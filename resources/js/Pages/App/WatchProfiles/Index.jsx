@@ -18,10 +18,24 @@ function pluralize(count, singular, plural) {
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
-export default function WatchProfilesIndex({ watchProfiles }) {
+function buildFilterQuery(filters) {
+    return Object.fromEntries(
+        Object.entries(filters).filter(([, value]) => value !== null && value !== undefined && value !== ''),
+    );
+}
+
+export default function WatchProfilesIndex({ watchProfiles, filters, filterOptions }) {
     const { locale } = usePage().props;
     const [togglingId, setTogglingId] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
+
+    const applyFilters = (nextFilters) => {
+        router.get('/app/watch-profiles', buildFilterQuery(nextFilters), {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+        });
+    };
 
     const toggleActive = (watchProfile) => {
         if (watchProfile.is_active && !window.confirm(`Er du sikker på at du vil deaktivere ${watchProfile.name}?`)) {
@@ -56,7 +70,7 @@ export default function WatchProfilesIndex({ watchProfiles }) {
                     <div className="space-y-1.5">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Watch Profiles</h1>
                         <p className="max-w-2xl text-sm leading-6 text-slate-500">
-                            Administrer kundens egne Watch Profiles med valgfri avdeling, nøkkelord og CPV-regler med vekt.
+                            Administrer dine personlige og avdelingsscopede watch profiles som brukes direkte mot Doffin live search.
                         </p>
                     </div>
                     <Link
@@ -67,10 +81,62 @@ export default function WatchProfilesIndex({ watchProfiles }) {
                     </Link>
                 </section>
 
+                <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+                        <label className="space-y-2">
+                            <span className="text-sm font-medium text-slate-700">Bruker</span>
+                            <select
+                                value={filters.user_id ?? ''}
+                                onChange={(event) => applyFilters({
+                                    ...filters,
+                                    user_id: event.target.value === '' ? null : Number(event.target.value),
+                                })}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                <option value="">Alle brukere</option>
+                                {filterOptions.users.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="space-y-2">
+                            <span className="text-sm font-medium text-slate-700">Avdeling</span>
+                            <select
+                                value={filters.department_id ?? ''}
+                                onChange={(event) => applyFilters({
+                                    ...filters,
+                                    department_id: event.target.value === '' ? null : Number(event.target.value),
+                                })}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                <option value="">Alle avdelinger</option>
+                                {filterOptions.departments.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <div className="flex md:justify-end">
+                            <button
+                                type="button"
+                                onClick={() => applyFilters({ user_id: null, department_id: null })}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            >
+                                Nullstill filtre
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
                 {watchProfiles.length === 0 ? (
                     <section className="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="text-lg font-semibold text-slate-900">Ingen Watch Profiles ennå</div>
-                        <p className="mt-2 text-sm text-slate-500">Opprett den første profilen for å definere kundens overvåkningskriterier.</p>
+                        <p className="mt-2 text-sm text-slate-500">Opprett den første profilen for å definere personlige eller avdelingsvise overvåkningskriterier.</p>
                     </section>
                 ) : (
                     <>
@@ -84,7 +150,7 @@ export default function WatchProfilesIndex({ watchProfiles }) {
                                         <div>
                                             <div className="text-base font-semibold text-slate-950">{watchProfile.name}</div>
                                             <div className="mt-1 text-sm text-slate-500">
-                                                {watchProfile.department ? `Avdeling: ${watchProfile.department}` : 'Ingen avdeling'}
+                                                {watchProfile.owner_label}: {watchProfile.owner_reference}
                                             </div>
                                         </div>
                                         <div className="flex flex-wrap gap-2 text-xs font-medium">
@@ -150,7 +216,7 @@ export default function WatchProfilesIndex({ watchProfiles }) {
                                     <thead className="bg-slate-50">
                                         <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                                             <th className="px-6 py-4">Navn</th>
-                                            <th className="px-6 py-4">Avdeling</th>
+                                            <th className="px-6 py-4">Eier</th>
                                             <th className="px-6 py-4">CPV-regler</th>
                                             <th className="px-6 py-4">Nøkkelord</th>
                                             <th className="px-6 py-4">Status</th>
@@ -162,7 +228,7 @@ export default function WatchProfilesIndex({ watchProfiles }) {
                                         {watchProfiles.map((watchProfile) => (
                                             <tr key={watchProfile.id} className="text-sm text-slate-700">
                                                 <td className="px-6 py-4 font-medium text-slate-950">{watchProfile.name}</td>
-                                                <td className="px-6 py-4 text-slate-500">{watchProfile.department || '—'}</td>
+                                                <td className="px-6 py-4 text-slate-500">{`${watchProfile.owner_label}: ${watchProfile.owner_reference}`}</td>
                                                 <td className="px-6 py-4">{pluralize(watchProfile.cpv_rule_count, 'CPV-regel', 'CPV-regler')}</td>
                                                 <td className="px-6 py-4">{pluralize(watchProfile.keyword_count, 'nøkkelord', 'nøkkelord')}</td>
                                                 <td className="px-6 py-4">

@@ -1,13 +1,8 @@
-import { router, usePage } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
-
-const worklistSummary = [
-    { label: 'Lagret fra søk', count: 3 },
-    { label: 'Markert som aktuelt', count: 5 },
-    { label: 'Med notater', count: 2 },
-];
+import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 
 const publicationOptions = [
     { value: '', label: 'Alltid' },
@@ -148,8 +143,51 @@ function formatDate(value, locale, options = {}) {
     }).format(new Date(value));
 }
 
-function pluralize(total) {
-    return `${total} ${total === 1 ? 'anskaffelse' : 'anskaffelser'}`;
+function formatDeadlineDate(value) {
+    if (!value) {
+        return '—';
+    }
+
+    return new Intl.DateTimeFormat('nb-NO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(new Date(value));
+}
+
+function formatMnokValue(value, locale) {
+    if (value === null || value === undefined || value === '') {
+        return '—';
+    }
+
+    return `${new Intl.NumberFormat(locale, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    }).format(Number(value))} MNOK`;
+}
+
+function dateInputValue(value) {
+    if (!value) {
+        return '';
+    }
+
+    return String(value).slice(0, 10);
+}
+
+function normalizeCount(value) {
+    const normalized = Number(value);
+
+    return Number.isFinite(normalized) ? normalized : 0;
+}
+
+function formatInteger(value, locale) {
+    return new Intl.NumberFormat(locale).format(normalizeCount(value));
+}
+
+function pluralize(total, locale) {
+    const normalized = normalizeCount(total);
+
+    return `${formatInteger(normalized, locale)} ${normalized === 1 ? 'anskaffelse' : 'anskaffelser'}`;
 }
 
 function summarizeText(value) {
@@ -190,8 +228,64 @@ function statusBadge(status, deadline) {
     };
 }
 
-export default function NoticeIndex({ notices, filters, savedSearches = [], source, supportMode, cpvSelector }) {
-    const { locale, translations } = usePage().props;
+function savedNoticeDeadlineBadge(notice) {
+    if (notice.deadline_state === 'upcoming' && notice.next_deadline_type && notice.next_deadline_at) {
+        return {
+            label: `Frist ${notice.next_deadline_type}: ${formatDeadlineDate(notice.next_deadline_at)}`,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        };
+    }
+
+    if (notice.deadline_state === 'expired') {
+        return {
+            label: 'Frist utløpt',
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        };
+    }
+
+    return {
+        label: 'Frist mangler metadata',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    };
+}
+
+function savedNoticeTimelineSteps(notice) {
+    return [
+        { key: 'questions_rfi', label: 'Spm RFI', date: notice.questions_rfi_deadline_at },
+        { key: 'rfi', label: 'RFI', date: notice.rfi_submission_deadline_at },
+        { key: 'questions_rfp', label: 'Spm RFP', date: notice.questions_rfp_deadline_at },
+        { key: 'rfp', label: 'RFP', date: notice.rfp_submission_deadline_at },
+        { key: 'award', label: 'Tildeling', date: notice.award_date_at },
+    ];
+}
+
+function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements) {
+    if (mode === 'saved') {
+        return {
+            title: 'Ingen lagrede kunngjøringer ennå.',
+            body: 'Lagre kunngjøringer fra live Doffin-søk for å holde dem synlige her.',
+        };
+    }
+
+    if (mode === 'history') {
+        return {
+            title: 'Ingen kunngjøringer i historikk ennå.',
+            body: 'Flytt lagrede kunngjøringer hit når de ikke lenger skal ligge i arbeidslisten.',
+        };
+    }
+
+    return {
+        title: hasAppliedSearch || hasAppliedRefinements
+            ? 'Ingen Doffin-treff matcher søket ditt.'
+            : 'Ingen Doffin-treff er tilgjengelige akkurat nå.',
+        body: hasAppliedRefinements
+            ? 'Prøv et bredere søk eller fjern noen av filtrene.'
+            : 'Søk i tittel, oppdragsgiver eller organisasjonsnummer for å finne kunngjøringer direkte i Doffin.',
+    };
+}
+
+export default function NoticeIndex({ notices, filters, savedSearches = [], source, supportMode, cpvSelector, mode = 'live', worklist = {}, monitoring = {} }) {
+    const { auth, locale, translations } = usePage().props;
     const [searchQuery, setSearchQuery] = useState(filters.q ?? '');
     const [organizationName, setOrganizationName] = useState(filters.organization_name ?? '');
     const [selectedCpvItems, setSelectedCpvItems] = useState(cpvSelector?.selected ?? []);
@@ -199,16 +293,41 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
     const [publicationDate, setPublicationDate] = useState(filters.publication_period ?? '');
     const [status, setStatus] = useState(filters.status ?? '');
     const [relevance, setRelevance] = useState(filters.relevance ?? '');
+    const [expandedSavedNoticeIds, setExpandedSavedNoticeIds] = useState({});
+    const [editingSavedNoticeId, setEditingSavedNoticeId] = useState(null);
+    const [editingHistoryNoticeId, setEditingHistoryNoticeId] = useState(null);
+    const deadlineForm = useForm({
+        questions_rfi_deadline_at: '',
+        rfi_submission_deadline_at: '',
+        questions_rfp_deadline_at: '',
+        rfp_submission_deadline_at: '',
+        award_date_at: '',
+    });
+    const historyForm = useForm({
+        selected_supplier_name: '',
+        contract_value_mnok: '',
+        contract_period_months: '',
+    });
+    const isLiveMode = mode === 'live';
+    const isSavedMode = mode === 'saved';
+    const isHistoryMode = mode === 'history';
+    const isSavedOrHistoryMode = mode === 'saved' || mode === 'history';
     const hasAppliedSearch = (filters.q ?? '').trim() !== '';
     const hasAppliedRefinements = [filters.organization_name, filters.cpv, filters.keywords, filters.publication_period, filters.status].some(
         (value) => (value ?? '').trim() !== '',
     );
-    const emptyStateTitle = hasAppliedSearch || hasAppliedRefinements
-        ? 'Ingen Doffin-treff matcher søket ditt.'
-        : 'Ingen Doffin-treff er tilgjengelige akkurat nå.';
-    const emptyStateBody = hasAppliedRefinements
-        ? 'Prøv et bredere søk eller fjern noen av filtrene.'
-        : 'Søk i tittel, oppdragsgiver eller organisasjonsnummer for å finne kunngjøringer direkte i Doffin.';
+    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements);
+    const worklistSummary = [
+        { key: 'saved', label: 'Lagrede kunngjøringer', count: worklist?.saved_count ?? 0 },
+        { key: 'history', label: 'Historikk', count: worklist?.history_count ?? 0 },
+    ];
+    const canManageWatchProfiles = Boolean(auth?.user?.can_manage_watch_profiles);
+    const monitoringHitsCount = Number(monitoring?.new_hits_last_day_count ?? 0);
+    const monitoringHitsLabel = monitoringHitsCount === 1 ? '1 nytt treff siste døgn' : `${monitoringHitsCount} nye treff siste døgn`;
+    const monitoringNextUpdateText = monitoring?.next_update_text ?? 'Automatisk oppdatering er ikke aktiv ennå.';
+    const totalHits = normalizeCount(notices?.meta?.numHitsTotal ?? notices?.meta?.total ?? 0);
+    const accessibleHits = normalizeCount(notices?.meta?.numHitsAccessible ?? notices?.meta?.total ?? 0);
+    const isCappedLiveSearch = isLiveMode && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
 
     useEffect(() => {
         setSearchQuery(filters.q ?? '');
@@ -227,6 +346,41 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         filters.relevance,
         filters.status,
     ]);
+
+    useEffect(() => {
+        if (!isSavedMode) {
+            setEditingSavedNoticeId(null);
+            deadlineForm.clearErrors();
+        }
+    }, [isSavedMode]);
+
+    useEffect(() => {
+        if (!isHistoryMode) {
+            setEditingHistoryNoticeId(null);
+            historyForm.clearErrors();
+        }
+    }, [isHistoryMode]);
+
+    const visitMode = (nextMode) => {
+        router.get(
+            '/app/notices',
+            buildNoticeQuery({
+                mode: nextMode,
+                q: filters.q,
+                organization_name: filters.organization_name,
+                cpv: filters.cpv,
+                keywords: filters.keywords,
+                publication_period: filters.publication_period,
+                status: filters.status,
+                relevance: filters.relevance,
+            }),
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+            },
+        );
+    };
 
     const saveNotice = (notice) => {
         router.post(
@@ -247,10 +401,107 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             },
         );
     };
+
+    const archiveNotice = (notice) => {
+        router.patch(`/app/notices/saved/${notice.saved_notice_id}/archive`, {}, {
+            preserveScroll: true,
+        });
+    };
+
+    const removeNotice = (notice) => {
+        router.delete(`/app/notices/saved/${notice.saved_notice_id}`, {
+            preserveScroll: true,
+        });
+    };
+
+    const removeHistoryNotice = (notice) => {
+        if (!window.confirm('Er du sikker på at du vil slette denne historikk-kunngjøringen?\n\nDenne handlingen kan ikke angres.')) {
+            return;
+        }
+
+        router.delete(`/app/notices/history/${notice.saved_notice_id}`, {
+            preserveScroll: true,
+        });
+    };
+
+    const toggleSavedNoticeDetails = (noticeId) => {
+        setExpandedSavedNoticeIds((current) => ({
+            ...current,
+            [noticeId]: !current[noticeId],
+        }));
+    };
+
+    const openDeadlineEditor = (notice) => {
+        setExpandedSavedNoticeIds((current) => ({
+            ...current,
+            [notice.id]: true,
+        }));
+        setEditingSavedNoticeId(notice.id);
+        deadlineForm.clearErrors();
+        deadlineForm.setData({
+            questions_rfi_deadline_at: dateInputValue(notice.questions_rfi_deadline_at),
+            rfi_submission_deadline_at: dateInputValue(notice.rfi_submission_deadline_at),
+            questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
+            rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
+            award_date_at: dateInputValue(notice.award_date_at),
+        });
+    };
+
+    const cancelDeadlineEditor = () => {
+        setEditingSavedNoticeId(null);
+        deadlineForm.reset();
+        deadlineForm.clearErrors();
+    };
+
+    const updateSavedNoticeDeadlines = (notice) => {
+        deadlineForm.patch(`/app/notices/saved/${notice.saved_notice_id}/deadlines`, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                setEditingSavedNoticeId(null);
+                deadlineForm.reset();
+                deadlineForm.clearErrors();
+            },
+        });
+    };
+
+    const openHistoryEditor = (notice) => {
+        setExpandedSavedNoticeIds((current) => ({
+            ...current,
+            [notice.id]: true,
+        }));
+        setEditingHistoryNoticeId(notice.id);
+        historyForm.clearErrors();
+        historyForm.setData({
+            selected_supplier_name: notice.selected_supplier_name ?? '',
+            contract_value_mnok: notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? String(notice.contract_value_mnok) : '',
+            contract_period_months: notice.contract_period_months !== null && notice.contract_period_months !== undefined ? String(notice.contract_period_months) : '',
+        });
+    };
+
+    const cancelHistoryEditor = () => {
+        setEditingHistoryNoticeId(null);
+        historyForm.reset();
+        historyForm.clearErrors();
+    };
+
+    const updateHistoryMetadata = (notice) => {
+        historyForm.patch(`/app/notices/saved/${notice.saved_notice_id}/history-metadata`, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                setEditingHistoryNoticeId(null);
+                historyForm.reset();
+                historyForm.clearErrors();
+            },
+        });
+    };
+
     const applyFilters = () => {
         router.get(
             '/app/notices',
             buildNoticeQuery({
+                mode: 'live',
                 q: searchQuery,
                 organization_name: organizationName,
                 cpv: selectedCpvItems.map((item) => item.code).join(','),
@@ -276,7 +527,9 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
 
         router.get(
             '/app/notices',
-            {},
+            {
+                mode: 'live',
+            },
             {
                 preserveState: true,
                 replace: true,
@@ -292,7 +545,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                     <p className="text-[15px] text-slate-500">{translations.frontend.procurements_subtitle}</p>
                 </section>
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_308px]">
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_308px] xl:items-start">
                     <div className="space-y-5">
                         <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
                             <div className="mb-3">
@@ -443,18 +696,59 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                     {source?.label}
                                 </div>
-                                <div className="text-[17px] font-semibold text-slate-950">{pluralize(notices.meta.total ?? 0)}</div>
+                                <div className="text-[17px] font-semibold text-slate-950">{pluralize(notices.meta.total ?? 0, locale)}</div>
                             </div>
+
+                            {isCappedLiveSearch ? (
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                    Doffin rapporterer {formatInteger(totalHits, locale)} treff for dette søket. I denne søkeflyten er bare topp{' '}
+                                    {formatInteger(accessibleHits, locale)} treff tilgjengelige for sidevisning. Bruk filtre for å snevre inn treffene og få tilgang til flere relevante kunngjøringer.
+                                </div>
+                            ) : null}
 
                             {notices.data.length === 0 ? (
                                 <div className="rounded-[22px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                                    <div className="text-lg font-semibold text-slate-900">{emptyStateTitle}</div>
-                                    <p className="mt-2 text-sm text-slate-500">{emptyStateBody}</p>
+                                    <div className="text-lg font-semibold text-slate-900">{emptyState.title}</div>
+                                    <p className="mt-2 text-sm text-slate-500">{emptyState.body}</p>
                                 </div>
                             ) : (
                                 <div className="space-y-3.5">
                                     {notices.data.map((notice) => {
                                         const statusTag = statusBadge(notice.status, notice.deadline);
+                                        const deadlineBadge = isSavedOrHistoryMode
+                                            ? savedNoticeDeadlineBadge(notice)
+                                            : {
+                                                label: `Frist ${formatDate(notice.deadline, locale)}`,
+                                                className: 'bg-slate-100 text-slate-700 ring-slate-200',
+                                            };
+                                        const timelineSteps = isSavedOrHistoryMode ? savedNoticeTimelineSteps(notice) : [];
+                                        const isDetailsExpanded = Boolean(expandedSavedNoticeIds[notice.id]);
+                                        const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
+                                        const isEditingHistory = isHistoryMode && editingHistoryNoticeId === notice.id;
+
+                                        if (isLiveMode) {
+                                            return (
+                                                <DiscoveryNoticeCard
+                                                    key={notice.id}
+                                                    notice={notice}
+                                                    locale={locale}
+                                                    canSaveToWorklist
+                                                    saveButtonLabel={translations.frontend.save_button}
+                                                    actions={
+                                                        notice.external_url ? (
+                                                            <a
+                                                                href={notice.external_url}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                            >
+                                                                Åpne i Doffin
+                                                            </a>
+                                                        ) : null
+                                                    }
+                                                />
+                                            );
+                                        }
 
                                         return (
                                             <article
@@ -480,37 +774,157 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                             {summarizeText(notice.summary)}
                                                         </p>
 
+                                                        {isSavedOrHistoryMode ? (
+                                                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                                                                <div className="grid grid-cols-5 gap-2">
+                                                                    {timelineSteps.map((step, index) => {
+                                                                        const isActive = Boolean(step.date);
+
+                                                                        return (
+                                                                            <div key={step.key} className="relative text-center">
+                                                                                {index > 0 ? (
+                                                                                    <span className="absolute right-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
+                                                                                ) : null}
+                                                                                {index < timelineSteps.length - 1 ? (
+                                                                                    <span className="absolute left-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
+                                                                                ) : null}
+                                                                                <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                                                    {step.label}
+                                                                                </div>
+                                                                                <div className="relative mt-2 flex justify-center">
+                                                                                    <span
+                                                                                        className={classNames(
+                                                                                            'relative z-10 h-3 w-3 rounded-full ring-4 ring-slate-50',
+                                                                                            isActive ? 'bg-violet-600' : 'bg-slate-300',
+                                                                                        )}
+                                                                                    />
+                                                                                </div>
+                                                                                <div className={classNames('mt-2 text-xs', isActive ? 'text-slate-700' : 'text-slate-400')}>
+                                                                                    {isActive ? formatDeadlineDate(step.date) : '—'}
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
+
                                                         <div className="mt-4 flex flex-wrap gap-2">
                                                             <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
                                                                 <CalendarIcon className="h-3.5 w-3.5" />
                                                                 Publisert {formatDate(notice.publication_date, locale)}
                                                             </span>
-                                                            <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                            <span
+                                                                className={classNames(
+                                                                    'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
+                                                                    deadlineBadge.className,
+                                                                )}
+                                                            >
                                                                 <ClockIcon className="h-3.5 w-3.5" />
-                                                                Frist {formatDate(notice.deadline, locale)}
+                                                                {deadlineBadge.label}
                                                             </span>
                                                             <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
                                                                 {notice.cpv_code ? `CPV: ${notice.cpv_code}` : 'Kategori: Doffin-kunngjøring'}
                                                             </span>
-                                                            <span
-                                                                className={classNames(
-                                                                    'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
-                                                                    statusTag.className,
-                                                                )}
-                                                            >
-                                                                {statusTag.label}
-                                                            </span>
+                                                            {isLiveMode || notice.status ? (
+                                                                <span
+                                                                    className={classNames(
+                                                                        'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
+                                                                        statusTag.className,
+                                                                    )}
+                                                                >
+                                                                    {statusTag.label}
+                                                                </span>
+                                                            ) : null}
                                                         </div>
                                                     </div>
 
                                                     <div className="flex shrink-0 flex-row gap-3 lg:flex-col">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => saveNotice(notice)}
-                                                            className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                                        >
-                                                            {translations.frontend.save_button}
-                                                        </button>
+                                                        {isSavedOrHistoryMode ? (
+                                                            <button
+                                                                type="button"
+                                                                aria-expanded={isDetailsExpanded}
+                                                                onClick={() => toggleSavedNoticeDetails(notice.id)}
+                                                                className={classNames(
+                                                                    'inline-flex min-w-[52px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    isDetailsExpanded
+                                                                        ? 'border-slate-300 bg-slate-100 text-slate-900'
+                                                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                )}
+                                                            >
+                                                                ...
+                                                            </button>
+                                                        ) : null}
+                                                        {isSavedMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openDeadlineEditor(notice)}
+                                                                className={classNames(
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    isEditingDeadlines
+                                                                        ? 'border-slate-300 bg-slate-100 text-slate-900'
+                                                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                )}
+                                                            >
+                                                                Rediger frister
+                                                            </button>
+                                                        ) : null}
+                                                        {isHistoryMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openHistoryEditor(notice)}
+                                                                className={classNames(
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    isEditingHistory
+                                                                        ? 'border-slate-300 bg-slate-100 text-slate-900'
+                                                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                )}
+                                                            >
+                                                                Legg til informasjon
+                                                            </button>
+                                                        ) : null}
+                                                        {isLiveMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => saveNotice(notice)}
+                                                                disabled={notice.is_saved}
+                                                                className={classNames(
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    notice.is_saved
+                                                                        ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                                                                )}
+                                                            >
+                                                                {notice.is_saved ? 'Lagret' : translations.frontend.save_button}
+                                                            </button>
+                                                        ) : null}
+                                                        {isSavedMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => archiveNotice(notice)}
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            >
+                                                                Flytt til historikk
+                                                            </button>
+                                                        ) : null}
+                                                        {isSavedMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeNotice(notice)}
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                            >
+                                                                Fjern
+                                                            </button>
+                                                        ) : null}
+                                                        {isHistoryMode ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeHistoryNotice(notice)}
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                            >
+                                                                Slett
+                                                            </button>
+                                                        ) : null}
                                                         {notice.external_url ? (
                                                             <a
                                                                 href={notice.external_url}
@@ -523,6 +937,256 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                         ) : null}
                                                     </div>
                                                 </div>
+
+                                                {isSavedOrHistoryMode && isDetailsExpanded ? (
+                                                    <div className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-600">
+                                                        <div className="grid gap-2 sm:grid-cols-2">
+                                                            <div>
+                                                                <span className="font-medium text-slate-700">Lagret av:</span>{' '}
+                                                                <span>{notice.saved_by_name || 'Ikke registrert'}</span>
+                                                            </div>
+                                                            {notice.saved_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Lagret:</span>{' '}
+                                                                    <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {notice.questions_rfi_deadline_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Spørsmål RFI:</span>{' '}
+                                                                    <span>{formatDate(notice.questions_rfi_deadline_at, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {notice.rfi_submission_deadline_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Innlevering RFI:</span>{' '}
+                                                                    <span>{formatDate(notice.rfi_submission_deadline_at, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {notice.questions_rfp_deadline_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Spørsmål RFP:</span>{' '}
+                                                                    <span>{formatDate(notice.questions_rfp_deadline_at, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {notice.rfp_submission_deadline_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Innlevering RFP:</span>{' '}
+                                                                    <span>{formatDate(notice.rfp_submission_deadline_at, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {notice.award_date_at ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Tildeling:</span>{' '}
+                                                                    <span>{formatDate(notice.award_date_at, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {isHistoryMode && notice.selected_supplier_name ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Valgt leverandør:</span>{' '}
+                                                                    <span>{notice.selected_supplier_name}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {isHistoryMode && notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Avtaleverdi:</span>{' '}
+                                                                    <span>{formatMnokValue(notice.contract_value_mnok, locale)}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {isHistoryMode && notice.contract_period_months !== null && notice.contract_period_months !== undefined ? (
+                                                                <div>
+                                                                    <span className="font-medium text-slate-700">Avtaleperiode:</span>{' '}
+                                                                    <span>{`${notice.contract_period_months} mnd`}</span>
+                                                                </div>
+                                                            ) : null}
+                                                            {isHistoryMode && notice.next_process_date_at ? (
+                                                                <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 sm:col-span-2">
+                                                                    <div className="text-sm font-medium text-violet-900">Ny prosess</div>
+                                                                    <div className="mt-1 text-sm text-violet-700">{formatDate(notice.next_process_date_at, locale)}</div>
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+
+                                                        {isEditingDeadlines ? (
+                                                            <form
+                                                                onSubmit={(event) => {
+                                                                    event.preventDefault();
+                                                                    updateSavedNoticeDeadlines(notice);
+                                                                }}
+                                                                className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                                            >
+                                                                <div className="space-y-3">
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Frist spørsmål RFI</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={deadlineForm.data.questions_rfi_deadline_at}
+                                                                            onChange={(event) => deadlineForm.setData('questions_rfi_deadline_at', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {deadlineForm.errors.questions_rfi_deadline_at ? (
+                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.questions_rfi_deadline_at}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Innlevering RFI</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={deadlineForm.data.rfi_submission_deadline_at}
+                                                                            onChange={(event) => deadlineForm.setData('rfi_submission_deadline_at', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {deadlineForm.errors.rfi_submission_deadline_at ? (
+                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.rfi_submission_deadline_at}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Frist spørsmål RFP</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={deadlineForm.data.questions_rfp_deadline_at}
+                                                                            onChange={(event) => deadlineForm.setData('questions_rfp_deadline_at', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {deadlineForm.errors.questions_rfp_deadline_at ? (
+                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.questions_rfp_deadline_at}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Innlevering RFP</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={deadlineForm.data.rfp_submission_deadline_at}
+                                                                            onChange={(event) => deadlineForm.setData('rfp_submission_deadline_at', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {deadlineForm.errors.rfp_submission_deadline_at ? (
+                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.rfp_submission_deadline_at}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Tildelingsdato</span>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={deadlineForm.data.award_date_at}
+                                                                            onChange={(event) => deadlineForm.setData('award_date_at', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {deadlineForm.errors.award_date_at ? (
+                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.award_date_at}</p>
+                                                                        ) : null}
+                                                                    </label>
+                                                                </div>
+
+                                                                <div className="mt-4 flex flex-wrap gap-2.5">
+                                                                    <button
+                                                                        type="submit"
+                                                                        disabled={deadlineForm.processing}
+                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        {deadlineForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={cancelDeadlineEditor}
+                                                                        disabled={deadlineForm.processing}
+                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        Avbryt
+                                                                    </button>
+                                                                </div>
+                                                            </form>
+                                                        ) : null}
+
+                                                        {isEditingHistory ? (
+                                                            <form
+                                                                onSubmit={(event) => {
+                                                                    event.preventDefault();
+                                                                    updateHistoryMetadata(notice);
+                                                                }}
+                                                                className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                                            >
+                                                                <div className="space-y-3">
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Valgt leverandør</span>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={historyForm.data.selected_supplier_name}
+                                                                            onChange={(event) => historyForm.setData('selected_supplier_name', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {historyForm.errors.selected_supplier_name ? (
+                                                                            <p className="text-sm text-rose-600">{historyForm.errors.selected_supplier_name}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Avtaleverdi (MNOK)</span>
+                                                                        <input
+                                                                            type="number"
+                                                                            inputMode="decimal"
+                                                                            min="0"
+                                                                            step="0.01"
+                                                                            value={historyForm.data.contract_value_mnok}
+                                                                            onChange={(event) => historyForm.setData('contract_value_mnok', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {historyForm.errors.contract_value_mnok ? (
+                                                                            <p className="text-sm text-rose-600">{historyForm.errors.contract_value_mnok}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-sm font-medium text-slate-700">Avtaleperiode (mnd)</span>
+                                                                        <input
+                                                                            type="number"
+                                                                            inputMode="numeric"
+                                                                            min="0"
+                                                                            step="1"
+                                                                            value={historyForm.data.contract_period_months}
+                                                                            onChange={(event) => historyForm.setData('contract_period_months', event.target.value)}
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {historyForm.errors.contract_period_months ? (
+                                                                            <p className="text-sm text-rose-600">{historyForm.errors.contract_period_months}</p>
+                                                                        ) : null}
+                                                                    </label>
+
+                                                                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                                                                        <span className="font-medium text-slate-700">Ny prosess:</span>{' '}
+                                                                        <span>
+                                                                            {notice.next_process_date_at
+                                                                                ? formatDate(notice.next_process_date_at, locale)
+                                                                                : 'Beregnes automatisk når tildelingsdato og avtaleperiode er satt.'}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="mt-4 flex flex-wrap gap-2.5">
+                                                                    <button
+                                                                        type="submit"
+                                                                        disabled={historyForm.processing}
+                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        {historyForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={cancelHistoryEditor}
+                                                                        disabled={historyForm.processing}
+                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        Avbryt
+                                                                    </button>
+                                                                </div>
+                                                            </form>
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
                                             </article>
                                         );
                                     })}
@@ -533,8 +1197,8 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                         <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_8px_22px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 {notices.meta.from && notices.meta.to
-                                    ? `${notices.meta.from}–${notices.meta.to} av ${notices.meta.total}`
-                                    : pluralize(notices.meta.total ?? 0)}
+                                    ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)}`
+                                    : pluralize(notices.meta.total ?? 0, locale)}
                             </div>
                             <div className="flex gap-3">
                                 <button
@@ -557,7 +1221,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                         </div>
                     </div>
 
-                    <aside className="space-y-4 xl:sticky xl:top-5 xl:self-start">
+                    <aside className="space-y-4 xl:self-start">
                         <section className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
                             <div className="mb-5 flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-3">
@@ -606,58 +1270,72 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                             </div>
 
                             <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 text-sm leading-6 text-violet-900">
-                                {translations.frontend.alert_summary}
+                                Her ser du status for overvåkning basert på dine aktive watch profiles.
                             </div>
 
                             <div className="mt-5 space-y-3 text-sm text-slate-600">
                                 <div className="flex items-center gap-3">
                                     <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                                    {translations.frontend.new_hits_last_day}
+                                    {monitoringHitsLabel}
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                                    {translations.frontend.next_update}
+                                    {monitoringNextUpdateText}
                                 </div>
                             </div>
 
                             <button
                                 type="button"
-                                className="mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                onClick={canManageWatchProfiles ? () => router.get('/app/watch-profiles') : undefined}
+                                disabled={!canManageWatchProfiles}
+                                title={!canManageWatchProfiles ? 'Kun tilgjengelig for kundeadministrator.' : undefined}
+                                className={classNames(
+                                    'mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition',
+                                    canManageWatchProfiles
+                                        ? 'hover:border-slate-300 hover:text-slate-950'
+                                        : 'cursor-not-allowed opacity-60',
+                                )}
                             >
                                 {translations.frontend.alert_settings}
                             </button>
                         </section>
 
                         <section className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                            <div className="mb-5 flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                    <ListIcon className="h-5 w-5 text-slate-500" />
-                                    <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.worklist_title}</h2>
-                                </div>
-                                <button
-                                    type="button"
-                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                >
-                                    {translations.frontend.see_all}
-                                </button>
+                            <div className="mb-5 flex items-center gap-3">
+                                <ListIcon className="h-5 w-5 text-slate-500" />
+                                <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.worklist_title}</h2>
                             </div>
 
                             <div className="space-y-3">
                                 {worklistSummary.map((item) => (
-                                    <div key={item.label} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3">
-                                        <span className="text-sm text-slate-700">{item.label}</span>
-                                        <span className="inline-flex h-7 min-w-[28px] items-center justify-center rounded-full bg-slate-200 px-2 text-xs font-semibold text-slate-700">
+                                    <button
+                                        key={item.key}
+                                        type="button"
+                                        onClick={() => visitMode(item.key)}
+                                        className={classNames(
+                                            'flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition',
+                                            mode === item.key ? 'bg-violet-50 ring-1 ring-violet-200' : 'bg-slate-50 hover:bg-slate-100',
+                                        )}
+                                    >
+                                        <span className={classNames('text-sm', mode === item.key ? 'text-violet-800' : 'text-slate-700')}>{item.label}</span>
+                                        <span
+                                            className={classNames(
+                                                'inline-flex h-7 min-w-[28px] items-center justify-center rounded-full px-2 text-xs font-semibold',
+                                                mode === item.key ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-700',
+                                            )}
+                                        >
                                             {item.count}
                                         </span>
-                                    </div>
+                                    </button>
                                 ))}
                             </div>
 
                             <button
                                 type="button"
+                                onClick={() => visitMode('live')}
                                 className="mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
-                                {translations.frontend.go_to_worklist}
+                                {isLiveMode ? 'Live søk er aktivt' : 'Til live søk i Doffin'}
                             </button>
                         </section>
                     </aside>

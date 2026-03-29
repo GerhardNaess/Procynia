@@ -86,6 +86,9 @@ export default function UsersIndex({ users }) {
                                         <div>
                                             <div className="text-base font-semibold text-slate-950">{user.name}</div>
                                             <div className="text-sm text-slate-500">{user.email}</div>
+                                            <div className="mt-1 text-sm text-slate-500">
+                                                {user.department_name ? `Avdeling: ${user.department_name}` : 'Ingen avdeling'}
+                                            </div>
                                         </div>
                                         <div className="flex flex-wrap gap-2 text-xs font-medium">
                                             <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-700">{user.role}</span>
@@ -142,6 +145,7 @@ export default function UsersIndex({ users }) {
                                         <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                                             <th className="px-6 py-4">Navn</th>
                                             <th className="px-6 py-4">E-post</th>
+                                            <th className="px-6 py-4">Avdeling</th>
                                             <th className="px-6 py-4">Rolle</th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4">Opprettet</th>
@@ -153,6 +157,7 @@ export default function UsersIndex({ users }) {
                                             <tr key={user.id} className="text-sm text-slate-700">
                                                 <td className="px-6 py-4 font-medium text-slate-950">{user.name}</td>
                                                 <td className="px-6 py-4">{user.email}</td>
+                                                <td className="px-6 py-4 text-slate-500">{user.department_name ?? '—'}</td>
                                                 <td className="px-6 py-4">{user.role}</td>
                                                 <td className="px-6 py-4">
                                                     <span

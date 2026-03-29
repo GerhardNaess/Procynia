@@ -8,6 +8,7 @@ export default function WatchProfileForm({
     title,
     subtitle,
     form,
+    ownerOptions,
     departmentOptions,
     backHref,
     submitLabel,
@@ -15,6 +16,9 @@ export default function WatchProfileForm({
     submitMethod,
     deleteUrl = null,
 }) {
+    const canChooseDepartmentOwner = ownerOptions.some((option) => option.value === 'department');
+    const selectedOwnerOption = ownerOptions.find((option) => option.value === form.data.owner_scope);
+
     const addCpvRule = () => {
         form.setData('cpv_codes', [
             ...form.data.cpv_codes,
@@ -76,19 +80,65 @@ export default function WatchProfileForm({
                     </label>
 
                     <label className="space-y-2">
+                        <span className="text-sm font-medium text-slate-700">Eierskap</span>
+                        {ownerOptions.length > 1 ? (
+                            <select
+                                value={form.data.owner_scope}
+                                onChange={(event) => {
+                                    const ownerScope = event.target.value;
+
+                                    form.setData({
+                                        ...form.data,
+                                        owner_scope: ownerScope,
+                                        department_id: ownerScope === 'department'
+                                            ? (form.data.department_id ?? departmentOptions[0]?.value ?? null)
+                                            : null,
+                                    });
+                                }}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                {ownerOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                                {selectedOwnerOption?.label}
+                            </div>
+                        )}
+                        {selectedOwnerOption?.description ? (
+                            <p className="text-xs text-slate-400">{selectedOwnerOption.description}</p>
+                        ) : null}
+                        {form.errors.owner_scope ? <p className="text-sm text-rose-600">{form.errors.owner_scope}</p> : null}
+                    </label>
+
+                    <label className="space-y-2">
                         <span className="text-sm font-medium text-slate-700">Avdeling</span>
-                        <select
-                            value={form.data.department_id ?? ''}
-                            onChange={(event) => form.setData('department_id', event.target.value === '' ? null : Number(event.target.value))}
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                        >
-                            <option value="">Ingen avdeling</option>
-                            {departmentOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
+                        {form.data.owner_scope === 'department' ? (
+                            <>
+                                <select
+                                    value={form.data.department_id ?? ''}
+                                    onChange={(event) => form.setData('department_id', event.target.value === '' ? null : Number(event.target.value))}
+                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                >
+                                    <option value="">Velg avdeling</option>
+                                    {departmentOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                {departmentOptions.length === 0 && canChooseDepartmentOwner ? (
+                                    <p className="text-xs text-slate-400">Ingen avdeling er tilgjengelig for denne brukeren.</p>
+                                ) : null}
+                            </>
+                        ) : (
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                Personlige watch profiles knyttes til deg og ikke til en avdeling.
+                            </div>
+                        )}
                         {form.errors.department_id ? <p className="text-sm text-rose-600">{form.errors.department_id}</p> : null}
                     </label>
 

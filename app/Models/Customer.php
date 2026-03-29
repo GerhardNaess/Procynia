@@ -48,6 +48,11 @@ class Customer extends Model
         return $this->hasMany(WatchProfile::class);
     }
 
+    public function watchProfileInboxRecords(): HasMany
+    {
+        return $this->hasMany(WatchProfileInboxRecord::class);
+    }
+
     public function noticeDecisions(): HasMany
     {
         return $this->hasMany(NoticeDecision::class);

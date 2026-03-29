@@ -1,11 +1,12 @@
 import { Link, useForm } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
-export default function UsersCreate({ roleOptions }) {
+export default function UsersCreate({ roleOptions, departmentOptions }) {
     const form = useForm({
         name: '',
         email: '',
         role: 'user',
+        department_id: '',
     });
 
     const submit = (event) => {
@@ -66,7 +67,25 @@ export default function UsersCreate({ roleOptions }) {
                             {form.errors.role ? <p className="text-sm text-rose-600">{form.errors.role}</p> : null}
                         </label>
 
-                        <div className="space-y-2">
+                        <label className="space-y-2">
+                            <span className="text-sm font-medium text-slate-700">Avdeling</span>
+                            <select
+                                value={form.data.department_id}
+                                onChange={(event) => form.setData('department_id', event.target.value)}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            >
+                                <option value="">Ingen avdeling</option>
+                                {departmentOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-slate-400">Brukes for avdelingsscoping i innbokser og watch profiles.</p>
+                            {form.errors.department_id ? <p className="text-sm text-rose-600">{form.errors.department_id}</p> : null}
+                        </label>
+
+                        <div className="space-y-2 md:col-span-2">
                             <span className="text-sm font-medium text-slate-700">Status</span>
                             <div className="flex min-h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-600">
                                 Aktiv ved opprettelse

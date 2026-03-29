@@ -19,9 +19,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const navigation = [
         { key: 'overview', label: translations.frontend.overview_nav, href: null },
         { key: 'notices', label: translations.frontend.procurements_nav, href: '/app/notices' },
+        ...(user?.can_manage_watch_profiles ? [{ key: 'user-inbox', label: 'Min innboks', href: '/app/inbox/user' }] : []),
+        ...(user?.can_access_department_inbox ? [{ key: 'department-inbox', label: 'Avdelingsinnboks', href: '/app/inbox/department' }] : []),
+        ...(user?.can_manage_watch_profiles ? [{ key: 'watch-profiles', label: 'Watch Profiles', href: '/app/watch-profiles' }] : []),
         ...(user?.can_manage_customer_users ? [{ key: 'departments', label: 'Avdelinger', href: '/app/departments' }] : []),
         ...(user?.can_manage_customer_users ? [{ key: 'users', label: 'Brukere', href: '/app/users' }] : []),
-        ...(user?.can_manage_customer_users ? [{ key: 'watch-profiles', label: 'Watch Profiles', href: '/app/watch-profiles' }] : []),
         { key: 'saved-searches', label: translations.frontend.saved_searches_nav, href: null },
         { key: 'alerts', label: translations.frontend.alerts_nav, href: null },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: null },

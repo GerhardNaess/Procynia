@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -63,6 +64,16 @@ class User extends Authenticatable implements FilamentUser
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    public function watchProfiles(): HasMany
+    {
+        return $this->hasMany(WatchProfile::class);
+    }
+
+    public function watchProfileInboxRecords(): HasMany
+    {
+        return $this->hasMany(WatchProfileInboxRecord::class);
     }
 
     public function nationality(): BelongsTo

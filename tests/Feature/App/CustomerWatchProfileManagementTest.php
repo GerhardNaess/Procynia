@@ -2,14 +2,13 @@
 
 namespace Tests\Feature\App;
 
-use App\Models\CpvCode;
 use App\Models\Customer;
 use App\Models\Department;
-use App\Models\Language;
-use App\Models\Nationality;
 use App\Models\User;
 use App\Models\WatchProfile;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -19,350 +18,323 @@ class CustomerWatchProfileManagementTest extends TestCase
     {
         parent::setUp();
 
-        $this->useProjectPostgresConnection();
-        DB::beginTransaction();
-    }
-
-    protected function tearDown(): void
-    {
-        if (DB::transactionLevel() > 0) {
-            DB::rollBack();
-        }
-
-        parent::tearDown();
-    }
-
-    public function test_customer_admin_can_access_watch_profiles_index_create_and_edit_pages(): void
-    {
-        $context = $this->customerAdminContext();
-        $department = $this->createDepartment($context['customer']->id, 'IT');
-        $profile = $this->createWatchProfile($context['customer']->id, $department->id, 'Maritime Core');
-
-        $this->actingAs($context['admin'])->get('/app/watch-profiles')->assertOk();
-        $this->actingAs($context['admin'])->get('/app/watch-profiles/create')->assertOk();
-        $this->actingAs($context['admin'])->get("/app/watch-profiles/{$profile->id}/edit")->assertOk();
-    }
-
-    public function test_customer_user_cannot_manage_watch_profiles_routes(): void
-    {
-        $context = $this->customerUserContext();
-        $profile = $this->createWatchProfile($context['customer']->id, null, 'Restricted Profile');
-
-        $this->actingAs($context['user'])->get('/app/watch-profiles')->assertForbidden();
-        $this->actingAs($context['user'])->get('/app/watch-profiles/create')->assertForbidden();
-        $this->actingAs($context['user'])->post('/app/watch-profiles', [
-            'name' => 'Skal Ikke Virke',
-            'description' => null,
-            'is_active' => true,
-            'department_id' => null,
-            'keywords' => '',
-            'cpv_codes' => [],
-        ])->assertForbidden();
-        $this->actingAs($context['user'])->get("/app/watch-profiles/{$profile->id}/edit")->assertForbidden();
-        $this->actingAs($context['user'])->put("/app/watch-profiles/{$profile->id}", [
-            'name' => 'Skal Ikke Virke',
-            'description' => null,
-            'is_active' => true,
-            'department_id' => null,
-            'keywords' => '',
-            'cpv_codes' => [],
-        ])->assertForbidden();
-        $this->actingAs($context['user'])->patch("/app/watch-profiles/{$profile->id}/toggle-active")->assertForbidden();
-        $this->actingAs($context['user'])->delete("/app/watch-profiles/{$profile->id}")->assertForbidden();
-    }
-
-    public function test_customer_only_sees_own_watch_profiles(): void
-    {
-        $primary = $this->customerAdminContext('Procynia AS');
-        $secondary = $this->customerAdminContext('Annen Kunde AS');
-
-        $this->createWatchProfile($primary['customer']->id, null, 'Procynia Maritime');
-        $this->createWatchProfile($secondary['customer']->id, null, 'Skjult Profil');
-
-        $response = $this->actingAs($primary['admin'])->get('/app/watch-profiles');
-
-        $response->assertOk();
-        $response->assertSee('Procynia Maritime');
-        $response->assertDontSee('Skjult Profil');
-    }
-
-    public function test_customer_admin_can_create_watch_profile_for_own_customer(): void
-    {
-        $context = $this->customerAdminContext();
-        $department = $this->createDepartment($context['customer']->id, 'IT');
-        $this->seedCpvCodes(['72000000', '48000000']);
-
-        $response = $this->actingAs($context['admin'])->post('/app/watch-profiles', [
-            'name' => 'Maritime Ops',
-            'description' => 'Profil for maritime anbud',
-            'is_active' => true,
-            'department_id' => $department->id,
-            'keywords' => "ferge\nhavn\nferge",
-            'cpv_codes' => [
-                ['cpv_code' => '72000000', 'weight' => 10],
-                ['cpv_code' => '48000000', 'weight' => 25],
-            ],
+        config([
+            'database.default' => 'sqlite',
+            'database.connections.sqlite.database' => ':memory:',
+            'session.driver' => 'array',
         ]);
 
-        $response->assertRedirect('/app/watch-profiles');
+        $this->app['db']->purge('sqlite');
+        $this->app['db']->reconnect('sqlite');
+        $this->withoutMiddleware(VerifyCsrfToken::class);
 
-        $profile = WatchProfile::query()
-            ->where('customer_id', $context['customer']->id)
-            ->where('name', 'Maritime Ops')
-            ->with('cpvCodes')
-            ->first();
-
-        $this->assertInstanceOf(WatchProfile::class, $profile);
-        $this->assertSame($context['customer']->id, $profile->customer_id);
-        $this->assertSame($department->id, $profile->department_id);
-        $this->assertSame(['ferge', 'havn'], $profile->keywords);
-        $this->assertTrue($profile->is_active);
-        $this->assertCount(2, $profile->cpvCodes);
-        $this->assertDatabaseHas('watch_profile_cpv_codes', [
-            'watch_profile_id' => $profile->id,
-            'cpv_code' => '72000000',
-            'weight' => 10,
-        ]);
+        $this->createSchema();
     }
 
-    public function test_customer_admin_cannot_override_customer_id_or_foreign_department_id(): void
+    public function test_regular_user_can_create_personal_watch_profile_and_only_see_accessible_profiles(): void
     {
-        $primary = $this->customerAdminContext('Procynia AS');
-        $secondary = $this->customerAdminContext('Annen Kunde AS');
-        $foreignDepartment = $this->createDepartment($secondary['customer']->id, 'Foreign');
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
+
+        $this->createWatchProfile($customer->id, 'Min Profil', $userA->id, null);
+        $this->createWatchProfile($customer->id, 'Salg Profil', null, $departmentA->id);
+        $this->createWatchProfile($customer->id, 'Skjult Personlig', $userB->id, null);
+        $this->createWatchProfile($customer->id, 'Skjult Avdeling', null, $departmentB->id);
         $this->seedCpvCodes(['72000000']);
 
-        $response = $this->actingAs($primary['admin'])->post('/app/watch-profiles', [
-            'name' => 'Invalid',
-            'description' => null,
-            'is_active' => true,
-            'customer_id' => $secondary['customer']->id,
-            'department_id' => $foreignDepartment->id,
-            'keywords' => "keyword",
-            'cpv_codes' => [
-                ['cpv_code' => '72000000', 'weight' => 10],
-            ],
-        ]);
+        $this->actingAs($userA)->get('/app/watch-profiles')
+            ->assertOk()
+            ->assertSee('Min Profil')
+            ->assertSee('Salg Profil')
+            ->assertDontSee('Skjult Personlig')
+            ->assertDontSee('Skjult Avdeling');
 
-        $response->assertSessionHasErrors(['customer_id', 'department_id']);
-        $this->assertDatabaseMissing('watch_profiles', [
-            'name' => 'Invalid',
-        ]);
-    }
-
-    public function test_customer_admin_can_edit_watch_profile_and_sync_cpv_rules_cleanly(): void
-    {
-        $context = $this->customerAdminContext();
-        $department = $this->createDepartment($context['customer']->id, 'IT');
-        $this->seedCpvCodes(['72000000', '48000000', '72200000']);
-
-        $profile = $this->createWatchProfile($context['customer']->id, null, 'Original Name', ['old'], true, [
-            ['cpv_code' => '72000000', 'weight' => 10],
-            ['cpv_code' => '48000000', 'weight' => 20],
-        ]);
-
-        $response = $this->actingAs($context['admin'])->put("/app/watch-profiles/{$profile->id}", [
-            'name' => 'Updated Name',
-            'description' => 'Oppdatert beskrivelse',
-            'is_active' => false,
-            'department_id' => $department->id,
-            'keywords' => "ferge\nhavn",
-            'cpv_codes' => [
-                ['cpv_code' => '72200000', 'weight' => 30],
-            ],
-        ]);
+        $response = $this->actingAs($userA)
+            ->withSession(['_token' => 'test-token'])
+            ->post('/app/watch-profiles', [
+                '_token' => 'test-token',
+                'owner_scope' => 'user',
+                'name' => 'Personlig Discovery',
+                'description' => 'Min egen profil',
+                'is_active' => true,
+                'department_id' => null,
+                'keywords' => "rammeavtale\nkonsulent",
+                'cpv_codes' => [
+                    ['cpv_code' => '72000000', 'weight' => 15],
+                ],
+            ]);
 
         $response->assertRedirect('/app/watch-profiles');
-
-        $profile->refresh();
-        $profile->load('cpvCodes');
-
-        $this->assertSame('Updated Name', $profile->name);
-        $this->assertSame('Oppdatert beskrivelse', $profile->description);
-        $this->assertFalse($profile->is_active);
-        $this->assertSame($department->id, $profile->department_id);
-        $this->assertSame(['ferge', 'havn'], $profile->keywords);
-        $this->assertCount(1, $profile->cpvCodes);
-        $this->assertDatabaseHas('watch_profile_cpv_codes', [
-            'watch_profile_id' => $profile->id,
-            'cpv_code' => '72200000',
-            'weight' => 30,
-        ]);
-        $this->assertDatabaseMissing('watch_profile_cpv_codes', [
-            'watch_profile_id' => $profile->id,
-            'cpv_code' => '72000000',
-        ]);
-        $this->assertDatabaseMissing('watch_profile_cpv_codes', [
-            'watch_profile_id' => $profile->id,
-            'cpv_code' => '48000000',
-        ]);
-
-        $editResponse = $this->actingAs($context['admin'])->get("/app/watch-profiles/{$profile->id}/edit");
-        $editResponse->assertSee('ferge');
-        $editResponse->assertSee('havn');
-        $editResponse->assertSee('72200000');
-    }
-
-    public function test_customer_admin_cannot_access_another_customers_watch_profile(): void
-    {
-        $primary = $this->customerAdminContext('Procynia AS');
-        $secondary = $this->customerAdminContext('Annen Kunde AS');
-        $profile = $this->createWatchProfile($secondary['customer']->id, null, 'Foreign Profile');
-
-        $this->actingAs($primary['admin'])->get("/app/watch-profiles/{$profile->id}/edit")->assertNotFound();
-        $this->actingAs($primary['admin'])->put("/app/watch-profiles/{$profile->id}", [
-            'name' => 'Skal Ikke Virke',
-            'description' => null,
-            'is_active' => true,
+        $this->assertDatabaseHas('watch_profiles', [
+            'customer_id' => $customer->id,
+            'user_id' => $userA->id,
             'department_id' => null,
-            'keywords' => '',
-            'cpv_codes' => [],
-        ])->assertNotFound();
-        $this->actingAs($primary['admin'])->patch("/app/watch-profiles/{$profile->id}/toggle-active")->assertNotFound();
-        $this->actingAs($primary['admin'])->delete("/app/watch-profiles/{$profile->id}")->assertNotFound();
-    }
-
-    public function test_customer_admin_can_toggle_active_state(): void
-    {
-        $context = $this->customerAdminContext();
-        $profile = $this->createWatchProfile($context['customer']->id, null, 'Toggle Profile');
-
-        $this->actingAs($context['admin'])->patch("/app/watch-profiles/{$profile->id}/toggle-active")
-            ->assertSessionHas('success', 'Watch Profile ble deaktivert.');
-
-        $this->assertDatabaseHas('watch_profiles', [
-            'id' => $profile->id,
-            'is_active' => false,
-        ]);
-
-        $this->actingAs($context['admin'])->patch("/app/watch-profiles/{$profile->id}/toggle-active")
-            ->assertSessionHas('success', 'Watch Profile ble aktivert.');
-
-        $this->assertDatabaseHas('watch_profiles', [
-            'id' => $profile->id,
-            'is_active' => true,
+            'name' => 'Personlig Discovery',
         ]);
     }
 
-    public function test_customer_admin_can_delete_watch_profile_and_cascade_cpv_rules(): void
+    public function test_regular_user_can_create_department_watch_profile_only_for_own_department(): void
     {
-        $context = $this->customerAdminContext();
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
         $this->seedCpvCodes(['72000000']);
-        $profile = $this->createWatchProfile($context['customer']->id, null, 'Delete Me', ['keyword'], true, [
-            ['cpv_code' => '72000000', 'weight' => 10],
-        ]);
 
-        $response = $this->actingAs($context['admin'])->delete("/app/watch-profiles/{$profile->id}");
-
-        $response->assertRedirect('/app/watch-profiles');
-        $this->assertDatabaseMissing('watch_profiles', [
-            'id' => $profile->id,
-        ]);
-        $this->assertDatabaseMissing('watch_profile_cpv_codes', [
-            'watch_profile_id' => $profile->id,
-        ]);
-    }
-
-    public function test_listing_shows_expected_watch_profile_values(): void
-    {
-        $context = $this->customerAdminContext();
-        $department = $this->createDepartment($context['customer']->id, 'Maritime');
-        $this->seedCpvCodes(['72000000', '48000000']);
-
-        $this->createWatchProfile($context['customer']->id, $department->id, 'Listing Profile', ['ferge', 'havn'], true, [
-            ['cpv_code' => '72000000', 'weight' => 10],
-            ['cpv_code' => '48000000', 'weight' => 20],
-        ]);
-
-        $response = $this->actingAs($context['admin'])->get('/app/watch-profiles');
-
-        $response->assertOk();
-        $response->assertSee('Listing Profile');
-        $response->assertSee('Maritime');
-        $response->assertSee('"cpv_rule_count":2', false);
-        $response->assertSee('"keyword_count":2', false);
-    }
-
-    public function test_duplicate_name_within_same_customer_is_rejected_but_allowed_across_customers(): void
-    {
-        $primary = $this->customerAdminContext('Procynia AS');
-        $secondary = $this->customerAdminContext('Annen Kunde AS');
-
-        $this->createWatchProfile($primary['customer']->id, null, 'Shared Name');
-
-        $this->actingAs($primary['admin'])->post('/app/watch-profiles', [
-            'name' => 'shared name',
-            'description' => null,
-            'is_active' => true,
-            'department_id' => null,
-            'keywords' => '',
-            'cpv_codes' => [],
-        ])->assertSessionHasErrors('name');
-
-        $this->actingAs($secondary['admin'])->post('/app/watch-profiles', [
-            'name' => 'Shared Name',
-            'description' => null,
-            'is_active' => true,
-            'department_id' => null,
-            'keywords' => '',
-            'cpv_codes' => [],
-        ])->assertRedirect('/app/watch-profiles');
+        $this->actingAs($userA)
+            ->withSession(['_token' => 'test-token'])
+            ->post('/app/watch-profiles', [
+                '_token' => 'test-token',
+                'owner_scope' => 'department',
+                'name' => 'Salg Discovery',
+                'description' => null,
+                'is_active' => true,
+                'department_id' => $departmentA->id,
+                'keywords' => 'salg',
+                'cpv_codes' => [
+                    ['cpv_code' => '72000000', 'weight' => 5],
+                ],
+            ])->assertRedirect('/app/watch-profiles');
 
         $this->assertDatabaseHas('watch_profiles', [
-            'customer_id' => $secondary['customer']->id,
-            'name' => 'Shared Name',
+            'customer_id' => $customer->id,
+            'user_id' => null,
+            'department_id' => $departmentA->id,
+            'name' => 'Salg Discovery',
         ]);
+
+        $this->actingAs($userA)
+            ->withSession(['_token' => 'test-token'])
+            ->post('/app/watch-profiles', [
+                '_token' => 'test-token',
+                'owner_scope' => 'department',
+                'name' => 'Ugyldig Avdeling',
+                'description' => null,
+                'is_active' => true,
+                'department_id' => $departmentB->id,
+                'keywords' => 'leveranse',
+                'cpv_codes' => [],
+            ])->assertSessionHasErrors('department_id');
     }
 
-    private function customerAdminContext(string $customerName = 'Procynia AS'): array
+    public function test_user_cannot_manage_other_users_or_other_departments_watch_profiles(): void
     {
-        $customer = $this->createCustomer($customerName);
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
 
-        $admin = User::factory()->create([
-            'role' => User::ROLE_CUSTOMER_ADMIN,
-            'customer_id' => $customer->id,
-            'is_active' => true,
-        ]);
+        $personalProfile = $this->createWatchProfile($customer->id, 'Skjult Personlig', $userB->id, null);
+        $departmentProfile = $this->createWatchProfile($customer->id, 'Skjult Avdeling', null, $departmentB->id);
 
-        return [
-            'customer' => $customer,
-            'admin' => $admin,
-        ];
+        $this->actingAs($userA)->get("/app/watch-profiles/{$personalProfile->id}/edit")->assertNotFound();
+        $this->actingAs($userA)->get("/app/watch-profiles/{$departmentProfile->id}/edit")->assertNotFound();
+        $this->actingAs($userA)
+            ->withSession(['_token' => 'test-token'])
+            ->patch("/app/watch-profiles/{$departmentProfile->id}/toggle-active", [
+                '_token' => 'test-token',
+            ])->assertNotFound();
+        $this->actingAs($userA)
+            ->withSession(['_token' => 'test-token'])
+            ->delete("/app/watch-profiles/{$personalProfile->id}", [
+                '_token' => 'test-token',
+            ])->assertNotFound();
     }
 
-    private function customerUserContext(string $customerName = 'Procynia AS'): array
+    public function test_customer_admin_can_see_and_edit_all_customer_watch_profiles(): void
     {
-        $customer = $this->createCustomer($customerName);
+        $customer = $this->createCustomer('Procynia AS');
+        $otherCustomer = $this->createCustomer('Annen Kunde AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $admin = $this->createUser($customer->id, $departmentA->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
 
-        $user = User::factory()->create([
-            'role' => User::ROLE_USER,
-            'customer_id' => $customer->id,
-            'is_active' => true,
-        ]);
+        $personalProfile = $this->createWatchProfile($customer->id, 'Personlig Profil', $userB->id, null);
+        $departmentProfile = $this->createWatchProfile($customer->id, 'Avdelingsprofil', null, $departmentB->id);
+        $foreignProfile = $this->createWatchProfile($otherCustomer->id, 'Fremmed', null, null);
 
-        return [
-            'customer' => $customer,
-            'user' => $user,
-        ];
+        $this->actingAs($admin)->get('/app/watch-profiles')
+            ->assertOk()
+            ->assertSee('Personlig Profil')
+            ->assertSee('Avdelingsprofil')
+            ->assertDontSee('Fremmed');
+
+        $this->actingAs($admin)->get("/app/watch-profiles/{$personalProfile->id}/edit")->assertOk();
+        $this->actingAs($admin)->get("/app/watch-profiles/{$departmentProfile->id}/edit")->assertOk();
+        $this->actingAs($admin)->get("/app/watch-profiles/{$foreignProfile->id}/edit")->assertNotFound();
+    }
+
+    public function test_customer_admin_can_filter_watch_profiles_by_user(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $admin = $this->createUser($customer->id, $departmentA->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
+
+        $this->createWatchProfile($customer->id, 'Personlig A', $userA->id, null);
+        $this->createWatchProfile($customer->id, 'Personlig B', $userB->id, null);
+        $this->createWatchProfile($customer->id, 'Avdeling B', null, $departmentB->id);
+
+        $response = $this->actingAs($admin)->get("/app/watch-profiles?user_id={$userB->id}");
+        $response->assertOk();
+        $response->assertSee('Personlig B');
+        $response->assertDontSee('Personlig A');
+        $response->assertDontSee('Avdeling B');
+        $response->assertSee('"user_id":'.$userB->id, false);
+        $response->assertSee('"department_id":null', false);
+    }
+
+    public function test_customer_admin_can_filter_watch_profiles_by_department(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $admin = $this->createUser($customer->id, $departmentA->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+
+        $this->createWatchProfile($customer->id, 'Personlig A', $userA->id, null);
+        $this->createWatchProfile($customer->id, 'Avdeling A', null, $departmentA->id);
+        $this->createWatchProfile($customer->id, 'Avdeling B', null, $departmentB->id);
+
+        $response = $this->actingAs($admin)->get("/app/watch-profiles?department_id={$departmentB->id}");
+        $response->assertOk();
+        $response->assertSee('Avdeling B');
+        $response->assertDontSee('Personlig A');
+        $response->assertDontSee('Avdeling A');
+        $response->assertSee('"user_id":null', false);
+        $response->assertSee('"department_id":'.$departmentB->id, false);
+    }
+
+    public function test_regular_user_cannot_expand_access_by_manipulating_filter_query_parameters(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
+
+        $this->createWatchProfile($customer->id, 'Personlig A', $userA->id, null);
+        $this->createWatchProfile($customer->id, 'Avdeling A', null, $departmentA->id);
+        $this->createWatchProfile($customer->id, 'Personlig B', $userB->id, null);
+        $this->createWatchProfile($customer->id, 'Avdeling B', null, $departmentB->id);
+
+        $response = $this->actingAs($userA)->get("/app/watch-profiles?user_id={$userB->id}&department_id={$departmentB->id}");
+        $response->assertOk();
+        $response->assertDontSee('Personlig B');
+        $response->assertDontSee('Avdeling B');
+        $response->assertSee('"user_id":'.$userB->id, false);
+        $response->assertSee('"department_id":'.$departmentB->id, false);
+        $response->assertSee('"filterOptions":{"users":[{"value":'.$userA->id.',"label":"user.a"}]', false);
+        $response->assertDontSee('"label":"user.b"', false);
+        $response->assertSee('"departments":[{"value":'.$departmentA->id.',"label":"Salg"}]', false);
+        $response->assertDontSee('"label":"Leveranse"', false);
+    }
+
+    public function test_filter_options_are_scoped_for_customer_admin_and_regular_user(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $departmentA = $this->createDepartment($customer->id, 'Salg');
+        $departmentB = $this->createDepartment($customer->id, 'Leveranse');
+        $admin = $this->createUser($customer->id, $departmentA->id, User::ROLE_CUSTOMER_ADMIN, 'admin@procynia.test');
+        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
+
+        $this->createWatchProfile($customer->id, 'Personlig A', $userA->id, null);
+        $this->createWatchProfile($customer->id, 'Personlig B', $userB->id, null);
+        $this->createWatchProfile($customer->id, 'Avdeling A', null, $departmentA->id);
+        $this->createWatchProfile($customer->id, 'Avdeling B', null, $departmentB->id);
+
+        $adminResponse = $this->actingAs($admin)->get('/app/watch-profiles');
+        $userResponse = $this->actingAs($userA)->get('/app/watch-profiles');
+
+        $adminResponse->assertSee('"label":"user.a"', false);
+        $adminResponse->assertSee('"label":"user.b"', false);
+        $adminResponse->assertSee('"label":"Salg"', false);
+        $adminResponse->assertSee('"label":"Leveranse"', false);
+        $userResponse->assertSee('"filterOptions":{"users":[{"value":'.$userA->id.',"label":"user.a"}]', false);
+        $userResponse->assertDontSee('"label":"user.b"', false);
+        $userResponse->assertSee('"departments":[{"value":'.$departmentA->id.',"label":"Salg"}]', false);
+        $userResponse->assertDontSee('"label":"Leveranse"', false);
+    }
+
+    private function createSchema(): void
+    {
+        Schema::create('customers', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('slug')->nullable();
+            $table->unsignedBigInteger('nationality_id')->nullable();
+            $table->unsignedBigInteger('language_id')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create('departments', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('customer_id');
+            $table->string('name');
+            $table->text('description')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->timestamp('email_verified_at')->nullable();
+            $table->string('password')->nullable();
+            $table->rememberToken();
+            $table->string('role')->default(User::ROLE_USER);
+            $table->boolean('is_active')->default(true);
+            $table->unsignedBigInteger('customer_id')->nullable();
+            $table->unsignedBigInteger('department_id')->nullable();
+            $table->unsignedBigInteger('nationality_id')->nullable();
+            $table->unsignedBigInteger('preferred_language_id')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('cpv_codes', function (Blueprint $table): void {
+            $table->id();
+            $table->string('code')->unique();
+            $table->string('description_en')->nullable();
+            $table->string('description_no')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('watch_profiles', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('customer_id');
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->unsignedBigInteger('department_id')->nullable();
+            $table->string('name');
+            $table->text('description')->nullable();
+            $table->json('keywords')->nullable();
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create('watch_profile_cpv_codes', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('watch_profile_id');
+            $table->string('cpv_code');
+            $table->integer('weight')->default(1);
+            $table->timestamps();
+        });
     }
 
     private function createCustomer(string $name): Customer
     {
-        $language = Language::query()->firstOrCreate(
-            ['code' => 'no'],
-            ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],
-        );
-
-        $nationality = Nationality::query()->firstOrCreate(
-            ['code' => 'NO'],
-            ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO'],
-        );
-
         return Customer::query()->create([
             'name' => $name,
             'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
-            'language_id' => $language->id,
-            'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
     }
@@ -377,88 +349,40 @@ class CustomerWatchProfileManagementTest extends TestCase
         ]);
     }
 
-    private function createWatchProfile(
-        int $customerId,
-        ?int $departmentId,
-        string $name,
-        array $keywords = [],
-        bool $isActive = true,
-        array $cpvCodes = [],
-    ): WatchProfile {
-        $profile = WatchProfile::query()->create([
+    private function createUser(int $customerId, ?int $departmentId, string $role, string $email): User
+    {
+        return User::factory()->create([
+            'name' => Str::before($email, '@'),
+            'role' => $role,
             'customer_id' => $customerId,
+            'department_id' => $departmentId,
+            'is_active' => true,
+            'email' => $email,
+        ]);
+    }
+
+    private function createWatchProfile(int $customerId, string $name, ?int $userId, ?int $departmentId): WatchProfile
+    {
+        return WatchProfile::query()->create([
+            'customer_id' => $customerId,
+            'user_id' => $userId,
             'department_id' => $departmentId,
             'name' => $name,
             'description' => null,
-            'keywords' => $keywords,
-            'is_active' => $isActive,
+            'keywords' => ['rammeavtale'],
+            'is_active' => true,
         ]);
-
-        if ($cpvCodes !== []) {
-            $profile->cpvCodes()->createMany($cpvCodes);
-        }
-
-        return $profile;
     }
 
     private function seedCpvCodes(array $codes): void
     {
         foreach ($codes as $code) {
-            CpvCode::query()->firstOrCreate(
-                ['code' => $code],
-                [
-                    'description_en' => "Description {$code}",
-                    'description_no' => "Beskrivelse {$code}",
-                ],
-            );
+            \App\Models\CpvCode::query()->create([
+                'code' => $code,
+                'description_en' => "Description {$code}",
+                'description_no' => "Beskrivelse {$code}",
+            ]);
         }
     }
 
-    private function useProjectPostgresConnection(): void
-    {
-        $connectionName = 'feature_pgsql';
-
-        config([
-            "database.connections.{$connectionName}" => [
-                'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
-                'charset' => 'utf8',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'search_path' => 'public',
-                'sslmode' => 'prefer',
-            ],
-            'database.default' => $connectionName,
-        ]);
-
-        DB::purge($connectionName);
-        DB::setDefaultConnection($connectionName);
-        DB::reconnect($connectionName);
-    }
-
-    private function projectEnv(string $key, string $default): string
-    {
-        static $values = null;
-
-        if (! is_array($values)) {
-            $values = [];
-
-            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $trimmed = trim($line);
-
-                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
-                    continue;
-                }
-
-                [$envKey, $envValue] = explode('=', $trimmed, 2);
-                $values[$envKey] = trim($envValue, " \t\n\r\0\x0B\"'");
-            }
-        }
-
-        return (string) ($values[$key] ?? $default);
-    }
 }

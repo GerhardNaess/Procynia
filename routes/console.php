@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 Schedule::command('doffin:import-batch --trigger=scheduler')
     ->hourly()
     ->withoutOverlapping();
+
+Schedule::command('doffin:watch-inbox-discover')
+    ->dailyAt('01:15')
+    ->withoutOverlapping();

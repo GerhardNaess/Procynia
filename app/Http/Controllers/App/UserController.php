@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\Department;
 use App\Models\User;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -31,6 +32,7 @@ class UserController extends Controller
         [$actor, $customerId] = $this->customerAdminContext($request);
 
         $users = $this->scopedCustomerUsersQuery($customerId)
+            ->with(['department:id,name'])
             ->where('customer_id', $customerId)
             ->orderByDesc('created_at')
             ->get()
@@ -44,10 +46,11 @@ class UserController extends Controller
 
     public function create(Request $request): Response
     {
-        $this->customerAdminContext($request);
+        [, $customerId] = $this->customerAdminContext($request);
 
         return Inertia::render('App/Users/Create', [
             'roleOptions' => $this->roleOptions(),
+            'departmentOptions' => $this->departmentOptions($customerId),
         ]);
     }
 
@@ -59,6 +62,7 @@ class UserController extends Controller
         return Inertia::render('App/Users/Edit', [
             'user' => $this->editUserPayload($record, $actor, $customerId),
             'roleOptions' => $this->roleOptions(),
+            'departmentOptions' => $this->departmentOptions($customerId),
         ]);
     }
 
@@ -71,7 +75,11 @@ class UserController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
             'role' => ['required', 'string', Rule::in(array_keys(self::ROLE_MAP))],
             'customer_id' => ['prohibited'],
-            'department_id' => ['prohibited'],
+            'department_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(Department::class, 'id')->where(fn ($query) => $query->where('customer_id', $customerId)),
+            ],
             'nationality_id' => ['prohibited'],
             'preferred_language_id' => ['prohibited'],
             'is_active' => ['prohibited'],
@@ -87,6 +95,7 @@ class UserController extends Controller
             'role' => self::ROLE_MAP[$validated['role']],
             'is_active' => true,
             'customer_id' => $customerId,
+            'department_id' => isset($validated['department_id']) ? (int) $validated['department_id'] : null,
         ]);
 
         return redirect()
@@ -109,7 +118,11 @@ class UserController extends Controller
             'role' => ['required', 'string', Rule::in(array_keys(self::ROLE_MAP))],
             'email' => ['prohibited'],
             'customer_id' => ['prohibited'],
-            'department_id' => ['prohibited'],
+            'department_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(Department::class, 'id')->where(fn ($query) => $query->where('customer_id', $customerId)),
+            ],
             'nationality_id' => ['prohibited'],
             'preferred_language_id' => ['prohibited'],
             'is_active' => ['prohibited'],
@@ -127,6 +140,7 @@ class UserController extends Controller
         $record->fill([
             'name' => Str::squish($validated['name']),
             'role' => $nextRole,
+            'department_id' => isset($validated['department_id']) ? (int) $validated['department_id'] : null,
         ])->save();
 
         if ($record->is($actor) && $nextRole === User::ROLE_USER) {
@@ -200,12 +214,27 @@ class UserController extends Controller
         ];
     }
 
+    private function departmentOptions(int $customerId): array
+    {
+        return Department::query()
+            ->where('customer_id', $customerId)
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'is_active'])
+            ->map(fn (Department $department): array => [
+                'value' => $department->id,
+                'label' => $department->is_active ? $department->name : "{$department->name} (inaktiv)",
+            ])
+            ->all();
+    }
+
     private function userListItem(User $user, User $actor, int $customerId): array
     {
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'department_name' => $user->department?->name,
             'role' => $this->roleLabel($user->role),
             'role_value' => $this->roleValue($user->role),
             'is_active' => (bool) $user->is_active,
@@ -224,6 +253,8 @@ class UserController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'department_id' => $user->department_id,
+            'department_name' => $user->department?->name,
             'role_value' => $this->roleValue($user->role),
             'role_label' => $this->roleLabel($user->role),
             'is_active' => (bool) $user->is_active,

@@ -2,8 +2,9 @@ import { useForm } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import WatchProfileForm from './WatchProfileForm';
 
-export default function WatchProfilesEdit({ watchProfile, departmentOptions }) {
+export default function WatchProfilesEdit({ watchProfile, ownerOptions, departmentOptions }) {
     const form = useForm({
+        owner_scope: watchProfile.owner_scope,
         name: watchProfile.name,
         description: watchProfile.description || '',
         is_active: watchProfile.is_active,
@@ -21,8 +22,9 @@ export default function WatchProfilesEdit({ watchProfile, departmentOptions }) {
         <CustomerAppLayout title="Rediger Watch Profile" showPageTitle={false}>
             <WatchProfileForm
                 title="Rediger Watch Profile"
-                subtitle="Oppdater profilens navn, avdeling, nøkkelord og CPV-regler uten å endre den underliggende Watch Profile-logikken."
+                subtitle="Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery."
                 form={form}
+                ownerOptions={ownerOptions}
                 departmentOptions={departmentOptions}
                 backHref="/app/watch-profiles"
                 submitLabel="Lagre endringer"

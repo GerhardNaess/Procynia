@@ -39,6 +39,9 @@ class HandleInertiaRequests extends Middleware
                     'email' => $user->email,
                     'role' => $user->role,
                     'can_manage_customer_users' => $this->customerContext->isCustomerAdmin($user),
+                    'can_manage_watch_profiles' => $user->canAccessCustomerFrontend(),
+                    'can_manage_department_watch_profiles' => $this->customerContext->isCustomerAdmin($user) || $user->department_id !== null,
+                    'can_access_department_inbox' => $user->department_id !== null,
                     'customer' => $customer ? [
                         'id' => $customer->id,
                         'name' => $customer->name,

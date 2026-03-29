@@ -47,4 +47,9 @@ class Department extends Model
     {
         return $this->hasMany(WatchProfile::class);
     }
+
+    public function watchProfileInboxRecords(): HasMany
+    {
+        return $this->hasMany(WatchProfileInboxRecord::class);
+    }
 }

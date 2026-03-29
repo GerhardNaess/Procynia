@@ -3,6 +3,7 @@
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\WatchProfileController;
+use App\Http\Controllers\App\WatchProfileInboxController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
@@ -36,8 +37,15 @@ Route::prefix('app')
         Route::redirect('/', '/app/notices');
 
         Route::get('/notices', [NoticeController::class, 'index'])->name('notices.index');
+        Route::get('/inbox/user', [WatchProfileInboxController::class, 'userInbox'])->name('inbox.user');
+        Route::get('/inbox/department', [WatchProfileInboxController::class, 'departmentInbox'])->name('inbox.department');
         Route::get('/notices/cpv-suggestions', [NoticeController::class, 'cpvSuggestions'])->name('notices.cpv-suggestions');
         Route::post('/notices/save', [NoticeController::class, 'storeSavedNotice'])->name('notices.save');
+        Route::patch('/notices/saved/{savedNotice}/deadlines', [NoticeController::class, 'updateSavedNoticeDeadlines'])->name('notices.saved.deadlines.update');
+        Route::patch('/notices/saved/{savedNotice}/history-metadata', [NoticeController::class, 'updateSavedNoticeHistoryMetadata'])->name('notices.saved.history-metadata.update');
+        Route::patch('/notices/saved/{savedNotice}/archive', [NoticeController::class, 'archiveSavedNotice'])->name('notices.saved.archive');
+        Route::delete('/notices/history/{savedNotice}', [NoticeController::class, 'destroyArchivedSavedNotice'])->name('notices.history.destroy');
+        Route::delete('/notices/saved/{savedNotice}', [NoticeController::class, 'destroySavedNotice'])->name('notices.saved.destroy');
         Route::get('/notices/{notice}', [NoticeController::class, 'show'])->name('notices.show');
         Route::get('/departments', [DepartmentController::class, 'index'])->name('departments.index');
         Route::get('/departments/create', [DepartmentController::class, 'create'])->name('departments.create');
