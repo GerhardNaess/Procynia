@@ -99,6 +99,11 @@ export default function WatchProfileInboxIndex({
                                     locale={locale}
                                     canSaveToWorklist
                                     saveButtonLabel={translations?.frontend?.save_button ?? 'Lagre'}
+                                    deleteAction={{
+                                        href: record.delete_url,
+                                        label: 'Slett',
+                                        confirmMessage: 'Vil du slette dette treffet fra innboksen?',
+                                    }}
                                     provenanceBadges={[
                                         {
                                             key: `score-${record.id}`,

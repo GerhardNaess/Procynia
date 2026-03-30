@@ -7,6 +7,7 @@ use App\Models\SavedNotice;
 use App\Models\User;
 use App\Models\WatchProfileInboxRecord;
 use App\Support\CustomerContext;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -62,6 +63,38 @@ class WatchProfileInboxController extends Controller
         ]);
     }
 
+    public function destroyUserInboxRecord(Request $request, int $record): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+
+        $deletableRecord = $this->userInboxQuery($user, $customerId)
+            ->whereKey($record)
+            ->firstOrFail();
+
+        $deletableRecord->delete();
+
+        return redirect()
+            ->route('app.inbox.user')
+            ->with('success', 'Inbox-treffet ble slettet.');
+    }
+
+    public function destroyDepartmentInboxRecord(Request $request, int $record): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+
+        abort_unless($user->department_id !== null, 403);
+
+        $deletableRecord = $this->departmentInboxQuery($user, $customerId)
+            ->whereKey($record)
+            ->firstOrFail();
+
+        $deletableRecord->delete();
+
+        return redirect()
+            ->route('app.inbox.department')
+            ->with('success', 'Inbox-treffet ble slettet.');
+    }
+
     private function frontendContext(Request $request): array
     {
         /** @var User|null $user */
@@ -83,6 +116,7 @@ class WatchProfileInboxController extends Controller
         return WatchProfileInboxRecord::query()
             ->userInbox($user)
             ->where('customer_id', $customerId)
+            ->where('relevance_score', '>', 0)
             ->with(['watchProfile:id,name'])
             ->orderByDesc('discovered_at')
             ->orderByDesc('relevance_score')
@@ -94,6 +128,7 @@ class WatchProfileInboxController extends Controller
         return WatchProfileInboxRecord::query()
             ->departmentInbox($user)
             ->where('customer_id', $customerId)
+            ->where('relevance_score', '>', 0)
             ->with(['watchProfile:id,name'])
             ->orderByDesc('discovered_at')
             ->orderByDesc('relevance_score')
@@ -128,6 +163,9 @@ class WatchProfileInboxController extends Controller
             'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
             'watch_profile_name' => $record->watchProfile?->name,
             'watch_profile_id' => $record->watch_profile_id,
+            'delete_url' => $record->user_id !== null
+                ? route('app.inbox.user.destroy', ['record' => $record->id])
+                : route('app.inbox.department.destroy', ['record' => $record->id]),
         ];
     }
 

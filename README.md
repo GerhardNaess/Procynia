@@ -62,3 +62,4 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 - [CPV catalog model](docs/cpv-catalog.md)
 - [Customer / tenancy foundation](docs/customer-tenancy.md)
 - [Customer frontend](docs/customer-frontend.md)
+- [Doffin supplier harvest](docs/doffin-supplier-harvest.md)

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\WatchProfile;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -59,6 +60,7 @@ class WatchProfileController extends Controller
             'ownerOptions' => $this->ownerOptions($user),
             'defaultOwnerScope' => WatchProfile::OWNER_SCOPE_USER,
             'departmentOptions' => $this->departmentOptions($user, $customerId),
+            'cpvSuggestionsUrl' => route('app.watch-profiles.cpv-suggestions'),
             'storeUrl' => route('app.watch-profiles.store'),
         ]);
     }
@@ -95,13 +97,40 @@ class WatchProfileController extends Controller
         $record->loadMissing([
             'department:id,name,is_active',
             'user:id,name',
-            'cpvCodes' => fn ($query) => $query->orderBy('id'),
+            'cpvCodes' => fn ($query) => $query
+                ->with('catalogEntry:code,description_en,description_no')
+                ->orderBy('id'),
         ]);
 
         return Inertia::render('App/WatchProfiles/Edit', [
-            'watchProfile' => $this->watchProfileFormPayload($record),
+            'watchProfile' => $this->watchProfileFormPayload($record, $user),
             'ownerOptions' => $this->ownerOptions($user),
             'departmentOptions' => $this->departmentOptions($user, $customerId),
+            'cpvSuggestionsUrl' => route('app.watch-profiles.cpv-suggestions'),
+        ]);
+    }
+
+    public function cpvSuggestions(Request $request): JsonResponse
+    {
+        [$user] = $this->frontendContext($request);
+        $query = trim((string) $request->string('query'));
+        $limit = min(20, max(5, (int) $request->integer('limit', 10)));
+
+        if ($query === '') {
+            return response()->json([
+                'data' => [],
+            ]);
+        }
+
+        $items = $this->cpvSuggestionsQuery($query)
+            ->limit($limit)
+            ->get(['code', 'description_en', 'description_no'])
+            ->map(fn (CpvCode $catalogEntry): array => $this->cpvSuggestionItem($catalogEntry, $user))
+            ->values()
+            ->all();
+
+        return response()->json([
+            'data' => $items,
         ]);
     }
 
@@ -279,7 +308,7 @@ class WatchProfileController extends Controller
             ->all();
     }
 
-    private function watchProfileFormPayload(WatchProfile $watchProfile): array
+    private function watchProfileFormPayload(WatchProfile $watchProfile, User $user): array
     {
         return [
             'id' => $watchProfile->id,
@@ -296,6 +325,7 @@ class WatchProfileController extends Controller
                 ->values()
                 ->map(fn ($cpvRule): array => [
                     'cpv_code' => $cpvRule->cpv_code,
+                    'description' => $this->customerContext->cpvDescription($cpvRule->catalogEntry, $user),
                     'weight' => (int) $cpvRule->weight,
                 ])
                 ->all(),
@@ -525,6 +555,53 @@ class WatchProfileController extends Controller
             ])
             ->values()
             ->all();
+    }
+
+    private function cpvSuggestionsQuery(string $query): Builder
+    {
+        $normalizedQuery = Str::lower(trim($query));
+        $digitsQuery = preg_replace('/\D+/', '', $query) ?? '';
+        $isNumericQuery = $normalizedQuery !== '' && preg_match('/^\d+$/', $normalizedQuery) === 1;
+        $textPrefix = $this->likePattern($normalizedQuery, false);
+        $textContains = $this->likePattern($normalizedQuery, true);
+
+        if ($isNumericQuery) {
+            return CpvCode::query()
+                ->where('code', 'like', "{$digitsQuery}%")
+                ->orderBy('code');
+        }
+
+        return CpvCode::query()
+            ->where(function (Builder $builder) use ($textContains): void {
+                $builder->orWhereRaw("LOWER(COALESCE(description_no, '')) LIKE ? ESCAPE '\\'", [$textContains])
+                    ->orWhereRaw("LOWER(COALESCE(description_en, '')) LIKE ? ESCAPE '\\'", [$textContains]);
+            })
+            ->orderByRaw(
+                "CASE
+                    WHEN LOWER(COALESCE(description_no, '')) LIKE ? ESCAPE '\\' THEN 0
+                    WHEN LOWER(COALESCE(description_en, '')) LIKE ? ESCAPE '\\' THEN 1
+                    WHEN LOWER(COALESCE(description_no, '')) LIKE ? ESCAPE '\\' THEN 2
+                    WHEN LOWER(COALESCE(description_en, '')) LIKE ? ESCAPE '\\' THEN 3
+                    ELSE 4
+                END",
+                [$textPrefix, $textPrefix, $textContains, $textContains],
+            )
+            ->orderBy('code');
+    }
+
+    private function cpvSuggestionItem(CpvCode $catalogEntry, User $user): array
+    {
+        return [
+            'code' => $catalogEntry->code,
+            'description' => $this->customerContext->cpvDescription($catalogEntry, $user) ?? '',
+        ];
+    }
+
+    private function likePattern(string $value, bool $contains): string
+    {
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
+
+        return $contains ? "%{$escaped}%" : "{$escaped}%";
     }
 
     private function normalizeDescription(mixed $value): ?string

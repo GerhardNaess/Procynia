@@ -1,7 +1,21 @@
 import { Link, router } from '@inertiajs/react';
+import { useEffect, useRef, useState } from 'react';
+
+function classNames(...values) {
+    return values.filter(Boolean).join(' ');
+}
 
 function cpvFieldError(errors, index, field) {
     return errors[`cpv_codes.${index}.${field}`];
+}
+
+function selectedCpvCodesExcludingIndex(rows, excludedIndex) {
+    return new Set(
+        rows
+            .filter((_, index) => index !== excludedIndex)
+            .map((row) => String(row?.cpv_code ?? '').trim())
+            .filter((code) => code !== ''),
+    );
 }
 
 export default function WatchProfileForm({
@@ -10,34 +24,173 @@ export default function WatchProfileForm({
     form,
     ownerOptions,
     departmentOptions,
+    cpvSuggestionsUrl,
     backHref,
     submitLabel,
     onSubmit,
     submitMethod,
     deleteUrl = null,
 }) {
+    const [activeCpvIndex, setActiveCpvIndex] = useState(null);
+    const [cpvSuggestions, setCpvSuggestions] = useState([]);
+    const [cpvLookupLoading, setCpvLookupLoading] = useState(false);
+    const requestSequenceRef = useRef(0);
     const canChooseDepartmentOwner = ownerOptions.some((option) => option.value === 'department');
     const selectedOwnerOption = ownerOptions.find((option) => option.value === form.data.owner_scope);
+    const activeCpvCode = activeCpvIndex === null
+        ? ''
+        : String(form.data.cpv_codes[activeCpvIndex]?.cpv_code ?? '');
+    const selectedCpvCodesSignature = form.data.cpv_codes
+        .map((row, index) => (index === activeCpvIndex ? '' : String(row?.cpv_code ?? '').trim()))
+        .join('|');
+    const shouldShowSuggestions = activeCpvIndex !== null && activeCpvCode.trim() !== '';
+
+    useEffect(() => {
+        if (!cpvSuggestionsUrl || activeCpvIndex === null) {
+            setCpvSuggestions([]);
+            setCpvLookupLoading(false);
+
+            return;
+        }
+
+        const activeRow = form.data.cpv_codes[activeCpvIndex];
+
+        if (!activeRow) {
+            setActiveCpvIndex(null);
+            setCpvSuggestions([]);
+            setCpvLookupLoading(false);
+
+            return;
+        }
+
+        const query = String(activeRow.cpv_code ?? '').trim();
+
+        if (query === '') {
+            setCpvSuggestions([]);
+            setCpvLookupLoading(false);
+
+            return;
+        }
+
+        const requestId = requestSequenceRef.current + 1;
+        const abortController = new AbortController();
+        const url = new URL(cpvSuggestionsUrl, window.location.origin);
+        const selectedCodes = selectedCpvCodesExcludingIndex(form.data.cpv_codes, activeCpvIndex);
+
+        requestSequenceRef.current = requestId;
+        url.searchParams.set('query', query);
+        url.searchParams.set('limit', '10');
+        setCpvLookupLoading(true);
+
+        fetch(url.toString(), {
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            signal: abortController.signal,
+        })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error('CPV lookup request failed.');
+                }
+
+                return response.json();
+            })
+            .then((payload) => {
+                if (requestSequenceRef.current !== requestId) {
+                    return;
+                }
+
+                const nextSuggestions = Array.isArray(payload.data)
+                    ? payload.data.filter((item) => !selectedCodes.has(item.code))
+                    : [];
+
+                setCpvSuggestions(nextSuggestions);
+            })
+            .catch((error) => {
+                if (error.name === 'AbortError') {
+                    return;
+                }
+
+                if (requestSequenceRef.current !== requestId) {
+                    return;
+                }
+
+                setCpvSuggestions([]);
+            })
+            .finally(() => {
+                if (requestSequenceRef.current === requestId) {
+                    setCpvLookupLoading(false);
+                }
+            });
+
+        return () => {
+            abortController.abort();
+        };
+    }, [activeCpvCode, activeCpvIndex, cpvSuggestionsUrl, form.data.cpv_codes, selectedCpvCodesSignature]);
+
+    const closeCpvSuggestions = () => {
+        setActiveCpvIndex(null);
+        setCpvSuggestions([]);
+        setCpvLookupLoading(false);
+    };
 
     const addCpvRule = () => {
+        closeCpvSuggestions();
+
         form.setData('cpv_codes', [
             ...form.data.cpv_codes,
-            { cpv_code: '', weight: 1 },
+            { cpv_code: '', description: '', weight: 1 },
         ]);
     };
 
     const updateCpvRule = (index, field, value) => {
+        const nextRows = form.data.cpv_codes.map((row, rowIndex) => {
+            if (rowIndex !== index) {
+                return row;
+            }
+
+            if (field === 'cpv_code') {
+                return {
+                    ...row,
+                    cpv_code: value,
+                    description: '',
+                };
+            }
+
+            return {
+                ...row,
+                [field]: value,
+            };
+        });
+
+        form.setData('cpv_codes', nextRows);
+
+        if (field === 'cpv_code') {
+            setActiveCpvIndex(index);
+        }
+    };
+
+    const selectCpvSuggestion = (index, suggestion) => {
         form.setData(
             'cpv_codes',
             form.data.cpv_codes.map((row, rowIndex) => (
                 rowIndex === index
-                    ? { ...row, [field]: value }
+                    ? {
+                        ...row,
+                        cpv_code: suggestion.code,
+                        description: suggestion.description,
+                    }
                     : row
             )),
         );
+
+        closeCpvSuggestions();
     };
 
     const removeCpvRule = (index) => {
+        closeCpvSuggestions();
+
         form.setData(
             'cpv_codes',
             form.data.cpv_codes.filter((_, rowIndex) => rowIndex !== index),
@@ -184,7 +337,7 @@ export default function WatchProfileForm({
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 className="text-lg font-semibold text-slate-950">CPV-regler</h2>
-                            <p className="text-sm text-slate-500">Legg inn én rad per CPV-kode med tilhørende vekt.</p>
+                            <p className="text-sm text-slate-500">Søk opp CPV-koder fra katalogen og sett én vekt per rad.</p>
                         </div>
                         <button
                             type="button"
@@ -202,49 +355,107 @@ export default function WatchProfileForm({
                             Ingen CPV-regler ennå.
                         </div>
                     ) : (
-                        <div className="space-y-3">
-                            {form.data.cpv_codes.map((row, index) => (
-                                <div key={`cpv-row-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
-                                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_140px_auto] md:items-start">
-                                        <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">CPV-kode</span>
-                                            <input
-                                                type="text"
-                                                value={row.cpv_code}
-                                                onChange={(event) => updateCpvRule(index, 'cpv_code', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                            />
-                                            {cpvFieldError(form.errors, index, 'cpv_code') ? (
-                                                <p className="text-sm text-rose-600">{cpvFieldError(form.errors, index, 'cpv_code')}</p>
-                                            ) : null}
-                                        </label>
+                        <div className="max-h-[540px] space-y-3 overflow-y-auto pr-2">
+                            {form.data.cpv_codes.map((row, index) => {
+                                const isActiveRow = activeCpvIndex === index;
+                                const showSuggestions = isActiveRow && shouldShowSuggestions;
+                                const showEmptyState = showSuggestions && !cpvLookupLoading && cpvSuggestions.length === 0;
 
-                                        <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">Vekt</span>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                value={row.weight}
-                                                onChange={(event) => updateCpvRule(index, 'weight', event.target.value)}
-                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                            />
-                                            {cpvFieldError(form.errors, index, 'weight') ? (
-                                                <p className="text-sm text-rose-600">{cpvFieldError(form.errors, index, 'weight')}</p>
-                                            ) : null}
-                                        </label>
+                                return (
+                                    <div key={`cpv-row-${index}`} className="rounded-xl border border-slate-200 bg-white p-4">
+                                        <div className="space-y-3">
+                                            <div className="flex items-start gap-3">
+                                                <div
+                                                    className="relative min-w-0 flex-1 space-y-2"
+                                                    onBlur={(event) => {
+                                                        if (!event.currentTarget.contains(event.relatedTarget)) {
+                                                            closeCpvSuggestions();
+                                                        }
+                                                    }}
+                                                >
+                                                    <span className="text-sm font-medium text-slate-700">CPV-kode</span>
+                                                    <input
+                                                        type="text"
+                                                        value={row.cpv_code}
+                                                        onFocus={() => setActiveCpvIndex(index)}
+                                                        onChange={(event) => updateCpvRule(index, 'cpv_code', event.target.value)}
+                                                        placeholder="Søk etter kode eller beskrivelse"
+                                                        autoComplete="off"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    />
 
-                                        <div className="flex items-end">
-                                            <button
-                                                type="button"
-                                                onClick={() => removeCpvRule(index)}
-                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                                            >
-                                                Fjern
-                                            </button>
+                                                    {showSuggestions ? (
+                                                        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.12)]">
+                                                            {cpvLookupLoading ? (
+                                                                <div className="px-4 py-3 text-sm text-slate-500">Laster CPV-treff...</div>
+                                                            ) : null}
+
+                                                            {!cpvLookupLoading && cpvSuggestions.map((item) => (
+                                                                <button
+                                                                    key={`${index}-${item.code}`}
+                                                                    type="button"
+                                                                    onMouseDown={(event) => event.preventDefault()}
+                                                                    onClick={() => selectCpvSuggestion(index, item)}
+                                                                    className="grid w-full grid-cols-[104px_minmax(0,1fr)] gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
+                                                                >
+                                                                    <span className="text-sm font-semibold text-slate-900">{item.code}</span>
+                                                                    <span className="text-sm text-slate-600">{item.description || 'No description available.'}</span>
+                                                                </button>
+                                                            ))}
+
+                                                            {showEmptyState ? (
+                                                                <div className="px-4 py-3 text-sm text-slate-500">Ingen treff</div>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : null}
+
+                                                    {cpvFieldError(form.errors, index, 'cpv_code') ? (
+                                                        <p className="text-sm text-rose-600">{cpvFieldError(form.errors, index, 'cpv_code')}</p>
+                                                    ) : null}
+                                                </div>
+
+                                                <label className="w-24 shrink-0 space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Vekt</span>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        value={row.weight}
+                                                        onChange={(event) => updateCpvRule(index, 'weight', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    />
+                                                    {cpvFieldError(form.errors, index, 'weight') ? (
+                                                        <p className="text-sm text-rose-600">{cpvFieldError(form.errors, index, 'weight')}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <div className="flex shrink-0 items-end pt-7">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeCpvRule(index)}
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                    >
+                                                        Fjern
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <span className="text-sm font-medium text-slate-700">Forklaring</span>
+                                                <div
+                                                    className={classNames(
+                                                        'min-h-11 w-full break-words rounded-xl border px-4 py-3 text-sm leading-6',
+                                                        row.description
+                                                            ? 'border-slate-200 bg-slate-50 text-slate-700'
+                                                            : 'border-slate-200 bg-white text-slate-400',
+                                                    )}
+                                                >
+                                                    {row.description || 'Velg en CPV-kode for å se beskrivelsen.'}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </section>

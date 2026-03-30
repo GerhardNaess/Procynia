@@ -170,7 +170,7 @@ class DoffinLiveSearchService
 
     private function publicationRange(string $publicationPeriod): array
     {
-        if (! in_array($publicationPeriod, ['7', '30', '90', '365'], true)) {
+        if (! in_array($publicationPeriod, ['1', '7', '30', '90', '365'], true)) {
             return [null, null];
         }
 

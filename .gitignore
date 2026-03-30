@@ -18,6 +18,11 @@
 /public/storage
 /storage/*.key
 /storage/pail
+/bootstrap/cache/testing-config.php
+/bootstrap/cache/testing-services.php
+/bootstrap/cache/testing-packages.php
+/bootstrap/cache/testing-routes.php
+/bootstrap/cache/testing-events.php
 /vendor
 Homestead.json
 Homestead.yaml

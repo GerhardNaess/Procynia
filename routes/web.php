@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\WatchProfileInboxController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
+use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use Illuminate\Support\Facades\Route;
 
@@ -34,11 +36,15 @@ Route::prefix('app')
     ->middleware(['auth', 'customer.frontend'])
     ->name('app.')
     ->group(function (): void {
-        Route::redirect('/', '/app/notices');
+        Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
         Route::get('/notices', [NoticeController::class, 'index'])->name('notices.index');
+        Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
+        Route::get('/suppliers/{supplier}', [SupplierController::class, 'show'])->name('suppliers.show');
         Route::get('/inbox/user', [WatchProfileInboxController::class, 'userInbox'])->name('inbox.user');
         Route::get('/inbox/department', [WatchProfileInboxController::class, 'departmentInbox'])->name('inbox.department');
+        Route::delete('/inbox/user/{record}', [WatchProfileInboxController::class, 'destroyUserInboxRecord'])->name('inbox.user.destroy');
+        Route::delete('/inbox/department/{record}', [WatchProfileInboxController::class, 'destroyDepartmentInboxRecord'])->name('inbox.department.destroy');
         Route::get('/notices/cpv-suggestions', [NoticeController::class, 'cpvSuggestions'])->name('notices.cpv-suggestions');
         Route::post('/notices/save', [NoticeController::class, 'storeSavedNotice'])->name('notices.save');
         Route::patch('/notices/saved/{savedNotice}/deadlines', [NoticeController::class, 'updateSavedNoticeDeadlines'])->name('notices.saved.deadlines.update');
@@ -54,6 +60,7 @@ Route::prefix('app')
         Route::put('/departments/{department}', [DepartmentController::class, 'update'])->name('departments.update');
         Route::patch('/departments/{department}/toggle-active', [DepartmentController::class, 'toggleActive'])->name('departments.toggle-active');
         Route::get('/watch-profiles', [WatchProfileController::class, 'index'])->name('watch-profiles.index');
+        Route::get('/watch-profiles/cpv-suggestions', [WatchProfileController::class, 'cpvSuggestions'])->name('watch-profiles.cpv-suggestions');
         Route::get('/watch-profiles/create', [WatchProfileController::class, 'create'])->name('watch-profiles.create');
         Route::post('/watch-profiles', [WatchProfileController::class, 'store'])->name('watch-profiles.store');
         Route::get('/watch-profiles/{watchProfile}/edit', [WatchProfileController::class, 'edit'])->name('watch-profiles.edit');

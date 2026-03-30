@@ -29,6 +29,28 @@ class CustomerFrontendAccessTest extends TestCase
         $response->assertRedirect(route('app.notices.index'));
     }
 
+    public function test_customer_user_can_access_customer_dashboard_from_app_root(): void
+    {
+        $user = new User([
+            'id' => 23,
+            'name' => 'Customer Admin',
+            'email' => 'customer.admin@procynia.local',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'customer_id' => 1,
+            'is_active' => true,
+        ]);
+        $user->setRelation('customer', new Customer([
+            'id' => 1,
+            'name' => 'Procynia AS',
+        ]));
+        $user->setRelation('department', null);
+
+        $response = $this->actingAs($user)->get('/app');
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page->component('App/Dashboard/Index'));
+    }
+
     public function test_super_admin_is_redirected_to_admin_dashboard_from_root(): void
     {
         $user = new User([

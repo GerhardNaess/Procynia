@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\Doffin\DoffinLiveSearchService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -324,5 +325,45 @@ class DoffinLiveSearchServiceTest extends TestCase
                 && $request['facets']['publicationDate']['from'] !== null
                 && $request['facets']['publicationDate']['to'] !== null;
         });
+    }
+
+    public function test_it_supports_1_day_as_a_publication_period(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-03-29 12:00:00'));
+
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+                'hits' => [
+                    [
+                        'id' => '2026-105164',
+                        'heading' => 'Recent notice',
+                        'publicationDate' => '2026-03-29T08:30:00',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        try {
+            app(DoffinLiveSearchService::class)->search([
+                'q' => 'recent',
+                'keywords' => '',
+                'organization_name' => '',
+                'cpv' => '',
+                'publication_period' => '1',
+                'status' => 'ACTIVE',
+            ], 1, 15);
+
+            Http::assertSentCount(1);
+            Http::assertSent(function ($request): bool {
+                return $request['searchString'] === 'recent'
+                    && $request['facets']['status']['checkedItems'] === ['ACTIVE']
+                    && $request['facets']['publicationDate']['from'] === '2026-03-28'
+                    && $request['facets']['publicationDate']['to'] === '2026-03-29';
+            });
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 }

@@ -169,6 +169,176 @@ class CustomerWatchProfileManagementTest extends TestCase
         $this->actingAs($admin)->get("/app/watch-profiles/{$foreignProfile->id}/edit")->assertNotFound();
     }
 
+    public function test_cpv_lookup_endpoint_returns_matches_from_cpv_codes_by_code(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user@procynia.test');
+        $this->seedCpvCodes([
+            [
+                'code' => '72000000',
+                'description_no' => 'IT-tjenester',
+                'description_en' => 'IT services',
+            ],
+            [
+                'code' => '90910000',
+                'description_no' => 'Renholdstjenester',
+                'description_en' => 'Cleaning services',
+            ],
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/watch-profiles/cpv-suggestions?query=7200&limit=10');
+
+        $response->assertOk();
+        $response->assertJsonFragment([
+            'code' => '72000000',
+            'description' => 'IT-tjenester',
+        ]);
+        $response->assertJsonMissing([
+            'code' => '90910000',
+        ]);
+    }
+
+    public function test_cpv_lookup_endpoint_uses_prefix_matching_for_numeric_queries(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user@procynia.test');
+        $this->seedCpvCodes([
+            [
+                'code' => '71000000',
+                'description_no' => 'Arkitekttjenester',
+                'description_en' => 'Architecture services',
+            ],
+            [
+                'code' => '71200000',
+                'description_no' => 'Tekniske tjenester',
+                'description_en' => 'Technical services',
+            ],
+            [
+                'code' => '72140000',
+                'description_no' => 'Strategisk rådgivning',
+                'description_en' => 'Strategic consulting',
+            ],
+            [
+                'code' => '72141000',
+                'description_no' => 'Analyse av informasjonssystemer',
+                'description_en' => 'Information systems analysis',
+            ],
+            [
+                'code' => '39721400',
+                'description_no' => 'Elektriske apparater',
+                'description_en' => 'Electrical appliances',
+            ],
+            [
+                'code' => '63721400',
+                'description_no' => 'Støttetjenester',
+                'description_en' => 'Support services',
+            ],
+            [
+                'code' => '90721400',
+                'description_no' => 'Miljøtjenester',
+                'description_en' => 'Environmental services',
+            ],
+        ]);
+
+        $prefixSeven = $this->actingAs($user)->get('/app/watch-profiles/cpv-suggestions?query=7&limit=10');
+        $prefixSeventyOne = $this->actingAs($user)->get('/app/watch-profiles/cpv-suggestions?query=71&limit=10');
+        $prefixSevenTwoOneFour = $this->actingAs($user)->get('/app/watch-profiles/cpv-suggestions?query=7214&limit=10');
+
+        $prefixSeven->assertOk();
+        $this->assertSame(
+            ['71000000', '71200000', '72140000', '72141000'],
+            array_column($prefixSeven->json('data'), 'code'),
+        );
+
+        $prefixSeventyOne->assertOk();
+        $this->assertSame(
+            ['71000000', '71200000'],
+            array_column($prefixSeventyOne->json('data'), 'code'),
+        );
+
+        $prefixSevenTwoOneFour->assertOk();
+        $this->assertSame(
+            ['72140000', '72141000'],
+            array_column($prefixSevenTwoOneFour->json('data'), 'code'),
+        );
+    }
+
+    public function test_cpv_lookup_endpoint_returns_matches_from_cpv_codes_by_description(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user@procynia.test');
+        $this->seedCpvCodes([
+            [
+                'code' => '72000000',
+                'description_no' => 'IT-tjenester',
+                'description_en' => 'IT services',
+            ],
+            [
+                'code' => '90910000',
+                'description_no' => 'Renholdstjenester',
+                'description_en' => 'Cleaning services',
+            ],
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/watch-profiles/cpv-suggestions?query=renhold&limit=10');
+
+        $response->assertOk();
+        $response->assertJsonFragment([
+            'code' => '90910000',
+            'description' => 'Renholdstjenester',
+        ]);
+        $response->assertJsonMissing([
+            'code' => '72000000',
+        ]);
+    }
+
+    public function test_edit_payload_includes_cpv_description_for_existing_rules(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user@procynia.test');
+        $this->seedCpvCodes(['72000000']);
+
+        $watchProfile = $this->createWatchProfile($customer->id, 'Min Profil', $user->id, null);
+        $watchProfile->cpvCodes()->create([
+            'cpv_code' => '72000000',
+            'weight' => 15,
+        ]);
+
+        $response = $this->actingAs($user)->get("/app/watch-profiles/{$watchProfile->id}/edit");
+
+        $response->assertOk();
+        $response->assertSee('"cpv_code":"72000000"', false);
+        $response->assertSee('"description":"Beskrivelse 72000000"', false);
+    }
+
+    public function test_watch_profile_store_validates_that_cpv_code_exists(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user@procynia.test');
+
+        $response = $this->actingAs($user)
+            ->withSession(['_token' => 'test-token'])
+            ->post('/app/watch-profiles', [
+                '_token' => 'test-token',
+                'owner_scope' => 'user',
+                'name' => 'Ugyldig CPV',
+                'description' => null,
+                'is_active' => true,
+                'department_id' => null,
+                'keywords' => 'rammeavtale',
+                'cpv_codes' => [
+                    ['cpv_code' => '99999999', 'weight' => 5],
+                ],
+            ]);
+
+        $response->assertSessionHasErrors('cpv_codes.0.cpv_code');
+    }
+
     public function test_customer_admin_can_filter_watch_profiles_by_user(): void
     {
         $customer = $this->createCustomer('Procynia AS');
@@ -376,11 +546,17 @@ class CustomerWatchProfileManagementTest extends TestCase
 
     private function seedCpvCodes(array $codes): void
     {
-        foreach ($codes as $code) {
+        foreach ($codes as $entry) {
+            $code = is_array($entry) ? (string) ($entry['code'] ?? '') : (string) $entry;
+
             \App\Models\CpvCode::query()->create([
                 'code' => $code,
-                'description_en' => "Description {$code}",
-                'description_no' => "Beskrivelse {$code}",
+                'description_en' => is_array($entry)
+                    ? (string) ($entry['description_en'] ?? "Description {$code}")
+                    : "Description {$code}",
+                'description_no' => is_array($entry)
+                    ? (string) ($entry['description_no'] ?? "Beskrivelse {$code}")
+                    : "Beskrivelse {$code}",
             ]);
         }
     }

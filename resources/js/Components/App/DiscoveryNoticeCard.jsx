@@ -104,6 +104,7 @@ export default function DiscoveryNoticeCard({
     locale,
     canSaveToWorklist = false,
     saveButtonLabel = 'Lagre',
+    deleteAction = null,
     actions = null,
     provenanceBadges = [],
 }) {
@@ -113,7 +114,8 @@ export default function DiscoveryNoticeCard({
         className: 'bg-slate-100 text-slate-700 ring-slate-200',
     };
     const canRenderSaveAction = canSaveToWorklist && Boolean(notice.notice_id) && Boolean(notice.title);
-    const hasActions = canRenderSaveAction || actions;
+    const canDelete = Boolean(deleteAction?.href);
+    const hasActions = canRenderSaveAction || canDelete || actions;
 
     const saveNoticeToWorklist = () => {
         if (!canRenderSaveAction || notice.is_saved) {
@@ -121,6 +123,22 @@ export default function DiscoveryNoticeCard({
         }
 
         router.post('/app/notices/save', worklistPayloadFromNotice(notice), {
+            preserveScroll: true,
+        });
+    };
+
+    const deleteNoticeFromInbox = () => {
+        if (!canDelete) {
+            return;
+        }
+
+        const confirmMessage = deleteAction.confirmMessage ?? 'Delete this inbox item?';
+
+        if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
+            return;
+        }
+
+        router.delete(deleteAction.href, {
             preserveScroll: true,
         });
     };
@@ -205,6 +223,15 @@ export default function DiscoveryNoticeCard({
                                 )}
                             >
                                 {notice.is_saved ? 'Lagret' : saveButtonLabel}
+                            </button>
+                        ) : null}
+                        {canDelete ? (
+                            <button
+                                type="button"
+                                onClick={deleteNoticeFromInbox}
+                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                            >
+                                {deleteAction.label ?? 'Slett'}
                             </button>
                         ) : null}
                         {actions}

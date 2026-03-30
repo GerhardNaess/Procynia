@@ -81,6 +81,7 @@ class DoffinWatchProfileInboxDiscoveryService
             $response = $this->liveSearchService->search($filters, $page, $perPage);
             $hits = collect($response['hits'] ?? [])
                 ->filter(fn (mixed $hit): bool => is_array($hit))
+                ->filter(fn (array $hit): bool => $this->shouldIncludeHit($watchProfile, $hit))
                 ->values();
 
             $summary['records_seen'] += $hits->count();
@@ -154,9 +155,38 @@ class DoffinWatchProfileInboxDiscoveryService
                 ->values()
                 ->implode(','),
             'keywords' => $this->keywordsFilter($watchProfile),
-            'publication_period' => '',
+            'publication_period' => '1',
             'status' => 'ACTIVE',
         ];
+    }
+
+    private function shouldIncludeHit(WatchProfile $watchProfile, array $hit): bool
+    {
+        return $this->hasEligibleStatus($hit)
+            && $this->publishedWithinLastDay($hit)
+            && $this->calculateRelevanceScore($watchProfile, $hit) > 0;
+    }
+
+    private function hasEligibleStatus(array $hit): bool
+    {
+        $status = strtoupper(trim((string) ($hit['status'] ?? '')));
+
+        if ($status === '') {
+            return true;
+        }
+
+        return $status === 'ACTIVE';
+    }
+
+    private function publishedWithinLastDay(array $hit): bool
+    {
+        $publicationDate = $this->dateTimeOrNull($hit['publicationDate'] ?? $hit['issueDate'] ?? null);
+
+        if (! $publicationDate instanceof Carbon) {
+            return false;
+        }
+
+        return $publicationDate->greaterThanOrEqualTo(now()->subDay());
     }
 
     private function keywordsFilter(WatchProfile $watchProfile): string

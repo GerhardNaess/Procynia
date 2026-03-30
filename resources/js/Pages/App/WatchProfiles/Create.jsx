@@ -2,7 +2,7 @@ import { useForm } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import WatchProfileForm from './WatchProfileForm';
 
-export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, departmentOptions, storeUrl }) {
+export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, departmentOptions, cpvSuggestionsUrl, storeUrl }) {
     const form = useForm({
         owner_scope: defaultOwnerScope,
         name: '',
@@ -26,6 +26,7 @@ export default function WatchProfilesCreate({ ownerOptions, defaultOwnerScope, d
                 form={form}
                 ownerOptions={ownerOptions}
                 departmentOptions={departmentOptions}
+                cpvSuggestionsUrl={cpvSuggestionsUrl}
                 backHref="/app/watch-profiles"
                 submitLabel="Opprett Watch Profile"
                 submitMethod="create"

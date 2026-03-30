@@ -2,7 +2,7 @@ import { useForm } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import WatchProfileForm from './WatchProfileForm';
 
-export default function WatchProfilesEdit({ watchProfile, ownerOptions, departmentOptions }) {
+export default function WatchProfilesEdit({ watchProfile, ownerOptions, departmentOptions, cpvSuggestionsUrl }) {
     const form = useForm({
         owner_scope: watchProfile.owner_scope,
         name: watchProfile.name,
@@ -26,6 +26,7 @@ export default function WatchProfilesEdit({ watchProfile, ownerOptions, departme
                 form={form}
                 ownerOptions={ownerOptions}
                 departmentOptions={departmentOptions}
+                cpvSuggestionsUrl={cpvSuggestionsUrl}
                 backHref="/app/watch-profiles"
                 submitLabel="Lagre endringer"
                 submitMethod="update"
