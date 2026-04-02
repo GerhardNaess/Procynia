@@ -21,6 +21,7 @@ function selectedCpvCodesExcludingIndex(rows, excludedIndex) {
 export default function WatchProfileForm({
     title,
     subtitle,
+    showHeader = true,
     form,
     ownerOptions,
     departmentOptions,
@@ -215,10 +216,12 @@ export default function WatchProfileForm({
                 onSubmit={onSubmit}
                 className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8"
             >
-                <div className="space-y-1.5">
-                    <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
-                    <p className="text-sm leading-6 text-slate-500">{subtitle}</p>
-                </div>
+                {showHeader ? (
+                    <div className="space-y-1.5">
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
+                        <p className="text-sm leading-6 text-slate-500">{subtitle}</p>
+                    </div>
+                ) : null}
 
                 <div className="grid gap-5 md:grid-cols-2">
                     <label className="space-y-2 md:col-span-2">

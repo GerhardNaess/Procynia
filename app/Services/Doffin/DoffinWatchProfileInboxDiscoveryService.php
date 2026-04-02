@@ -25,6 +25,7 @@ class DoffinWatchProfileInboxDiscoveryService
             'records_seen' => 0,
             'records_created' => 0,
             'records_updated' => 0,
+            'created_record_ids' => [],
         ];
 
         WatchProfile::query()
@@ -50,6 +51,10 @@ class DoffinWatchProfileInboxDiscoveryService
                     $summary['records_seen'] += $profileSummary['records_seen'];
                     $summary['records_created'] += $profileSummary['records_created'];
                     $summary['records_updated'] += $profileSummary['records_updated'];
+                    $summary['created_record_ids'] = [
+                        ...$summary['created_record_ids'],
+                        ...$profileSummary['created_record_ids'],
+                    ];
                 } catch (Throwable $throwable) {
                     $summary['profiles_failed']++;
 
@@ -72,6 +77,7 @@ class DoffinWatchProfileInboxDiscoveryService
             'records_seen' => 0,
             'records_created' => 0,
             'records_updated' => 0,
+            'created_record_ids' => [],
         ];
         $page = 1;
         $perPage = 50;
@@ -89,11 +95,12 @@ class DoffinWatchProfileInboxDiscoveryService
             foreach ($hits as $hit) {
                 $result = $this->upsertInboxRecord($watchProfile, $hit);
 
-                if ($result === 'created') {
+                if (($result['state'] ?? null) === 'created') {
                     $summary['records_created']++;
+                    $summary['created_record_ids'][] = $result['record_id'];
                 }
 
-                if ($result === 'updated') {
+                if (($result['state'] ?? null) === 'updated') {
                     $summary['records_updated']++;
                 }
             }
@@ -106,7 +113,7 @@ class DoffinWatchProfileInboxDiscoveryService
         return $summary;
     }
 
-    private function upsertInboxRecord(WatchProfile $watchProfile, array $hit): ?string
+    private function upsertInboxRecord(WatchProfile $watchProfile, array $hit): ?array
     {
         $noticeId = $this->stringOrNull($hit['id'] ?? null);
 
@@ -138,7 +145,10 @@ class DoffinWatchProfileInboxDiscoveryService
 
         $record->save();
 
-        return $isNew ? 'created' : 'updated';
+        return [
+            'state' => $isNew ? 'created' : 'updated',
+            'record_id' => (int) $record->id,
+        ];
     }
 
     private function buildFilters(WatchProfile $watchProfile): array

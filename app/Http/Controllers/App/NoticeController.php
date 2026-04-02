@@ -14,12 +14,15 @@ use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Support\CustomerContext;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -49,6 +52,7 @@ class NoticeController extends Controller
             'publication_period' => trim((string) $request->string('publication_period')),
             'status' => trim((string) $request->string('status')),
             'relevance' => trim((string) $request->string('relevance')),
+            'bid_status' => trim((string) $request->string('bid_status')),
         ];
 
         if ($customerId === null) {
@@ -206,6 +210,7 @@ class NoticeController extends Controller
 
         if ($isNewRecord) {
             $record->saved_by_user_id = $user->id;
+            $record->bid_status = SavedNotice::BID_STATUS_DISCOVERED;
         }
 
         $record->save();
@@ -282,9 +287,25 @@ class NoticeController extends Controller
         $validated = $request->validate([
             'selected_supplier_name' => ['nullable', 'string', 'max:255'],
             'contract_value_mnok' => ['nullable', 'numeric', 'min:0'],
-            'contract_period_months' => ['nullable', 'integer', 'min:0'],
+            'procurement_type' => ['required', 'string', Rule::in(SavedNotice::PROCUREMENT_TYPES)],
+            'follow_up_mode' => ['required', 'string', Rule::in(SavedNotice::EDITABLE_FOLLOW_UP_MODES)],
+            'follow_up_offset_months' => [
+                Rule::requiredIf(fn (): bool => $request->input('follow_up_mode') === SavedNotice::FOLLOW_UP_MODE_MANUAL_OFFSET),
+                'nullable',
+                'integer',
+                'min:1',
+                Rule::prohibitedIf(fn (): bool => $request->input('follow_up_mode') !== SavedNotice::FOLLOW_UP_MODE_MANUAL_OFFSET),
+            ],
+            'contract_period_months' => [
+                'nullable',
+                'integer',
+                'min:1',
+            ],
         ]);
 
+        $followUpOffsetMonths = array_key_exists('follow_up_offset_months', $validated) && $validated['follow_up_offset_months'] !== null
+            ? (int) $validated['follow_up_offset_months']
+            : null;
         $contractPeriodMonths = array_key_exists('contract_period_months', $validated) && $validated['contract_period_months'] !== null
             ? (int) $validated['contract_period_months']
             : null;
@@ -296,8 +317,14 @@ class NoticeController extends Controller
         $record->fill([
             'selected_supplier_name' => $validated['selected_supplier_name'] ?? null,
             'contract_value_mnok' => $contractValueMnok,
-            'contract_period_months' => $contractPeriodMonths,
-            'next_process_date_at' => $this->calculateNextProcessDate($record->award_date_at, $contractPeriodMonths),
+            'procurement_type' => $validated['procurement_type'],
+            'follow_up_mode' => $validated['follow_up_mode'],
+            'follow_up_offset_months' => $validated['follow_up_mode'] === SavedNotice::FOLLOW_UP_MODE_MANUAL_OFFSET ? $followUpOffsetMonths : null,
+            'contract_period_months' => $validated['procurement_type'] === SavedNotice::PROCUREMENT_TYPE_RECURRING ? $contractPeriodMonths : null,
+            'next_process_date_at' => $this->calculateHistoryNextProcessDate(
+                $validated['follow_up_mode'],
+                $followUpOffsetMonths,
+            ),
         ]);
         $record->save();
 
@@ -375,6 +402,181 @@ class NoticeController extends Controller
         return redirect()
             ->back()
             ->with('success', 'Historikk-kunngjøringen ble slettet.');
+    }
+
+    public function showSavedNotice(Request $request, SavedNotice $savedNotice): Response
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            abort(HttpResponse::HTTP_NOT_FOUND);
+        }
+
+        $record = $this->customerSavedNoticeQuery($customerId)
+            ->whereKey($savedNotice->id)
+            ->with([
+                'opportunityOwner:id,name,bid_role',
+                'bidManager:id,name,bid_role',
+                'submissions:id,saved_notice_id,sequence_number,label,submitted_at',
+            ])
+            ->firstOrFail();
+
+        return Inertia::render('App/Notices/SavedShow', [
+            'notice' => $this->savedNoticeCasePayload($record),
+        ]);
+    }
+
+    public function storeSavedNoticeSubmission(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->activeSavedNoticeQuery($customerId)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        if (! $record->canCreateSubmission()) {
+            return redirect()
+                ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+                ->with('error', 'Ny innsending kan bare registreres nar saken er sendt eller i forhandling.');
+        }
+
+        $record->createNextSubmission(now());
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Ny innsending ble registrert.');
+    }
+
+    public function updateSavedNoticeStatus(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $validated = $request->validate([
+            'status' => ['required', 'string', Rule::in(SavedNotice::BID_STATUSES)],
+            'bid_closure_reason' => [
+                Rule::requiredIf(fn (): bool => in_array((string) $request->input('status'), [
+                    SavedNotice::BID_STATUS_NO_GO,
+                    SavedNotice::BID_STATUS_WITHDRAWN,
+                ], true)),
+                'nullable',
+                'string',
+                Rule::in(SavedNotice::BID_CLOSURE_REASONS),
+            ],
+            'bid_closure_note' => ['nullable', 'string'],
+        ]);
+
+        $record = $this->activeSavedNoticeQuery($customerId)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        try {
+            $record->transitionBidStatus(
+                (string) $validated['status'],
+                $validated['bid_closure_reason'] ?? null,
+                $validated['bid_closure_note'] ?? null,
+            )->save();
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages([
+                'status' => 'Statusendringen er ikke tillatt for denne saken.',
+            ]);
+        }
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Saksstatus ble oppdatert.');
+    }
+
+    public function updateSavedNoticeOpportunityOwner(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $validated = $request->validate([
+            'opportunity_owner_user_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                    ->where('customer_id', $customerId)
+                    ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])),
+            ],
+        ]);
+
+        $record = $this->customerSavedNoticeQuery($customerId)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        $record->fill([
+            'opportunity_owner_user_id' => isset($validated['opportunity_owner_user_id']) && $validated['opportunity_owner_user_id'] !== null
+                ? (int) $validated['opportunity_owner_user_id']
+                : null,
+        ])->save();
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Kommersiell eier ble oppdatert.');
+    }
+
+    public function updateSavedNoticeBidManager(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $validated = $request->validate([
+            'bid_manager_user_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                    ->where('customer_id', $customerId)
+                    ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+                    ->where('bid_role', User::BID_ROLE_BID_MANAGER)),
+            ],
+        ]);
+
+        $record = $this->customerSavedNoticeQuery($customerId)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        $record->fill([
+            'bid_manager_user_id' => isset($validated['bid_manager_user_id']) && $validated['bid_manager_user_id'] !== null
+                ? (int) $validated['bid_manager_user_id']
+                : null,
+        ])->save();
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Bid-manager ble oppdatert.');
     }
 
     public function show(Request $request, int $notice): Response
@@ -483,17 +685,21 @@ class NoticeController extends Controller
         };
     }
 
-    private function activeSavedNoticeQuery(int $customerId): Builder
+    private function customerSavedNoticeQuery(int $customerId): Builder
     {
         return SavedNotice::query()
-            ->where('customer_id', $customerId)
+            ->where('customer_id', $customerId);
+    }
+
+    private function activeSavedNoticeQuery(int $customerId): Builder
+    {
+        return $this->customerSavedNoticeQuery($customerId)
             ->whereNull('archived_at');
     }
 
     private function archivedSavedNoticeQuery(int $customerId): Builder
     {
-        return SavedNotice::query()
-            ->where('customer_id', $customerId)
+        return $this->customerSavedNoticeQuery($customerId)
             ->whereNotNull('archived_at');
     }
 
@@ -510,10 +716,20 @@ class NoticeController extends Controller
         $query = $mode === 'history'
             ? $this->archivedSavedNoticeQuery($customerId)
             : $this->activeSavedNoticeQuery($customerId);
+        $bidStatus = trim((string) $request->string('bid_status'));
+
+        if ($bidStatus !== '' && in_array($bidStatus, SavedNotice::BID_STATUSES, true)) {
+            $query->where('bid_status', $bidStatus);
+        }
 
         $total = (clone $query)->count();
         $records = $query
-            ->with('savedBy:id,name')
+            ->with([
+                'savedBy:id,name',
+                'opportunityOwner:id,name',
+                'bidManager:id,name',
+            ])
+            ->withCount('submissions')
             ->orderByDesc('updated_at')
             ->forPage($page, $perPage)
             ->get();
@@ -547,7 +763,12 @@ class NoticeController extends Controller
             'cpv_code' => $notice->cpv_code,
             'is_new' => false,
             'external_url' => $notice->external_url ?: $this->publicNoticeUrl($notice->external_id),
+            'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
             'is_saved' => $notice->archived_at === null,
+            'bid_status' => $notice->bid_status,
+            'bid_status_label' => $notice->bid_status_label,
+            'submissions_count' => (int) ($notice->submissions_count ?? 0),
+            'opportunity_owner_name' => $notice->opportunityOwner?->name,
             'next_deadline_type' => $nextDeadline['type'],
             'next_deadline_at' => optional($nextDeadline['at'])?->toIso8601String(),
             'deadline_state' => $nextDeadline['state'],
@@ -561,20 +782,142 @@ class NoticeController extends Controller
             'award_date_at' => optional($notice->award_date_at)?->toIso8601String(),
             'selected_supplier_name' => $notice->selected_supplier_name,
             'contract_value_mnok' => $notice->contract_value_mnok !== null ? (float) $notice->contract_value_mnok : null,
+            'contract_period_text' => $notice->contract_period_text,
             'contract_period_months' => $notice->contract_period_months,
+            'procurement_type' => $notice->procurement_type,
+            'follow_up_mode' => $notice->follow_up_mode,
+            'follow_up_offset_months' => $notice->follow_up_offset_months,
             'next_process_date_at' => optional($notice->next_process_date_at)?->toIso8601String(),
         ];
     }
 
-    private function calculateNextProcessDate($awardDate, ?int $contractPeriodMonths)
+    private function savedNoticeCasePayload(SavedNotice $notice): array
     {
-        if ($awardDate === null || $contractPeriodMonths === null) {
-            return null;
-        }
+        $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
+        $isMutableCase = $notice->archived_at === null;
+        $canCreateSubmission = $isMutableCase && $notice->canCreateSubmission();
+        $statusActions = $isMutableCase ? $notice->availableBidStatusActions() : [];
 
-        return $awardDate->copy()
-            ->addMonthsNoOverflow($contractPeriodMonths)
-            ->subMonthsNoOverflow(6);
+        return [
+            'id' => $notice->id,
+            'notice_id' => $notice->external_id,
+            'title' => $notice->title,
+            'organization_name' => $notice->buyer_name,
+            'external_url' => $notice->external_url ?: $this->publicNoticeUrl($notice->external_id),
+            'summary' => $notice->summary,
+            'cpv_code' => $notice->cpv_code,
+            'publication_date' => optional($notice->publication_date)?->toIso8601String(),
+            'deadline' => optional($notice->deadline)?->toIso8601String(),
+            'next_deadline_type' => $nextDeadline['type'],
+            'next_deadline_at' => optional($nextDeadline['at'])?->toIso8601String(),
+            'deadline_state' => $nextDeadline['state'],
+            'bid_status' => $notice->bid_status,
+            'bid_status_label' => $notice->bid_status_label,
+            'bid_closed_at' => optional($notice->bid_closed_at)?->toIso8601String(),
+            'bid_closure_reason' => $notice->bid_closure_reason,
+            'bid_closure_reason_label' => $notice->bid_closure_reason ? $notice->bid_closure_reason_label : null,
+            'bid_closure_note' => $notice->bid_closure_note,
+            'bid_submitted_at' => optional($notice->bid_submitted_at)?->toIso8601String(),
+            'archived_at' => optional($notice->archived_at)?->toIso8601String(),
+            'opportunity_owner' => $notice->opportunityOwner
+                ? [
+                    'id' => $notice->opportunityOwner->id,
+                    'name' => $notice->opportunityOwner->name,
+                    'bid_role' => $notice->opportunityOwner->resolvedBidRole(),
+                    'bid_role_label' => $notice->opportunityOwner->bid_role_label,
+                ]
+                : null,
+            'bid_manager' => $notice->bidManager
+                ? [
+                    'id' => $notice->bidManager->id,
+                    'name' => $notice->bidManager->name,
+                    'bid_role' => $notice->bidManager->resolvedBidRole(),
+                    'bid_role_label' => $notice->bidManager->bid_role_label,
+                ]
+                : null,
+            'submissions' => $notice->submissions
+                ->map(fn ($submission): array => [
+                    'id' => $submission->id,
+                    'sequence_number' => $submission->sequence_number,
+                    'label' => $submission->label,
+                    'submitted_at' => optional($submission->submitted_at)?->toIso8601String(),
+                ])
+                ->all(),
+            'back_url' => route('app.notices.index', ['mode' => $notice->archived_at ? 'history' : 'saved']),
+            'back_label' => $notice->archived_at ? 'Tilbake til historikk' : 'Tilbake til arbeidsliste',
+            'actions' => [
+                'update_status_url' => $isMutableCase
+                    ? route('app.notices.saved.status.update', ['savedNotice' => $notice->id])
+                    : null,
+                'status_actions' => $statusActions,
+                'closure_reasons' => SavedNotice::bidClosureReasonOptions(),
+                'update_opportunity_owner_url' => route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id]),
+                'opportunity_owner_options' => $this->customerOpportunityOwnerOptions((int) $notice->customer_id),
+                'update_bid_manager_url' => route('app.notices.saved.bid-manager.update', ['savedNotice' => $notice->id]),
+                'bid_manager_options' => $this->customerBidManagerOptions((int) $notice->customer_id),
+                'can_create_submission' => $canCreateSubmission,
+                'create_submission_url' => $canCreateSubmission
+                    ? route('app.notices.saved.submissions.store', ['savedNotice' => $notice->id])
+                    : null,
+            ],
+        ];
+    }
+
+    private function calculateHistoryNextProcessDate(
+        string $followUpMode,
+        ?int $followUpOffsetMonths,
+    ): ?CarbonInterface
+    {
+        return match ($followUpMode) {
+            SavedNotice::FOLLOW_UP_MODE_NONE => null,
+            SavedNotice::FOLLOW_UP_MODE_MANUAL_OFFSET => $followUpOffsetMonths !== null
+                ? now()->addMonthsNoOverflow($followUpOffsetMonths)
+                : null,
+            default => null,
+        };
+    }
+
+    private function customerOpportunityOwnerOptions(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'is_active', 'bid_role'])
+            ->map(function (User $user): array {
+                $bidRoleLabel = match ($user->resolvedBidRole()) {
+                    User::BID_ROLE_BID_MANAGER => 'Bid-manager',
+                    User::BID_ROLE_VIEWER => 'Lesetilgang',
+                    default => 'Bid-bidragsyter',
+                };
+
+                return [
+                    'value' => $user->id,
+                    'label' => $user->is_active
+                        ? "{$user->name} · {$bidRoleLabel}"
+                        : "{$user->name} · {$bidRoleLabel} (inaktiv)",
+                ];
+            })
+            ->all();
+    }
+
+    private function customerBidManagerOptions(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+            ->where('bid_role', User::BID_ROLE_BID_MANAGER)
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'is_active'])
+            ->map(fn (User $user): array => [
+                'value' => $user->id,
+                'label' => $user->is_active
+                    ? $user->name
+                    : "{$user->name} (inaktiv)",
+            ])
+            ->all();
     }
 
     private function nextRelevantSavedNoticeDeadline(SavedNotice $notice): array
@@ -639,7 +982,7 @@ class NoticeController extends Controller
             'notice_id' => $noticeId,
             'title' => trim((string) ($hit['heading'] ?? '')),
             'buyer_name' => $buyers->implode(', '),
-            'summary' => $description !== '' ? Str::limit(Str::squish($description), 220) : null,
+            'summary' => $description !== '' ? Str::squish($description) : null,
             'publication_date' => $publicationDate,
             'deadline' => $hit['deadline'] ?? null,
             'status' => $hit['status'] ?? null,
@@ -724,7 +1067,7 @@ class NoticeController extends Controller
         return match ($mode) {
             'saved' => [
                 'type' => 'saved_notices',
-                'label' => 'Lagrede kunngjøringer',
+                'label' => 'Registrerte kunngjøringer',
             ],
             'history' => [
                 'type' => 'saved_notice_history',
@@ -773,8 +1116,37 @@ class NoticeController extends Controller
                     ? ($profile->user?->name ?? 'Ukjent bruker')
                     : ($profile->department?->name ?? 'Ukjent avdeling'),
                 'frequency' => null,
+                'prefill' => $this->savedSearchPrefill($profile),
             ])
             ->all();
+    }
+
+    private function savedSearchPrefill(WatchProfile $profile): array
+    {
+        $keywords = collect($profile->keywords ?? [])
+            ->filter(fn (mixed $keyword): bool => is_string($keyword) && trim($keyword) !== '')
+            ->map(fn (string $keyword): string => trim($keyword))
+            ->values()
+            ->all();
+        $cpvItems = $profile->cpvCodes
+            ->pluck('cpv_code')
+            ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
+            ->map(fn (string $value): string => trim($value))
+            ->unique()
+            ->sort()
+            ->map(fn (string $code): ?array => $this->cpvSearchService->resolve($code))
+            ->filter()
+            ->values()
+            ->all();
+
+        return [
+            'organization_name' => null,
+            'cpv_items' => $cpvItems,
+            'keywords' => implode(', ', $keywords),
+            'publication_period' => null,
+            'status' => 'ACTIVE',
+            'relevance' => null,
+        ];
     }
 
     private function monitoringSummary(?User $user, ?int $customerId): array

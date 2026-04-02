@@ -204,7 +204,7 @@ class DoffinLiveSearchServiceTest extends TestCase
         });
     }
 
-    public function test_it_merges_keywords_into_the_primary_search_string_without_replacing_q(): void
+    public function test_it_prioritizes_the_primary_search_query_over_keywords(): void
     {
         Http::fake([
             'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
@@ -240,7 +240,55 @@ class DoffinLiveSearchServiceTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function ($request): bool {
-            return $request['searchString'] === 'sjøfart havn ferge';
+            return $request['searchString'] === 'sjøfart';
+        });
+    }
+
+    public function test_it_uses_a_single_keyword_when_no_primary_query_is_provided(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+                'hits' => [],
+            ], 200),
+        ]);
+
+        app(DoffinLiveSearchService::class)->search([
+            'q' => '',
+            'keywords' => 'ferge',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request): bool {
+            return $request['searchString'] === 'ferge';
+        });
+    }
+
+    public function test_it_does_not_build_an_overly_strict_search_string_from_multiple_keywords_alone(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+                'hits' => [],
+            ], 200),
+        ]);
+
+        app(DoffinLiveSearchService::class)->search([
+            'q' => '',
+            'keywords' => 'havn, ferge, sourcing partner',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request): bool {
+            return $request['searchString'] === '';
         });
     }
 

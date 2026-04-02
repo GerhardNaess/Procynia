@@ -135,30 +135,19 @@ class DoffinLiveSearchService
 
     private function buildSearchString(string $query, array $keywords, string $organizationName): string
     {
-        $parts = [];
-
         if ($query !== '') {
-            $parts[] = $query;
+            return $query;
         }
 
-        $normalizedQuery = Str::lower($query);
-
-        foreach ($keywords as $keyword) {
-            $normalizedKeyword = Str::lower($keyword);
-
-            if (
-                $normalizedQuery !== ''
-                && preg_match('/(?:^|\s)'.preg_quote($normalizedKeyword, '/').'(?:$|\s)/u', $normalizedQuery) === 1
-            ) {
-                continue;
-            }
-
-            $parts[] = $keyword;
+        if ($organizationName !== '') {
+            return $organizationName;
         }
 
-        $searchString = Str::squish(implode(' ', $parts));
+        if (count($keywords) === 1) {
+            return $keywords[0];
+        }
 
-        return $searchString !== '' ? $searchString : $organizationName;
+        return '';
     }
 
     private function normalizeStatus(string $value): ?string

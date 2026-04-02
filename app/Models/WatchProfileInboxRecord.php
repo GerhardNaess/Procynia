@@ -64,11 +64,13 @@ class WatchProfileInboxRecord extends Model
             return $query;
         }
 
-        return $query->where(function (Builder $scopeQuery) use ($user): void {
+        $membershipDepartmentIds = $user->membershipDepartmentIds();
+
+        return $query->where(function (Builder $scopeQuery) use ($user, $membershipDepartmentIds): void {
             $scopeQuery->where('user_id', $user->id);
 
-            if ($user->department_id !== null) {
-                $scopeQuery->orWhere('department_id', $user->department_id);
+            if ($membershipDepartmentIds !== []) {
+                $scopeQuery->orWhereIn('department_id', $membershipDepartmentIds);
             }
         });
     }
@@ -82,12 +84,14 @@ class WatchProfileInboxRecord extends Model
 
     public function scopeDepartmentInbox(Builder $query, User $user): Builder
     {
-        if ($user->department_id === null) {
+        $membershipDepartmentIds = $user->membershipDepartmentIds();
+
+        if ($membershipDepartmentIds === []) {
             return $query->whereRaw('1 = 0');
         }
 
         return $query
             ->where('customer_id', $user->customer_id)
-            ->where('department_id', $user->department_id);
+            ->whereIn('department_id', $membershipDepartmentIds);
     }
 }

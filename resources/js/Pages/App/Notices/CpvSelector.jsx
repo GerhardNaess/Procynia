@@ -164,7 +164,7 @@ export default function CpvSelector({
                                     type="button"
                                     onClick={() => removeItem(item.code)}
                                     className="shrink-0 rounded-full text-violet-700 transition hover:text-violet-900"
-                                    aria-label={`Fjern ${item.label}`}
+                                    aria-label={`Slett ${item.label}`}
                                 >
                                     x
                                 </button>

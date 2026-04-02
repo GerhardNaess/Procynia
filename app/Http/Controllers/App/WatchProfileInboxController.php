@@ -26,6 +26,7 @@ class WatchProfileInboxController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $records = $this->userInboxQuery($user, $customerId)->get();
         $savedNoticeIds = $this->activeSavedNoticeIds($customerId, $records);
+        $hasDepartmentInbox = $this->customerContext->hasDepartmentMembership($user);
 
         return Inertia::render('App/Inbox/Index', [
             'scope' => 'user',
@@ -36,7 +37,7 @@ class WatchProfileInboxController extends Controller
                 ->all(),
             'switchLinks' => [
                 'user' => route('app.inbox.user'),
-                'department' => $user->department_id !== null ? route('app.inbox.department') : null,
+                'department' => $hasDepartmentInbox ? route('app.inbox.department') : null,
             ],
         ]);
     }
@@ -45,14 +46,14 @@ class WatchProfileInboxController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
 
-        abort_unless($user->department_id !== null, 403);
+        abort_unless($this->customerContext->hasDepartmentMembership($user), 403);
         $records = $this->departmentInboxQuery($user, $customerId)->get();
         $savedNoticeIds = $this->activeSavedNoticeIds($customerId, $records);
 
         return Inertia::render('App/Inbox/Index', [
             'scope' => 'department',
             'title' => 'Avdelingsinnboks',
-            'description' => 'Live Doffin-treff fanget opp av watch profiles for din avdeling.',
+            'description' => 'Live Doffin-treff fanget opp av watch profiles for avdelingene du tilhører.',
             'records' => $records
                 ->map(fn (WatchProfileInboxRecord $record): array => $this->inboxListItem($record, $savedNoticeIds))
                 ->all(),
@@ -82,7 +83,7 @@ class WatchProfileInboxController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
 
-        abort_unless($user->department_id !== null, 403);
+        abort_unless($this->customerContext->hasDepartmentMembership($user), 403);
 
         $deletableRecord = $this->departmentInboxQuery($user, $customerId)
             ->whereKey($record)

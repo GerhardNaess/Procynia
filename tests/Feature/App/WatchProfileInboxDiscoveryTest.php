@@ -748,13 +748,14 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         $this->assertDatabaseHas('watch_profile_inbox_records', ['id' => $foreignRecord->id]);
     }
 
-    public function test_department_inbox_access_and_navigation_follow_users_department_id(): void
+    public function test_department_inbox_access_and_navigation_follow_department_membership_rule(): void
     {
         $customer = $this->createCustomer('Procynia AS');
         $departmentA = $this->createDepartment($customer->id, 'Salg');
         $departmentB = $this->createDepartment($customer->id, 'Leveranse');
         $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
-        $userB = $this->createUser($customer->id, $departmentB->id, User::ROLE_USER, 'user.b@procynia.test');
+        $userB = $this->createUser($customer->id, null, User::ROLE_USER, 'user.b@procynia.test');
+        $userB->departments()->attach($departmentB->id);
         $userWithoutDepartment = $this->createUser($customer->id, null, User::ROLE_USER, 'user.none@procynia.test');
 
         $profileA = $this->createWatchProfile($customer->id, 'Salg Profil', null, $departmentA->id, ['renhold']);
@@ -789,6 +790,7 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         ]);
 
         $userInboxWithDepartment = $this->actingAs($userA)->get('/app/inbox/user');
+        $userInboxWithPivotMembership = $this->actingAs($userB)->get('/app/inbox/user');
         $userInboxWithoutDepartment = $this->actingAs($userWithoutDepartment)->get('/app/inbox/user');
         $departmentInboxForUserA = $this->actingAs($userA)->get('/app/inbox/department');
         $departmentInboxForUserB = $this->actingAs($userB)->get('/app/inbox/department');
@@ -796,6 +798,8 @@ class WatchProfileInboxDiscoveryTest extends TestCase
 
         $userInboxWithDepartment->assertOk();
         $userInboxWithDepartment->assertSee('"can_access_department_inbox":true', false);
+        $userInboxWithPivotMembership->assertOk();
+        $userInboxWithPivotMembership->assertSee('"can_access_department_inbox":true', false);
         $userInboxWithoutDepartment->assertOk();
         $userInboxWithoutDepartment->assertSee('"can_access_department_inbox":false', false);
 
@@ -847,6 +851,13 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('department_user', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('department_id');
+            $table->unsignedBigInteger('user_id');
+            $table->timestamps();
+        });
+
         Schema::create('watch_profiles', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id');
@@ -871,6 +882,11 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('saved_by_user_id')->nullable();
+            $table->string('bid_status')->default('discovered');
+            $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
+            $table->timestamp('bid_qualified_at')->nullable();
+            $table->timestamp('bid_submitted_at')->nullable();
+            $table->timestamp('bid_closed_at')->nullable();
             $table->string('external_id');
             $table->string('title');
             $table->string('buyer_name')->nullable();
@@ -910,6 +926,15 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->timestamp('discovered_at');
             $table->timestamp('last_seen_at')->nullable();
             $table->json('raw_payload')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('notifications', function (Blueprint $table): void {
+            $table->uuid('id')->primary();
+            $table->string('type');
+            $table->morphs('notifiable');
+            $table->text('data');
+            $table->timestamp('read_at')->nullable();
             $table->timestamps();
         });
     }

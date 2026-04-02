@@ -76,12 +76,13 @@ class CustomerWatchProfileManagementTest extends TestCase
         ]);
     }
 
-    public function test_regular_user_can_create_department_watch_profile_only_for_own_department(): void
+    public function test_regular_user_with_pivot_membership_can_create_department_watch_profile_only_for_owned_department(): void
     {
         $customer = $this->createCustomer('Procynia AS');
         $departmentA = $this->createDepartment($customer->id, 'Salg');
         $departmentB = $this->createDepartment($customer->id, 'Leveranse');
-        $userA = $this->createUser($customer->id, $departmentA->id, User::ROLE_USER, 'user.a@procynia.test');
+        $userA = $this->createUser($customer->id, null, User::ROLE_USER, 'user.a@procynia.test');
+        $userA->departments()->attach($departmentA->id);
         $this->seedCpvCodes(['72000000']);
 
         $this->actingAs($userA)
@@ -468,6 +469,13 @@ class CustomerWatchProfileManagementTest extends TestCase
             $table->unsignedBigInteger('department_id')->nullable();
             $table->unsignedBigInteger('nationality_id')->nullable();
             $table->unsignedBigInteger('preferred_language_id')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('department_user', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('department_id');
+            $table->unsignedBigInteger('user_id');
             $table->timestamps();
         });
 

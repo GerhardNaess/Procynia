@@ -20,19 +20,29 @@ export default function WatchProfilesEdit({ watchProfile, ownerOptions, departme
 
     return (
         <CustomerAppLayout title="Rediger Watch Profile" showPageTitle={false}>
-            <WatchProfileForm
-                title="Rediger Watch Profile"
-                subtitle="Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery."
-                form={form}
-                ownerOptions={ownerOptions}
-                departmentOptions={departmentOptions}
-                cpvSuggestionsUrl={cpvSuggestionsUrl}
-                backHref="/app/watch-profiles"
-                submitLabel="Lagre endringer"
-                submitMethod="update"
-                deleteUrl={watchProfile.delete_url}
-                onSubmit={submit}
-            />
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger Watch Profile</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery.
+                    </p>
+                </section>
+
+                <WatchProfileForm
+                    title="Rediger Watch Profile"
+                    subtitle="Oppdater eierskap, søkekriterier og status for watch profile-en uten å bruke lokal notice-matching som discovery."
+                    showHeader={false}
+                    form={form}
+                    ownerOptions={ownerOptions}
+                    departmentOptions={departmentOptions}
+                    cpvSuggestionsUrl={cpvSuggestionsUrl}
+                    backHref="/app/watch-profiles"
+                    submitLabel="Lagre endringer"
+                    submitMethod="update"
+                    deleteUrl={watchProfile.delete_url}
+                    onSubmit={submit}
+                />
+            </div>
         </CustomerAppLayout>
     );
 }

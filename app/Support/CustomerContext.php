@@ -78,6 +78,22 @@ class CustomerContext
         return $user instanceof User && $user->canManageUsers();
     }
 
+    public function canManageCustomerUsers(?User $user = null): bool
+    {
+        $user ??= $this->currentUser();
+
+        return $user instanceof User && $user->canManageCustomerUsers();
+    }
+
+    public function canCreateCustomerDepartments(?User $user = null): bool
+    {
+        $user ??= $this->currentUser();
+
+        return $user instanceof User
+            && $this->canManageCustomerUsers($user)
+            && $user->isSystemOwner();
+    }
+
     public function customerDepartmentIds(?User $user = null): array
     {
         $customerId = $this->currentCustomerId($user);
@@ -92,6 +108,108 @@ class CustomerContext
             ->pluck('id')
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
+    }
+
+    public function manageableDepartmentIds(?User $user = null): array
+    {
+        $user ??= $this->currentUser();
+
+        if (! $user instanceof User || ! $this->canManageCustomerUsers($user)) {
+            return [];
+        }
+
+        if ($user->hasCompanyWideCustomerManagementScope()) {
+            return $this->customerDepartmentIds($user);
+        }
+
+        if (! $user->hasDepartmentScopedBidManagement()) {
+            return [];
+        }
+
+        return Department::query()
+            ->where('customer_id', $user->customer_id)
+            ->whereIn('id', $user->managedDepartmentIds())
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+    }
+
+    public function membershipDepartmentIds(User $user): array
+    {
+        return $user->membershipDepartmentIds();
+    }
+
+    public function hasDepartmentMembership(?User $user = null): bool
+    {
+        $user ??= $this->currentUser();
+
+        return $user instanceof User && $user->hasDepartmentMembership();
+    }
+
+    public function canManageDepartment(Department $department, ?User $user = null): bool
+    {
+        $user ??= $this->currentUser();
+
+        if (! $user instanceof User || ! $this->canManageCustomerUsers($user)) {
+            return false;
+        }
+
+        if ((int) $department->customer_id !== (int) $user->customer_id) {
+            return false;
+        }
+
+        if ($user->hasCompanyWideCustomerManagementScope()) {
+            return true;
+        }
+
+        return in_array((int) $department->id, $this->manageableDepartmentIds($user), true);
+    }
+
+    public function canManageCustomerUser(User $actor, User $target): bool
+    {
+        if (! $this->canManageCustomerUsers($actor)) {
+            return false;
+        }
+
+        if ($actor->customer_id === null || (int) $target->customer_id !== (int) $actor->customer_id) {
+            return false;
+        }
+
+        if (! in_array($target->role, [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER], true)) {
+            return false;
+        }
+
+        if ($actor->is($target)) {
+            return true;
+        }
+
+        if ($actor->isSystemOwner()) {
+            return true;
+        }
+
+        if (! $actor->isBidManager()) {
+            return false;
+        }
+
+        if ($target->isSystemOwner() || $target->isBidManager()) {
+            return false;
+        }
+
+        if ($actor->hasCompanyWideBidManagementScope()) {
+            return true;
+        }
+
+        $manageableDepartmentIds = $this->manageableDepartmentIds($actor);
+
+        if ($manageableDepartmentIds === []) {
+            return false;
+        }
+
+        $membershipDepartmentIds = $this->membershipDepartmentIds($target);
+
+        return $membershipDepartmentIds !== []
+            && ! $this->hasOutOfScopeDepartment($membershipDepartmentIds, $manageableDepartmentIds);
     }
 
     public function scopeCustomerOwned(Builder $query, string $column = 'customer_id', ?User $user = null): Builder
@@ -271,5 +389,16 @@ class CustomerContext
         }
 
         return $this->normalizeNationalityCode($customer->nationality()->value('code'));
+    }
+
+    private function hasOutOfScopeDepartment(array $candidateIds, array $allowedIds): bool
+    {
+        foreach ($candidateIds as $candidateId) {
+            if (! in_array((int) $candidateId, $allowedIds, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

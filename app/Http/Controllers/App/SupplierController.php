@@ -39,11 +39,37 @@ class SupplierController extends Controller
     public function index(Request $request): Response
     {
         $search = trim((string) $request->query('search', ''));
+        $sortField = trim((string) $request->query('sort_field', ''));
+        $sortDirection = strtolower(trim((string) $request->query('sort_direction', 'desc')));
+        $allowedSortFields = [
+            'supplier_name' => 'supplier_name',
+            'organization_number' => 'organization_number',
+            'notices_count' => 'notices_count',
+            'total_estimated_value_amount' => 'total_estimated_value_amount',
+            'updated_at' => 'updated_at',
+        ];
+
+        if (! array_key_exists($sortField, $allowedSortFields)) {
+            $sortField = 'updated_at';
+        }
+
+        if (! in_array($sortDirection, ['asc', 'desc'], true)) {
+            $sortDirection = 'desc';
+        }
 
         $suppliers = DoffinSupplier::query()
             ->withListingMetrics()
-            ->searchListing($search)
-            ->orderByDesc('updated_at')
+            ->searchListing($search);
+
+        if ($sortField === 'total_estimated_value_amount') {
+            $suppliers->orderByRaw(sprintf('total_estimated_value_amount %s NULLS LAST', $sortDirection));
+        } else {
+            $suppliers->orderBy($allowedSortFields[$sortField], $sortDirection);
+        }
+
+        $suppliers = $suppliers
+            ->orderBy('supplier_name')
+            ->orderBy('id')
             ->paginate(20)
             ->withQueryString();
 
@@ -53,6 +79,8 @@ class SupplierController extends Controller
                 'supplier_name' => $supplier->supplier_name,
                 'organization_number' => $supplier->organization_number,
                 'notices_count' => (int) ($supplier->notices_count ?? 0),
+                'total_estimated_value_amount' => $supplier->total_estimated_value_amount,
+                'total_estimated_value_currency_code' => $supplier->total_estimated_value_amount !== null ? 'NOK' : null,
                 'updated_at' => optional($supplier->updated_at)?->toIso8601String(),
                 'view_url' => route('app.suppliers.show', ['supplier' => $supplier->id]),
             ]),
@@ -61,6 +89,8 @@ class SupplierController extends Controller
         return Inertia::render('App/Suppliers/Index', [
             'filters' => [
                 'search' => $search,
+                'sort_field' => $sortField,
+                'sort_direction' => $sortDirection,
             ],
             'suppliers' => $suppliers,
         ]);
@@ -85,6 +115,10 @@ class SupplierController extends Controller
             ->withListingMetrics()
             ->whereKey($supplier)
             ->firstOrFail();
+        $noticeLinks = $record->noticeSuppliers()
+            ->with('notice')
+            ->orderByDesc('id')
+            ->get();
 
         return Inertia::render('App/Suppliers/Show', [
             'supplier' => [
@@ -96,22 +130,25 @@ class SupplierController extends Controller
                 'updated_at' => optional($record->updated_at)?->toIso8601String(),
                 'back_url' => route('app.suppliers.index'),
             ],
-            'linkedNotices' => $record->noticeSuppliers()
-                ->with('notice')
-                ->orderByDesc('id')
-                ->get()
-                ->map(fn ($link): array => [
-                    'id' => $link->id,
-                    'notice_id' => $link->notice?->notice_id,
-                    'heading' => $link->notice?->heading,
-                    'buyer_name' => $link->notice?->buyer_name,
-                    'publication_date' => optional($link->notice?->publication_date)?->toIso8601String(),
-                    'source' => $link->source,
-                    'winner_lots' => filled($link->winner_lots_json)
-                        ? array_values($link->winner_lots_json)
-                        : [],
-                    'show_url' => $link->notice ? route('app.notices.show', ['notice' => $link->notice->id]) : null,
-                ])
+            'linkedNotices' => $noticeLinks
+                ->map(function ($link): array {
+                    return [
+                        'id' => $link->id,
+                        'notice_id' => $link->notice?->notice_id,
+                        'heading' => $link->notice?->heading,
+                        'buyer_name' => $link->notice?->buyer_name,
+                        'publication_date' => optional($link->notice?->publication_date)?->toIso8601String(),
+                        'source' => $link->source,
+                        'estimated_value_amount' => $link->notice?->estimated_value_amount,
+                        'estimated_value_currency_code' => $link->notice?->estimated_value_currency_code,
+                        'contract_period_text' => null,
+                        'short_description' => data_get($link->notice?->raw_payload_json, 'description'),
+                        'winner_lots' => filled($link->winner_lots_json)
+                            ? array_values($link->winner_lots_json)
+                            : [],
+                        'show_url' => $link->notice ? route('app.notices.show', ['notice' => $link->notice->id]) : null,
+                    ];
+                })
                 ->all(),
         ]);
     }

@@ -217,7 +217,7 @@ class DoffinNoticeParser
         $amount = $estimatedValue['amount'] ?? null;
 
         return [
-            'amount' => is_numeric($amount) ? (float) $amount : null,
+            'amount' => is_scalar($amount) ? $this->stringOrNull($amount) : null,
             'currency_code' => $this->stringOrNull($estimatedValue['currencyCode'] ?? $estimatedValue['code'] ?? null),
             'display' => $this->stringOrNull($estimatedValue['fullLocalizedText'] ?? null),
         ];

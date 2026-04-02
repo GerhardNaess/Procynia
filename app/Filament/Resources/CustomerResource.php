@@ -8,6 +8,7 @@ use App\Filament\Resources\CustomerResource\Pages\ListCustomers;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\User;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Forms\Components\Select;
@@ -62,6 +63,21 @@ class CustomerResource extends Resource
                         Toggle::make('is_active')
                             ->label(__('procynia.customer.is_active'))
                             ->default(true),
+                    ]),
+                Section::make('Første systemeier')
+                    ->columns(2)
+                    ->visible(fn (string $operation): bool => $operation === 'create')
+                    ->schema([
+                        TextInput::make('initial_system_owner_name')
+                            ->label('Navn')
+                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->maxLength(255),
+                        TextInput::make('initial_system_owner_email')
+                            ->label('E-post')
+                            ->email()
+                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->maxLength(255)
+                            ->unique(User::class, 'email'),
                     ]),
             ]);
     }

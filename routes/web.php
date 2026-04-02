@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\App\DashboardController;
+use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\WatchProfileController;
@@ -19,7 +20,7 @@ Route::get('/', function () {
     }
 
     return method_exists($user, 'canAccessCustomerFrontend') && $user->canAccessCustomerFrontend()
-        ? redirect()->route('app.notices.index')
+        ? redirect()->route('app.notices.index', ['mode' => 'saved'])
         : redirect()->route('filament.admin.pages.dashboard');
 });
 
@@ -36,7 +37,9 @@ Route::prefix('app')
     ->middleware(['auth', 'customer.frontend'])
     ->name('app.')
     ->group(function (): void {
-        Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+        Route::redirect('/', '/app/notices?mode=saved');
+        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+        Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
 
         Route::get('/notices', [NoticeController::class, 'index'])->name('notices.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
@@ -47,6 +50,11 @@ Route::prefix('app')
         Route::delete('/inbox/department/{record}', [WatchProfileInboxController::class, 'destroyDepartmentInboxRecord'])->name('inbox.department.destroy');
         Route::get('/notices/cpv-suggestions', [NoticeController::class, 'cpvSuggestions'])->name('notices.cpv-suggestions');
         Route::post('/notices/save', [NoticeController::class, 'storeSavedNotice'])->name('notices.save');
+        Route::get('/notices/saved/{savedNotice}', [NoticeController::class, 'showSavedNotice'])->name('notices.saved.show');
+        Route::post('/notices/saved/{savedNotice}/submissions', [NoticeController::class, 'storeSavedNoticeSubmission'])->name('notices.saved.submissions.store');
+        Route::patch('/notices/saved/{savedNotice}/status', [NoticeController::class, 'updateSavedNoticeStatus'])->name('notices.saved.status.update');
+        Route::patch('/notices/saved/{savedNotice}/opportunity-owner', [NoticeController::class, 'updateSavedNoticeOpportunityOwner'])->name('notices.saved.opportunity-owner.update');
+        Route::patch('/notices/saved/{savedNotice}/bid-manager', [NoticeController::class, 'updateSavedNoticeBidManager'])->name('notices.saved.bid-manager.update');
         Route::patch('/notices/saved/{savedNotice}/deadlines', [NoticeController::class, 'updateSavedNoticeDeadlines'])->name('notices.saved.deadlines.update');
         Route::patch('/notices/saved/{savedNotice}/history-metadata', [NoticeController::class, 'updateSavedNoticeHistoryMetadata'])->name('notices.saved.history-metadata.update');
         Route::patch('/notices/saved/{savedNotice}/archive', [NoticeController::class, 'archiveSavedNotice'])->name('notices.saved.archive');

@@ -25,6 +25,7 @@ class DashboardController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
 
         return Inertia::render('App/Dashboard/Index', [
+            'pipeline' => $this->savedNoticePipelineSummary($customerId),
             'stats' => $this->resolveStats($user, $customerId),
             'recentInboxItems' => $this->resolveRecentInboxItems($user, $customerId),
             'recentWorklistItems' => $this->resolveRecentWorklistItems($customerId),
@@ -54,7 +55,7 @@ class DashboardController extends Controller
     private function resolveStats(User $user, int $customerId): array
     {
         $userInboxCount = (clone $this->userInboxQuery($user, $customerId))->count();
-        $departmentInboxAvailable = $user->department_id !== null;
+        $departmentInboxAvailable = $this->customerContext->hasDepartmentMembership($user);
         $departmentInboxCount = $departmentInboxAvailable
             ? (clone $this->departmentInboxQuery($user, $customerId))->count()
             : 0;
@@ -93,7 +94,7 @@ class DashboardController extends Controller
             ->map(fn (WatchProfileInboxRecord $record): array => $this->recentInboxItem($record, 'Min inbox', route('app.inbox.user')))
             ->all();
 
-        $departmentItems = $user->department_id === null
+        $departmentItems = ! $this->customerContext->hasDepartmentMembership($user)
             ? []
             : $this->departmentInboxQuery($user, $customerId)
                 ->limit(5)
@@ -176,7 +177,7 @@ class DashboardController extends Controller
         return array_values(array_filter([
             [
                 'key' => 'procurements',
-                'label' => 'Gå til anskaffelser',
+                'label' => 'Gå til kunngjøringer',
                 'href' => route('app.notices.index'),
             ],
             [
@@ -184,7 +185,7 @@ class DashboardController extends Controller
                 'label' => 'Åpne min inbox',
                 'href' => route('app.inbox.user'),
             ],
-            $user->department_id !== null ? [
+            $this->customerContext->hasDepartmentMembership($user) ? [
                 'key' => 'departmentInbox',
                 'label' => 'Åpne avdelingsinnboks',
                 'href' => route('app.inbox.department'),
@@ -200,6 +201,73 @@ class DashboardController extends Controller
                 'href' => route('app.watch-profiles.index'),
             ],
         ]));
+    }
+
+    private function savedNoticePipelineSummary(int $customerId): array
+    {
+        $counts = SavedNotice::query()
+            ->where('customer_id', $customerId)
+            ->select('bid_status')
+            ->selectRaw('COUNT(*) as aggregate')
+            ->groupBy('bid_status')
+            ->get()
+            ->reduce(function (array $carry, SavedNotice $notice): array {
+                $status = in_array($notice->bid_status, SavedNotice::BID_STATUSES, true)
+                    ? $notice->bid_status
+                    : SavedNotice::BID_STATUS_DISCOVERED;
+
+                $carry[$status] = ($carry[$status] ?? 0) + (int) $notice->aggregate;
+
+                return $carry;
+            }, []);
+
+        return $this->buildSavedNoticePipelineSummary($counts);
+    }
+
+    private function buildSavedNoticePipelineSummary(array $counts): array
+    {
+        $normalizedCounts = [];
+
+        foreach (SavedNotice::BID_STATUSES as $status) {
+            $normalizedCounts[$status] = (int) ($counts[$status] ?? 0);
+        }
+
+        $activeStatuses = [
+            SavedNotice::BID_STATUS_DISCOVERED,
+            SavedNotice::BID_STATUS_QUALIFYING,
+            SavedNotice::BID_STATUS_GO_NO_GO,
+            SavedNotice::BID_STATUS_IN_PROGRESS,
+            SavedNotice::BID_STATUS_SUBMITTED,
+            SavedNotice::BID_STATUS_NEGOTIATION,
+        ];
+        $outcomeStatuses = [
+            SavedNotice::BID_STATUS_WON,
+            SavedNotice::BID_STATUS_LOST,
+            SavedNotice::BID_STATUS_NO_GO,
+            SavedNotice::BID_STATUS_WITHDRAWN,
+            SavedNotice::BID_STATUS_ARCHIVED,
+        ];
+
+        return [
+            'total_count' => array_sum($normalizedCounts),
+            'active_total_count' => array_sum(array_intersect_key($normalizedCounts, array_flip($activeStatuses))),
+            'outcome_total_count' => array_sum(array_intersect_key($normalizedCounts, array_flip($outcomeStatuses))),
+            'focus_counts' => [
+                'submitted' => $normalizedCounts[SavedNotice::BID_STATUS_SUBMITTED],
+                'negotiation' => $normalizedCounts[SavedNotice::BID_STATUS_NEGOTIATION],
+                'won' => $normalizedCounts[SavedNotice::BID_STATUS_WON],
+            ],
+            'stages' => array_map(fn (string $status): array => [
+                'key' => $status,
+                'label' => SavedNotice::BID_STATUS_LABELS[$status],
+                'count' => $normalizedCounts[$status],
+            ], $activeStatuses),
+            'outcomes' => array_map(fn (string $status): array => [
+                'key' => $status,
+                'label' => SavedNotice::BID_STATUS_LABELS[$status],
+                'count' => $normalizedCounts[$status],
+            ], $outcomeStatuses),
+        ];
     }
 
     private function userInboxQuery(User $user, int $customerId): Builder

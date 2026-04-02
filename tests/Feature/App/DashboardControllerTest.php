@@ -58,14 +58,15 @@ class DashboardControllerTest extends TestCase
         $this->createInboxRecord($customer->id, $hiddenDepartmentProfile->id, null, $departmentB->id, '2026-500004', 'Hidden Department Hit', 'Skjult', '2026-03-29 12:00:00');
         $this->createInboxRecord($otherCustomer->id, $foreignProfile->id, $foreignUser->id, null, '2026-500005', 'Foreign Hit', 'External', '2026-03-29 13:00:00');
 
-        $this->createSavedNotice($customer->id, '2026-600001', 'Saved Notice A');
-        $this->createSavedNotice($customer->id, '2026-600002', 'Saved Notice B');
-        $this->createSavedNotice($customer->id, '2026-600003', 'Archived Notice', archived: true);
-        $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice');
+        $this->createSavedNotice($customer->id, '2026-600001', 'Saved Notice A', bidStatus: SavedNotice::BID_STATUS_DISCOVERED);
+        $this->createSavedNotice($customer->id, '2026-600002', 'Saved Notice B', bidStatus: SavedNotice::BID_STATUS_SUBMITTED);
+        $this->createSavedNotice($customer->id, '2026-600003', 'Archived Notice', archived: true, bidStatus: SavedNotice::BID_STATUS_ARCHIVED);
+        $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice', bidStatus: SavedNotice::BID_STATUS_WON);
 
-        $page = $this->inertiaPage($this->actingAs($userA)->get('/app'));
+        $page = $this->inertiaPage($this->actingAs($userA)->get('/app/dashboard'));
 
         $this->assertSame('App/Dashboard/Index', $page['component']);
+        $this->assertArrayHasKey('pipeline', $page['props']);
         $this->assertArrayHasKey('stats', $page['props']);
         $this->assertArrayHasKey('recentInboxItems', $page['props']);
         $this->assertArrayHasKey('recentWorklistItems', $page['props']);
@@ -77,6 +78,9 @@ class DashboardControllerTest extends TestCase
         $this->assertTrue($page['props']['stats']['departmentInbox']['is_available']);
         $this->assertSame(2, $page['props']['stats']['worklist']['value']);
         $this->assertSame(2, $page['props']['stats']['activeWatchProfiles']['value']);
+        $this->assertSame(3, $page['props']['pipeline']['total_count']);
+        $this->assertSame(2, $page['props']['pipeline']['active_total_count']);
+        $this->assertSame(1, $page['props']['pipeline']['outcome_total_count']);
 
         $this->assertSame(['Personal Hit', 'Department Hit'], array_column($page['props']['recentInboxItems'], 'title'));
         $this->assertSame(['Min inbox', 'Avdeling'], array_column($page['props']['recentInboxItems'], 'source_label'));
@@ -102,7 +106,7 @@ class DashboardControllerTest extends TestCase
         $this->createInboxRecord($customer->id, $personalProfile->id, $user->id, null, '2026-700001', 'Personal Hit', 'Procynia AS', '2026-03-29 08:00:00');
         $this->createInboxRecord($customer->id, $departmentProfile->id, null, $department->id, '2026-700002', 'Department Hit', 'Oslo kommune', '2026-03-29 09:00:00');
 
-        $page = $this->inertiaPage($this->actingAs($user)->get('/app'));
+        $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
 
         $this->assertSame(1, $page['props']['stats']['userInbox']['value']);
         $this->assertSame(0, $page['props']['stats']['departmentInbox']['value']);
@@ -112,6 +116,25 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
         $this->assertSame(0, $page['props']['watchProfileSummary']['active_department_count']);
         $this->assertNotContains('departmentInbox', array_column($page['props']['quickLinks'], 'key'));
+    }
+
+    public function test_dashboard_treats_pivot_only_membership_as_department_access(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Sales');
+        $user = $this->createUser($customer->id, null, User::ROLE_USER, 'user.pivot.department@procynia.test');
+        $user->departments()->attach($department->id);
+        $departmentProfile = $this->createWatchProfile($customer->id, 'Department Profile', null, $department->id, true);
+
+        $this->createInboxRecord($customer->id, $departmentProfile->id, null, $department->id, '2026-700003', 'Department Hit', 'Oslo kommune', '2026-03-29 09:00:00');
+
+        $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+
+        $this->assertSame(1, $page['props']['stats']['departmentInbox']['value']);
+        $this->assertTrue($page['props']['stats']['departmentInbox']['is_available']);
+        $this->assertSame(['Department Hit'], array_column($page['props']['recentInboxItems'], 'title'));
+        $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
+        $this->assertContains('departmentInbox', array_column($page['props']['quickLinks'], 'key'));
     }
 
     private function createSchema(): void
@@ -151,6 +174,13 @@ class DashboardControllerTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('department_user', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('department_id');
+            $table->unsignedBigInteger('user_id');
+            $table->timestamps();
+        });
+
         Schema::create('watch_profiles', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id');
@@ -187,6 +217,7 @@ class DashboardControllerTest extends TestCase
             $table->decimal('contract_value_mnok', 12, 2)->nullable();
             $table->unsignedInteger('contract_period_months')->nullable();
             $table->timestamp('next_process_date_at')->nullable();
+            $table->string('bid_status')->default(SavedNotice::BID_STATUS_DISCOVERED);
             $table->timestamps();
         });
 
@@ -289,7 +320,13 @@ class DashboardControllerTest extends TestCase
         ]);
     }
 
-    private function createSavedNotice(int $customerId, string $externalId, string $title, bool $archived = false): SavedNotice
+    private function createSavedNotice(
+        int $customerId,
+        string $externalId,
+        string $title,
+        bool $archived = false,
+        string $bidStatus = SavedNotice::BID_STATUS_DISCOVERED,
+    ): SavedNotice
     {
         return SavedNotice::query()->create([
             'customer_id' => $customerId,
@@ -304,6 +341,7 @@ class DashboardControllerTest extends TestCase
             'status' => 'ACTIVE',
             'cpv_code' => '72000000',
             'archived_at' => $archived ? now() : null,
+            'bid_status' => $bidStatus,
         ]);
     }
 

@@ -97,6 +97,36 @@ class DoffinPersistenceServiceTest extends TestCase
         $this->assertCount(2, $supplier->noticeSuppliers);
     }
 
+    public function test_it_parses_supported_estimated_value_display_formats(): void
+    {
+        $service = app(DoffinPersistenceService::class);
+        $examples = [
+            ['notice_id' => '2026-500010', 'display' => '250000.0 NOK', 'amount' => '250000.00', 'currency' => 'NOK'],
+            ['notice_id' => '2026-500011', 'display' => '3.0E8 NOK', 'amount' => '300000000.00', 'currency' => 'NOK'],
+            ['notice_id' => '2026-500012', 'display' => '8.0E7 NOK', 'amount' => '80000000.00', 'currency' => 'NOK'],
+        ];
+
+        foreach ($examples as $example) {
+            $payload = $this->noticePayload();
+            $payload['notice_id'] = $example['notice_id'];
+            $payload['estimated_value'] = [
+                'amount' => null,
+                'currency_code' => null,
+                'display' => $example['display'],
+            ];
+
+            $service->persist([$payload], []);
+        }
+
+        foreach ($examples as $example) {
+            $notice = DoffinNotice::query()->where('notice_id', $example['notice_id'])->firstOrFail();
+
+            $this->assertSame($example['display'], $notice->estimated_value_display);
+            $this->assertSame($example['amount'], $notice->estimated_value_amount);
+            $this->assertSame($example['currency'], $notice->estimated_value_currency_code);
+        }
+    }
+
     private function noticePayload(): array
     {
         return [

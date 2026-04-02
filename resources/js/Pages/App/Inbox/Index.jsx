@@ -31,43 +31,38 @@ export default function WatchProfileInboxIndex({
 
     return (
         <CustomerAppLayout title={title} showPageTitle={false}>
-            <div className="space-y-6">
-                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="space-y-1.5">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Watch Profile Inbox
-                            </div>
-                            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">{description}</p>
-                        </div>
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{title}</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">{description}</p>
+                </section>
 
-                        <div className="flex flex-wrap gap-2">
+                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                        <Link
+                            href={switchLinks.user}
+                            className={classNames(
+                                'inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                scope === 'user'
+                                    ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+                            )}
+                        >
+                            Min innboks
+                        </Link>
+                        {switchLinks.department ? (
                             <Link
-                                href={switchLinks.user}
+                                href={switchLinks.department}
                                 className={classNames(
                                     'inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
-                                    scope === 'user'
+                                    scope === 'department'
                                         ? 'border-violet-200 bg-violet-50 text-violet-700'
                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                 )}
                             >
-                                Min innboks
+                                Avdelingsinnboks
                             </Link>
-                            {switchLinks.department ? (
-                                <Link
-                                    href={switchLinks.department}
-                                    className={classNames(
-                                        'inline-flex min-h-11 items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
-                                        scope === 'department'
-                                            ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
-                                    )}
-                                >
-                                    Avdelingsinnboks
-                                </Link>
-                            ) : null}
-                        </div>
+                        ) : null}
                     </div>
                 </section>
 

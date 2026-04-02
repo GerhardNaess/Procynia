@@ -33,20 +33,23 @@ export default function DepartmentsIndex({ departments }) {
 
     return (
         <CustomerAppLayout title="Avdelinger" showPageTitle={false}>
-            <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-1.5">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Avdelinger</h1>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
-                            Organiser kunden i avdelinger som kan brukes for struktur i profiler og varsler i senere faser.
-                        </p>
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Avdelinger</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Organiser kunden i avdelinger som kan brukes for struktur i profiler og varsler i senere faser.
+                    </p>
+                </section>
+
+                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="flex justify-end">
+                        <Link
+                            href="/app/departments/create"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                        >
+                            Legg til avdeling
+                        </Link>
                     </div>
-                    <Link
-                        href="/app/departments/create"
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
-                    >
-                        Legg til avdeling
-                    </Link>
                 </section>
 
                 {departments.length === 0 ? (

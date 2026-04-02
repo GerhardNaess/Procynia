@@ -291,8 +291,8 @@ class WatchProfileController extends Controller
             ->map(fn (mixed $id): int => (int) $id)
             ->values();
 
-        if (! $user->isCustomerAdmin() && $user->department_id !== null) {
-            $departmentIds->push($user->department_id);
+        if (! $user->isCustomerAdmin()) {
+            $departmentIds = $departmentIds->merge($user->membershipDepartmentIds());
         }
 
         return Department::query()
@@ -358,7 +358,7 @@ class WatchProfileController extends Controller
 
     private function canCreateDepartmentProfiles(User $user): bool
     {
-        return $user->isCustomerAdmin() || $user->department_id !== null;
+        return $user->isCustomerAdmin() || $this->customerContext->hasDepartmentMembership($user);
     }
 
     private function departmentOptions(User $user, int $customerId): array
@@ -367,7 +367,7 @@ class WatchProfileController extends Controller
             ->where('customer_id', $customerId);
 
         if (! $user->isCustomerAdmin()) {
-            $query->whereKey($user->department_id ?? 0);
+            $query->whereIn('id', $user->membershipDepartmentIds());
         }
 
         return $query
@@ -466,9 +466,9 @@ class WatchProfileController extends Controller
             ]);
         }
 
-        if (! $user->isCustomerAdmin() && $user->department_id !== $departmentId) {
+        if (! $user->isCustomerAdmin() && ! in_array($departmentId, $user->membershipDepartmentIds(), true)) {
             throw ValidationException::withMessages([
-                'department_id' => 'Du kan bare opprette og administrere watch profiles for din egen avdeling.',
+                'department_id' => 'Du kan bare opprette og administrere watch profiles for en av avdelingene du tilhører.',
             ]);
         }
 

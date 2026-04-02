@@ -15,7 +15,7 @@ function formatDate(value, locale) {
 }
 
 export default function UsersIndex({ users }) {
-    const { locale, flash } = usePage().props;
+    const { locale } = usePage().props;
     const [togglingUserId, setTogglingUserId] = useState(null);
 
     const toggleActive = (user) => {
@@ -37,37 +37,24 @@ export default function UsersIndex({ users }) {
 
     return (
         <CustomerAppLayout title="Brukere" showPageTitle={false}>
-            <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-1.5">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Brukere</h1>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
-                            Administrer brukere for din egen kunde. Nye brukere opprettes som aktive og får et midlertidig passord.
-                        </p>
-                    </div>
-                    <Link
-                        href="/app/users/create"
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
-                    >
-                        Legg til bruker
-                    </Link>
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Brukere</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.
+                    </p>
                 </section>
 
-                {flash?.userCreated ? (
-                    <section className="rounded-[24px] border border-amber-200 bg-amber-50 p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-sm font-semibold text-amber-900">Midlertidig passord</div>
-                        <p className="mt-2 text-sm leading-6 text-amber-900">
-                            Brukeren <span className="font-semibold">{flash.userCreated.name}</span> er opprettet for{' '}
-                            <span className="font-semibold">{flash.userCreated.email}</span>.
-                        </p>
-                        <div className="mt-4 inline-flex rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold tracking-[0.04em] text-slate-900">
-                            {flash.userCreated.temporaryPassword}
-                        </div>
-                        <p className="mt-3 text-xs leading-5 text-amber-800">
-                            Dette passordet vises kun denne gangen. Del det sikkert med brukeren og be dem endre det ved første anledning.
-                        </p>
-                    </section>
-                ) : null}
+                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="flex justify-end">
+                        <Link
+                            href="/app/users/create"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                        >
+                            Legg til bruker
+                        </Link>
+                    </div>
+                </section>
 
                 {users.length === 0 ? (
                     <section className="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -91,7 +78,12 @@ export default function UsersIndex({ users }) {
                                             </div>
                                         </div>
                                         <div className="flex flex-wrap gap-2 text-xs font-medium">
-                                            <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-700">{user.role}</span>
+                                            <span className="rounded-full bg-sky-100 px-3 py-1 text-sky-700">{user.bid_role}</span>
+                                            {user.bid_manager_scope_summary ? (
+                                                <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">
+                                                    {user.bid_manager_scope_summary}
+                                                </span>
+                                            ) : null}
                                             <span
                                                 className={
                                                     user.is_active
@@ -158,7 +150,14 @@ export default function UsersIndex({ users }) {
                                                 <td className="px-6 py-4 font-medium text-slate-950">{user.name}</td>
                                                 <td className="px-6 py-4">{user.email}</td>
                                                 <td className="px-6 py-4 text-slate-500">{user.department_name ?? '—'}</td>
-                                                <td className="px-6 py-4">{user.role}</td>
+                                                <td className="px-6 py-4">
+                                                    <div className="space-y-1">
+                                                        <div>{user.bid_role}</div>
+                                                        {user.bid_manager_scope_summary ? (
+                                                            <div className="text-xs font-medium text-slate-500">{user.bid_manager_scope_summary}</div>
+                                                        ) : null}
+                                                    </div>
+                                                </td>
                                                 <td className="px-6 py-4">
                                                     <span
                                                         className={

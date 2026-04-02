@@ -28,18 +28,19 @@ export default function DepartmentsEdit({ department }) {
 
     return (
         <CustomerAppLayout title="Rediger avdeling" showPageTitle={false}>
-            <div className="mx-auto max-w-3xl">
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Rediger avdeling</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Oppdater navn og beskrivelse. Avdelingen brukes kun som organisasjonsstruktur i denne fasen.
+                    </p>
+                </section>
+
+                <div className="mx-auto max-w-3xl">
                 <form
                     onSubmit={submit}
                     className="space-y-6 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8"
                 >
-                    <div className="space-y-1.5">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Rediger avdeling</h1>
-                        <p className="text-sm leading-6 text-slate-500">
-                            Oppdater navn og beskrivelse. Avdelingen brukes kun som organisasjonsstruktur i denne fasen.
-                        </p>
-                    </div>
-
                     <div className="grid gap-5">
                         <label className="space-y-2">
                             <span className="text-sm font-medium text-slate-700">Navn</span>
@@ -105,6 +106,7 @@ export default function DepartmentsEdit({ department }) {
                         </button>
                     </div>
                 </form>
+                </div>
             </div>
         </CustomerAppLayout>
     );

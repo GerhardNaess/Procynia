@@ -1,4 +1,5 @@
 import { router } from '@inertiajs/react';
+import { useState } from 'react';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -56,6 +57,14 @@ function summarizeText(value) {
 
     return trimmed;
 }
+
+const DESCRIPTION_PREVIEW_LIMIT = 280;
+const DESCRIPTION_COLLAPSED_STYLE = {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 4,
+    overflow: 'hidden',
+};
 
 function statusBadge(status, deadline) {
     if (status) {
@@ -116,6 +125,10 @@ export default function DiscoveryNoticeCard({
     const canRenderSaveAction = canSaveToWorklist && Boolean(notice.notice_id) && Boolean(notice.title);
     const canDelete = Boolean(deleteAction?.href);
     const hasActions = canRenderSaveAction || canDelete || actions;
+    const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+    const description = (notice.summary ?? '').trim();
+    const shouldCollapseDescription = description.length > DESCRIPTION_PREVIEW_LIMIT;
+    const descriptionStyle = shouldCollapseDescription && !isDescriptionExpanded ? DESCRIPTION_COLLAPSED_STYLE : undefined;
 
     const saveNoticeToWorklist = () => {
         if (!canRenderSaveAction || notice.is_saved) {
@@ -176,9 +189,18 @@ export default function DiscoveryNoticeCard({
                         </span>
                     </div>
 
-                    <p className="mt-3 max-w-4xl text-sm leading-7 text-slate-600">
-                        {summarizeText(notice.summary)}
-                    </p>
+                    <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
+                        <div style={descriptionStyle}>{summarizeText(notice.summary)}</div>
+                        {shouldCollapseDescription ? (
+                            <button
+                                type="button"
+                                onClick={() => setIsDescriptionExpanded((current) => !current)}
+                                className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
+                            >
+                                {isDescriptionExpanded ? 'Vis mindre' : 'Mer'}
+                            </button>
+                        ) : null}
+                    </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
                         <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">

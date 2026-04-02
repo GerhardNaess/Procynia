@@ -27,6 +27,8 @@ class CustomerDepartmentManagementTest extends TestCase
             DB::rollBack();
         }
 
+        DB::disconnect(DB::getDefaultConnection());
+
         parent::tearDown();
     }
 
@@ -203,6 +205,34 @@ class CustomerDepartmentManagementTest extends TestCase
         ]);
     }
 
+    public function test_deactivating_department_keeps_existing_user_memberships(): void
+    {
+        $context = $this->customerAdminContext();
+        $department = Department::query()->create([
+            'customer_id' => $context['customer']->id,
+            'name' => 'Historikk',
+            'description' => null,
+            'is_active' => true,
+        ]);
+        $user = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'department_id' => $department->id,
+            'is_active' => true,
+        ]);
+
+        $department->members()->attach($user->id);
+
+        $response = $this->actingAs($context['admin'])->patch("/app/departments/{$department->id}/toggle-active");
+
+        $response->assertSessionHas('success', 'Avdelingen ble deaktivert.');
+        $this->assertDatabaseHas('department_user', [
+            'department_id' => $department->id,
+            'user_id' => $user->id,
+        ]);
+    }
+
     public function test_customer_admin_can_reactivate_department(): void
     {
         $context = $this->customerAdminContext();
@@ -265,12 +295,62 @@ class CustomerDepartmentManagementTest extends TestCase
         ]);
     }
 
+    public function test_department_scoped_bid_manager_cannot_create_departments(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $sales = $this->createDepartment($customer->id, 'Salg');
+        $manager = $this->departmentScopedBidManager($customer, [$sales->id]);
+
+        $this->actingAs($manager)->get('/app/departments/create')->assertForbidden();
+        $this->actingAs($manager)->post('/app/departments', [
+            'name' => 'Ny avdeling',
+            'description' => 'Skal ikke være tillatt',
+        ])->assertForbidden();
+    }
+
+    public function test_company_wide_bid_manager_cannot_create_or_edit_departments(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $department = $this->createDepartment($customer->id, 'Salg');
+        $manager = User::factory()->create([
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($manager)->get('/app/departments/create')->assertForbidden();
+        $this->actingAs($manager)->get("/app/departments/{$department->id}/edit")->assertForbidden();
+        $this->actingAs($manager)->patch("/app/departments/{$department->id}/toggle-active")->assertForbidden();
+    }
+
+    public function test_department_scoped_bid_manager_only_sees_scoped_departments_but_cannot_manage_department_structure(): void
+    {
+        $customer = $this->createCustomer('Procynia AS');
+        $sales = $this->createDepartment($customer->id, 'Salg');
+        $delivery = $this->createDepartment($customer->id, 'Leveranse');
+        $manager = $this->departmentScopedBidManager($customer, [$sales->id]);
+
+        $response = $this->actingAs($manager)->get('/app/departments');
+
+        $response->assertOk();
+        $response->assertSee('Salg');
+        $response->assertDontSee('Leveranse');
+
+        $this->actingAs($manager)->get("/app/departments/{$sales->id}/edit")->assertForbidden();
+        $this->actingAs($manager)->get("/app/departments/{$delivery->id}/edit")->assertForbidden();
+        $this->actingAs($manager)->patch("/app/departments/{$delivery->id}/toggle-active")->assertForbidden();
+    }
+
     private function customerAdminContext(string $customerName = 'Procynia AS'): array
     {
         $customer = $this->createCustomer($customerName);
 
         $admin = User::factory()->create([
             'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'bid_manager_scope' => null,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
@@ -281,12 +361,28 @@ class CustomerDepartmentManagementTest extends TestCase
         ];
     }
 
+    private function departmentScopedBidManager(Customer $customer, array $managedDepartmentIds): User
+    {
+        $user = User::factory()->create([
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_DEPARTMENTS,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $user->managedDepartments()->sync($managedDepartmentIds);
+
+        return $user;
+    }
+
     private function customerUserContext(string $customerName = 'Procynia AS'): array
     {
         $customer = $this->createCustomer($customerName);
 
         $user = User::factory()->create([
             'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
@@ -314,6 +410,16 @@ class CustomerDepartmentManagementTest extends TestCase
             'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
+            'is_active' => true,
+        ]);
+    }
+
+    private function createDepartment(int $customerId, string $name): Department
+    {
+        return Department::query()->create([
+            'customer_id' => $customerId,
+            'name' => $name,
+            'description' => null,
             'is_active' => true,
         ]);
     }

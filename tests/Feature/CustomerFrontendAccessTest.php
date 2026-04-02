@@ -26,10 +26,10 @@ class CustomerFrontendAccessTest extends TestCase
 
         $response = $this->actingAs($user)->get('/');
 
-        $response->assertRedirect(route('app.notices.index'));
+        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
     }
 
-    public function test_customer_user_can_access_customer_dashboard_from_app_root(): void
+    public function test_customer_user_is_redirected_to_worklist_from_app_root(): void
     {
         $user = new User([
             'id' => 23,
@@ -47,8 +47,7 @@ class CustomerFrontendAccessTest extends TestCase
 
         $response = $this->actingAs($user)->get('/app');
 
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page->component('App/Dashboard/Index'));
+        $response->assertRedirect(route('app.notices.index', ['mode' => 'saved']));
     }
 
     public function test_super_admin_is_redirected_to_admin_dashboard_from_root(): void

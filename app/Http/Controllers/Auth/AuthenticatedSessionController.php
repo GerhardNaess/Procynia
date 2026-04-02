@@ -18,7 +18,7 @@ class AuthenticatedSessionController extends Controller
             $user = Auth::user();
 
             return $user && method_exists($user, 'canAccessCustomerFrontend') && $user->canAccessCustomerFrontend()
-                ? redirect()->route('app.notices.index')
+                ? redirect()->route('app.notices.index', ['mode' => 'saved'])
                 : redirect()->route('filament.admin.pages.dashboard');
         }
 
@@ -56,7 +56,7 @@ class AuthenticatedSessionController extends Controller
             ]);
         }
 
-        return redirect()->intended(route('app.notices.index'));
+        return redirect()->intended(route('app.notices.index', ['mode' => 'saved']));
     }
 
     public function destroy(Request $request): RedirectResponse

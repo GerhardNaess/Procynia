@@ -65,23 +65,24 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
 
     return (
         <CustomerAppLayout title="Watch Profiles" showPageTitle={false}>
-            <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-1.5">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">Watch Profiles</h1>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
-                            Administrer dine personlige og avdelingsscopede watch profiles som brukes direkte mot Doffin live search.
-                        </p>
-                    </div>
-                    <Link
-                        href="/app/watch-profiles/create"
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
-                    >
-                        Legg til Watch Profile
-                    </Link>
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Watch Profiles</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Administrer dine personlige og avdelingsscopede watch profiles som brukes direkte mot Doffin live search.
+                    </p>
                 </section>
 
                 <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="mb-4 flex justify-end">
+                        <Link
+                            href="/app/watch-profiles/create"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                        >
+                            Legg til Watch Profile
+                        </Link>
+                    </div>
+
                     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
                         <label className="space-y-2">
                             <span className="text-sm font-medium text-slate-700">Bruker</span>

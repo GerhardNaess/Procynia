@@ -97,11 +97,13 @@ class WatchProfile extends Model
             return $query;
         }
 
-        return $query->where(function (Builder $ownerQuery) use ($user): void {
+        $membershipDepartmentIds = $user->membershipDepartmentIds();
+
+        return $query->where(function (Builder $ownerQuery) use ($user, $membershipDepartmentIds): void {
             $ownerQuery->where('user_id', $user->id);
 
-            if ($user->department_id !== null) {
-                $ownerQuery->orWhere('department_id', $user->department_id);
+            if ($membershipDepartmentIds !== []) {
+                $ownerQuery->orWhereIn('department_id', $membershipDepartmentIds);
             }
         });
     }

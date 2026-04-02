@@ -22,9 +22,10 @@ class DepartmentController extends Controller
 
     public function index(Request $request): Response
     {
-        [, $customerId] = $this->customerAdminContext($request);
+        [$actor, $customerId] = $this->customerBidManagerContext($request);
 
-        $departments = $this->scopedCustomerDepartmentsQuery($customerId)
+        $departments = $this->scopedCustomerDepartmentsQuery($customerId, $actor)
+            ->withCount('members')
             ->orderBy('name')
             ->get()
             ->map(fn (Department $department): array => [
@@ -32,7 +33,9 @@ class DepartmentController extends Controller
                 'name' => $department->name,
                 'description' => $department->description,
                 'is_active' => (bool) $department->is_active,
+                'user_count' => (int) $department->members_count,
                 'created_at' => optional($department->created_at)?->toIso8601String(),
+                'updated_at' => optional($department->updated_at)?->toIso8601String(),
                 'edit_url' => route('app.departments.edit', ['department' => $department->id]),
                 'toggle_active_url' => route('app.departments.toggle-active', ['department' => $department->id]),
             ])
@@ -45,18 +48,23 @@ class DepartmentController extends Controller
 
     public function create(Request $request): Response
     {
-        $this->customerAdminContext($request);
+        [$user] = $this->customerBidManagerContext($request);
+
+        abort_unless($this->customerContext->canCreateCustomerDepartments($user), 403);
 
         return Inertia::render('App/Departments/Create');
     }
 
     public function store(Request $request): RedirectResponse
     {
-        [, $customerId] = $this->customerAdminContext($request);
+        [$user, $customerId] = $this->customerBidManagerContext($request);
+
+        abort_unless($this->customerContext->canCreateCustomerDepartments($user), 403);
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
             'customer_id' => ['prohibited'],
             'is_active' => ['prohibited'],
             'cpv_whitelist' => ['prohibited'],
@@ -75,15 +83,14 @@ class DepartmentController extends Controller
             'is_active' => true,
         ]);
 
-        return redirect()
-            ->route('app.departments.index')
-            ->with('success', 'Avdelingen ble opprettet.');
+        return $this->successRedirect($request, 'app.departments.index', 'Avdelingen ble opprettet.');
     }
 
     public function edit(Request $request, int $department): Response
     {
-        [, $customerId] = $this->customerAdminContext($request);
-        $record = $this->scopedCustomerDepartment($customerId, $department);
+        [$actor, $customerId] = $this->customerBidManagerContext($request);
+        abort_unless($this->customerContext->canCreateCustomerDepartments($actor), 403);
+        $record = $this->scopedCustomerDepartment($customerId, $department, $actor);
 
         return Inertia::render('App/Departments/Edit', [
             'department' => [
@@ -99,12 +106,14 @@ class DepartmentController extends Controller
 
     public function update(Request $request, int $department): RedirectResponse
     {
-        [, $customerId] = $this->customerAdminContext($request);
-        $record = $this->scopedCustomerDepartment($customerId, $department);
+        [$actor, $customerId] = $this->customerBidManagerContext($request);
+        abort_unless($this->customerContext->canCreateCustomerDepartments($actor), 403);
+        $record = $this->scopedCustomerDepartment($customerId, $department, $actor);
 
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
             'customer_id' => ['prohibited'],
             'is_active' => ['prohibited'],
             'cpv_whitelist' => ['prohibited'],
@@ -121,24 +130,28 @@ class DepartmentController extends Controller
             'description' => $description,
         ])->save();
 
-        return redirect()
-            ->route('app.departments.index')
-            ->with('success', 'Avdelingen ble oppdatert.');
+        return $this->successRedirect($request, 'app.departments.index', 'Avdelingen ble oppdatert.');
     }
 
     public function toggleActive(Request $request, int $department): RedirectResponse
     {
-        [, $customerId] = $this->customerAdminContext($request);
-        $record = $this->scopedCustomerDepartment($customerId, $department);
+        [$actor, $customerId] = $this->customerBidManagerContext($request);
+        abort_unless($this->customerContext->canCreateCustomerDepartments($actor), 403);
+        $record = $this->scopedCustomerDepartment($customerId, $department, $actor);
 
         $record->forceFill([
             'is_active' => ! (bool) $record->is_active,
         ])->save();
 
-        return back()->with('success', $record->is_active ? 'Avdelingen ble aktivert.' : 'Avdelingen ble deaktivert.');
+        return $this->successRedirect(
+            $request,
+            'app.departments.index',
+            $record->is_active ? 'Avdelingen ble aktivert.' : 'Avdelingen ble deaktivert.',
+            true,
+        );
     }
 
-    private function customerAdminContext(Request $request): array
+    private function customerBidManagerContext(Request $request): array
     {
         /** @var User|null $user */
         $user = $request->user();
@@ -146,7 +159,7 @@ class DepartmentController extends Controller
 
         abort_unless(
             $user instanceof User
-            && $this->customerContext->isCustomerAdmin($user)
+            && $this->customerContext->canManageCustomerUsers($user)
             && $customerId !== null,
             403,
         );
@@ -154,21 +167,38 @@ class DepartmentController extends Controller
         return [$user, $customerId];
     }
 
-    private function scopedCustomerDepartmentsQuery(int $customerId)
+    private function scopedCustomerDepartmentsQuery(int $customerId, User $actor)
     {
-        return Department::query()->where('customer_id', $customerId);
+        $query = Department::query()->where('customer_id', $customerId);
+
+        if ($actor->hasCompanyWideBidManagementScope()) {
+            return $query;
+        }
+
+        $manageableDepartmentIds = $this->customerContext->manageableDepartmentIds($actor);
+
+        if ($manageableDepartmentIds === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereIn('id', $manageableDepartmentIds);
     }
 
-    private function scopedCustomerDepartment(int $customerId, int $departmentId): Department
+    private function scopedCustomerDepartment(int $customerId, int $departmentId, User $actor): Department
     {
-        return $this->scopedCustomerDepartmentsQuery($customerId)
+        $department = $this->scopedCustomerDepartmentsQuery($customerId, $actor)
             ->whereKey($departmentId)
             ->firstOrFail();
+
+        abort_unless($this->customerContext->canManageDepartment($department, $actor), 404);
+
+        return $department;
     }
 
     private function ensureUniqueDepartmentName(int $customerId, string $name, ?int $ignoreId = null): void
     {
-        $query = $this->scopedCustomerDepartmentsQuery($customerId)
+        $query = Department::query()
+            ->where('customer_id', $customerId)
             ->whereRaw('LOWER(name) = ?', [Str::lower($name)]);
 
         if ($ignoreId !== null) {
@@ -187,5 +217,31 @@ class DepartmentController extends Controller
         $description = trim((string) $value);
 
         return $description === '' ? null : $description;
+    }
+
+    private function successRedirect(Request $request, string $fallbackRoute, string $message, bool $useBack = false): RedirectResponse
+    {
+        $redirectTo = $this->redirectTarget($request);
+
+        if ($redirectTo !== null) {
+            return redirect()->to($redirectTo)->with('success', $message);
+        }
+
+        if ($useBack) {
+            return back()->with('success', $message);
+        }
+
+        return redirect()->route($fallbackRoute)->with('success', $message);
+    }
+
+    private function redirectTarget(Request $request): ?string
+    {
+        $redirectTo = trim((string) $request->input('redirect_to'));
+
+        if ($redirectTo === '' || ! str_starts_with($redirectTo, '/app/customer-environment')) {
+            return null;
+        }
+
+        return $redirectTo;
     }
 }

@@ -1,4 +1,5 @@
 import { Link, usePage } from '@inertiajs/react';
+import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
 function formatDate(value, locale) {
@@ -31,8 +32,24 @@ function formatFileSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const DESCRIPTION_PREVIEW_LIMIT = 280;
+const DESCRIPTION_COLLAPSED_STYLE = {
+    display: '-webkit-box',
+    WebkitBoxOrient: 'vertical',
+    WebkitLineClamp: 4,
+    overflow: 'hidden',
+};
+
 export default function NoticeShow({ notice }) {
     const { locale, translations } = usePage().props;
+    const [isReasonSummaryExpanded, setIsReasonSummaryExpanded] = useState(false);
+    const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
+    const reasonSummary = (notice.reason_summary ?? '').trim();
+    const description = (notice.description ?? '').trim();
+    const shouldCollapseReasonSummary = reasonSummary.length > DESCRIPTION_PREVIEW_LIMIT;
+    const reasonSummaryStyle = shouldCollapseReasonSummary && !isReasonSummaryExpanded ? DESCRIPTION_COLLAPSED_STYLE : undefined;
+    const shouldCollapseDescription = description.length > DESCRIPTION_PREVIEW_LIMIT;
+    const descriptionStyle = shouldCollapseDescription && !isDescriptionExpanded ? DESCRIPTION_COLLAPSED_STYLE : undefined;
 
     return (
         <CustomerAppLayout title={notice.title}>
@@ -47,7 +64,20 @@ export default function NoticeShow({ notice }) {
                     <div className="grid gap-6 lg:grid-cols-2">
                         <div className="space-y-3">
                             <div className="text-sm text-slate-500">{notice.notice_id}</div>
-                            <div className="text-sm text-slate-600">{notice.reason_summary}</div>
+                            {reasonSummary ? (
+                                <div className="text-sm text-slate-600 whitespace-pre-line">
+                                    <div style={reasonSummaryStyle}>{reasonSummary}</div>
+                                    {shouldCollapseReasonSummary ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsReasonSummaryExpanded((current) => !current)}
+                                            className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
+                                        >
+                                            {isReasonSummaryExpanded ? 'Vis mindre' : 'Mer'}
+                                        </button>
+                                    ) : null}
+                                </div>
+                            ) : null}
                             {notice.relevance_score !== null || notice.relevance_level ? (
                                 <div className="flex flex-wrap gap-3 pt-2">
                                     <span className="rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white">
@@ -80,7 +110,18 @@ export default function NoticeShow({ notice }) {
                     </div>
                     {notice.description ? (
                         <div className="mt-6 border-t border-slate-200 pt-6 text-sm leading-7 text-slate-700">
-                            {notice.description}
+                            <div className="whitespace-pre-line" style={descriptionStyle}>
+                                {description}
+                            </div>
+                            {shouldCollapseDescription ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsDescriptionExpanded((current) => !current)}
+                                    className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
+                                >
+                                    {isDescriptionExpanded ? 'Vis mindre' : 'Mer'}
+                                </button>
+                            ) : null}
                         </div>
                     ) : null}
                 </section>

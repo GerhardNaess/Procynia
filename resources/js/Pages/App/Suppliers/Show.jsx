@@ -30,6 +30,37 @@ function formatDateTime(value, locale) {
 
 /**
  * Purpose:
+ * Format a persisted numeric contract value as a whole-number string with currency.
+ *
+ * Inputs:
+ * A numeric amount and an optional currency code from the backend payload.
+ *
+ * Returns:
+ * string|null
+ *
+ * Side effects:
+ * None.
+ */
+function formatContractValue(amount, currencyCode) {
+    if (amount === null || amount === undefined || amount === '') {
+        return null;
+    }
+
+    const numericValue = Number(amount);
+
+    if (!Number.isFinite(numericValue)) {
+        return null;
+    }
+
+    const formattedAmount = numericValue.toLocaleString('no-NO', {
+        maximumFractionDigits: 0,
+    });
+
+    return currencyCode ? `${formattedAmount} ${currencyCode}` : formattedAmount;
+}
+
+/**
+ * Purpose:
  * Render a simple read-only competitor detail page for customer users.
  *
  * Inputs:
@@ -46,20 +77,23 @@ export default function SupplierShow({ supplier, linkedNotices = [] }) {
 
     return (
         <CustomerAppLayout title={supplier.supplier_name} showPageTitle={false}>
-            <div className="space-y-6">
-                <section className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-start sm:justify-between">
-                    <div className="space-y-1.5">
-                        <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{supplier.supplier_name}</h1>
-                        <p className="max-w-2xl text-sm leading-6 text-slate-500">
-                            Read-only customer detail for a harvested Doffin competitor.
-                        </p>
+            <div className="space-y-7">
+                <section className="space-y-1.5">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{supplier.supplier_name}</h1>
+                    <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                        Read-only customer detail for a harvested Doffin competitor.
+                    </p>
+                </section>
+
+                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="flex justify-end">
+                        <Link
+                            href={supplier.back_url}
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                        >
+                            Back to competitors
+                        </Link>
                     </div>
-                    <Link
-                        href={supplier.back_url}
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                    >
-                        Back to competitors
-                    </Link>
                 </section>
 
                 <section className="grid gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:grid-cols-2">
@@ -101,56 +135,84 @@ export default function SupplierShow({ supplier, linkedNotices = [] }) {
                     ) : (
                         <div className="max-h-[34rem] overflow-y-auto">
                             <div className="divide-y divide-slate-200">
-                                {linkedNotices.map((notice) => (
-                                    <article key={notice.id} className="px-6 py-4">
-                                        <div className="flex flex-wrap items-start justify-between gap-3">
-                                            <div className="min-w-0 flex-1 space-y-1.5">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    {notice.show_url ? (
-                                                        <Link
-                                                            href={notice.show_url}
-                                                            className="text-sm font-semibold text-violet-700 transition hover:text-violet-800"
-                                                        >
-                                                            {notice.notice_id || 'Unknown notice'}
-                                                        </Link>
-                                                    ) : (
-                                                        <span className="text-sm font-semibold text-slate-900">
-                                                            {notice.notice_id || 'Unknown notice'}
-                                                        </span>
-                                                    )}
+                                {linkedNotices.map((notice) => {
+                                    const formattedContractValue = formatContractValue(
+                                        notice.estimated_value_amount,
+                                        notice.estimated_value_currency_code,
+                                    );
 
-                                                    {notice.source ? (
-                                                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                            {notice.source}
-                                                        </span>
+                                    return (
+                                        <article key={notice.id} className="px-6 py-4">
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div className="min-w-0 flex-1 space-y-1.5">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        {notice.show_url ? (
+                                                            <Link
+                                                                href={notice.show_url}
+                                                                className="text-sm font-semibold text-violet-700 transition hover:text-violet-800"
+                                                            >
+                                                                {notice.notice_id || 'Unknown notice'}
+                                                            </Link>
+                                                        ) : (
+                                                            <span className="text-sm font-semibold text-slate-900">
+                                                                {notice.notice_id || 'Unknown notice'}
+                                                            </span>
+                                                        )}
+
+                                                        {notice.source ? (
+                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                                {notice.source}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+
+                                                    <div className="text-sm font-medium leading-5 text-slate-950">
+                                                        {notice.heading || 'No heading available'}
+                                                    </div>
+
+                                                    {formattedContractValue || notice.contract_period_text || notice.short_description ? (
+                                                        <div className="space-y-2">
+                                                            {(formattedContractValue || notice.contract_period_text) ? (
+                                                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
+                                                                    {formattedContractValue ? (
+                                                                        <span>Verdi: {formattedContractValue}</span>
+                                                                    ) : null}
+                                                                    {notice.contract_period_text ? (
+                                                                        <span>Avtaleperiode: {notice.contract_period_text}</span>
+                                                                    ) : null}
+                                                                </div>
+                                                            ) : null}
+
+                                                            {notice.short_description ? (
+                                                                <div className="text-sm leading-5 text-slate-600">
+                                                                    {notice.short_description}
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
                                                     ) : null}
                                                 </div>
 
-                                                <div className="text-sm font-medium leading-5 text-slate-950">
-                                                    {notice.heading || 'No heading available'}
+                                                <div className="text-xs font-medium text-slate-500">
+                                                    {formatDateTime(notice.publication_date, locale)}
                                                 </div>
                                             </div>
 
-                                            <div className="text-xs font-medium text-slate-500">
-                                                {formatDateTime(notice.publication_date, locale)}
-                                            </div>
-                                        </div>
+                                            <div className="mt-3 grid gap-x-4 gap-y-2 md:grid-cols-2">
+                                                <div className="space-y-1">
+                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Buyer</div>
+                                                    <div className="text-sm text-slate-900">{notice.buyer_name || 'Unknown buyer'}</div>
+                                                </div>
 
-                                        <div className="mt-3 grid gap-x-4 gap-y-2 md:grid-cols-2">
-                                            <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Buyer</div>
-                                                <div className="text-sm text-slate-900">{notice.buyer_name || 'Unknown buyer'}</div>
-                                            </div>
-
-                                            <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Winner lots</div>
-                                                <div className="text-sm text-slate-900">
-                                                    {notice.winner_lots.length > 0 ? notice.winner_lots.join(', ') : 'None'}
+                                                <div className="space-y-1">
+                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Winner lots</div>
+                                                    <div className="text-sm text-slate-900">
+                                                        {notice.winner_lots.length > 0 ? notice.winner_lots.join(', ') : 'None'}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </article>
-                                ))}
+                                        </article>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}
