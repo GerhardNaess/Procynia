@@ -43,7 +43,9 @@ class CustomerContext
     {
         $user ??= $this->currentUser();
 
-        return $user?->department_id;
+        return $user instanceof User
+            ? $user->primaryAffiliationDepartmentId()
+            : null;
     }
 
     public function isInternalAdmin(?User $user = null): bool

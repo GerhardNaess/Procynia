@@ -46,6 +46,8 @@ class CreateCustomer extends CreateRecord
                 'role' => User::customerRoleForBidRole(User::BID_ROLE_SYSTEM_OWNER),
                 'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
                 'bid_manager_scope' => null,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
                 'is_active' => true,
                 'customer_id' => $customer->id,
             ]);

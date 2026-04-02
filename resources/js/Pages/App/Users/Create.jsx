@@ -54,6 +54,7 @@ export default function UsersCreate({
     redirectTo,
     bidRoleOptions,
     bidManagerScopeOptions,
+    primaryAffiliationScopeOptions,
     departmentOptions,
     managedDepartmentOptions,
     canEditRole,
@@ -67,6 +68,8 @@ export default function UsersCreate({
         password_confirmation: '',
         bid_role: 'contributor',
         bid_manager_scope: bidManagerScopeOptions[0]?.value ?? 'company',
+        primary_affiliation_scope: primaryAffiliationScopeOptions[0]?.value ?? 'company',
+        primary_department_id: '',
         department_ids: [],
         managed_department_ids: [],
         redirect_to: redirectTo,
@@ -74,6 +77,8 @@ export default function UsersCreate({
 
     const isBidManager = form.data.bid_role === 'bid_manager';
     const isDepartmentScopedBidManager = isBidManager && form.data.bid_manager_scope === 'departments';
+    const isDepartmentPrimaryAffiliation = form.data.primary_affiliation_scope === 'department';
+    const primaryDepartmentOptions = departmentOptions.filter((option) => form.data.department_ids.includes(option.value));
     const pageErrors = page.props.errors ?? {};
     const errors = Object.keys(form.errors).length > 0 ? form.errors : pageErrors;
     const firstError = Object.values(errors)[0] ?? null;
@@ -89,6 +94,24 @@ export default function UsersCreate({
             : [...selectedIds, numericId];
 
         form.setData(field, nextSelection);
+
+        if (field !== 'department_ids') {
+            return;
+        }
+
+        if (form.data.primary_affiliation_scope !== 'department') {
+            return;
+        }
+
+        if (nextSelection.length === 0) {
+            form.setData('primary_department_id', '');
+
+            return;
+        }
+
+        if (!nextSelection.includes(Number(form.data.primary_department_id))) {
+            form.setData('primary_department_id', nextSelection[0]);
+        }
     };
 
     const handleBidRoleChange = (value) => {
@@ -106,6 +129,19 @@ export default function UsersCreate({
         if (value !== 'departments') {
             form.setData('managed_department_ids', []);
         }
+    };
+
+    const handlePrimaryAffiliationScopeChange = (value) => {
+        form.setData('primary_affiliation_scope', value);
+
+        if (value !== 'department') {
+            form.setData('primary_department_id', '');
+
+            return;
+        }
+
+        const firstDepartmentId = form.data.department_ids[0] ?? '';
+        form.setData('primary_department_id', firstDepartmentId);
     };
 
     return (
@@ -267,6 +303,49 @@ export default function UsersCreate({
                                     helperText="Dette er administrativt ansvarsområde for bid-manager, ikke vanlig medlemskap. Velg én eller flere avdelinger."
                                     error={errors.managed_department_ids}
                                 />
+                            ) : null}
+
+                            <label className="space-y-2 md:col-span-2">
+                                <span className="text-sm font-medium text-slate-700">Primær tilhørighet</span>
+                                <select
+                                    name="primary_affiliation_scope"
+                                    value={form.data.primary_affiliation_scope}
+                                    onChange={(event) => handlePrimaryAffiliationScopeChange(event.target.value)}
+                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                >
+                                    {primaryAffiliationScopeOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-slate-400">
+                                    Primær tilhørighet styrer brukerens normale organisatoriske hjemsted. Dette er separat fra bid-manager sitt administrative ansvarsområde.
+                                </p>
+                                {errors.primary_affiliation_scope ? <p className="text-sm text-rose-600">{errors.primary_affiliation_scope}</p> : null}
+                            </label>
+
+                            {isDepartmentPrimaryAffiliation ? (
+                                <label className="space-y-2 md:col-span-2">
+                                    <span className="text-sm font-medium text-slate-700">Primær avdeling</span>
+                                    <select
+                                        name="primary_department_id"
+                                        value={form.data.primary_department_id}
+                                        onChange={(event) => form.setData('primary_department_id', event.target.value === '' ? '' : Number(event.target.value))}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    >
+                                        <option value="">Velg primær avdeling</option>
+                                        {primaryDepartmentOptions.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-slate-400">
+                                        Primær avdeling må være blant brukerens operative avdelinger.
+                                    </p>
+                                    {errors.primary_department_id ? <p className="text-sm text-rose-600">{errors.primary_department_id}</p> : null}
+                                </label>
                             ) : null}
 
                             <div className="space-y-2 md:col-span-2">

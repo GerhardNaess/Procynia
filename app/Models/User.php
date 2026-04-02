@@ -22,6 +22,8 @@ use Illuminate\Notifications\Notifiable;
     'role',
     'bid_role',
     'bid_manager_scope',
+    'primary_affiliation_scope',
+    'primary_department_id',
     'is_active',
     'customer_id',
     'department_id',
@@ -64,6 +66,15 @@ class User extends Authenticatable implements FilamentUser
         self::BID_MANAGER_SCOPE_DEPARTMENTS,
     ];
 
+    public const PRIMARY_AFFILIATION_SCOPE_COMPANY = 'company';
+
+    public const PRIMARY_AFFILIATION_SCOPE_DEPARTMENT = 'department';
+
+    public const PRIMARY_AFFILIATION_SCOPES = [
+        self::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+        self::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+    ];
+
     public const BID_ROLE_LABELS = [
         self::BID_ROLE_SYSTEM_OWNER => 'System Owner',
         self::BID_ROLE_BID_MANAGER => 'Bid Manager',
@@ -74,6 +85,11 @@ class User extends Authenticatable implements FilamentUser
     public const BID_MANAGER_SCOPE_LABELS = [
         self::BID_MANAGER_SCOPE_COMPANY => 'Hele selskapet',
         self::BID_MANAGER_SCOPE_DEPARTMENTS => 'Utvalgte avdelinger',
+    ];
+
+    public const PRIMARY_AFFILIATION_SCOPE_LABELS = [
+        self::PRIMARY_AFFILIATION_SCOPE_COMPANY => 'Hele selskapet',
+        self::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT => 'Primær avdeling',
     ];
 
     /**
@@ -100,6 +116,11 @@ class User extends Authenticatable implements FilamentUser
         return $this->belongsTo(Department::class);
     }
 
+    public function primaryDepartment(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'primary_department_id');
+    }
+
     public function departments(): BelongsToMany
     {
         return $this->belongsToMany(Department::class)
@@ -122,7 +143,9 @@ class User extends Authenticatable implements FilamentUser
             return $departmentIds;
         }
 
-        return $this->department_id !== null ? [(int) $this->department_id] : [];
+        $primaryDepartmentId = $this->primaryAffiliationDepartmentId();
+
+        return $primaryDepartmentId !== null ? [$primaryDepartmentId] : [];
     }
 
     public function hasDepartmentMembership(): bool
@@ -170,6 +193,11 @@ class User extends Authenticatable implements FilamentUser
     public static function bidManagerScopeOptions(): array
     {
         return self::BID_MANAGER_SCOPE_LABELS;
+    }
+
+    public static function primaryAffiliationScopeOptions(): array
+    {
+        return self::PRIMARY_AFFILIATION_SCOPE_LABELS;
     }
 
     public static function roleOptions(): array
@@ -284,6 +312,45 @@ class User extends Authenticatable implements FilamentUser
             ->all();
     }
 
+    public function resolvedPrimaryAffiliationScope(): string
+    {
+        $value = (string) ($this->getAttribute('primary_affiliation_scope') ?? '');
+
+        if (in_array($value, self::PRIMARY_AFFILIATION_SCOPES, true)) {
+            return $value;
+        }
+
+        return $this->department_id !== null
+            ? self::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT
+            : self::PRIMARY_AFFILIATION_SCOPE_COMPANY;
+    }
+
+    public function primaryAffiliationDepartmentId(): ?int
+    {
+        if ($this->resolvedPrimaryAffiliationScope() !== self::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT) {
+            return null;
+        }
+
+        $primaryDepartmentId = $this->getAttribute('primary_department_id');
+
+        if ($primaryDepartmentId !== null) {
+            return (int) $primaryDepartmentId;
+        }
+
+        return $this->department_id !== null ? (int) $this->department_id : null;
+    }
+
+    public function hasCompanyPrimaryAffiliation(): bool
+    {
+        return $this->resolvedPrimaryAffiliationScope() === self::PRIMARY_AFFILIATION_SCOPE_COMPANY;
+    }
+
+    public function hasDepartmentPrimaryAffiliation(): bool
+    {
+        return $this->resolvedPrimaryAffiliationScope() === self::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT
+            && $this->primaryAffiliationDepartmentId() !== null;
+    }
+
     public function getBidRoleLabelAttribute(): string
     {
         return self::BID_ROLE_LABELS[$this->resolvedBidRole()];
@@ -294,6 +361,11 @@ class User extends Authenticatable implements FilamentUser
         $scope = $this->resolvedBidManagerScope();
 
         return $scope !== null ? self::BID_MANAGER_SCOPE_LABELS[$scope] : null;
+    }
+
+    public function getPrimaryAffiliationScopeLabelAttribute(): string
+    {
+        return self::PRIMARY_AFFILIATION_SCOPE_LABELS[$this->resolvedPrimaryAffiliationScope()];
     }
 
     public function canAccessCustomerFrontend(): bool

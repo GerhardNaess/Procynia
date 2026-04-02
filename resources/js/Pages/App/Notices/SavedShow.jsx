@@ -269,6 +269,10 @@ export default function SavedNoticeShow({ notice }) {
     const bidManagerForm = useForm({
         bid_manager_user_id: notice.bid_manager?.id ? String(notice.bid_manager.id) : '',
     });
+    const caseAccessForm = useForm({
+        user_id: '',
+        access_role: notice.actions?.case_access?.access_role_options?.[0]?.value ?? 'contributor',
+    });
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
     const shouldShowSubmissions = notice.submissions.length > 0
@@ -278,6 +282,10 @@ export default function SavedNoticeShow({ notice }) {
     const closureReasonOptions = notice.actions?.closure_reasons ?? [];
     const opportunityOwnerOptions = notice.actions?.opportunity_owner_options ?? [];
     const bidManagerOptions = notice.actions?.bid_manager_options ?? [];
+    const caseAccess = notice.actions?.case_access ?? {};
+    const caseAccessUserOptions = caseAccess.user_options ?? [];
+    const caseAccessRoleOptions = caseAccess.access_role_options ?? [];
+    const caseAccessEntries = caseAccess.accesses ?? [];
     const activeClosureAction = statusActions.find((action) => action.status === openClosureStatus) ?? null;
     const noStatusActionsMessage = notice.archived_at
         ? 'Saken ligger i historikk og kan ikke endres videre her.'
@@ -287,6 +295,7 @@ export default function SavedNoticeShow({ notice }) {
     const currentBidManagerId = notice.bid_manager?.id ? String(notice.bid_manager.id) : '';
     const isOpportunityOwnerDirty = opportunityOwnerForm.data.opportunity_owner_user_id !== currentOpportunityOwnerId;
     const isBidManagerDirty = bidManagerForm.data.bid_manager_user_id !== currentBidManagerId;
+    const isCaseAccessDirty = caseAccessForm.data.user_id !== '';
     const csrfToken = typeof document !== 'undefined'
         ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
         : '';
@@ -303,6 +312,34 @@ export default function SavedNoticeShow({ notice }) {
         bidManagerForm.setData('bid_manager_user_id', currentBidManagerId);
         bidManagerForm.clearErrors();
     }, [currentBidManagerId]);
+
+    const grantCaseAccess = (event) => {
+        event.preventDefault();
+
+        if (!caseAccess.store_url) {
+            return;
+        }
+
+        caseAccessForm.clearErrors();
+        caseAccessForm.post(caseAccess.store_url, {
+            preserveScroll: true,
+            onSuccess: () => {
+                caseAccessForm.reset('user_id');
+                caseAccessForm.setData('access_role', caseAccessRoleOptions[0]?.value ?? 'contributor');
+                caseAccessForm.clearErrors();
+            },
+        });
+    };
+
+    const revokeCaseAccess = (url) => {
+        if (!url) {
+            return;
+        }
+
+        router.delete(url, {
+            preserveScroll: true,
+        });
+    };
 
     const createSubmission = () => {
         if (!notice.actions?.can_create_submission || !notice.actions?.create_submission_url) {
@@ -826,6 +863,130 @@ export default function SavedNoticeShow({ notice }) {
                                                 Lagre kommersiell eier
                                             </button>
                                         </form>
+                                    ) : null}
+
+                                    {caseAccess.can_manage ? (
+                                        <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                            <div className="space-y-1.5">
+                                                <h3 className="text-sm font-semibold text-slate-950">Explicit case access</h3>
+                                                <p className="text-xs text-slate-400">
+                                                    Separate from department membership and bid-manager assignment.
+                                                </p>
+                                            </div>
+
+                                            <form onSubmit={grantCaseAccess} className="mt-4 space-y-4">
+                                                <div className="grid gap-4">
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-sm font-medium text-slate-800" htmlFor="case_access_user_id">
+                                                            User
+                                                        </label>
+                                                        <select
+                                                            id="case_access_user_id"
+                                                            name="user_id"
+                                                            value={caseAccessForm.data.user_id}
+                                                            onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
+                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        >
+                                                            <option value="">Select a contributor or viewer</option>
+                                                            {caseAccessUserOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {(caseAccessForm.errors.user_id || errors.user_id) ? (
+                                                            <p className="text-sm text-rose-600">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
+                                                        ) : null}
+                                                    </div>
+
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-sm font-medium text-slate-800" htmlFor="case_access_role">
+                                                            Access level
+                                                        </label>
+                                                        <select
+                                                            id="case_access_role"
+                                                            name="access_role"
+                                                            value={caseAccessForm.data.access_role}
+                                                            onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
+                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        >
+                                                            {caseAccessRoleOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {(caseAccessForm.errors.access_role || errors.access_role) ? (
+                                                            <p className="text-sm text-rose-600">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-wrap gap-3">
+                                                    <button
+                                                        type="submit"
+                                                        disabled={!isCaseAccessDirty || caseAccessForm.processing || !caseAccess.store_url}
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {caseAccessForm.processing ? 'Granting...' : 'Grant access'}
+                                                    </button>
+                                                </div>
+                                            </form>
+
+                                            <div className="mt-5 space-y-3">
+                                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    Active access
+                                                </div>
+
+                                                {caseAccessEntries.length > 0 ? (
+                                                    <div className="space-y-3">
+                                                        {caseAccessEntries.map((access) => (
+                                                            <div
+                                                                key={access.id}
+                                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                                            >
+                                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                                    <div className="space-y-2">
+                                                                        <div>
+                                                                            <div className="text-sm font-semibold text-slate-950">
+                                                                                {access.user?.name || 'Unnamed user'}
+                                                                            </div>
+                                                                            <div className="text-xs text-slate-500">
+                                                                                {access.user?.email || '—'}
+                                                                            </div>
+                                                                        </div>
+
+                                                                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                                {access.access_role_label}
+                                                                            </span>
+                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                                Granted by {access.granted_by?.name || '—'}
+                                                                            </span>
+                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                                {access.granted_at ? formatDate(access.granted_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                            </span>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => revokeCaseAccess(access.revoke_url)}
+                                                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                                                                    >
+                                                                        Revoke
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                        No explicit case access has been granted yet.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </section>
                                     ) : null}
                                 </div>
                             </div>

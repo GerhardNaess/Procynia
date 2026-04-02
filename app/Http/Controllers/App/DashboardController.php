@@ -7,6 +7,7 @@ use App\Models\SavedNotice;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
+use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -17,6 +18,7 @@ class DashboardController extends Controller
 {
     public function __construct(
         private readonly CustomerContext $customerContext,
+        private readonly SavedNoticeAccessService $savedNoticeAccess,
     ) {
     }
 
@@ -25,10 +27,10 @@ class DashboardController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
 
         return Inertia::render('App/Dashboard/Index', [
-            'pipeline' => $this->savedNoticePipelineSummary($customerId),
+            'pipeline' => $this->savedNoticePipelineSummary($user),
             'stats' => $this->resolveStats($user, $customerId),
             'recentInboxItems' => $this->resolveRecentInboxItems($user, $customerId),
-            'recentWorklistItems' => $this->resolveRecentWorklistItems($customerId),
+            'recentWorklistItems' => $this->resolveRecentWorklistItems($user),
             'watchProfileSummary' => $this->resolveWatchProfileSummary($user, $customerId),
             'quickLinks' => $this->resolveQuickLinks($user),
         ]);
@@ -59,7 +61,7 @@ class DashboardController extends Controller
         $departmentInboxCount = $departmentInboxAvailable
             ? (clone $this->departmentInboxQuery($user, $customerId))->count()
             : 0;
-        $worklistCount = (clone $this->activeSavedNoticeQuery($customerId))->count();
+        $worklistCount = (clone $this->activeSavedNoticeQuery($user))->count();
         $activeWatchProfileCount = (clone $this->activeAccessibleWatchProfilesQuery($user, $customerId))->count();
 
         return [
@@ -127,9 +129,9 @@ class DashboardController extends Controller
         ];
     }
 
-    private function resolveRecentWorklistItems(int $customerId): array
+    private function resolveRecentWorklistItems(User $user): array
     {
-        return $this->activeSavedNoticeQuery($customerId)
+        return $this->activeSavedNoticeQuery($user)
             ->orderByDesc('updated_at')
             ->limit(5)
             ->get()
@@ -203,10 +205,9 @@ class DashboardController extends Controller
         ]));
     }
 
-    private function savedNoticePipelineSummary(int $customerId): array
+    private function savedNoticePipelineSummary(User $user): array
     {
-        $counts = SavedNotice::query()
-            ->where('customer_id', $customerId)
+        $counts = $this->savedNoticeAccess->visibleQueryFor($user)
             ->select('bid_status')
             ->selectRaw('COUNT(*) as aggregate')
             ->groupBy('bid_status')
@@ -290,10 +291,9 @@ class DashboardController extends Controller
             ->orderByDesc('id');
     }
 
-    private function activeSavedNoticeQuery(int $customerId): Builder
+    private function activeSavedNoticeQuery(User $user): Builder
     {
-        return SavedNotice::query()
-            ->where('customer_id', $customerId)
+        return $this->savedNoticeAccess->visibleQueryFor($user)
             ->whereNull('archived_at');
     }
 

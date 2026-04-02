@@ -36,7 +36,7 @@ class CustomerEnvironmentController extends Controller
             ->where('customer_id', $customerId)
             ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
             ->with([
-                'department:id,name',
+                'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
             ])
@@ -155,12 +155,14 @@ class CustomerEnvironmentController extends Controller
             'bid_manager_scope_value' => $user->resolvedBidManagerScope(),
             'bid_manager_scope_label' => $user->bid_manager_scope_label,
             'bid_manager_scope_summary' => $this->bidManagerScopeSummary($user),
+            'primary_affiliation_scope_value' => $user->resolvedPrimaryAffiliationScope(),
+            'primary_affiliation_scope_label' => $user->primary_affiliation_scope_label,
             'is_active' => (bool) $user->is_active,
             'is_self' => $user->is($actor),
             'can_toggle_active' => $this->canToggleActive($user, $actor, $customerId),
-            'primary_department' => $user->department ? [
-                'id' => $user->department->id,
-                'name' => $user->department->name,
+            'primary_department' => $user->primaryDepartment ? [
+                'id' => $user->primaryDepartment->id,
+                'name' => $user->primaryDepartment->name,
             ] : null,
             'department_ids' => $user->departments->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
             'departments' => $user->departments

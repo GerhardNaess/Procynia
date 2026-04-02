@@ -3,9 +3,11 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
+use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Testing\TestResponse;
@@ -21,6 +23,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
     private bool $createdBidSubmissionsTable = false;
 
+    private bool $createdSavedNoticeUserAccessTable = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -28,6 +32,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->useProjectPostgresConnection();
         $this->ensureSavedNoticesTable();
         $this->ensureBidSubmissionsTable();
+        $this->ensureSavedNoticeUserAccessTable();
         DB::beginTransaction();
     }
 
@@ -45,6 +50,10 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
         if ($this->createdBidSubmissionsTable) {
             Schema::dropIfExists('bid_submissions');
+        }
+
+        if ($this->createdSavedNoticeUserAccessTable) {
+            Schema::dropIfExists('saved_notice_user_access');
         }
 
         parent::tearDown();
@@ -1092,7 +1101,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(SavedNotice::BID_STATUS_NEGOTIATION, $page['props']['notice']['bid_status']);
         $this->assertSame('Forhandling', $page['props']['notice']['bid_status_label']);
         $this->assertSame($context['admin']->name, $page['props']['notice']['opportunity_owner']['name']);
-        $this->assertSame(User::BID_ROLE_CONTRIBUTOR, $page['props']['notice']['opportunity_owner']['bid_role']);
+        $this->assertSame(User::BID_ROLE_SYSTEM_OWNER, $page['props']['notice']['opportunity_owner']['bid_role']);
         $this->assertSame($bidManager->name, $page['props']['notice']['bid_manager']['name']);
         $this->assertSame(User::BID_ROLE_BID_MANAGER, $page['props']['notice']['bid_manager']['bid_role']);
         $this->assertNotEmpty($page['props']['notice']['actions']['opportunity_owner_options']);
@@ -1100,6 +1109,419 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(
             ['Initial Submission', 'Revised Submission 1'],
             array_column($page['props']['notice']['submissions'], 'label'),
+        );
+    }
+
+    public function test_saved_notice_case_show_page_exposes_case_access_controls_for_assigned_bid_manager(): void
+    {
+        $context = $this->customerAdminContext();
+        $bidManager = User::factory()->create([
+            'name' => 'Case Bid Manager',
+            'email' => 'case.manager@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        User::factory()->create([
+            'name' => 'Eligible Contributor',
+            'email' => 'eligible.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-access-visible',
+            'Case access visible',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $bidManager->id,
+        );
+
+        $page = $this->inertiaPage(
+            $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertTrue($page['props']['notice']['actions']['case_access']['can_manage']);
+        $this->assertSame(
+            route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]),
+            $page['props']['notice']['actions']['case_access']['store_url'],
+        );
+        $this->assertNotEmpty($page['props']['notice']['actions']['case_access']['user_options']);
+        $this->assertSame([], $page['props']['notice']['actions']['case_access']['accesses']);
+    }
+
+    public function test_case_bid_manager_can_grant_and_revoke_contributor_case_access(): void
+    {
+        $context = $this->customerAdminContext();
+        $bidManager = User::factory()->create([
+            'name' => 'Case Bid Manager',
+            'email' => 'case.manager.grant@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $targetContributor = User::factory()->create([
+            'name' => 'Case Contributor',
+            'email' => 'case.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-access-grant',
+            'Case access grant',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $bidManager->id,
+        );
+
+        $grantResponse = $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $targetContributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ]);
+
+        $grantResponse->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->assertDatabaseHas('saved_notice_user_access', [
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $targetContributor->id,
+            'granted_by_user_id' => $bidManager->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            'revoked_at' => null,
+        ]);
+
+        $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $targetContributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->assertSame(
+            1,
+            SavedNoticeUserAccess::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->where('user_id', $targetContributor->id)
+                ->count(),
+        );
+
+        $pageAfterGrant = $this->inertiaPage(
+            $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertCount(1, $pageAfterGrant['props']['notice']['actions']['case_access']['accesses']);
+        $this->assertSame(
+            $targetContributor->id,
+            $pageAfterGrant['props']['notice']['actions']['case_access']['accesses'][0]['user']['id'],
+        );
+
+        $access = SavedNoticeUserAccess::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('user_id', $targetContributor->id)
+            ->firstOrFail();
+
+        $revokeResponse = $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->delete(route('app.notices.saved.case-access.destroy', [
+                'savedNotice' => $savedNotice->id,
+                'caseAccess' => $access->id,
+            ]));
+
+        $revokeResponse->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $access->refresh();
+
+        $this->assertNotNull($access->revoked_at);
+
+        $pageAfterRevoke = $this->inertiaPage(
+            $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertSame([], $pageAfterRevoke['props']['notice']['actions']['case_access']['accesses']);
+    }
+
+    public function test_case_opportunity_owner_can_grant_viewer_case_access(): void
+    {
+        $context = $this->customerAdminContext();
+        $opportunityOwner = User::factory()->create([
+            'name' => 'Case Owner',
+            'email' => 'case.owner@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $targetViewer = User::factory()->create([
+            'name' => 'Case Viewer',
+            'email' => 'case.viewer@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-owner-access',
+            'Case owner access',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            opportunityOwnerUserId: $opportunityOwner->id,
+        );
+
+        $response = $this->actingAs($opportunityOwner)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $targetViewer->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+            ]);
+
+        $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->assertDatabaseHas('saved_notice_user_access', [
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $targetViewer->id,
+            'granted_by_user_id' => $opportunityOwner->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+            'revoked_at' => null,
+        ]);
+
+        $page = $this->inertiaPage(
+            $this->actingAs($opportunityOwner)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertTrue($page['props']['notice']['actions']['case_access']['can_manage']);
+        $this->assertSame(1, count($page['props']['notice']['actions']['case_access']['accesses']));
+    }
+
+    public function test_unrelated_bid_manager_cannot_grant_case_access(): void
+    {
+        $context = $this->customerAdminContext();
+        $assignedBidManager = User::factory()->create([
+            'name' => 'Assigned Bid Manager',
+            'email' => 'assigned.manager@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $unrelatedBidManager = User::factory()->create([
+            'name' => 'Unrelated Bid Manager',
+            'email' => 'unrelated.manager@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-unrelated-manager',
+            'Unrelated manager case',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $assignedBidManager->id,
+        );
+
+        $this->actingAs($unrelatedBidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $assignedBidManager->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_contributor_cannot_grant_case_access(): void
+    {
+        $context = $this->customerAdminContext();
+        $assignedBidManager = User::factory()->create([
+            'name' => 'Assigned Bid Manager',
+            'email' => 'assigned.manager.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $contributor = User::factory()->create([
+            'name' => 'Contributor User',
+            'email' => 'contributor.user@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-contributor-forbidden',
+            'Contributor forbidden case',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $assignedBidManager->id,
+        );
+
+        $this->actingAs($contributor)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $assignedBidManager->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_non_managing_user_does_not_see_case_access_controls(): void
+    {
+        $context = $this->customerAdminContext();
+        $assignedBidManager = User::factory()->create([
+            'name' => 'Assigned Bid Manager',
+            'email' => 'assigned.manager.hidden@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $viewer = User::factory()->create([
+            'name' => 'Visible Viewer',
+            'email' => 'visible.viewer@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-controls-hidden',
+            'Hidden controls case',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $assignedBidManager->id,
+        );
+
+        $page = $this->inertiaPage(
+            $this->actingAs($viewer)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertFalse($page['props']['notice']['actions']['case_access']['can_manage']);
+        $this->assertNull($page['props']['notice']['actions']['case_access']['store_url']);
+        $this->assertSame([], $page['props']['notice']['actions']['case_access']['user_options']);
+    }
+
+    public function test_multiple_contributors_can_be_granted_to_the_same_saved_notice(): void
+    {
+        $context = $this->customerAdminContext();
+        $bidManager = User::factory()->create([
+            'name' => 'Case Bid Manager',
+            'email' => 'case.manager.multiple@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $firstContributor = User::factory()->create([
+            'name' => 'First Contributor',
+            'email' => 'first.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $secondContributor = User::factory()->create([
+            'name' => 'Second Contributor',
+            'email' => 'second.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-case-multiple-access',
+            'Multiple access case',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $bidManager->id,
+        );
+
+        $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $firstContributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertRedirect();
+
+        $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $secondContributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(2, $savedNotice->fresh()->userAccesses()->active()->count());
+
+        $page = $this->inertiaPage(
+            $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertCount(2, $page['props']['notice']['actions']['case_access']['accesses']);
+        $this->assertEqualsCanonicalizing(
+            [$firstContributor->id, $secondContributor->id],
+            array_map(
+                fn (array $access): int => (int) $access['user']['id'],
+                $page['props']['notice']['actions']['case_access']['accesses'],
+            ),
         );
     }
 
@@ -1506,14 +1928,122 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(0, $savedNotice->fresh()->submissions()->count());
     }
 
+    public function test_department_affiliated_contributor_can_only_see_saved_notices_within_primary_department_or_explicit_case_access(): void
+    {
+        $context = $this->customerAdminContext();
+        $sales = $this->createDepartment($context['customer']->id, 'Sales');
+        $delivery = $this->createDepartment($context['customer']->id, 'Delivery');
+        $contributor = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+            'primary_department_id' => $sales->id,
+            'department_id' => $sales->id,
+        ]);
+
+        $visibleNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-access-visible',
+            'Sales-sak',
+            organizationalDepartmentId: $sales->id,
+        );
+        $hiddenNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-access-hidden',
+            'Delivery-sak',
+            organizationalDepartmentId: $delivery->id,
+        );
+
+        $savedPage = $this->inertiaPage(
+            $this->actingAs($contributor)->get('/app/notices?mode=saved'),
+        );
+
+        $this->assertSame(['Sales-sak'], array_column($savedPage['props']['notices']['data'], 'title'));
+
+        $this->actingAs($contributor)
+            ->get("/app/notices/saved/{$visibleNotice->id}")
+            ->assertOk();
+
+        $this->actingAs($contributor)
+            ->get("/app/notices/saved/{$hiddenNotice->id}")
+            ->assertNotFound();
+
+        $hiddenNotice->userAccesses()->create([
+            'user_id' => $contributor->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+        ]);
+
+        $pageWithExplicitAccess = $this->inertiaPage(
+            $this->actingAs($contributor)->get('/app/notices?mode=saved'),
+        );
+
+        $this->assertEqualsCanonicalizing(
+            ['Sales-sak', 'Delivery-sak'],
+            array_column($pageWithExplicitAccess['props']['notices']['data'], 'title'),
+        );
+
+        $this->actingAs($contributor)
+            ->get("/app/notices/saved/{$hiddenNotice->id}")
+            ->assertOk();
+    }
+
+    public function test_department_scoped_bid_manager_can_manage_saved_notices_in_managed_departments_only(): void
+    {
+        $context = $this->customerAdminContext();
+        $sales = $this->createDepartment($context['customer']->id, 'Sales');
+        $delivery = $this->createDepartment($context['customer']->id, 'Delivery');
+        $manager = User::factory()->create([
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_DEPARTMENTS,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+        ]);
+        $manager->managedDepartments()->sync([$sales->id]);
+
+        $managedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-manager-visible',
+            'Sales-sak',
+            organizationalDepartmentId: $sales->id,
+        );
+        $blockedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-manager-hidden',
+            'Delivery-sak',
+            organizationalDepartmentId: $delivery->id,
+        );
+
+        $this->actingAs($manager)
+            ->patch("/app/notices/saved/{$managedNotice->id}/deadlines", [
+                'rfi_submission_deadline_at' => now()->addDays(4)->toDateString(),
+            ])
+            ->assertRedirect();
+
+        $this->assertNotNull($managedNotice->fresh()->rfi_submission_deadline_at);
+
+        $this->actingAs($manager)
+            ->patch("/app/notices/saved/{$blockedNotice->id}/deadlines", [
+                'rfi_submission_deadline_at' => now()->addDays(6)->toDateString(),
+            ])
+            ->assertNotFound();
+    }
+
     private function customerAdminContext(string $customerName = 'Procynia AS'): array
     {
         $customer = $this->createCustomer($customerName);
 
         $admin = User::factory()->create([
             'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'customer_id' => $customer->id,
             'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
         ]);
 
         return [
@@ -1543,6 +2073,16 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ]);
     }
 
+    private function createDepartment(int $customerId, string $name): Department
+    {
+        return Department::query()->create([
+            'customer_id' => $customerId,
+            'name' => $name,
+            'description' => null,
+            'is_active' => true,
+        ]);
+    }
+
     private function createSavedNotice(
         int $customerId,
         string $externalId,
@@ -1568,6 +2108,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ?string $bidStatus = SavedNotice::BID_STATUS_DISCOVERED,
         ?int $opportunityOwnerUserId = null,
         ?int $bidManagerUserId = null,
+        ?int $organizationalDepartmentId = null,
         ?string $bidSubmittedAt = null,
         ?string $bidClosedAt = null,
         ?string $bidClosureReason = null,
@@ -1580,6 +2121,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'bid_status' => $bidStatus,
             'opportunity_owner_user_id' => $opportunityOwnerUserId,
             'bid_manager_user_id' => $bidManagerUserId,
+            'organizational_department_id' => $organizationalDepartmentId,
             'bid_submitted_at' => $bidSubmittedAt,
             'bid_closed_at' => $bidClosedAt,
             'bid_closure_reason' => $bidClosureReason,
@@ -1650,6 +2192,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 $table->string('bid_status')->default(SavedNotice::BID_STATUS_DISCOVERED);
                 $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
                 $table->unsignedBigInteger('bid_manager_user_id')->nullable();
+                $table->unsignedBigInteger('organizational_department_id')->nullable();
                 $table->timestamp('bid_qualified_at')->nullable();
                 $table->timestamp('bid_submitted_at')->nullable();
                 $table->timestamp('bid_closed_at')->nullable();
@@ -1753,6 +2296,12 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         if (! Schema::hasColumn('saved_notices', 'bid_manager_user_id')) {
             Schema::table('saved_notices', function (Blueprint $table): void {
                 $table->unsignedBigInteger('bid_manager_user_id')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'organizational_department_id')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->unsignedBigInteger('organizational_department_id')->nullable();
             });
         }
 
@@ -1868,6 +2417,28 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         });
 
         $this->createdBidSubmissionsTable = true;
+    }
+
+    private function ensureSavedNoticeUserAccessTable(): void
+    {
+        if (Schema::hasTable('saved_notice_user_access')) {
+            return;
+        }
+
+        Schema::create('saved_notice_user_access', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('granted_by_user_id')->nullable();
+            $table->string('access_role');
+            $table->timestamp('expires_at')->nullable();
+            $table->timestamp('revoked_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['saved_notice_id', 'user_id']);
+        });
+
+        $this->createdSavedNoticeUserAccessTable = true;
     }
 
     private function useProjectPostgresConnection(): void

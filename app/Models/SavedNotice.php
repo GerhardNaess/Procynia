@@ -226,6 +226,7 @@ class SavedNotice extends Model
 
     protected $fillable = [
         'customer_id',
+        'organizational_department_id',
         'saved_by_user_id',
         'bid_status',
         'opportunity_owner_user_id',
@@ -285,6 +286,11 @@ class SavedNotice extends Model
         return $this->belongsTo(User::class, 'saved_by_user_id');
     }
 
+    public function organizationalDepartment(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'organizational_department_id');
+    }
+
     public function opportunityOwner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'opportunity_owner_user_id');
@@ -298,6 +304,11 @@ class SavedNotice extends Model
     public function submissions(): HasMany
     {
         return $this->hasMany(BidSubmission::class)->orderBy('sequence_number');
+    }
+
+    public function userAccesses(): HasMany
+    {
+        return $this->hasMany(SavedNoticeUserAccess::class)->orderByDesc('created_at');
     }
 
     public function getBidStatusLabelAttribute(): string

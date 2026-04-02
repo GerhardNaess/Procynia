@@ -7,12 +7,14 @@ use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,6 +36,7 @@ class NoticeController extends Controller
         private readonly CustomerNoticeCpvSearchService $cpvSearchService,
         private readonly DoffinLiveSearchService $liveSearchService,
         private readonly DoffinNoticeDocumentService $documentService,
+        private readonly SavedNoticeAccessService $savedNoticeAccess,
     ) {
     }
 
@@ -77,7 +80,7 @@ class NoticeController extends Controller
 
         $page = max(1, (int) $request->integer('page', 1));
         $perPage = 15;
-        $worklist = $this->savedNoticeCounts($customerId);
+        $worklist = $this->savedNoticeCounts($user);
 
         if ($mode !== 'live') {
             return Inertia::render('App/Notices/Index', [
@@ -92,7 +95,7 @@ class NoticeController extends Controller
                 'savedSearches' => $this->savedSearchesForUser($user, $customerId),
                 'worklist' => $worklist,
                 'monitoring' => $this->monitoringSummary($user, $customerId),
-                'notices' => $this->savedNoticeResult($request, $customerId, $mode, $page, $perPage),
+                'notices' => $this->savedNoticeResult($request, $user, $mode, $page, $perPage),
             ]);
         }
 
@@ -114,7 +117,7 @@ class NoticeController extends Controller
             ->values();
         $accessibleTotal = (int) ($searchResponse['numHitsAccessible'] ?? $searchResponse['numHitsTotal'] ?? $hits->count());
         $total = (int) ($searchResponse['numHitsTotal'] ?? $accessibleTotal);
-        $savedExternalIds = $this->activeSavedNoticeQuery($customerId)
+        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user)
             ->whereIn('external_id', $hits->pluck('id')->filter()->map(fn (mixed $id): string => (string) $id)->all())
             ->pluck('external_id')
             ->map(fn (mixed $id): string => (string) $id)
@@ -193,6 +196,7 @@ class NoticeController extends Controller
             'external_id' => $validated['notice_id'],
         ]);
         $isNewRecord = ! $record->exists;
+        $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
 
         $record->fill([
             'title' => $validated['title'],
@@ -211,9 +215,14 @@ class NoticeController extends Controller
         if ($isNewRecord) {
             $record->saved_by_user_id = $user->id;
             $record->bid_status = SavedNotice::BID_STATUS_DISCOVERED;
+            $record->organizational_department_id = $user->primaryAffiliationDepartmentId();
         }
 
         $record->save();
+
+        if (! $hadCaseAccess) {
+            $this->grantSavedNoticeAccess($record, $user, $user, SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR);
+        }
 
         return redirect()
             ->back()
@@ -232,7 +241,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->activeSavedNoticeQuery($customerId)
+        $record = $this->activeSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -280,7 +289,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->archivedSavedNoticeQuery($customerId)
+        $record = $this->archivedSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -345,7 +354,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->activeSavedNoticeQuery($customerId)
+        $record = $this->activeSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -370,7 +379,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->activeSavedNoticeQuery($customerId)
+        $record = $this->activeSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -393,7 +402,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->archivedSavedNoticeQuery($customerId)
+        $record = $this->archivedSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -414,18 +423,108 @@ class NoticeController extends Controller
             abort(HttpResponse::HTTP_NOT_FOUND);
         }
 
-        $record = $this->customerSavedNoticeQuery($customerId)
+        $record = $this->customerSavedNoticeVisibleQuery($user)
             ->whereKey($savedNotice->id)
             ->with([
                 'opportunityOwner:id,name,bid_role',
                 'bidManager:id,name,bid_role',
+                'userAccesses' => fn ($query) => $query
+                    ->active()
+                    ->with([
+                        'user:id,name,email,bid_role',
+                        'grantedBy:id,name,email',
+                    ]),
                 'submissions:id,saved_notice_id,sequence_number,label,submitted_at',
             ])
             ->firstOrFail();
+        $canManageCase = $this->savedNoticeAccess->canManage($user, $record);
+        $canManageContributorAccess = $this->savedNoticeAccess->canManageContributorAccess($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice' => $this->savedNoticeCasePayload($record),
+            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess),
         ]);
+    }
+
+    public function storeSavedNoticeCaseAccess(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canManageContributorAccess($user, $record), 403);
+
+        $validated = $request->validate([
+            'user_id' => [
+                'required',
+                'integer',
+                Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                    ->where('customer_id', $customerId)
+                    ->where('is_active', true)
+                    ->whereIn('bid_role', [
+                        User::BID_ROLE_CONTRIBUTOR,
+                        User::BID_ROLE_VIEWER,
+                    ])),
+            ],
+            'access_role' => ['required', 'string', Rule::in(SavedNoticeUserAccess::ACCESS_ROLES)],
+        ]);
+
+        $targetUser = User::query()
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->whereIn('bid_role', [
+                User::BID_ROLE_CONTRIBUTOR,
+                User::BID_ROLE_VIEWER,
+            ])
+            ->whereKey((int) $validated['user_id'])
+            ->firstOrFail();
+
+        $this->grantSavedNoticeAccess($record, $user, $targetUser, (string) $validated['access_role']);
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Case access was granted.');
+    }
+
+    public function destroySavedNoticeCaseAccess(Request $request, SavedNotice $savedNotice, SavedNoticeUserAccess $caseAccess): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canManageContributorAccess($user, $record), 403);
+
+        $accessRecord = $record->userAccesses()
+            ->whereKey($caseAccess->id)
+            ->whereNull('revoked_at')
+            ->firstOrFail();
+
+        $accessRecord->forceFill([
+            'revoked_at' => now(),
+        ])->save();
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Case access was revoked.');
     }
 
     public function storeSavedNoticeSubmission(Request $request, SavedNotice $savedNotice): RedirectResponse
@@ -440,7 +539,7 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->activeSavedNoticeQuery($customerId)
+        $record = $this->activeSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -483,7 +582,7 @@ class NoticeController extends Controller
             'bid_closure_note' => ['nullable', 'string'],
         ]);
 
-        $record = $this->activeSavedNoticeQuery($customerId)
+        $record = $this->activeSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -526,7 +625,7 @@ class NoticeController extends Controller
             ],
         ]);
 
-        $record = $this->customerSavedNoticeQuery($customerId)
+        $record = $this->customerSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -564,7 +663,7 @@ class NoticeController extends Controller
             ],
         ]);
 
-        $record = $this->customerSavedNoticeQuery($customerId)
+        $record = $this->customerSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
@@ -685,37 +784,53 @@ class NoticeController extends Controller
         };
     }
 
-    private function customerSavedNoticeQuery(int $customerId): Builder
+    private function customerSavedNoticeVisibleQuery(User $user): Builder
     {
-        return SavedNotice::query()
-            ->where('customer_id', $customerId);
+        return $this->savedNoticeAccess->visibleQueryFor($user);
     }
 
-    private function activeSavedNoticeQuery(int $customerId): Builder
+    private function activeSavedNoticeVisibleQuery(User $user): Builder
     {
-        return $this->customerSavedNoticeQuery($customerId)
+        return $this->customerSavedNoticeVisibleQuery($user)
             ->whereNull('archived_at');
     }
 
-    private function archivedSavedNoticeQuery(int $customerId): Builder
+    private function archivedSavedNoticeVisibleQuery(User $user): Builder
     {
-        return $this->customerSavedNoticeQuery($customerId)
+        return $this->customerSavedNoticeVisibleQuery($user)
             ->whereNotNull('archived_at');
     }
 
-    private function savedNoticeCounts(int $customerId): array
+    private function customerSavedNoticeManageableQuery(User $user): Builder
+    {
+        return $this->savedNoticeAccess->manageableQueryFor($user);
+    }
+
+    private function activeSavedNoticeManageableQuery(User $user): Builder
+    {
+        return $this->customerSavedNoticeManageableQuery($user)
+            ->whereNull('archived_at');
+    }
+
+    private function archivedSavedNoticeManageableQuery(User $user): Builder
+    {
+        return $this->customerSavedNoticeManageableQuery($user)
+            ->whereNotNull('archived_at');
+    }
+
+    private function savedNoticeCounts(User $user): array
     {
         return [
-            'saved_count' => $this->activeSavedNoticeQuery($customerId)->count(),
-            'history_count' => $this->archivedSavedNoticeQuery($customerId)->count(),
+            'saved_count' => $this->activeSavedNoticeVisibleQuery($user)->count(),
+            'history_count' => $this->archivedSavedNoticeVisibleQuery($user)->count(),
         ];
     }
 
-    private function savedNoticeResult(Request $request, int $customerId, string $mode, int $page, int $perPage): array
+    private function savedNoticeResult(Request $request, User $user, string $mode, int $page, int $perPage): array
     {
         $query = $mode === 'history'
-            ? $this->archivedSavedNoticeQuery($customerId)
-            : $this->activeSavedNoticeQuery($customerId);
+            ? $this->archivedSavedNoticeVisibleQuery($user)
+            : $this->activeSavedNoticeVisibleQuery($user);
         $bidStatus = trim((string) $request->string('bid_status'));
 
         if ($bidStatus !== '' && in_array($bidStatus, SavedNotice::BID_STATUSES, true)) {
@@ -791,10 +906,14 @@ class NoticeController extends Controller
         ];
     }
 
-    private function savedNoticeCasePayload(SavedNotice $notice): array
+    private function savedNoticeCasePayload(
+        SavedNotice $notice,
+        bool $canManageCase,
+        bool $canManageContributorAccess,
+    ): array
     {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
-        $isMutableCase = $notice->archived_at === null;
+        $isMutableCase = $notice->archived_at === null && $canManageCase;
         $canCreateSubmission = $isMutableCase && $notice->canCreateSubmission();
         $statusActions = $isMutableCase ? $notice->availableBidStatusActions() : [];
 
@@ -851,16 +970,114 @@ class NoticeController extends Controller
                     : null,
                 'status_actions' => $statusActions,
                 'closure_reasons' => SavedNotice::bidClosureReasonOptions(),
-                'update_opportunity_owner_url' => route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id]),
-                'opportunity_owner_options' => $this->customerOpportunityOwnerOptions((int) $notice->customer_id),
-                'update_bid_manager_url' => route('app.notices.saved.bid-manager.update', ['savedNotice' => $notice->id]),
-                'bid_manager_options' => $this->customerBidManagerOptions((int) $notice->customer_id),
+                'update_opportunity_owner_url' => $canManageCase
+                    ? route('app.notices.saved.opportunity-owner.update', ['savedNotice' => $notice->id])
+                    : null,
+                'opportunity_owner_options' => $canManageCase
+                    ? $this->customerOpportunityOwnerOptions((int) $notice->customer_id)
+                    : [],
+                'update_bid_manager_url' => $canManageCase
+                    ? route('app.notices.saved.bid-manager.update', ['savedNotice' => $notice->id])
+                    : null,
+                'bid_manager_options' => $canManageCase
+                    ? $this->customerBidManagerOptions((int) $notice->customer_id)
+                    : [],
+                'case_access' => [
+                    'can_manage' => $canManageContributorAccess,
+                    'store_url' => $canManageContributorAccess
+                        ? route('app.notices.saved.case-access.store', ['savedNotice' => $notice->id])
+                        : null,
+                    'access_role_options' => $canManageContributorAccess
+                        ? $this->caseAccessRoleOptions()
+                        : [],
+                    'user_options' => $canManageContributorAccess
+                        ? $this->customerCaseAccessUserOptions((int) $notice->customer_id)
+                        : [],
+                    'accesses' => $canManageContributorAccess
+                        ? $notice->userAccesses
+                            ->map(fn (SavedNoticeUserAccess $access): array => [
+                                'id' => $access->id,
+                                'user' => $access->user ? [
+                                    'id' => $access->user->id,
+                                    'name' => $access->user->name,
+                                    'email' => $access->user->email,
+                                ] : null,
+                                'access_role' => $access->access_role,
+                                'access_role_label' => $access->access_role_label,
+                                'granted_by' => $access->grantedBy ? [
+                                    'id' => $access->grantedBy->id,
+                                    'name' => $access->grantedBy->name,
+                                    'email' => $access->grantedBy->email,
+                                ] : null,
+                                'granted_at' => optional($access->created_at)?->toIso8601String(),
+                                'revoke_url' => route('app.notices.saved.case-access.destroy', [
+                                    'savedNotice' => $notice->id,
+                                    'caseAccess' => $access->id,
+                                ]),
+                            ])
+                            ->all()
+                        : [],
+                ],
                 'can_create_submission' => $canCreateSubmission,
                 'create_submission_url' => $canCreateSubmission
                     ? route('app.notices.saved.submissions.store', ['savedNotice' => $notice->id])
                     : null,
             ],
         ];
+    }
+
+    private function grantSavedNoticeAccess(SavedNotice $notice, User $grantedBy, User $user, string $accessRole): void
+    {
+        $access = $notice->userAccesses()->firstOrNew([
+            'user_id' => $user->id,
+        ]);
+
+        $shouldRefreshGrantTimestamp = $access->exists && $access->revoked_at !== null;
+
+        $access->forceFill([
+            'granted_by_user_id' => $grantedBy->id,
+            'access_role' => $accessRole,
+            'expires_at' => null,
+            'revoked_at' => null,
+        ]);
+
+        if ($shouldRefreshGrantTimestamp) {
+            $access->forceFill([
+                'created_at' => now(),
+            ]);
+        }
+
+        $access->save();
+    }
+
+    private function caseAccessRoleOptions(): array
+    {
+        return collect(SavedNoticeUserAccess::accessRoleOptions())
+            ->map(fn (string $label, string $value): array => [
+                'value' => $value,
+                'label' => $label,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function customerCaseAccessUserOptions(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->whereIn('bid_role', [
+                User::BID_ROLE_CONTRIBUTOR,
+                User::BID_ROLE_VIEWER,
+            ])
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'bid_role'])
+            ->map(fn (User $user): array => [
+                'value' => $user->id,
+                'label' => "{$user->name} · {$user->email} · {$user->bid_role_label}",
+            ])
+            ->values()
+            ->all();
     }
 
     private function calculateHistoryNextProcessDate(

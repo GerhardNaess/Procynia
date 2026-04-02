@@ -28,7 +28,7 @@ class UserController extends Controller
 
         $users = $this->scopedCustomerUsersQuery($customerId)
             ->with([
-                'department:id,name',
+                'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
             ])
@@ -52,6 +52,7 @@ class UserController extends Controller
             'redirectTo' => $this->pageRedirectTarget($request),
             'bidRoleOptions' => $this->bidRoleOptions($actor),
             'bidManagerScopeOptions' => $this->bidManagerScopeOptions(),
+            'primaryAffiliationScopeOptions' => $this->primaryAffiliationScopeOptions(),
             'departmentOptions' => $this->membershipDepartmentOptions($actor, $customerId),
             'managedDepartmentOptions' => $this->managedDepartmentOptions($actor, $customerId),
             'canEditRole' => $actor->isSystemOwner(),
@@ -70,6 +71,7 @@ class UserController extends Controller
             'user' => $this->editUserPayload($record, $actor, $customerId),
             'bidRoleOptions' => $this->bidRoleOptions($actor, $record),
             'bidManagerScopeOptions' => $this->bidManagerScopeOptions(),
+            'primaryAffiliationScopeOptions' => $this->primaryAffiliationScopeOptions(),
             'departmentOptions' => $this->membershipDepartmentOptions(
                 $actor,
                 $customerId,
@@ -115,8 +117,21 @@ class UserController extends Controller
             null,
             $targetBidRole,
         );
+        [$primaryAffiliationScope, $primaryDepartmentId] = $this->validatedPrimaryAffiliation(
+            $validated,
+            $departmentIds,
+        );
 
-        DB::transaction(function () use ($validated, $customerId, $departmentIds, $bidManagerScope, $managedDepartmentIds, $targetBidRole): void {
+        DB::transaction(function () use (
+            $validated,
+            $customerId,
+            $departmentIds,
+            $bidManagerScope,
+            $managedDepartmentIds,
+            $targetBidRole,
+            $primaryAffiliationScope,
+            $primaryDepartmentId
+        ): void {
             $user = User::create([
                 'name' => Str::squish($validated['name']),
                 'email' => Str::lower(trim($validated['email'])),
@@ -124,12 +139,14 @@ class UserController extends Controller
                 'role' => User::customerRoleForBidRole($targetBidRole),
                 'bid_role' => $targetBidRole,
                 'bid_manager_scope' => $bidManagerScope,
+                'primary_affiliation_scope' => $primaryAffiliationScope,
+                'primary_department_id' => $primaryDepartmentId,
                 'is_active' => true,
                 'customer_id' => $customerId,
-                'department_id' => null,
+                'department_id' => $primaryDepartmentId,
             ]);
 
-            $this->syncUserDepartments($user, $departmentIds);
+            $this->syncUserDepartments($user, $departmentIds, $primaryDepartmentId);
             $this->syncManagedDepartments($user, $bidManagerScope, $managedDepartmentIds);
         });
 
@@ -175,6 +192,11 @@ class UserController extends Controller
             $nextBidRole,
             $allowSelfScopeRecovery,
         );
+        [$primaryAffiliationScope, $primaryDepartmentId] = $this->validatedPrimaryAffiliation(
+            $validated,
+            $departmentIds,
+            $record,
+        );
 
         if ($this->wouldRemoveLastActiveSystemOwner($record, $nextBidRole, (bool) $record->is_active)) {
             throw ValidationException::withMessages([
@@ -182,12 +204,25 @@ class UserController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($record, $validated, $nextRole, $nextBidRole, $departmentIds, $bidManagerScope, $managedDepartmentIds): void {
+        DB::transaction(function () use (
+            $record,
+            $validated,
+            $nextRole,
+            $nextBidRole,
+            $departmentIds,
+            $bidManagerScope,
+            $managedDepartmentIds,
+            $primaryAffiliationScope,
+            $primaryDepartmentId
+        ): void {
             $attributes = [
                 'name' => Str::squish($validated['name']),
                 'role' => $nextRole,
                 'bid_role' => $nextBidRole,
                 'bid_manager_scope' => $bidManagerScope,
+                'primary_affiliation_scope' => $primaryAffiliationScope,
+                'primary_department_id' => $primaryDepartmentId,
+                'department_id' => $primaryDepartmentId,
             ];
 
             if (! empty($validated['password'])) {
@@ -196,7 +231,7 @@ class UserController extends Controller
 
             $record->fill($attributes)->save();
 
-            $this->syncUserDepartments($record, $departmentIds);
+            $this->syncUserDepartments($record, $departmentIds, $primaryDepartmentId);
             $this->syncManagedDepartments($record, $bidManagerScope, $managedDepartmentIds);
         });
 
@@ -260,7 +295,7 @@ class UserController extends Controller
     {
         $user = $this->scopedCustomerUsersQuery($customerId)
             ->with([
-                'department:id,name',
+                'primaryDepartment:id,name',
                 'departments:id,name,is_active',
                 'managedDepartments:id,name,is_active',
             ])
@@ -338,6 +373,17 @@ class UserController extends Controller
     private function bidManagerScopeOptions(): array
     {
         return collect(User::bidManagerScopeOptions())
+            ->map(fn (string $label, string $value): array => [
+                'value' => $value,
+                'label' => $label,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function primaryAffiliationScopeOptions(): array
+    {
+        return collect(User::primaryAffiliationScopeOptions())
             ->map(fn (string $label, string $value): array => [
                 'value' => $value,
                 'label' => $label,
@@ -434,7 +480,11 @@ class UserController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'department_name' => $user->department?->name,
+            'department_name' => $user->primaryDepartment?->name,
+            'primary_affiliation_scope_value' => $user->resolvedPrimaryAffiliationScope(),
+            'primary_affiliation_scope_label' => $user->primary_affiliation_scope_label,
+            'primary_department_id' => $user->primaryAffiliationDepartmentId(),
+            'primary_department_name' => $user->primaryDepartment?->name,
             'department_ids' => $user->departments->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
             'departments' => $user->departments
                 ->map(fn (Department $department): array => [
@@ -471,8 +521,12 @@ class UserController extends Controller
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'department_id' => $user->department_id,
-            'department_name' => $user->department?->name,
+            'department_id' => $user->primaryAffiliationDepartmentId(),
+            'department_name' => $user->primaryDepartment?->name,
+            'primary_affiliation_scope_value' => $user->resolvedPrimaryAffiliationScope(),
+            'primary_affiliation_scope_label' => $user->primary_affiliation_scope_label,
+            'primary_department_id' => $user->primaryAffiliationDepartmentId(),
+            'primary_department_name' => $user->primaryDepartment?->name,
             'department_ids' => $user->departments->pluck('id')->map(fn (mixed $id): int => (int) $id)->all(),
             'departments' => $user->departments
                 ->map(fn (Department $department): array => [
@@ -605,6 +659,62 @@ class UserController extends Controller
         return $submittedIds->all();
     }
 
+    private function validatedPrimaryAffiliation(
+        array $validated,
+        array $departmentIds,
+        ?User $record = null,
+    ): array {
+        $requestedScope = (string) ($validated['primary_affiliation_scope'] ?? '');
+        $requestedDepartmentId = isset($validated['primary_department_id']) && $validated['primary_department_id'] !== null
+            ? (int) $validated['primary_department_id']
+            : null;
+
+        if ($requestedDepartmentId === null && isset($validated['department_id']) && $validated['department_id'] !== null) {
+            $requestedDepartmentId = (int) $validated['department_id'];
+        }
+
+        if ($requestedScope === '') {
+            if ($requestedDepartmentId !== null) {
+                $requestedScope = User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT;
+            } elseif ($departmentIds !== []) {
+                $requestedScope = User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT;
+                $requestedDepartmentId = $departmentIds[0];
+            } elseif ($record instanceof User) {
+                $requestedScope = $record->resolvedPrimaryAffiliationScope();
+                $requestedDepartmentId ??= $record->primaryAffiliationDepartmentId();
+            } else {
+                $requestedScope = $departmentIds === []
+                    ? User::PRIMARY_AFFILIATION_SCOPE_COMPANY
+                    : User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT;
+                $requestedDepartmentId ??= $departmentIds[0] ?? null;
+            }
+        }
+
+        if (! in_array($requestedScope, User::PRIMARY_AFFILIATION_SCOPES, true)) {
+            throw ValidationException::withMessages([
+                'primary_affiliation_scope' => 'Velg en gyldig primærtilhørighet.',
+            ]);
+        }
+
+        if ($requestedScope === User::PRIMARY_AFFILIATION_SCOPE_COMPANY) {
+            return [User::PRIMARY_AFFILIATION_SCOPE_COMPANY, null];
+        }
+
+        if ($requestedDepartmentId === null) {
+            throw ValidationException::withMessages([
+                'primary_department_id' => 'Velg en primær avdeling når tilhørigheten er avdelingsbasert.',
+            ]);
+        }
+
+        if (! in_array($requestedDepartmentId, $departmentIds, true)) {
+            throw ValidationException::withMessages([
+                'primary_department_id' => 'Primær avdeling må være blant brukerens operative avdelinger.',
+            ]);
+        }
+
+        return [User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT, $requestedDepartmentId];
+    }
+
     private function validatedBidManagerScope(
         User $actor,
         int $customerId,
@@ -706,7 +816,7 @@ class UserController extends Controller
         return [$scope, $submittedIds->all()];
     }
 
-    private function syncUserDepartments(User $user, array $departmentIds): void
+    private function syncUserDepartments(User $user, array $departmentIds, ?int $primaryDepartmentId): void
     {
         $existingInactiveIds = $user->exists
             ? $user->departments()
@@ -725,11 +835,12 @@ class UserController extends Controller
         $user->departments()->sync($syncedIds);
 
         $user->forceFill([
-            'department_id' => $this->resolvePrimaryDepartmentId($user, $departmentIds),
+            'department_id' => $primaryDepartmentId,
+            'primary_department_id' => $primaryDepartmentId,
         ])->save();
 
         $user->load([
-            'department:id,name',
+            'primaryDepartment:id,name',
             'departments:id,name,is_active',
         ]);
     }
@@ -759,39 +870,6 @@ class UserController extends Controller
 
         $user->managedDepartments()->sync($syncedIds);
         $user->load('managedDepartments:id,name,is_active');
-    }
-
-    private function resolvePrimaryDepartmentId(User $user, array $departmentIds): ?int
-    {
-        if ($departmentIds === []) {
-            return null;
-        }
-
-        $activeDepartmentIds = Department::query()
-            ->where('customer_id', $user->customer_id)
-            ->where('is_active', true)
-            ->whereIn('id', $departmentIds)
-            ->pluck('id')
-            ->map(fn (mixed $id): int => (int) $id)
-            ->all();
-
-        if ($activeDepartmentIds === []) {
-            return null;
-        }
-
-        $currentDepartmentId = $user->department_id === null ? null : (int) $user->department_id;
-
-        if ($currentDepartmentId !== null && in_array($currentDepartmentId, $activeDepartmentIds, true)) {
-            return $currentDepartmentId;
-        }
-
-        foreach ($departmentIds as $departmentId) {
-            if (in_array($departmentId, $activeDepartmentIds, true)) {
-                return $departmentId;
-            }
-        }
-
-        return null;
     }
 
     private function bidManagerScopeSummary(User $user): ?string
@@ -858,6 +936,8 @@ class UserController extends Controller
             'department_id' => ['nullable', 'integer'],
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer'],
+            'primary_affiliation_scope' => ['nullable', 'string', Rule::in(User::PRIMARY_AFFILIATION_SCOPES)],
+            'primary_department_id' => ['nullable', 'integer'],
             'managed_department_ids' => $actor->isSystemOwner()
                 ? ['nullable', 'array']
                 : ['prohibited'],
@@ -888,6 +968,8 @@ class UserController extends Controller
             'department_id' => ['nullable', 'integer'],
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer'],
+            'primary_affiliation_scope' => ['nullable', 'string', Rule::in(User::PRIMARY_AFFILIATION_SCOPES)],
+            'primary_department_id' => ['nullable', 'integer'],
             'managed_department_ids' => $this->canEditBidManagerScope($actor, $record)
                 ? ['nullable', 'array']
                 : ['prohibited'],

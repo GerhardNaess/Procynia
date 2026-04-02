@@ -58,10 +58,10 @@ class DashboardControllerTest extends TestCase
         $this->createInboxRecord($customer->id, $hiddenDepartmentProfile->id, null, $departmentB->id, '2026-500004', 'Hidden Department Hit', 'Skjult', '2026-03-29 12:00:00');
         $this->createInboxRecord($otherCustomer->id, $foreignProfile->id, $foreignUser->id, null, '2026-500005', 'Foreign Hit', 'External', '2026-03-29 13:00:00');
 
-        $this->createSavedNotice($customer->id, '2026-600001', 'Saved Notice A', bidStatus: SavedNotice::BID_STATUS_DISCOVERED);
-        $this->createSavedNotice($customer->id, '2026-600002', 'Saved Notice B', bidStatus: SavedNotice::BID_STATUS_SUBMITTED);
-        $this->createSavedNotice($customer->id, '2026-600003', 'Archived Notice', archived: true, bidStatus: SavedNotice::BID_STATUS_ARCHIVED);
-        $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice', bidStatus: SavedNotice::BID_STATUS_WON);
+        $this->createSavedNotice($customer->id, '2026-600001', 'Saved Notice A', organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_DISCOVERED);
+        $this->createSavedNotice($customer->id, '2026-600002', 'Saved Notice B', organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_SUBMITTED);
+        $this->createSavedNotice($customer->id, '2026-600003', 'Archived Notice', archived: true, organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_ARCHIVED);
+        $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice', organizationalDepartmentId: $otherDepartment->id, bidStatus: SavedNotice::BID_STATUS_WON);
 
         $page = $this->inertiaPage($this->actingAs($userA)->get('/app/dashboard'));
 
@@ -166,9 +166,13 @@ class DashboardControllerTest extends TestCase
             $table->string('password')->nullable();
             $table->rememberToken();
             $table->string('role')->default(User::ROLE_USER);
+            $table->string('bid_role')->nullable();
+            $table->string('bid_manager_scope')->nullable();
+            $table->string('primary_affiliation_scope')->nullable();
             $table->boolean('is_active')->default(true);
             $table->unsignedBigInteger('customer_id')->nullable();
             $table->unsignedBigInteger('department_id')->nullable();
+            $table->unsignedBigInteger('primary_department_id')->nullable();
             $table->unsignedBigInteger('nationality_id')->nullable();
             $table->unsignedBigInteger('preferred_language_id')->nullable();
             $table->timestamps();
@@ -197,6 +201,9 @@ class DashboardControllerTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('saved_by_user_id')->nullable();
+            $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
+            $table->unsignedBigInteger('bid_manager_user_id')->nullable();
+            $table->unsignedBigInteger('organizational_department_id')->nullable();
             $table->string('external_id');
             $table->string('title');
             $table->string('buyer_name')->nullable();
@@ -218,6 +225,17 @@ class DashboardControllerTest extends TestCase
             $table->unsignedInteger('contract_period_months')->nullable();
             $table->timestamp('next_process_date_at')->nullable();
             $table->string('bid_status')->default(SavedNotice::BID_STATUS_DISCOVERED);
+            $table->timestamps();
+        });
+
+        Schema::create('saved_notice_user_access', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('granted_by_user_id')->nullable();
+            $table->string('access_role');
+            $table->timestamp('expires_at')->nullable();
+            $table->timestamp('revoked_at')->nullable();
             $table->timestamps();
         });
 
@@ -262,14 +280,25 @@ class DashboardControllerTest extends TestCase
 
     private function createUser(int $customerId, ?int $departmentId, string $role, string $email): User
     {
-        return User::factory()->create([
+        $user = User::factory()->create([
             'name' => Str::before($email, '@'),
             'role' => $role,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
             'customer_id' => $customerId,
             'department_id' => $departmentId,
+            'primary_affiliation_scope' => $departmentId !== null
+                ? User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT
+                : User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => $departmentId,
             'is_active' => true,
             'email' => $email,
         ]);
+
+        if ($departmentId !== null) {
+            $user->departments()->syncWithoutDetaching([$departmentId]);
+        }
+
+        return $user;
     }
 
     private function createWatchProfile(
@@ -325,12 +354,16 @@ class DashboardControllerTest extends TestCase
         string $externalId,
         string $title,
         bool $archived = false,
+        ?int $organizationalDepartmentId = null,
         string $bidStatus = SavedNotice::BID_STATUS_DISCOVERED,
     ): SavedNotice
     {
         return SavedNotice::query()->create([
             'customer_id' => $customerId,
             'saved_by_user_id' => null,
+            'opportunity_owner_user_id' => null,
+            'bid_manager_user_id' => null,
+            'organizational_department_id' => $organizationalDepartmentId,
             'external_id' => $externalId,
             'title' => $title,
             'buyer_name' => 'Procynia',

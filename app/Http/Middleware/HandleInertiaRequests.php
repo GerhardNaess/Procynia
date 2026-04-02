@@ -25,9 +25,9 @@ class HandleInertiaRequests extends Middleware
     {
         $user = $request->user();
         $customer = $this->customerContext->currentCustomer($user instanceof User ? $user : null);
-        $department = $user instanceof User && $user->relationLoaded('department')
-            ? $user->department
-            : ($user instanceof User ? $user->department()->first() : null);
+        $department = $user instanceof User && $user->relationLoaded('primaryDepartment')
+            ? $user->primaryDepartment
+            : ($user instanceof User ? $user->primaryDepartment()->first() : null);
 
         return array_merge(parent::share($request), [
             'appName' => config('app.name'),
@@ -42,6 +42,8 @@ class HandleInertiaRequests extends Middleware
                     'bid_role_label' => $user->bid_role_label,
                     'bid_manager_scope' => $user->resolvedBidManagerScope(),
                     'bid_manager_scope_label' => $user->bid_manager_scope_label,
+                    'primary_affiliation_scope' => $user->resolvedPrimaryAffiliationScope(),
+                    'primary_affiliation_scope_label' => $user->primary_affiliation_scope_label,
                     'is_system_owner' => $user->isSystemOwner(),
                     'is_bid_manager' => $user->isBidManager(),
                     'can_manage_customer_users' => $this->customerContext->canManageCustomerUsers($user),
