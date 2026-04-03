@@ -16,6 +16,14 @@ function formatDate(value, locale, options = {}) {
     }).format(new Date(value));
 }
 
+function dateInputValue(value) {
+    if (!value) {
+        return '';
+    }
+
+    return String(value).slice(0, 10);
+}
+
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
@@ -70,6 +78,16 @@ function bidRoleLabel(role) {
     switch (role) {
         case 'bid_manager':
             return 'Bid-manager';
+        case 'viewer':
+            return 'Lesetilgang';
+        case 'contributor':
+        default:
+            return 'Bid-bidragsyter';
+    }
+}
+
+function accessRoleLabel(role) {
+    switch (role) {
         case 'viewer':
             return 'Lesetilgang';
         case 'contributor':
@@ -253,6 +271,78 @@ function deadlineStateLabel(notice, locale) {
     return `${prefix}${formatDate(notice.next_deadline_at, locale)}`;
 }
 
+function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle, children }) {
+    return (
+        <section className={classNames(
+            'overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 transition',
+            isOpen ? 'shadow-[0_6px_20px_rgba(15,23,42,0.04)]' : '',
+        )}>
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={isOpen}
+                className="flex w-full items-start justify-between gap-4 px-4 py-4 text-left transition hover:bg-slate-100/80"
+            >
+                <div className="min-w-0 space-y-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        {title}
+                    </div>
+                    <div className="truncate text-sm font-semibold text-slate-950">
+                        {summary}
+                    </div>
+                    {hint ? (
+                        <div className="text-xs leading-5 text-slate-500">
+                            {hint}
+                        </div>
+                    ) : null}
+                </div>
+
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-sm font-semibold text-slate-600">
+                    {isOpen ? '−' : '+'}
+                </div>
+            </button>
+
+            {isOpen ? (
+                <div className="border-t border-slate-200 bg-white px-4 py-4">
+                    {children}
+                </div>
+            ) : null}
+        </section>
+    );
+}
+
+function PhaseCommentCard({ comment, locale }) {
+    return (
+        <article className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-semibold text-slate-950">
+                            {comment.user?.name || 'Ukjent bruker'}
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                            {comment.user?.bid_role_label || 'Bid-bidragsyter'}
+                        </span>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                        {comment.user?.email || '—'}
+                        {' · '}
+                        {formatDate(comment.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                </div>
+
+                <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                    {comment.phase_status_label}
+                </span>
+            </div>
+
+            <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">
+                {comment.comment}
+            </p>
+        </article>
+    );
+}
+
 export default function SavedNoticeShow({ notice }) {
     const page = usePage();
     const { auth, errors = {} } = page.props;
@@ -269,11 +359,25 @@ export default function SavedNoticeShow({ notice }) {
     const bidManagerForm = useForm({
         bid_manager_user_id: notice.bid_manager?.id ? String(notice.bid_manager.id) : '',
     });
+    const deadlineForm = useForm({
+        questions_deadline_at: '',
+        questions_rfi_deadline_at: '',
+        rfi_submission_deadline_at: '',
+        questions_rfp_deadline_at: '',
+        rfp_submission_deadline_at: '',
+        award_date_at: '',
+    });
+    const phaseCommentForm = useForm({
+        comment: '',
+    });
     const caseAccessForm = useForm({
         user_id: '',
         access_role: notice.actions?.case_access?.access_role_options?.[0]?.value ?? 'contributor',
     });
+    const [isEditingDeadlines, setIsEditingDeadlines] = useState(false);
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
+    const [openActionSection, setOpenActionSection] = useState('decision');
+    const [openCommentPhases, setOpenCommentPhases] = useState({});
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
     const shouldShowSubmissions = notice.submissions.length > 0
         || notice.bid_status === 'submitted'
@@ -286,6 +390,17 @@ export default function SavedNoticeShow({ notice }) {
     const caseAccessUserOptions = caseAccess.user_options ?? [];
     const caseAccessRoleOptions = caseAccess.access_role_options ?? [];
     const caseAccessEntries = caseAccess.accesses ?? [];
+    const caseAccessSummary = caseAccessEntries.length > 0
+        ? `${caseAccessEntries.length} aktive brukere`
+        : 'Ingen aktive';
+    const canManageCaseAccess = caseAccess.can_manage
+        ?? (
+            auth?.user?.id
+            && (
+                String(auth.user.id) === String(notice.bid_manager?.id)
+                || String(auth.user.id) === String(notice.opportunity_owner?.id)
+            )
+        );
     const activeClosureAction = statusActions.find((action) => action.status === openClosureStatus) ?? null;
     const noStatusActionsMessage = notice.archived_at
         ? 'Saken ligger i historikk og kan ikke endres videre her.'
@@ -296,12 +411,46 @@ export default function SavedNoticeShow({ notice }) {
     const isOpportunityOwnerDirty = opportunityOwnerForm.data.opportunity_owner_user_id !== currentOpportunityOwnerId;
     const isBidManagerDirty = bidManagerForm.data.bid_manager_user_id !== currentBidManagerId;
     const isCaseAccessDirty = caseAccessForm.data.user_id !== '';
+    const isDeadlineDirty = deadlineForm.isDirty;
     const csrfToken = typeof document !== 'undefined'
         ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
         : '';
     const primaryAction = statusActions.find((action) => action.status === primaryActionStatus(notice.bid_status)) ?? null;
     const secondaryActions = statusActions.filter((action) => action.status !== primaryAction?.status);
     const guidance = lifecycleGuidance(notice.bid_status, Boolean(notice.archived_at));
+    const commentPhaseOptions = [
+        { status: 'qualifying', number: '2', label: 'Kvalifiseres' },
+        { status: 'go_no_go', number: '3', label: 'Go / No-Go' },
+        { status: 'in_progress', number: '4', label: 'Under arbeid' },
+        { status: 'negotiation', number: '6', label: 'Forhandling' },
+    ].map((option) => ({
+        ...option,
+        guidance: lifecycleGuidance(option.status, Boolean(notice.archived_at)),
+    }));
+    const activeCommentPhaseOption = commentPhaseOptions.find((option) => option.status === notice.bid_status) ?? null;
+    const phaseCommentEntries = notice.phase_comments?.comments ?? [];
+    const phaseCommentGroups = phaseCommentEntries.reduce((groups, comment) => {
+        const phase = comment.phase_status;
+
+        if (!groups[phase]) {
+            groups[phase] = [];
+        }
+
+        groups[phase].push(comment);
+
+        return groups;
+    }, {});
+    const activePhaseCommentEntries = phaseCommentGroups[notice.bid_status] ?? [];
+    const phaseCommentStoreUrl = notice.phase_comments?.store_url ?? null;
+    const canCommentOnCase = Boolean(notice.phase_comments?.can_comment);
+    const deadlineSummary = deadlineStateLabel(notice, locale);
+    const bidManagerSummary = notice.bid_manager?.name || 'Ikke satt';
+    const opportunityOwnerSummary = notice.opportunity_owner?.name || 'Ikke satt';
+    const administrationSummary = notice.archived_at ? 'Saken er arkivert' : 'Sekundære handlinger';
+    const nextDecisionSummary = primaryAction ? statusActionLabel(primaryAction.status) : noStatusActionsMessage;
+    const activeCommentPhaseLabel = activeCommentPhaseOption
+        ? `${activeCommentPhaseOption.number} ${activeCommentPhaseOption.label}`
+        : guidance.phaseTitle;
 
     useEffect(() => {
         opportunityOwnerForm.setData('opportunity_owner_user_id', currentOpportunityOwnerId);
@@ -331,6 +480,36 @@ export default function SavedNoticeShow({ notice }) {
         });
     };
 
+    const openDeadlineEditor = () => {
+        setIsEditingDeadlines(true);
+        deadlineForm.clearErrors();
+        deadlineForm.setData({
+            questions_deadline_at: dateInputValue(notice.questions_deadline_at),
+            questions_rfi_deadline_at: dateInputValue(notice.questions_rfi_deadline_at),
+            rfi_submission_deadline_at: dateInputValue(notice.rfi_submission_deadline_at),
+            questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
+            rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
+            award_date_at: dateInputValue(notice.award_date_at),
+        });
+    };
+
+    const cancelDeadlineEditor = () => {
+        setIsEditingDeadlines(false);
+        deadlineForm.reset();
+        deadlineForm.clearErrors();
+    };
+
+    const submitDeadlineEditor = () => {
+        deadlineForm.patch(`/app/notices/saved/${notice.id}/deadlines`, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setIsEditingDeadlines(false);
+                deadlineForm.reset();
+                deadlineForm.clearErrors();
+            },
+        });
+    };
+
     const revokeCaseAccess = (url) => {
         if (!url) {
             return;
@@ -339,6 +518,14 @@ export default function SavedNoticeShow({ notice }) {
         router.delete(url, {
             preserveScroll: true,
         });
+    };
+
+    const archiveSavedNotice = () => {
+        if (!notice.archived_at) {
+            router.patch(`/app/notices/saved/${notice.id}/archive`, {}, {
+                preserveScroll: true,
+            });
+        }
     };
 
     const createSubmission = () => {
@@ -398,6 +585,28 @@ export default function SavedNoticeShow({ notice }) {
         }
 
         submitStatusAction(action, false);
+    };
+
+    const toggleCommentPhase = (phaseStatus) => {
+        setOpenCommentPhases((current) => ({
+            ...current,
+            [phaseStatus]: !current[phaseStatus],
+        }));
+    };
+
+    const submitPhaseComment = () => {
+        if (!phaseCommentStoreUrl || !canCommentOnCase) {
+            return;
+        }
+
+        phaseCommentForm.clearErrors();
+        phaseCommentForm.post(phaseCommentStoreUrl, {
+            preserveScroll: true,
+            onSuccess: () => {
+                phaseCommentForm.reset('comment');
+                phaseCommentForm.clearErrors();
+            },
+        });
     };
 
     const openClosureActionForm = (action) => {
@@ -471,154 +680,79 @@ export default function SavedNoticeShow({ notice }) {
 
                 <BidStatusPipeline currentStatus={notice.bid_status} />
 
-                <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Nåværende fase</div>
-                            <div className="mt-2 text-sm font-semibold text-slate-950">{guidance.phaseTitle}</div>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">{guidance.description}</p>
-                        </div>
-
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Nåværende status</div>
-                            <div className="mt-2 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
-                        </div>
-
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Neste steg</div>
-                            <div className="mt-2 text-sm font-medium leading-6 text-slate-700">{guidance.nextStepDescription}</div>
-
-                            {statusForm.errors.status ? (
-                                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-medium text-rose-700">
-                                    {statusForm.errors.status}
+                <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)_360px] xl:items-start">
+                    <aside className="space-y-4">
+                        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="space-y-4">
+                                <div>
+                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Statuspanel</h2>
+                                    <p className="mt-1 text-sm text-slate-500">Operativ status, ansvar og nøkkeldatoer.</p>
                                 </div>
-                            ) : null}
 
-                            {primaryAction ? (
-                                <button
-                                    type="button"
-                                    onClick={() => triggerStatusAction(primaryAction)}
-                                    disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
-                                    className={classNames(
-                                        'mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
-                                        actionButtonClassName(primaryAction.tone, primaryAction.status),
-                                    )}
-                                >
-                                    {statusActionLabel(primaryAction.status)}
-                                </button>
-                            ) : null}
+                                <div className="space-y-3">
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Nåværende status</div>
+                                        <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
+                                        <div className="mt-2 text-sm font-medium text-slate-900">{guidance.phaseTitle}</div>
+                                        <p className="mt-1 text-sm leading-6 text-slate-600">{guidance.description}</p>
+                                        <div className="mt-3 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+                                    </div>
 
-                            {secondaryActions.length > 0 ? (
-                                <div className="mt-3 space-y-2">
-                                    {secondaryActions.map((action) => (
-                                        <button
-                                            key={action.status}
-                                            type="button"
-                                            onClick={() => triggerStatusAction(action)}
-                                            disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
-                                            className={classNames(
-                                                'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
-                                                actionButtonClassName(action.tone, action.status),
-                                            )}
-                                        >
-                                            {statusActionLabel(action.status)}
-                                        </button>
-                                    ))}
-                                </div>
-                            ) : null}
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ansvarlige</div>
+                                        <div className="mt-3 space-y-3">
+                                            <div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Bid-manager</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || 'Ikke satt'}</div>
+                                                {notice.bid_manager?.bid_role ? (
+                                                    <div className="mt-1 text-xs text-slate-500">
+                                                        Global bid-rolle: {bidRoleLabel(notice.bid_manager.bid_role)}
+                                                    </div>
+                                                ) : null}
+                                            </div>
 
-                            {!primaryAction && secondaryActions.length === 0 ? (
-                                <div className="mt-4 rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-500">
-                                    {noStatusActionsMessage}
-                                </div>
-                            ) : null}
+                                            <div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Kommersiell eier</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || 'Ikke satt'}</div>
+                                                {notice.opportunity_owner?.bid_role ? (
+                                                    <div className="mt-1 text-xs text-slate-500">
+                                                        Global bid-rolle: {bidRoleLabel(notice.opportunity_owner.bid_role)}
+                                                    </div>
+                                                ) : null}
+                                            </div>
 
-                            {activeClosureAction ? (
-                                <form
-                                    onSubmit={(event) => {
-                                        event.preventDefault();
-                                        submitStatusAction(activeClosureAction, true);
-                                    }}
-                                    className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-white p-4"
-                                >
-                                    {closureActionGuidance(activeClosureAction.status) ? (
-                                        <div className={classNames('rounded-xl border px-3 py-3 text-sm font-medium', closureActionGuidance(activeClosureAction.status)?.className)}>
-                                            {closureActionGuidance(activeClosureAction.status)?.text}
+                                            <div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Din globale bid-rolle</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{currentUserBidRoleLabel}</div>
+                                                <div className="mt-1 text-xs text-slate-500">Gjelder brukerkontoen din, ikke denne saken.</div>
+                                            </div>
                                         </div>
-                                    ) : null}
-
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_reason">
-                                            Avslutningsårsak
-                                        </label>
-                                        <select
-                                            id="bid_closure_reason"
-                                            value={statusForm.data.bid_closure_reason}
-                                            onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
-                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                        >
-                                            <option value="">Velg avslutningsårsak</option>
-                                            {closureReasonOptions.map((option) => (
-                                                <option key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        {statusForm.errors.bid_closure_reason ? (
-                                            <p className="text-sm text-rose-600">{statusForm.errors.bid_closure_reason}</p>
-                                        ) : null}
                                     </div>
 
-                                    <div className="space-y-1.5">
-                                        <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_note">
-                                            Notat
-                                        </label>
-                                        <textarea
-                                            id="bid_closure_note"
-                                            value={statusForm.data.bid_closure_note}
-                                            onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
-                                            rows={3}
-                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                            placeholder="Valgfritt notat"
-                                        />
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sentrale datoer</div>
+                                        <div className="mt-3 space-y-3">
+                                            <div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Sendt dato</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_submitted_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Lukket dato</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
+                                            </div>
+                                        </div>
                                     </div>
+                                </div>
+                            </div>
+                        </section>
+                    </aside>
 
-                                    <div className="flex flex-wrap gap-3">
-                                        <button
-                                            type="submit"
-                                            disabled={isStatusActionProcessing}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {isStatusActionProcessing ? 'Oppdaterer...' : statusActionLabel(activeClosureAction.status)}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={resetStatusForm}
-                                            disabled={isStatusActionProcessing}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            Avbryt
-                                        </button>
-                                    </div>
-                                </form>
-                            ) : null}
-                        </div>
-
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Beslutningsgrense</div>
-                            <div className="mt-2 text-sm leading-6 text-slate-700">{guidance.closureRule}</div>
-                        </div>
-                    </div>
-
-                </section>
-
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-                    <div className="space-y-6">
+                    <main className="space-y-6">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
                                 <div>
-                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">Saksinformasjon</h2>
-                                    <p className="mt-1 text-sm text-slate-500">Kjerneinformasjon for den lagrede bid-saken.</p>
+                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">Informasjon</h2>
+                                    <p className="mt-1 text-sm text-slate-500">Sakens innhold, oppsummering og fasebundet kontekst.</p>
                                 </div>
 
                                 <div className="grid gap-4 md:grid-cols-2">
@@ -657,6 +791,176 @@ export default function SavedNoticeShow({ notice }) {
                             </div>
                         </section>
 
+                        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="space-y-5">
+                                <div>
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0">
+                                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">Fasekommentarer</h2>
+                                            <p className="mt-1 text-sm text-slate-500">Aktiv fase: {activeCommentPhaseLabel}</p>
+                                        </div>
+
+                                        <div className="flex flex-wrap justify-end gap-2">
+                                            {commentPhaseOptions.map((phaseOption) => {
+                                                const isOpen = Boolean(openCommentPhases[phaseOption.status]);
+                                                const isCurrentPhase = notice.bid_status === phaseOption.status;
+
+                                                return (
+                                                    <button
+                                                        key={phaseOption.status}
+                                                        type="button"
+                                                        onClick={isCurrentPhase ? undefined : () => toggleCommentPhase(phaseOption.status)}
+                                                        aria-expanded={isCurrentPhase ? true : isOpen}
+                                                        disabled={isCurrentPhase}
+                                                        className={classNames(
+                                                            'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition disabled:cursor-default',
+                                                            isCurrentPhase
+                                                                ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                                : isOpen
+                                                                    ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:text-violet-700',
+                                                        )}
+                                                    >
+                                                        <span className="text-[10px] font-bold uppercase tracking-[0.14em]">
+                                                            {phaseOption.number}
+                                                        </span>
+                                                        <span className="whitespace-nowrap">
+                                                            {phaseOption.label}
+                                                        </span>
+                                                        {isCurrentPhase ? (
+                                                            <span className="rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet-700">
+                                                                Aktiv
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-[10px] leading-none">
+                                                                {isOpen ? '−' : '+'}
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Aktiv fase
+                                    </div>
+                                    <div className="mt-2 text-sm font-semibold text-slate-950">
+                                        {guidance.phaseTitle}
+                                    </div>
+                                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                                        {guidance.description}
+                                    </p>
+                                    <div className="mt-3 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+
+                                    <div className="mt-4 space-y-3">
+                                        {activePhaseCommentEntries.length > 0 ? (
+                                            activePhaseCommentEntries.map((comment) => (
+                                                <PhaseCommentCard key={comment.id} comment={comment} locale={locale} />
+                                            ))
+                                        ) : (
+                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                                                Ingen kommentarer er registrert for aktiv fase ennå.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {canCommentOnCase ? (
+                                        <form
+                                            onSubmit={(event) => {
+                                                event.preventDefault();
+                                                submitPhaseComment();
+                                            }}
+                                            className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                        >
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Ny kommentar
+                                            </div>
+
+                                            <label className="space-y-1.5">
+                                                <span className="text-sm font-medium text-slate-800">
+                                                    Kommentar for aktiv fase
+                                                </span>
+                                                <textarea
+                                                    value={phaseCommentForm.data.comment}
+                                                    onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
+                                                    rows={4}
+                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                    placeholder="Skriv en kommentar for denne fasen"
+                                                />
+                                            </label>
+
+                                            {(phaseCommentForm.errors.comment || errors.comment) ? (
+                                                <p className="text-sm text-rose-600">{phaseCommentForm.errors.comment ?? errors.comment}</p>
+                                            ) : null}
+
+                                            <div className="flex flex-wrap gap-3">
+                                                <button
+                                                    type="submit"
+                                                    disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {phaseCommentForm.processing ? 'Lagrer...' : 'Lagre kommentar'}
+                                                </button>
+                                            </div>
+                                        </form>
+                                    ) : null}
+                                </div>
+
+                                <div className="space-y-3">
+                                    {commentPhaseOptions.map((phaseOption) => {
+                                        const isOpen = Boolean(openCommentPhases[phaseOption.status]);
+                                        const comments = phaseCommentGroups[phaseOption.status] ?? [];
+                                        const isCurrentPhase = notice.bid_status === phaseOption.status;
+
+                                        if (isCurrentPhase || !isOpen) {
+                                            return null;
+                                        }
+
+                                        return (
+                                            <section
+                                                key={phaseOption.status}
+                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                            Fase {phaseOption.number}
+                                                        </div>
+                                                        <h3 className="mt-1 text-sm font-semibold text-slate-950">
+                                                            {phaseOption.label}
+                                                        </h3>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleCommentPhase(phaseOption.status)}
+                                                        className="inline-flex min-h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                    >
+                                                        Skjul
+                                                    </button>
+                                                </div>
+
+                                                {comments.length > 0 ? (
+                                                    <div className="mt-4 space-y-3">
+                                                        {comments.map((comment) => (
+                                                            <PhaseCommentCard key={comment.id} comment={comment} locale={locale} />
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                                                        Ingen kommentarer er registrert for denne fasen ennå.
+                                                    </div>
+                                                )}
+                                            </section>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </section>
+
                         {shouldShowSubmissions ? (
                             <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -664,17 +968,6 @@ export default function SavedNoticeShow({ notice }) {
                                         <h2 className="text-xl font-semibold tracking-tight text-slate-950">Forhandlingsrunder</h2>
                                         <p className="mt-1 text-sm text-slate-500">Registrerte innsendinger for denne saken.</p>
                                     </div>
-
-                                    {notice.actions?.can_create_submission ? (
-                                        <button
-                                            type="button"
-                                            onClick={createSubmission}
-                                            disabled={submissionForm.processing}
-                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {submissionForm.processing ? 'Registrerer...' : 'Legg til ny innsending'}
-                                        </button>
-                                    ) : null}
                                 </div>
 
                                 {notice.submissions.length === 0 ? (
@@ -711,283 +1004,471 @@ export default function SavedNoticeShow({ notice }) {
                                 )}
                             </section>
                         ) : null}
-                    </div>
+                    </main>
 
-                    <aside className="space-y-4">
+                    <aside className="space-y-3">
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
-                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Statuspanel</h2>
-                                    <p className="mt-1 text-sm text-slate-500">Operativ status og nøkkelmetadata.</p>
+                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Aksjoner</h2>
+                                    <p className="mt-1 text-sm text-slate-500">Alt du kan gjøre på saken akkurat nå.</p>
                                 </div>
 
                                 <div className="space-y-3">
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Saksstatus</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
-                                    </div>
+                                    <ActionAccordionSection
+                                        title="Neste beslutning"
+                                        summary={nextDecisionSummary}
+                                        hint={guidance.phaseTitle}
+                                        isOpen={openActionSection === 'decision'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'decision' ? null : 'decision'))}
+                                    >
+                                        <p className="text-sm leading-6 text-slate-600">{guidance.nextStepDescription}</p>
 
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Bid-manager</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || 'Ikke satt'}</div>
-                                        {notice.bid_manager?.bid_role ? (
-                                            <div className="mt-1 text-xs text-slate-500">
-                                                Global bid-rolle: {bidRoleLabel(notice.bid_manager.bid_role)}
+                                        {statusForm.errors.status ? (
+                                            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-medium text-rose-700">
+                                                {statusForm.errors.status}
                                             </div>
                                         ) : null}
-                                    </div>
 
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kommersiell eier</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || 'Ikke satt'}</div>
-                                        {notice.opportunity_owner?.bid_role ? (
-                                            <div className="mt-1 text-xs text-slate-500">
-                                                Global bid-rolle: {bidRoleLabel(notice.opportunity_owner.bid_role)}
-                                            </div>
-                                        ) : null}
-                                    </div>
-
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Din globale bid-rolle</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{currentUserBidRoleLabel}</div>
-                                        <div className="mt-1 text-xs text-slate-500">Gjelder brukerkontoen din, ikke denne saken.</div>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sendt dato</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_submitted_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Lukket dato</div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
-                                    </div>
-
-                                    {notice.bid_closure_reason_label ? (
-                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Avslutningsarsak</div>
-                                            <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_closure_reason_label}</div>
-                                        </div>
-                                    ) : null}
-
-                                    {notice.bid_closure_note ? (
-                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Avslutningsnotat</div>
-                                            <div className="mt-1 text-sm leading-6 text-slate-700 whitespace-pre-line">{notice.bid_closure_note}</div>
-                                        </div>
-                                    ) : null}
-
-                                    {notice.actions?.update_bid_manager_url ? (
-                                        <form
-                                            method="post"
-                                            action={notice.actions.update_bid_manager_url}
-                                            className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
-                                        >
-                                            {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
-                                            <input type="hidden" name="_method" value="patch" />
-                                            <div className="space-y-1.5">
-                                                <label className="text-sm font-medium text-slate-800" htmlFor="bid_manager_user_id">
-                                                    Sett bid-manager
-                                                </label>
-                                                <select
-                                                    id="bid_manager_user_id"
-                                                    name="bid_manager_user_id"
-                                                    value={bidManagerForm.data.bid_manager_user_id}
-                                                    onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
-                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                        <div className="mt-4 space-y-2">
+                                            {primaryAction ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => triggerStatusAction(primaryAction)}
+                                                    disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
+                                                    className={classNames(
+                                                        'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                        actionButtonClassName(primaryAction.tone, primaryAction.status),
+                                                    )}
                                                 >
-                                                    <option value="">Ikke satt</option>
-                                                    {bidManagerOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-slate-400">
-                                                    Velg operativt ansvarlig for tilbudsprosessen. Kun brukere med global bid-rolle Bid-manager kan velges.
-                                                </p>
-                                                {(bidManagerForm.errors.bid_manager_user_id || errors.bid_manager_user_id) ? (
-                                                    <p className="text-sm text-rose-600">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
-                                                ) : null}
-                                            </div>
+                                                    {statusActionLabel(primaryAction.status)}
+                                                </button>
+                                            ) : null}
 
-                                            <button
-                                                type="submit"
-                                                disabled={!isBidManagerDirty}
-                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                Lagre bid-manager
-                                            </button>
-                                        </form>
-                                    ) : null}
-
-                                    {notice.actions?.update_opportunity_owner_url ? (
-                                        <form
-                                            method="post"
-                                            action={notice.actions.update_opportunity_owner_url}
-                                            className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
-                                        >
-                                            {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
-                                            <input type="hidden" name="_method" value="patch" />
-                                            <div className="space-y-1.5">
-                                                <label className="text-sm font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
-                                                    Sett kommersiell eier
-                                                </label>
-                                                <select
-                                                    id="opportunity_owner_user_id"
-                                                    name="opportunity_owner_user_id"
-                                                    value={opportunityOwnerForm.data.opportunity_owner_user_id}
-                                                    onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
-                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                >
-                                                    <option value="">Ikke satt</option>
-                                                    {opportunityOwnerOptions.map((option) => (
-                                                        <option key={option.value} value={option.value}>
-                                                            {option.label}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                                <p className="text-xs text-slate-400">
-                                                    Velg selger eller kommersielt ansvarlig for saken. Global bid-rolle vises kun som brukerinfo.
-                                                </p>
-                                                {(opportunityOwnerForm.errors.opportunity_owner_user_id || errors.opportunity_owner_user_id) ? (
-                                                    <p className="text-sm text-rose-600">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
-                                                ) : null}
-                                            </div>
-
-                                            <button
-                                                type="submit"
-                                                disabled={!isOpportunityOwnerDirty}
-                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                Lagre kommersiell eier
-                                            </button>
-                                        </form>
-                                    ) : null}
-
-                                    {caseAccess.can_manage ? (
-                                        <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                            <div className="space-y-1.5">
-                                                <h3 className="text-sm font-semibold text-slate-950">Explicit case access</h3>
-                                                <p className="text-xs text-slate-400">
-                                                    Separate from department membership and bid-manager assignment.
-                                                </p>
-                                            </div>
-
-                                            <form onSubmit={grantCaseAccess} className="mt-4 space-y-4">
-                                                <div className="grid gap-4">
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium text-slate-800" htmlFor="case_access_user_id">
-                                                            User
-                                                        </label>
-                                                        <select
-                                                            id="case_access_user_id"
-                                                            name="user_id"
-                                                            value={caseAccessForm.data.user_id}
-                                                            onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
-                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                            {secondaryActions.length > 0 ? (
+                                                <div className="space-y-2">
+                                                    {secondaryActions.map((action) => (
+                                                        <button
+                                                            key={action.status}
+                                                            type="button"
+                                                            onClick={() => triggerStatusAction(action)}
+                                                            disabled={isStatusActionProcessing || !notice.actions?.update_status_url}
+                                                            className={classNames(
+                                                                'inline-flex min-h-11 w-full items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                actionButtonClassName(action.tone, action.status),
+                                                            )}
                                                         >
-                                                            <option value="">Select a contributor or viewer</option>
-                                                            {caseAccessUserOptions.map((option) => (
-                                                                <option key={option.value} value={option.value}>
-                                                                    {option.label}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        {(caseAccessForm.errors.user_id || errors.user_id) ? (
-                                                            <p className="text-sm text-rose-600">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
-                                                        ) : null}
-                                                    </div>
+                                                            {statusActionLabel(action.status)}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            ) : null}
 
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-sm font-medium text-slate-800" htmlFor="case_access_role">
-                                                            Access level
-                                                        </label>
-                                                        <select
-                                                            id="case_access_role"
-                                                            name="access_role"
-                                                            value={caseAccessForm.data.access_role}
-                                                            onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
-                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                        >
-                                                            {caseAccessRoleOptions.map((option) => (
-                                                                <option key={option.value} value={option.value}>
-                                                                    {option.label}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                        {(caseAccessForm.errors.access_role || errors.access_role) ? (
-                                                            <p className="text-sm text-rose-600">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
-                                                        ) : null}
+                                            {!primaryAction && secondaryActions.length === 0 ? (
+                                                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-500">
+                                                    {noStatusActionsMessage}
+                                                </div>
+                                            ) : null}
+                                        </div>
+
+                                        {activeClosureAction ? (
+                                            <form
+                                                onSubmit={(event) => {
+                                                    event.preventDefault();
+                                                    submitStatusAction(activeClosureAction, true);
+                                                }}
+                                                className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                            >
+                                                {closureActionGuidance(activeClosureAction.status) ? (
+                                                    <div className={classNames('rounded-xl border px-3 py-3 text-sm font-medium', closureActionGuidance(activeClosureAction.status)?.className)}>
+                                                        {closureActionGuidance(activeClosureAction.status)?.text}
                                                     </div>
+                                                ) : null}
+
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_reason">
+                                                        Avslutningsårsak
+                                                    </label>
+                                                    <select
+                                                        id="bid_closure_reason"
+                                                        value={statusForm.data.bid_closure_reason}
+                                                        onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                    >
+                                                        <option value="">Velg avslutningsårsak</option>
+                                                        {closureReasonOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    {statusForm.errors.bid_closure_reason ? (
+                                                        <p className="text-sm text-rose-600">{statusForm.errors.bid_closure_reason}</p>
+                                                    ) : null}
+                                                </div>
+
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_note">
+                                                        Notat
+                                                    </label>
+                                                    <textarea
+                                                        id="bid_closure_note"
+                                                        value={statusForm.data.bid_closure_note}
+                                                        onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
+                                                        rows={3}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                        placeholder="Valgfritt notat"
+                                                    />
                                                 </div>
 
                                                 <div className="flex flex-wrap gap-3">
                                                     <button
                                                         type="submit"
-                                                        disabled={!isCaseAccessDirty || caseAccessForm.processing || !caseAccess.store_url}
+                                                        disabled={isStatusActionProcessing}
                                                         className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {caseAccessForm.processing ? 'Granting...' : 'Grant access'}
+                                                        {isStatusActionProcessing ? 'Oppdaterer...' : statusActionLabel(activeClosureAction.status)}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={resetStatusForm}
+                                                        disabled={isStatusActionProcessing}
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        Avbryt
                                                     </button>
                                                 </div>
                                             </form>
+                                        ) : null}
 
-                                            <div className="mt-5 space-y-3">
-                                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Active access
+                                        {notice.actions?.can_create_submission ? (
+                                            <button
+                                                type="button"
+                                                onClick={createSubmission}
+                                                disabled={submissionForm.processing}
+                                                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {submissionForm.processing ? 'Registrerer...' : 'Legg til ny innsending'}
+                                            </button>
+                                        ) : null}
+                                    </ActionAccordionSection>
+
+                                    <ActionAccordionSection
+                                        title="Deadlines"
+                                        summary={deadlineSummary}
+                                        hint="Oppdater ved endring"
+                                        isOpen={openActionSection === 'deadlines'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'deadlines' ? null : 'deadlines'))}
+                                    >
+                                        {!isEditingDeadlines ? (
+                                            <button
+                                                type="button"
+                                                onClick={openDeadlineEditor}
+                                                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                            >
+                                                Oppdater deadlines
+                                            </button>
+                                        ) : null}
+
+                                        {isEditingDeadlines ? (
+                                            <form
+                                                onSubmit={(event) => {
+                                                    event.preventDefault();
+                                                    submitDeadlineEditor();
+                                                }}
+                                                className="space-y-3"
+                                            >
+                                                {[
+                                                    { key: 'questions_deadline_at', label: 'Frist spørsmål' },
+                                                    { key: 'questions_rfi_deadline_at', label: 'Frist spørsmål RFI' },
+                                                    { key: 'rfi_submission_deadline_at', label: 'Innlevering RFI' },
+                                                    { key: 'questions_rfp_deadline_at', label: 'Frist spørsmål RFP' },
+                                                    { key: 'rfp_submission_deadline_at', label: 'Innlevering RFP' },
+                                                    { key: 'award_date_at', label: 'Tildelingsdato' },
+                                                ].map((field) => (
+                                                    <label key={field.key} className="space-y-2">
+                                                        <span className="text-sm font-medium text-slate-700">{field.label}</span>
+                                                        <input
+                                                            type="date"
+                                                            value={deadlineForm.data[field.key]}
+                                                            onChange={(event) => deadlineForm.setData(field.key, event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        />
+                                                        {deadlineForm.errors[field.key] ? (
+                                                            <p className="text-sm text-rose-600">{deadlineForm.errors[field.key]}</p>
+                                                        ) : null}
+                                                    </label>
+                                                ))}
+
+                                                <div className="flex flex-wrap gap-2.5 pt-1">
+                                                    <button
+                                                        type="submit"
+                                                        disabled={!isDeadlineDirty || deadlineForm.processing}
+                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {deadlineForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelDeadlineEditor}
+                                                        disabled={deadlineForm.processing}
+                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        Avbryt
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        ) : null}
+                                    </ActionAccordionSection>
+
+                                    <ActionAccordionSection
+                                        title="Sakens bid-manager"
+                                        summary={bidManagerSummary}
+                                        hint="Operativt ansvar"
+                                        isOpen={openActionSection === 'bid-manager'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'bid-manager' ? null : 'bid-manager'))}
+                                    >
+                                        {notice.actions?.update_bid_manager_url ? (
+                                            <form
+                                                method="post"
+                                                action={notice.actions.update_bid_manager_url}
+                                                className="space-y-3"
+                                            >
+                                                {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
+                                                <input type="hidden" name="_method" value="patch" />
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium text-slate-800" htmlFor="bid_manager_user_id">
+                                                        Sakens bid-manager
+                                                    </label>
+                                                    <select
+                                                        id="bid_manager_user_id"
+                                                        name="bid_manager_user_id"
+                                                        value={bidManagerForm.data.bid_manager_user_id}
+                                                        onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                    >
+                                                        <option value="">Ikke satt</option>
+                                                        {bidManagerOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="text-xs text-slate-400">
+                                                        Velg operativt ansvarlig for tilbudsprosessen. Kun brukere med global bid-rolle Bid-manager kan velges.
+                                                    </p>
+                                                    {(bidManagerForm.errors.bid_manager_user_id || errors.bid_manager_user_id) ? (
+                                                        <p className="text-sm text-rose-600">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
+                                                    ) : null}
                                                 </div>
 
-                                                {caseAccessEntries.length > 0 ? (
-                                                    <div className="space-y-3">
-                                                        {caseAccessEntries.map((access) => (
-                                                            <div
-                                                                key={access.id}
-                                                                className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                                                            >
-                                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                                    <div className="space-y-2">
-                                                                        <div>
-                                                                            <div className="text-sm font-semibold text-slate-950">
-                                                                                {access.user?.name || 'Unnamed user'}
-                                                                            </div>
-                                                                            <div className="text-xs text-slate-500">
-                                                                                {access.user?.email || '—'}
-                                                                            </div>
-                                                                        </div>
+                                                <button
+                                                    type="submit"
+                                                    disabled={!isBidManagerDirty}
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    Lagre bid-manager
+                                                </button>
+                                            </form>
+                                        ) : null}
+                                    </ActionAccordionSection>
 
-                                                                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                                {access.access_role_label}
-                                                                            </span>
-                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                                Granted by {access.granted_by?.name || '—'}
-                                                                            </span>
-                                                                            <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                                {access.granted_at ? formatDate(access.granted_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
-                                                                            </span>
+                                    <ActionAccordionSection
+                                        title="Sakens kommersielle eier"
+                                        summary={opportunityOwnerSummary}
+                                        hint="Kommersielt ansvar"
+                                        isOpen={openActionSection === 'opportunity-owner'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'opportunity-owner' ? null : 'opportunity-owner'))}
+                                    >
+                                        {notice.actions?.update_opportunity_owner_url ? (
+                                            <form
+                                                method="post"
+                                                action={notice.actions.update_opportunity_owner_url}
+                                                className="space-y-3"
+                                            >
+                                                {csrfToken ? <input type="hidden" name="_token" value={csrfToken} /> : null}
+                                                <input type="hidden" name="_method" value="patch" />
+                                                <div className="space-y-1.5">
+                                                    <label className="text-sm font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
+                                                        Sakens kommersielle eier
+                                                    </label>
+                                                    <select
+                                                        id="opportunity_owner_user_id"
+                                                        name="opportunity_owner_user_id"
+                                                        value={opportunityOwnerForm.data.opportunity_owner_user_id}
+                                                        onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                    >
+                                                        <option value="">Ikke satt</option>
+                                                        {opportunityOwnerOptions.map((option) => (
+                                                            <option key={option.value} value={option.value}>
+                                                                {option.label}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="text-xs text-slate-400">
+                                                        Velg selger eller kommersielt ansvarlig for saken. Global bid-rolle vises kun som brukerinfo.
+                                                    </p>
+                                                    {(opportunityOwnerForm.errors.opportunity_owner_user_id || errors.opportunity_owner_user_id) ? (
+                                                        <p className="text-sm text-rose-600">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
+                                                    ) : null}
+                                                </div>
+
+                                                <button
+                                                    type="submit"
+                                                    disabled={!isOpportunityOwnerDirty}
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    Lagre kommersiell eier
+                                                </button>
+                                            </form>
+                                        ) : null}
+                                    </ActionAccordionSection>
+
+                                    <ActionAccordionSection
+                                        title="Eksplisitt saksadgang"
+                                        summary={caseAccessSummary}
+                                        hint="Saksspesifikk tilgang"
+                                        isOpen={openActionSection === 'case-access'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'case-access' ? null : 'case-access'))}
+                                    >
+                                        <div className="space-y-3">
+                                            {caseAccessEntries.length > 0 ? (
+                                                <div className="space-y-3">
+                                                    {caseAccessEntries.map((access) => (
+                                                        <div
+                                                            key={access.id}
+                                                            className="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                                        >
+                                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                                <div className="space-y-2">
+                                                                    <div>
+                                                                        <div className="text-sm font-semibold text-slate-950">
+                                                                            {access.user?.name || 'Ukjent bruker'}
+                                                                        </div>
+                                                                        <div className="text-xs text-slate-500">
+                                                                            {access.user?.email || '—'}
                                                                         </div>
                                                                     </div>
 
+                                                                    <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                                                                        <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                            {accessRoleLabel(access.access_role)}
+                                                                        </span>
+                                                                        <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                            Gitt av {access.granted_by?.name || '—'}
+                                                                        </span>
+                                                                        <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                            {access.granted_at ? formatDate(access.granted_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+
+                                                                {canManageCaseAccess ? (
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => revokeCaseAccess(access.revoke_url)}
                                                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                                                                     >
-                                                                        Revoke
+                                                                        Tilbakekall
                                                                     </button>
-                                                                </div>
+                                                                ) : null}
                                                             </div>
-                                                        ))}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                    Ingen eksplisitt saksadgang er gitt ennå.
+                                                </div>
+                                            )}
+
+                                            {canManageCaseAccess ? (
+                                                <form onSubmit={grantCaseAccess} className="space-y-4 border-t border-slate-200 pt-4">
+                                                    <div className="grid gap-4">
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-sm font-medium text-slate-800" htmlFor="case_access_user_id">
+                                                                Bruker
+                                                            </label>
+                                                            <select
+                                                                id="case_access_user_id"
+                                                                name="user_id"
+                                                                value={caseAccessForm.data.user_id}
+                                                                onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                            >
+                                                                <option value="">Velg bid-bidragsyter eller lesetilgang</option>
+                                                                {caseAccessUserOptions.map((option) => (
+                                                                    <option key={option.value} value={option.value}>
+                                                                        {option.label}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            {(caseAccessForm.errors.user_id || errors.user_id) ? (
+                                                                <p className="text-sm text-rose-600">{caseAccessForm.errors.user_id ?? errors.user_id}</p>
+                                                            ) : null}
+                                                        </div>
+
+                                                        <div className="space-y-1.5">
+                                                            <label className="text-sm font-medium text-slate-800" htmlFor="case_access_role">
+                                                                Tilgangsnivå
+                                                            </label>
+                                                            <select
+                                                                id="case_access_role"
+                                                                name="access_role"
+                                                                value={caseAccessForm.data.access_role}
+                                                                onChange={(event) => caseAccessForm.setData('access_role', event.target.value)}
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                            >
+                                                                {caseAccessRoleOptions.map((option) => (
+                                                                    <option key={option.value} value={option.value}>
+                                                                        {accessRoleLabel(option.value)}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            {(caseAccessForm.errors.access_role || errors.access_role) ? (
+                                                                <p className="text-sm text-rose-600">{caseAccessForm.errors.access_role ?? errors.access_role}</p>
+                                                            ) : null}
+                                                        </div>
                                                     </div>
-                                                ) : (
-                                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-                                                        No explicit case access has been granted yet.
+
+                                                    <div className="flex flex-wrap gap-3">
+                                                        <button
+                                                            type="submit"
+                                                            disabled={!isCaseAccessDirty || caseAccessForm.processing || !caseAccess.store_url}
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            {caseAccessForm.processing ? 'Lagrer...' : 'Gi tilgang'}
+                                                        </button>
                                                     </div>
-                                                )}
-                                            </div>
-                                        </section>
-                                    ) : null}
+                                                </form>
+                                            ) : (
+                                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                    Du har ikke tilgang til å administrere eksplisitt saksadgang for denne saken.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </ActionAccordionSection>
+
+                                    <ActionAccordionSection
+                                        title="Administrasjon"
+                                        summary={administrationSummary}
+                                        hint="Sekundære handlinger"
+                                        isOpen={openActionSection === 'administration'}
+                                        onToggle={() => setOpenActionSection((current) => (current === 'administration' ? null : 'administration'))}
+                                    >
+                                        <div className="flex flex-wrap gap-3">
+                                            {!notice.archived_at ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={archiveSavedNotice}
+                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                >
+                                                    Arkiver sak
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    </ActionAccordionSection>
                                 </div>
                             </div>
                         </section>

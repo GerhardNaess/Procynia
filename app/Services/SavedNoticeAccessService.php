@@ -19,6 +19,19 @@ class SavedNoticeAccessService
             || $actor->id === $notice->opportunity_owner_user_id;
     }
 
+    public function canComment(User $actor, SavedNotice $notice): bool
+    {
+        if ($notice->archived_at !== null) {
+            return false;
+        }
+
+        if (! $this->canView($actor, $notice)) {
+            return false;
+        }
+
+        return $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER;
+    }
+
     public function visibleQueryFor(User $user): Builder
     {
         $query = SavedNotice::query();

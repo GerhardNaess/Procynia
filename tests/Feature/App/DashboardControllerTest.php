@@ -4,7 +4,9 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\Department;
+use App\Models\BidSubmission;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticePhaseComment;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
@@ -58,14 +60,82 @@ class DashboardControllerTest extends TestCase
         $this->createInboxRecord($customer->id, $hiddenDepartmentProfile->id, null, $departmentB->id, '2026-500004', 'Hidden Department Hit', 'Skjult', '2026-03-29 12:00:00');
         $this->createInboxRecord($otherCustomer->id, $foreignProfile->id, $foreignUser->id, null, '2026-500005', 'Foreign Hit', 'External', '2026-03-29 13:00:00');
 
-        $this->createSavedNotice($customer->id, '2026-600001', 'Saved Notice A', organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_DISCOVERED);
-        $this->createSavedNotice($customer->id, '2026-600002', 'Saved Notice B', organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_SUBMITTED);
-        $this->createSavedNotice($customer->id, '2026-600003', 'Archived Notice', archived: true, organizationalDepartmentId: $departmentA->id, bidStatus: SavedNotice::BID_STATUS_ARCHIVED);
+        $savedNoticeA = $this->createSavedNotice(
+            $customer->id,
+            '2026-600001',
+            'Saved Notice A',
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+            deadlineAt: now()->addDays(12)->toDateTimeString(),
+        );
+        $savedNoticeB = $this->createSavedNotice(
+            $customer->id,
+            '2026-600002',
+            'Saved Notice B',
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_SUBMITTED,
+            bidManagerUserId: $userA->id,
+            deadlineAt: now()->addDays(9)->toDateTimeString(),
+        );
+        $this->createSavedNotice(
+            $customer->id,
+            '2026-600003',
+            'Archived Notice',
+            archived: true,
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_ARCHIVED,
+        );
+        $savedNoticeD = $this->createSavedNotice(
+            $customer->id,
+            '2026-600004',
+            'Go No Go Notice',
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_GO_NO_GO,
+            bidManagerUserId: $userA->id,
+            deadlineAt: now()->addDays(10)->toDateTimeString(),
+            updatedAt: now()->subDays(8)->toDateTimeString(),
+        );
+        $savedNoticeE = $this->createSavedNotice(
+            $customer->id,
+            '2026-600005',
+            'Follow-up Notice',
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_QUALIFYING,
+            opportunityOwnerUserId: $userA->id,
+            deadlineAt: now()->addDays(3)->toDateTimeString(),
+        );
+        $savedNoticeF = $this->createSavedNotice(
+            $customer->id,
+            '2026-600006',
+            'In Progress Notice',
+            organizationalDepartmentId: $departmentA->id,
+            bidStatus: SavedNotice::BID_STATUS_IN_PROGRESS,
+            bidManagerUserId: $userA->id,
+            deadlineAt: now()->addDays(8)->toDateTimeString(),
+        );
+
+        SavedNoticePhaseComment::query()->create([
+            'saved_notice_id' => $savedNoticeE->id,
+            'user_id' => $userA->id,
+            'phase_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'comment' => 'Qualification comment',
+            'created_at' => now()->subHours(3),
+            'updated_at' => now()->subHours(3),
+        ]);
+        BidSubmission::query()->create([
+            'saved_notice_id' => $savedNoticeB->id,
+            'sequence_number' => 1,
+            'label' => 'Initial Submission',
+            'submitted_at' => now()->subHours(2),
+            'created_at' => now()->subHours(2),
+            'updated_at' => now()->subHours(2),
+        ]);
         $this->createSavedNotice($otherCustomer->id, '2026-600004', 'Foreign Saved Notice', organizationalDepartmentId: $otherDepartment->id, bidStatus: SavedNotice::BID_STATUS_WON);
 
         $page = $this->inertiaPage($this->actingAs($userA)->get('/app/dashboard'));
 
         $this->assertSame('App/Dashboard/Index', $page['component']);
+        $this->assertArrayHasKey('cockpit', $page['props']);
         $this->assertArrayHasKey('pipeline', $page['props']);
         $this->assertArrayHasKey('stats', $page['props']);
         $this->assertArrayHasKey('recentInboxItems', $page['props']);
@@ -76,15 +146,28 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(1, $page['props']['stats']['userInbox']['value']);
         $this->assertSame(1, $page['props']['stats']['departmentInbox']['value']);
         $this->assertTrue($page['props']['stats']['departmentInbox']['is_available']);
-        $this->assertSame(2, $page['props']['stats']['worklist']['value']);
+        $this->assertSame(5, $page['props']['stats']['worklist']['value']);
         $this->assertSame(2, $page['props']['stats']['activeWatchProfiles']['value']);
-        $this->assertSame(3, $page['props']['pipeline']['total_count']);
-        $this->assertSame(2, $page['props']['pipeline']['active_total_count']);
+        $this->assertSame(6, $page['props']['pipeline']['total_count']);
+        $this->assertSame(5, $page['props']['pipeline']['active_total_count']);
         $this->assertSame(1, $page['props']['pipeline']['outcome_total_count']);
 
-        $this->assertSame(['Personal Hit', 'Department Hit'], array_column($page['props']['recentInboxItems'], 'title'));
+        $this->assertSame(4, count($page['props']['cockpit']['attention']['items']));
+        $this->assertSame(1, $page['props']['cockpit']['attention']['items'][0]['count']);
+        $this->assertSame(6, $page['props']['cockpit']['portfolio']['total']);
+        $this->assertSame(5, $page['props']['cockpit']['portfolio']['active']);
+        $this->assertSame(1, $page['props']['cockpit']['portfolio']['outcome']);
+        $this->assertCount(2, $page['props']['cockpit']['pipeline_quality']['conversions']);
+        $this->assertSame(3, $page['props']['cockpit']['responsibility_activity']['bid_managers']['assigned_count']);
+        $this->assertSame(1, $page['props']['cockpit']['responsibility_activity']['opportunity_owners']['assigned_count']);
+        $this->assertGreaterThanOrEqual(3, $page['props']['cockpit']['responsibility_activity']['activity']['activity_count_14_days']);
+        $this->assertNotEmpty($page['props']['cockpit']['deadlines']['items']);
+
+        $this->assertContains('Personal Hit', array_column($page['props']['recentInboxItems'], 'title'));
+        $this->assertContains('Department Hit', array_column($page['props']['recentInboxItems'], 'title'));
         $this->assertSame(['Min inbox', 'Avdeling'], array_column($page['props']['recentInboxItems'], 'source_label'));
-        $this->assertEqualsCanonicalizing(['Saved Notice A', 'Saved Notice B'], array_column($page['props']['recentWorklistItems'], 'title'));
+        $this->assertContains('Saved Notice A', array_column($page['props']['recentWorklistItems'], 'title'));
+        $this->assertContains('Saved Notice B', array_column($page['props']['recentWorklistItems'], 'title'));
 
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
@@ -228,6 +311,15 @@ class DashboardControllerTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('saved_notice_phase_comments', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->unsignedBigInteger('user_id');
+            $table->string('phase_status');
+            $table->text('comment');
+            $table->timestamps();
+        });
+
         Schema::create('saved_notice_user_access', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('saved_notice_id');
@@ -236,6 +328,15 @@ class DashboardControllerTest extends TestCase
             $table->string('access_role');
             $table->timestamp('expires_at')->nullable();
             $table->timestamp('revoked_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('bid_submissions', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->unsignedInteger('sequence_number');
+            $table->string('label');
+            $table->timestamp('submitted_at')->nullable();
             $table->timestamps();
         });
 
@@ -356,13 +457,17 @@ class DashboardControllerTest extends TestCase
         bool $archived = false,
         ?int $organizationalDepartmentId = null,
         string $bidStatus = SavedNotice::BID_STATUS_DISCOVERED,
+        ?string $deadlineAt = null,
+        ?string $updatedAt = null,
+        ?int $bidManagerUserId = null,
+        ?int $opportunityOwnerUserId = null,
     ): SavedNotice
     {
-        return SavedNotice::query()->create([
+        $notice = SavedNotice::query()->create([
             'customer_id' => $customerId,
             'saved_by_user_id' => null,
-            'opportunity_owner_user_id' => null,
-            'bid_manager_user_id' => null,
+            'opportunity_owner_user_id' => $opportunityOwnerUserId,
+            'bid_manager_user_id' => $bidManagerUserId,
             'organizational_department_id' => $organizationalDepartmentId,
             'external_id' => $externalId,
             'title' => $title,
@@ -370,12 +475,22 @@ class DashboardControllerTest extends TestCase
             'external_url' => "https://doffin.no/notices/{$externalId}",
             'summary' => 'Summary',
             'publication_date' => '2026-03-20 00:00:00',
-            'deadline' => '2026-04-20 00:00:00',
+            'deadline' => $deadlineAt ?? '2026-04-20 00:00:00',
             'status' => 'ACTIVE',
             'cpv_code' => '72000000',
             'archived_at' => $archived ? now() : null,
             'bid_status' => $bidStatus,
         ]);
+
+        if ($updatedAt !== null) {
+            $notice->timestamps = false;
+            $notice->forceFill([
+                'updated_at' => Carbon::parse($updatedAt),
+            ])->saveQuietly();
+            $notice->timestamps = true;
+        }
+
+        return $notice;
     }
 
     private function inertiaPage($response): array

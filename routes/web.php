@@ -53,6 +53,7 @@ Route::prefix('app')
         Route::get('/notices/saved/{savedNotice}', [NoticeController::class, 'showSavedNotice'])->name('notices.saved.show');
         Route::post('/notices/saved/{savedNotice}/case-access', [NoticeController::class, 'storeSavedNoticeCaseAccess'])->name('notices.saved.case-access.store');
         Route::delete('/notices/saved/{savedNotice}/case-access/{caseAccess}', [NoticeController::class, 'destroySavedNoticeCaseAccess'])->name('notices.saved.case-access.destroy');
+        Route::post('/notices/saved/{savedNotice}/phase-comments', [NoticeController::class, 'storeSavedNoticePhaseComment'])->name('notices.saved.phase-comments.store');
         Route::post('/notices/saved/{savedNotice}/submissions', [NoticeController::class, 'storeSavedNoticeSubmission'])->name('notices.saved.submissions.store');
         Route::patch('/notices/saved/{savedNotice}/status', [NoticeController::class, 'updateSavedNoticeStatus'])->name('notices.saved.status.update');
         Route::patch('/notices/saved/{savedNotice}/opportunity-owner', [NoticeController::class, 'updateSavedNoticeOpportunityOwner'])->name('notices.saved.opportunity-owner.update');

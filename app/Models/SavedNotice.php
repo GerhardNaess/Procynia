@@ -311,6 +311,11 @@ class SavedNotice extends Model
         return $this->hasMany(SavedNoticeUserAccess::class)->orderByDesc('created_at');
     }
 
+    public function phaseComments(): HasMany
+    {
+        return $this->hasMany(SavedNoticePhaseComment::class)->orderBy('created_at');
+    }
+
     public function getBidStatusLabelAttribute(): string
     {
         $status = (string) ($this->bid_status ?? '');

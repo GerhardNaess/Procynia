@@ -1,0 +1,28 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('saved_notice_phase_comments', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('saved_notice_id')->constrained('saved_notices')->cascadeOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('phase_status');
+            $table->text('comment');
+            $table->timestamps();
+
+            $table->index(['saved_notice_id', 'phase_status']);
+            $table->index(['saved_notice_id', 'created_at']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('saved_notice_phase_comments');
+    }
+};

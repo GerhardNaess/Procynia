@@ -7,6 +7,7 @@ use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
@@ -428,6 +429,9 @@ class NoticeController extends Controller
             ->with([
                 'opportunityOwner:id,name,bid_role',
                 'bidManager:id,name,bid_role',
+                'phaseComments' => fn ($query) => $query
+                    ->with(['user:id,name,email,bid_role'])
+                    ->orderBy('created_at'),
                 'userAccesses' => fn ($query) => $query
                     ->active()
                     ->with([
@@ -439,9 +443,10 @@ class NoticeController extends Controller
             ->firstOrFail();
         $canManageCase = $this->savedNoticeAccess->canManage($user, $record);
         $canManageContributorAccess = $this->savedNoticeAccess->canManageContributorAccess($user, $record);
+        $canComment = $this->savedNoticeAccess->canComment($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess),
+            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment),
         ]);
     }
 
@@ -493,6 +498,47 @@ class NoticeController extends Controller
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
             ->with('success', 'Case access was granted.');
+    }
+
+    public function storeSavedNoticePhaseComment(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canComment($user, $record), 403);
+
+        $validated = $request->validate([
+            'comment' => ['required', 'string', 'max:4000'],
+        ]);
+
+        $comment = trim((string) $validated['comment']);
+
+        if ($comment === '') {
+            throw ValidationException::withMessages([
+                'comment' => 'Kommentaren kan ikke være tom.',
+            ]);
+        }
+
+        $record->phaseComments()->create([
+            'user_id' => $user->id,
+            'phase_status' => $record->bid_status,
+            'comment' => $comment,
+        ]);
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Kommentaren ble lagret.');
     }
 
     public function destroySavedNoticeCaseAccess(Request $request, SavedNotice $savedNotice, SavedNoticeUserAccess $caseAccess): RedirectResponse
@@ -910,6 +956,7 @@ class NoticeController extends Controller
         SavedNotice $notice,
         bool $canManageCase,
         bool $canManageContributorAccess,
+        bool $canComment,
     ): array
     {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
@@ -962,6 +1009,30 @@ class NoticeController extends Controller
                     'submitted_at' => optional($submission->submitted_at)?->toIso8601String(),
                 ])
                 ->all(),
+            'phase_comments' => [
+                'can_comment' => $canComment,
+                'store_url' => $canComment
+                    ? route('app.notices.saved.phase-comments.store', ['savedNotice' => $notice->id])
+                    : null,
+                'active_phase_status' => $notice->bid_status,
+                'active_phase_label' => $notice->bid_status_label,
+                'comments' => $notice->phaseComments
+                    ->map(fn (SavedNoticePhaseComment $comment): array => [
+                        'id' => $comment->id,
+                        'phase_status' => $comment->phase_status,
+                        'phase_status_label' => $comment->phase_status_label,
+                        'comment' => $comment->comment,
+                        'created_at' => optional($comment->created_at)?->toIso8601String(),
+                        'user' => $comment->user ? [
+                            'id' => $comment->user->id,
+                            'name' => $comment->user->name,
+                            'email' => $comment->user->email,
+                            'bid_role' => $comment->user->resolvedBidRole(),
+                            'bid_role_label' => $comment->user->bid_role_label,
+                        ] : null,
+                    ])
+                    ->all(),
+            ],
             'back_url' => route('app.notices.index', ['mode' => $notice->archived_at ? 'history' : 'saved']),
             'back_label' => $notice->archived_at ? 'Tilbake til historikk' : 'Tilbake til arbeidsliste',
             'actions' => [

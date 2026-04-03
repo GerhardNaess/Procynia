@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
@@ -25,6 +26,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
     private bool $createdSavedNoticeUserAccessTable = false;
 
+    private bool $createdSavedNoticePhaseCommentsTable = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -33,6 +36,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->ensureSavedNoticesTable();
         $this->ensureBidSubmissionsTable();
         $this->ensureSavedNoticeUserAccessTable();
+        $this->ensureSavedNoticePhaseCommentsTable();
         DB::beginTransaction();
     }
 
@@ -54,6 +58,11 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
         if ($this->createdSavedNoticeUserAccessTable) {
             Schema::dropIfExists('saved_notice_user_access');
+        }
+
+        if ($this->createdSavedNoticePhaseCommentsTable) {
+            Schema::dropIfExists('saved_notice_phase_comments');
+            DB::statement('DROP SEQUENCE IF EXISTS saved_notice_phase_comments_id_seq CASCADE');
         }
 
         parent::tearDown();
@@ -1449,6 +1458,151 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame([], $page['props']['notice']['actions']['case_access']['user_options']);
     }
 
+    public function test_saved_notice_case_show_page_exposes_phase_comments_and_allows_new_comment_for_non_viewer(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-01 11:15:00'));
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-phase-comments-visible',
+            'Phase comments case',
+            bidStatus: SavedNotice::BID_STATUS_QUALIFYING,
+        );
+
+        $response = $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), [
+                'comment' => 'Qualification note from system owner.',
+            ]);
+
+        $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->assertDatabaseHas('saved_notice_phase_comments', [
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $context['admin']->id,
+            'phase_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'comment' => 'Qualification note from system owner.',
+        ]);
+
+        $page = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])),
+        );
+
+        $this->assertTrue($page['props']['notice']['phase_comments']['can_comment']);
+        $this->assertSame(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), $page['props']['notice']['phase_comments']['store_url']);
+        $this->assertSame(SavedNotice::BID_STATUS_QUALIFYING, $page['props']['notice']['phase_comments']['active_phase_status']);
+        $this->assertCount(1, $page['props']['notice']['phase_comments']['comments']);
+        $this->assertSame('Qualification note from system owner.', $page['props']['notice']['phase_comments']['comments'][0]['comment']);
+    }
+
+    public function test_viewer_cannot_store_phase_comment_for_saved_notice(): void
+    {
+        $context = $this->customerAdminContext();
+        $viewer = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-phase-comments-viewer',
+            'Phase comments viewer case',
+            bidStatus: SavedNotice::BID_STATUS_IN_PROGRESS,
+        );
+
+        $this->actingAs($viewer)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), [
+            'comment' => 'Viewer comment should fail.',
+        ])
+            ->assertForbidden();
+
+        $page = $this->inertiaPage(
+            $this->actingAs($viewer)->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])),
+        );
+
+        $this->assertFalse($page['props']['notice']['phase_comments']['can_comment']);
+        $this->assertDatabaseMissing('saved_notice_phase_comments', [
+            'saved_notice_id' => $savedNotice->id,
+            'comment' => 'Viewer comment should fail.',
+        ]);
+    }
+
+    public function test_phase_comments_are_persisted_per_phase_when_status_changes(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-phase-comments-history',
+            'Phase comments history case',
+            bidStatus: SavedNotice::BID_STATUS_QUALIFYING,
+        );
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->post(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), [
+                'comment' => 'Qualification comment.',
+            ])
+            ->assertRedirect();
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->patch(route('app.notices.saved.status.update', ['savedNotice' => $savedNotice->id]), [
+                'status' => SavedNotice::BID_STATUS_GO_NO_GO,
+            ])
+            ->assertRedirect();
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->patch(route('app.notices.saved.status.update', ['savedNotice' => $savedNotice->id]), [
+                'status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+            ])
+            ->assertRedirect();
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->post(route('app.notices.saved.phase-comments.store', ['savedNotice' => $savedNotice->id]), [
+                'comment' => 'In progress comment.',
+            ])
+            ->assertRedirect();
+
+        $phaseStatuses = SavedNoticePhaseComment::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->orderBy('created_at')
+            ->pluck('phase_status')
+            ->all();
+
+        $this->assertSame([
+            SavedNotice::BID_STATUS_QUALIFYING,
+            SavedNotice::BID_STATUS_IN_PROGRESS,
+        ], $phaseStatuses);
+
+        $page = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id])),
+        );
+
+        $this->assertCount(2, $page['props']['notice']['phase_comments']['comments']);
+        $this->assertSame(
+            [
+                SavedNotice::BID_STATUS_QUALIFYING,
+                SavedNotice::BID_STATUS_IN_PROGRESS,
+            ],
+            array_column($page['props']['notice']['phase_comments']['comments'], 'phase_status'),
+        );
+    }
+
     public function test_multiple_contributors_can_be_granted_to_the_same_saved_notice(): void
     {
         $context = $this->customerAdminContext();
@@ -2439,6 +2593,29 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         });
 
         $this->createdSavedNoticeUserAccessTable = true;
+    }
+
+    private function ensureSavedNoticePhaseCommentsTable(): void
+    {
+        if (Schema::hasTable('saved_notice_phase_comments')) {
+            return;
+        }
+
+        DB::statement('DROP SEQUENCE IF EXISTS saved_notice_phase_comments_id_seq CASCADE');
+
+        Schema::create('saved_notice_phase_comments', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('saved_notice_id')->constrained('saved_notices')->cascadeOnDelete();
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('phase_status');
+            $table->text('comment');
+            $table->timestamps();
+
+            $table->index(['saved_notice_id', 'phase_status']);
+            $table->index(['saved_notice_id', 'created_at']);
+        });
+
+        $this->createdSavedNoticePhaseCommentsTable = true;
     }
 
     private function useProjectPostgresConnection(): void
