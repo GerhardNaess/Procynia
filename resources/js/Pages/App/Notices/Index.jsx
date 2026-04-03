@@ -424,7 +424,58 @@ function statusBadge(status, deadline) {
     };
 }
 
-function savedNoticeDeadlineBadge(notice) {
+function noticeSourceTypeLabel(notice) {
+    if (notice.source_type_label) {
+        return notice.source_type_label;
+    }
+
+    return notice.source_type === 'private_request'
+        ? 'Privat forespørsel'
+        : 'Offentlig kunngjøring';
+}
+
+function noticeSourceTimelineLabel(notice, locale) {
+    if (notice.source_type === 'private_request') {
+        return `Registrert ${formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    return `Publisert ${formatDate(notice.publication_date, locale)}`;
+}
+
+function noticeExternalLinkLabel(notice) {
+    return notice.source_type === 'private_request'
+        ? 'Åpne lenke'
+        : 'Åpne i Doffin';
+}
+
+function noticeSourceBadgeClassName(notice) {
+    return notice.source_type === 'private_request'
+        ? 'bg-violet-100 text-violet-700 ring-violet-200'
+        : 'bg-slate-100 text-slate-700 ring-slate-200';
+}
+
+function savedNoticeDeadlineBadge(notice, locale) {
+    if (notice.source_type === 'private_request') {
+        if (!notice.deadline) {
+            return {
+                label: 'Frist ikke registrert',
+                className: 'bg-slate-100 text-slate-700 ring-slate-200',
+            };
+        }
+
+        if (new Date(notice.deadline) <= new Date()) {
+            return {
+                label: 'Frist utløpt',
+                className: 'bg-rose-100 text-rose-700 ring-rose-200',
+            };
+        }
+
+        return {
+            label: `Frist ${formatDate(notice.deadline, locale)}`,
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        };
+    }
+
     if (notice.deadline_state === 'upcoming' && notice.next_deadline_type && notice.next_deadline_at) {
         return {
             label: `Frist ${notice.next_deadline_type}: ${formatDeadlineDate(notice.next_deadline_at)}`,
@@ -452,6 +503,47 @@ function savedNoticeTimelineSteps(notice) {
         { key: 'questions_rfp', label: 'Spm RFP', date: notice.questions_rfp_deadline_at },
         { key: 'rfp', label: 'RFP', date: notice.rfp_submission_deadline_at },
         { key: 'award', label: 'Tildeling', date: notice.award_date_at },
+    ];
+}
+
+function privateRequestSummaryFields(notice, locale) {
+    return [
+        {
+            key: 'saved_at',
+            label: 'Registrert',
+            value: notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : 'Ikke registrert',
+        },
+        {
+            key: 'buyer_name',
+            label: 'Oppdragsgiver',
+            value: notice.buyer_name || 'Ikke registrert',
+        },
+        {
+            key: 'deadline',
+            label: 'Frist',
+            value: notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert',
+        },
+        {
+            key: 'reference_number',
+            label: 'Referanse',
+            value: notice.reference_number || 'Ikke registrert',
+        },
+        {
+            key: 'contact_person_name',
+            label: 'Kontaktperson',
+            value: notice.contact_person_name || 'Ikke registrert',
+        },
+        {
+            key: 'contact_person_email',
+            label: 'Kontakt e-post',
+            value: notice.contact_person_email || 'Ikke registrert',
+        },
+        {
+            key: 'notes',
+            label: 'Notater',
+            value: notice.notes || 'Ingen notater registrert',
+            span: true,
+        },
     ];
 }
 
@@ -495,6 +587,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
     const [expandedNoticeSummaryIds, setExpandedNoticeSummaryIds] = useState({});
     const [editingSavedNoticeId, setEditingSavedNoticeId] = useState(null);
     const [editingHistoryNoticeId, setEditingHistoryNoticeId] = useState(null);
+    const [isPrivateRequestFormOpen, setIsPrivateRequestFormOpen] = useState(false);
     const deadlineForm = useForm({
         questions_rfi_deadline_at: '',
         rfi_submission_deadline_at: '',
@@ -509,6 +602,18 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         follow_up_mode: '',
         follow_up_offset_months: '',
         contract_period_months: '',
+    });
+    const privateRequestForm = useForm({
+        source_type: 'private_request',
+        title: '',
+        buyer_name: '',
+        summary: '',
+        deadline: '',
+        reference_number: '',
+        contact_person_name: '',
+        contact_person_email: '',
+        external_url: '',
+        notes: '',
     });
     const isLiveMode = mode === 'live';
     const isSavedMode = mode === 'saved';
@@ -601,6 +706,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         router.post(
             '/app/notices/save',
             {
+                source_type: 'public_notice',
                 notice_id: notice.notice_id,
                 title: notice.title,
                 buyer_name: notice.buyer_name,
@@ -615,6 +721,20 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 preserveScroll: true,
             },
         );
+    };
+
+    const submitPrivateRequest = () => {
+        privateRequestForm.post('/app/notices/save', {
+            preserveScroll: true,
+            onSuccess: () => {
+                privateRequestForm.reset();
+                privateRequestForm.clearErrors();
+                setIsPrivateRequestFormOpen(false);
+            },
+            onError: () => {
+                setIsPrivateRequestFormOpen(true);
+            },
+        });
     };
 
     const archiveNotice = (notice) => {
@@ -1086,6 +1206,196 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                             </section>
                         ) : null}
 
+                        {isSavedMode ? (
+                            <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                                <div className="space-y-4">
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div>
+                                            <div className="text-sm font-medium text-slate-900">Registrer privat forespørsel</div>
+                                            <p className="mt-1 text-sm text-slate-500">
+                                                Legg inn inviterte eller direkte mottatte forespørsler i samme saksmotor som offentlige kunngjøringer.
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            aria-expanded={isPrivateRequestFormOpen}
+                                            aria-controls="private-request-form"
+                                            onClick={() => setIsPrivateRequestFormOpen((current) => !current)}
+                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                        >
+                                            {isPrivateRequestFormOpen ? 'Skjul skjema' : 'Registrer privat forespørsel'}
+                                        </button>
+                                    </div>
+
+                                    {isPrivateRequestFormOpen ? (
+                                        <form
+                                            id="private-request-form"
+                                            onSubmit={(event) => {
+                                                event.preventDefault();
+                                                submitPrivateRequest();
+                                            }}
+                                            className="space-y-4"
+                                        >
+                                            <input type="hidden" name="source_type" value={privateRequestForm.data.source_type} />
+
+                                            <div className="grid gap-3.5 md:grid-cols-2">
+                                                <label className="space-y-2 md:col-span-2">
+                                                    <span className="text-sm font-medium text-slate-700">Tittel</span>
+                                                    <input
+                                                        type="text"
+                                                        value={privateRequestForm.data.title}
+                                                        onChange={(event) => privateRequestForm.setData('title', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Navn på forespørselen"
+                                                    />
+                                                    {privateRequestForm.errors.title ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.title}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Oppdragsgiver</span>
+                                                    <input
+                                                        type="text"
+                                                        value={privateRequestForm.data.buyer_name}
+                                                        onChange={(event) => privateRequestForm.setData('buyer_name', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Navn på kunde eller oppdragsgiver"
+                                                    />
+                                                    {privateRequestForm.errors.buyer_name ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.buyer_name}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Frist</span>
+                                                    <input
+                                                        type="date"
+                                                        value={privateRequestForm.data.deadline}
+                                                        onChange={(event) => privateRequestForm.setData('deadline', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    />
+                                                    {privateRequestForm.errors.deadline ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.deadline}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2 md:col-span-2">
+                                                    <span className="text-sm font-medium text-slate-700">Kort beskrivelse</span>
+                                                    <textarea
+                                                        value={privateRequestForm.data.summary}
+                                                        onChange={(event) => privateRequestForm.setData('summary', event.target.value)}
+                                                        rows={3}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Kort om hva forespørselen gjelder"
+                                                    />
+                                                    {privateRequestForm.errors.summary ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.summary}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Referanse</span>
+                                                    <input
+                                                        type="text"
+                                                        value={privateRequestForm.data.reference_number}
+                                                        onChange={(event) => privateRequestForm.setData('reference_number', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Valgfri referanse"
+                                                    />
+                                                    {privateRequestForm.errors.reference_number ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.reference_number}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Kontaktperson</span>
+                                                    <input
+                                                        type="text"
+                                                        value={privateRequestForm.data.contact_person_name}
+                                                        onChange={(event) => privateRequestForm.setData('contact_person_name', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Navn på kontaktperson"
+                                                    />
+                                                    {privateRequestForm.errors.contact_person_name ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.contact_person_name}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2">
+                                                    <span className="text-sm font-medium text-slate-700">Kontakt e-post</span>
+                                                    <input
+                                                        type="email"
+                                                        value={privateRequestForm.data.contact_person_email}
+                                                        onChange={(event) => privateRequestForm.setData('contact_person_email', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="kontakt@kunde.no"
+                                                    />
+                                                    {privateRequestForm.errors.contact_person_email ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.contact_person_email}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2 md:col-span-2">
+                                                    <span className="text-sm font-medium text-slate-700">Ekstern lenke</span>
+                                                    <input
+                                                        type="url"
+                                                        value={privateRequestForm.data.external_url}
+                                                        onChange={(event) => privateRequestForm.setData('external_url', event.target.value)}
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="https://..."
+                                                    />
+                                                    {privateRequestForm.errors.external_url ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.external_url}</p>
+                                                    ) : null}
+                                                </label>
+
+                                                <label className="space-y-2 md:col-span-2">
+                                                    <span className="text-sm font-medium text-slate-700">Notater</span>
+                                                    <textarea
+                                                        value={privateRequestForm.data.notes}
+                                                        onChange={(event) => privateRequestForm.setData('notes', event.target.value)}
+                                                        rows={3}
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        placeholder="Valgfri intern informasjon"
+                                                    />
+                                                    {privateRequestForm.errors.notes ? (
+                                                        <p className="text-sm text-rose-600">{privateRequestForm.errors.notes}</p>
+                                                    ) : null}
+                                                </label>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2.5">
+                                                <button
+                                                    type="submit"
+                                                    disabled={privateRequestForm.processing}
+                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {privateRequestForm.processing ? 'Lagrer...' : 'Registrer forespørsel'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        privateRequestForm.reset();
+                                                        privateRequestForm.clearErrors();
+                                                    }}
+                                                    disabled={privateRequestForm.processing}
+                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    Tøm
+                                                </button>
+                                            </div>
+                                        </form>
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                                            Skjemaet er skjult. Klikk for å registrere en privat forespørsel.
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        ) : null}
+
                         {isSavedOrHistoryMode ? (
                             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1149,14 +1459,15 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                             ) : (
                                 <div className="space-y-3.5">
                                     {notices.data.map((notice) => {
+                                        const isPrivateRequest = notice.source_type === 'private_request';
                                         const statusTag = statusBadge(notice.status, notice.deadline);
                                         const deadlineBadge = isSavedOrHistoryMode
-                                            ? savedNoticeDeadlineBadge(notice)
+                                            ? savedNoticeDeadlineBadge(notice, locale)
                                             : {
                                                 label: `Frist ${formatDate(notice.deadline, locale)}`,
                                                 className: 'bg-slate-100 text-slate-700 ring-slate-200',
                                             };
-                                        const timelineSteps = isSavedOrHistoryMode ? savedNoticeTimelineSteps(notice) : [];
+                                        const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest ? savedNoticeTimelineSteps(notice) : [];
                                         const isDetailsExpanded = Boolean(expandedSavedNoticeIds[notice.id]);
                                         const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
                                         const isEditingHistory = isHistoryMode && editingHistoryNoticeId === notice.id;
@@ -1230,44 +1541,86 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                         </div>
 
                                                         {isSavedOrHistoryMode ? (
-                                                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-                                                                <div className="grid grid-cols-5 gap-2">
-                                                                    {timelineSteps.map((step, index) => {
-                                                                        const isActive = Boolean(step.date);
-
-                                                                        return (
-                                                                            <div key={step.key} className="relative text-center">
-                                                                                {index > 0 ? (
-                                                                                    <span className="absolute right-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
-                                                                                ) : null}
-                                                                                {index < timelineSteps.length - 1 ? (
-                                                                                    <span className="absolute left-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
-                                                                                ) : null}
-                                                                                <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
-                                                                                    {step.label}
-                                                                                </div>
-                                                                                <div className="relative mt-2 flex justify-center">
-                                                                                    <span
-                                                                                        className={classNames(
-                                                                                            'relative z-10 h-3 w-3 rounded-full ring-4 ring-slate-50',
-                                                                                            isActive ? 'bg-violet-600' : 'bg-slate-300',
-                                                                                        )}
-                                                                                    />
-                                                                                </div>
-                                                                                <div className={classNames('mt-2 text-xs', isActive ? 'text-slate-700' : 'text-slate-400')}>
-                                                                                    {isActive ? formatDeadlineDate(step.date) : '—'}
-                                                                                </div>
+                                                            isPrivateRequest ? (
+                                                                <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50/70 px-4 py-4">
+                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                                        <div>
+                                                                            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">
+                                                                                Privat forespørsel
                                                                             </div>
-                                                                        );
-                                                                    })}
+                                                                            <p className="mt-1 text-sm text-violet-950/75">
+                                                                                Saksinformasjon for en manuelt registrert forespørsel.
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                                        {privateRequestSummaryFields(notice, locale).map((field) => (
+                                                                            <div
+                                                                                key={field.key}
+                                                                                className={classNames(
+                                                                                    'rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]',
+                                                                                    field.span ? 'sm:col-span-2' : '',
+                                                                                )}
+                                                                            >
+                                                                                <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    {field.label}
+                                                                                </dt>
+                                                                                <dd className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                    {field.value}
+                                                                                </dd>
+                                                                            </div>
+                                                                        ))}
+                                                                    </dl>
                                                                 </div>
-                                                            </div>
+                                                            ) : timelineSteps.length > 0 ? (
+                                                                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+                                                                    <div className="grid grid-cols-5 gap-2">
+                                                                        {timelineSteps.map((step, index) => {
+                                                                            const isActive = Boolean(step.date);
+
+                                                                            return (
+                                                                                <div key={step.key} className="relative text-center">
+                                                                                    {index > 0 ? (
+                                                                                        <span className="absolute right-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
+                                                                                    ) : null}
+                                                                                    {index < timelineSteps.length - 1 ? (
+                                                                                        <span className="absolute left-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
+                                                                                    ) : null}
+                                                                                    <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                                                        {step.label}
+                                                                                    </div>
+                                                                                    <div className="relative mt-2 flex justify-center">
+                                                                                        <span
+                                                                                            className={classNames(
+                                                                                                'relative z-10 h-3 w-3 rounded-full ring-4 ring-slate-50',
+                                                                                                isActive ? 'bg-violet-600' : 'bg-slate-300',
+                                                                                            )}
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div className={classNames('mt-2 text-xs', isActive ? 'text-slate-700' : 'text-slate-400')}>
+                                                                                        {isActive ? formatDeadlineDate(step.date) : '—'}
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            ) : null
                                                         ) : null}
 
                                                         <div className="mt-4 flex flex-wrap gap-2">
+                                                            <span
+                                                                className={classNames(
+                                                                    'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
+                                                                    noticeSourceBadgeClassName(notice),
+                                                                )}
+                                                            >
+                                                                <CalendarIcon className="h-3.5 w-3.5" />
+                                                                {noticeSourceTypeLabel(notice)}
+                                                            </span>
                                                             <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
                                                                 <CalendarIcon className="h-3.5 w-3.5" />
-                                                                Publisert {formatDate(notice.publication_date, locale)}
+                                                                {noticeSourceTimelineLabel(notice, locale)}
                                                             </span>
                                                             <span
                                                                 className={classNames(
@@ -1278,9 +1631,20 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                 <ClockIcon className="h-3.5 w-3.5" />
                                                                 {deadlineBadge.label}
                                                             </span>
-                                                            <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                                                                {notice.cpv_code ? `CPV: ${notice.cpv_code}` : 'Kategori: Doffin-kunngjøring'}
-                                                            </span>
+                                                            {isPrivateRequest ? (
+                                                                <span className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
+                                                                    {notice.reference_number ? `Referanse: ${notice.reference_number}` : 'Privat forespørsel'}
+                                                                </span>
+                                                            ) : (
+                                                                <>
+                                                                    <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                                                                        Publisert {formatDate(notice.publication_date, locale)}
+                                                                    </span>
+                                                                    <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
+                                                                        {notice.cpv_code ? `CPV: ${notice.cpv_code}` : 'Kategori: Doffin-kunngjøring'}
+                                                                    </span>
+                                                                </>
+                                                            )}
                                                             {isSavedOrHistoryMode && notice.bid_status_label ? (
                                                                 <span
                                                                     className={classNames(
@@ -1409,90 +1773,146 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                 rel="noreferrer"
                                                                 className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
-                                                                Åpne i Doffin
+                                                                {noticeExternalLinkLabel(notice)}
                                                             </a>
                                                         ) : null}
                                                     </div>
                                                 </div>
 
-                                                {isSavedOrHistoryMode && isDetailsExpanded ? (
-                                                    <div className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-600">
-                                                        <div className="grid gap-2 sm:grid-cols-2">
-                                                            <div>
-                                                                <span className="font-medium text-slate-700">Lagret av:</span>{' '}
-                                                                <span>{notice.saved_by_name || 'Ikke registrert'}</span>
-                                                            </div>
-                                                            {notice.saved_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Lagret:</span>{' '}
-                                                                    <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {notice.questions_rfi_deadline_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Spørsmål RFI:</span>{' '}
-                                                                    <span>{formatDate(notice.questions_rfi_deadline_at, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {notice.rfi_submission_deadline_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Innlevering RFI:</span>{' '}
-                                                                    <span>{formatDate(notice.rfi_submission_deadline_at, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {notice.questions_rfp_deadline_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Spørsmål RFP:</span>{' '}
-                                                                    <span>{formatDate(notice.questions_rfp_deadline_at, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {notice.rfp_submission_deadline_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Innlevering RFP:</span>{' '}
-                                                                    <span>{formatDate(notice.rfp_submission_deadline_at, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {notice.award_date_at ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Tildeling:</span>{' '}
-                                                                    <span>{formatDate(notice.award_date_at, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {isHistoryMode && notice.selected_supplier_name ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Valgt leverandør:</span>{' '}
-                                                                    <span>{notice.selected_supplier_name}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {isHistoryMode && notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">Avtaleverdi:</span>{' '}
-                                                                    <span>{formatMnokValue(notice.contract_value_mnok, locale)}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {isHistoryMode && historyContractLabel ? (
-                                                                <div>
-                                                                    <span className="font-medium text-slate-700">{historyContractLabel}</span>
-                                                                </div>
-                                                            ) : null}
-                                                            {needsHistorySelection ? (
-                                                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2">
-                                                                    Eksisterende historikkdata mangler strukturert oppfølgingsmodell. Velg anskaffelsestype og oppfølging før du lagrer på nytt.
-                                                                </div>
-                                                            ) : null}
-                                                            {isHistoryMode && notice.next_process_date_at ? (
-                                                                <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 sm:col-span-2">
-                                                                    <div className="text-sm font-medium text-violet-900">Dato for neste oppfølging</div>
-                                                                    <div className="mt-1 text-sm text-violet-700">{formatDate(notice.next_process_date_at, locale)}</div>
-                                                                </div>
-                                                            ) : isHistoryMode ? (
-                                                                <div className="sm:col-span-2">
-                                                                    <span className="font-medium text-slate-700">Ingen planlagt oppfølging</span>
-                                                                </div>
-                                                            ) : null}
-                                                        </div>
+                                                        {isSavedOrHistoryMode && isDetailsExpanded ? (
+                                                            <div className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-600">
+                                                                {isPrivateRequest ? (
+                                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Registrert av:</span>{' '}
+                                                                            <span>{notice.saved_by_name || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        {notice.saved_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Registrert:</span>{' '}
+                                                                                <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Oppdragsgiver:</span>{' '}
+                                                                            <span>{notice.buyer_name || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Frist:</span>{' '}
+                                                                            <span>{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Referanse:</span>{' '}
+                                                                            <span>{notice.reference_number || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Kontaktperson:</span>{' '}
+                                                                            <span>{notice.contact_person_name || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Kontakt e-post:</span>{' '}
+                                                                            <span>{notice.contact_person_email || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        <div className="sm:col-span-2">
+                                                                            <span className="font-medium text-slate-700">Ekstern lenke:</span>{' '}
+                                                                            {notice.external_url ? (
+                                                                                <a
+                                                                                    href={notice.external_url}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                    className="font-medium text-violet-700 transition hover:text-violet-800"
+                                                                                >
+                                                                                    {noticeExternalLinkLabel(notice)}
+                                                                                </a>
+                                                                            ) : (
+                                                                                <span>Ikke registrert</span>
+                                                                            )}
+                                                                        </div>
+                                                                        {notice.notes ? (
+                                                                            <div className="sm:col-span-2">
+                                                                                <span className="font-medium text-slate-700">Notater:</span>{' '}
+                                                                                <span className="whitespace-pre-line">{notice.notes}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="grid gap-2 sm:grid-cols-2">
+                                                                        <div>
+                                                                            <span className="font-medium text-slate-700">Lagret av:</span>{' '}
+                                                                            <span>{notice.saved_by_name || 'Ikke registrert'}</span>
+                                                                        </div>
+                                                                        {notice.saved_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Lagret:</span>{' '}
+                                                                                <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {notice.questions_rfi_deadline_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Spørsmål RFI:</span>{' '}
+                                                                                <span>{formatDate(notice.questions_rfi_deadline_at, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {notice.rfi_submission_deadline_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Innlevering RFI:</span>{' '}
+                                                                                <span>{formatDate(notice.rfi_submission_deadline_at, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {notice.questions_rfp_deadline_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Spørsmål RFP:</span>{' '}
+                                                                                <span>{formatDate(notice.questions_rfp_deadline_at, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {notice.rfp_submission_deadline_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Innlevering RFP:</span>{' '}
+                                                                                <span>{formatDate(notice.rfp_submission_deadline_at, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {notice.award_date_at ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Tildeling:</span>{' '}
+                                                                                <span>{formatDate(notice.award_date_at, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {isHistoryMode && notice.selected_supplier_name ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Valgt leverandør:</span>{' '}
+                                                                                <span>{notice.selected_supplier_name}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {isHistoryMode && notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">Avtaleverdi:</span>{' '}
+                                                                                <span>{formatMnokValue(notice.contract_value_mnok, locale)}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {isHistoryMode && historyContractLabel ? (
+                                                                            <div>
+                                                                                <span className="font-medium text-slate-700">{historyContractLabel}</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {needsHistorySelection ? (
+                                                                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2">
+                                                                                Eksisterende historikkdata mangler strukturert oppfølgingsmodell. Velg anskaffelsestype og oppfølging før du lagrer på nytt.
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {isHistoryMode && notice.next_process_date_at ? (
+                                                                            <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 sm:col-span-2">
+                                                                                <div className="text-sm font-medium text-violet-900">Dato for neste oppfølging</div>
+                                                                                <div className="mt-1 text-sm text-violet-700">{formatDate(notice.next_process_date_at, locale)}</div>
+                                                                            </div>
+                                                                        ) : isHistoryMode ? (
+                                                                            <div className="sm:col-span-2">
+                                                                                <span className="font-medium text-slate-700">Ingen planlagt oppfølging</span>
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                )}
 
-                                                        {isEditingDeadlines ? (
+                                                                {isEditingDeadlines ? (
                                                             <form
                                                                 onSubmit={(event) => {
                                                                     event.preventDefault();

@@ -773,6 +773,67 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame($original['admin']->id, $savedNotice->fresh()->opportunity_owner_user_id);
     }
 
+    public function test_customer_can_create_private_request_saved_notice_and_see_source_metadata(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $response = $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices')
+            ->post('/app/notices/save', [
+                'source_type' => SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                'title' => 'Privat forespørsel fra kunde',
+                'buyer_name' => 'Advania Norge AS',
+                'summary' => 'Manuelt registrert forespørsel',
+                'deadline' => now()->addDays(9)->toDateString(),
+                'reference_number' => 'PRIV-2026-001',
+                'contact_person_name' => 'Kari Kontakt',
+                'contact_person_email' => 'kari.kontakt@example.com',
+                'external_url' => 'https://example.com/private-invite',
+                'notes' => 'Brukes i pilotløp',
+            ]);
+
+        $response->assertRedirect('/app/notices');
+
+        $record = SavedNotice::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('title', 'Privat forespørsel fra kunde')
+            ->first();
+
+        $this->assertInstanceOf(SavedNotice::class, $record);
+        $this->assertSame(SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST, $record->source_type);
+        $this->assertSame($context['admin']->id, $record->saved_by_user_id);
+        $this->assertSame($context['admin']->id, $record->opportunity_owner_user_id);
+        $this->assertSame('PRIV-2026-001', $record->reference_number);
+        $this->assertSame('Kari Kontakt', $record->contact_person_name);
+        $this->assertSame('kari.kontakt@example.com', $record->contact_person_email);
+        $this->assertSame('Brukes i pilotløp', $record->notes);
+        $this->assertSame('https://example.com/private-invite', $record->external_url);
+
+        $savedPayload = $this->savedNoticePayload($context['admin'], $record);
+        $this->assertSame(SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST, $savedPayload['source_type']);
+        $this->assertSame('Privat forespørsel', $savedPayload['source_type_label']);
+        $this->assertSame('Advania Norge AS', $savedPayload['buyer_name']);
+        $this->assertSame('PRIV-2026-001', $savedPayload['reference_number']);
+        $this->assertSame('Kari Kontakt', $savedPayload['contact_person_name']);
+        $this->assertSame('kari.kontakt@example.com', $savedPayload['contact_person_email']);
+        $this->assertSame('Brukes i pilotløp', $savedPayload['notes']);
+        $this->assertSame('https://example.com/private-invite', $savedPayload['external_url']);
+
+        $showPage = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get("/app/notices/saved/{$record->id}"),
+        );
+
+        $this->assertSame(SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST, $showPage['props']['notice']['source_type']);
+        $this->assertSame('Privat forespørsel', $showPage['props']['notice']['source_type_label']);
+        $this->assertSame('PRIV-2026-001', $showPage['props']['notice']['reference_number']);
+        $this->assertSame('Kari Kontakt', $showPage['props']['notice']['contact_person_name']);
+        $this->assertSame('kari.kontakt@example.com', $showPage['props']['notice']['contact_person_email']);
+        $this->assertSame('Brukes i pilotløp', $showPage['props']['notice']['notes']);
+        $this->assertSame('https://example.com/private-invite', $showPage['props']['notice']['external_url']);
+    }
+
     public function test_customer_can_update_deadlines_for_own_active_saved_notice(): void
     {
         $context = $this->customerAdminContext();
@@ -2267,12 +2328,24 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ?string $bidClosedAt = null,
         ?string $bidClosureReason = null,
         ?string $bidClosureNote = null,
+        ?string $sourceType = SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE,
+        ?string $referenceNumber = null,
+        ?string $contactPersonName = null,
+        ?string $contactPersonEmail = null,
+        ?string $notes = null,
+        ?string $externalUrl = null,
     ): SavedNotice
     {
+        $sourceType = in_array($sourceType, SavedNotice::SOURCE_TYPES, true)
+            ? $sourceType
+            : SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE;
+        $isPrivateRequest = $sourceType === SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST;
+
         return SavedNotice::query()->create([
             'customer_id' => $customerId,
             'saved_by_user_id' => $savedByUserId,
             'bid_status' => $bidStatus,
+            'source_type' => $sourceType,
             'opportunity_owner_user_id' => $opportunityOwnerUserId,
             'bid_manager_user_id' => $bidManagerUserId,
             'organizational_department_id' => $organizationalDepartmentId,
@@ -2283,13 +2356,17 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'external_id' => $externalId,
             'title' => $title,
             'buyer_name' => 'Procynia',
-            'external_url' => "https://doffin.no/notices/{$externalId}",
+            'external_url' => $externalUrl ?? ($isPrivateRequest ? null : "https://doffin.no/notices/{$externalId}"),
             'summary' => 'Kort oppsummering',
-            'publication_date' => '2026-03-20 00:00:00',
+            'publication_date' => $isPrivateRequest ? null : '2026-03-20 00:00:00',
             'deadline' => $deadline,
             'status' => $status,
-            'cpv_code' => '72000000',
+            'cpv_code' => $isPrivateRequest ? null : '72000000',
             'archived_at' => $archived ? now() : null,
+            'reference_number' => $referenceNumber,
+            'contact_person_name' => $contactPersonName,
+            'contact_person_email' => $contactPersonEmail,
+            'notes' => $notes,
             'questions_deadline_at' => $questionsDeadlineAt,
             'questions_rfi_deadline_at' => $questionsRfiDeadlineAt,
             'rfi_submission_deadline_at' => $rfiSubmissionDeadlineAt,
@@ -2344,6 +2421,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
                 $table->unsignedBigInteger('saved_by_user_id')->nullable();
                 $table->string('bid_status')->default(SavedNotice::BID_STATUS_DISCOVERED);
+                $table->string('source_type')->default(SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE);
                 $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
                 $table->unsignedBigInteger('bid_manager_user_id')->nullable();
                 $table->unsignedBigInteger('organizational_department_id')->nullable();
@@ -2357,6 +2435,10 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 $table->string('buyer_name')->nullable();
                 $table->string('external_url', 2000)->nullable();
                 $table->text('summary')->nullable();
+                $table->string('reference_number')->nullable();
+                $table->string('contact_person_name')->nullable();
+                $table->string('contact_person_email')->nullable();
+                $table->text('notes')->nullable();
                 $table->timestamp('publication_date')->nullable();
                 $table->timestamp('deadline')->nullable();
                 $table->string('status')->nullable();
@@ -2441,6 +2523,12 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             });
         }
 
+        if (! Schema::hasColumn('saved_notices', 'source_type')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->string('source_type')->default(SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE);
+            });
+        }
+
         if (! Schema::hasColumn('saved_notices', 'opportunity_owner_user_id')) {
             Schema::table('saved_notices', function (Blueprint $table): void {
                 $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
@@ -2456,6 +2544,30 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         if (! Schema::hasColumn('saved_notices', 'organizational_department_id')) {
             Schema::table('saved_notices', function (Blueprint $table): void {
                 $table->unsignedBigInteger('organizational_department_id')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'reference_number')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->string('reference_number')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'contact_person_name')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->string('contact_person_name')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'contact_person_email')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->string('contact_person_email')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'notes')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->text('notes')->nullable();
             });
         }
 

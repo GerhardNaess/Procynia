@@ -96,6 +96,28 @@ function accessRoleLabel(role) {
     }
 }
 
+function noticeSourceTypeLabel(notice) {
+    if (notice.source_type_label) {
+        return notice.source_type_label;
+    }
+
+    return notice.source_type === 'private_request'
+        ? 'Privat forespørsel'
+        : 'Offentlig kunngjøring';
+}
+
+function noticeExternalLinkLabel(notice) {
+    return notice.source_type === 'private_request'
+        ? 'Åpne lenke'
+        : 'Åpne i Doffin';
+}
+
+function noticeSourceBadgeClassName(notice) {
+    return notice.source_type === 'private_request'
+        ? 'bg-violet-100 text-violet-700 ring-violet-200'
+        : 'bg-slate-100 text-slate-700 ring-slate-200';
+}
+
 function statusActionLabel(status) {
     switch (status) {
         case 'qualifying':
@@ -443,6 +465,10 @@ export default function SavedNoticeShow({ notice }) {
     const activePhaseCommentEntries = phaseCommentGroups[notice.bid_status] ?? [];
     const phaseCommentStoreUrl = notice.phase_comments?.store_url ?? null;
     const canCommentOnCase = Boolean(notice.phase_comments?.can_comment);
+    const isPrivateRequest = notice.source_type === 'private_request';
+    const sourceTypeLabel = noticeSourceTypeLabel(notice);
+    const externalLinkLabel = noticeExternalLinkLabel(notice);
+    const sourceBadgeClassName = noticeSourceBadgeClassName(notice);
     const deadlineSummary = deadlineStateLabel(notice, locale);
     const bidManagerSummary = notice.bid_manager?.name || 'Ikke satt';
     const opportunityOwnerSummary = notice.opportunity_owner?.name || 'Ikke satt';
@@ -648,6 +674,14 @@ export default function SavedNoticeShow({ notice }) {
                                 >
                                     {notice.bid_status_label}
                                 </span>
+                                <span
+                                    className={classNames(
+                                        'inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset',
+                                        sourceBadgeClassName,
+                                    )}
+                                >
+                                    {sourceTypeLabel}
+                                </span>
                                 {notice.archived_at ? (
                                     <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
                                         Arkivert
@@ -671,7 +705,7 @@ export default function SavedNoticeShow({ notice }) {
                                     rel="noreferrer"
                                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                 >
-                                    Åpne i Doffin
+                                    {externalLinkLabel}
                                 </a>
                             ) : null}
                         </div>
@@ -752,35 +786,87 @@ export default function SavedNoticeShow({ notice }) {
                             <div className="space-y-5">
                                 <div>
                                     <h2 className="text-xl font-semibold tracking-tight text-slate-950">Informasjon</h2>
-                                    <p className="mt-1 text-sm text-slate-500">Sakens innhold, oppsummering og fasebundet kontekst.</p>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {isPrivateRequest
+                                            ? 'Manuell forespørsel med relevant kontakt- og fristinformasjon.'
+                                            : 'Sakens innhold, oppsummering og fasebundet kontekst.'}
+                                    </p>
                                 </div>
 
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kunngjøring</div>
-                                        <div className="text-sm font-medium text-slate-900">{notice.notice_id || '—'}</div>
+                                {isPrivateRequest ? (
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                            <div className="text-sm font-medium text-slate-900">
+                                                {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Referanse</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.reference_number || 'Ikke registrert'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontaktperson</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || 'Ikke registrert'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontakt e-post</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || 'Ikke registrert'}</div>
+                                        </div>
+                                        <div className="space-y-1 md:col-span-2">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                            <div className="text-sm font-medium text-slate-900">
+                                                {notice.external_url ? (
+                                                    <a
+                                                        href={notice.external_url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="font-semibold text-violet-700 transition hover:text-violet-800"
+                                                    >
+                                                        {externalLinkLabel}
+                                                    </a>
+                                                ) : (
+                                                    'Ikke registrert'
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
-                                        <div className="text-sm font-medium text-slate-900">{notice.organization_name || '—'}</div>
+                                ) : (
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kunngjøring</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.notice_id || '—'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.organization_name || '—'}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Publisert</div>
+                                            <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                            <div className="text-sm font-medium text-slate-900">{formatDate(notice.deadline, locale)}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Neste leveringsfrist</div>
+                                            <div className="text-sm font-medium text-slate-900">{deadlineStateLabel(notice, locale)}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">CPV</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.cpv_code || '—'}</div>
+                                        </div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Publisert</div>
-                                        <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
-                                        <div className="text-sm font-medium text-slate-900">{formatDate(notice.deadline, locale)}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Neste leveringsfrist</div>
-                                        <div className="text-sm font-medium text-slate-900">{deadlineStateLabel(notice, locale)}</div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">CPV</div>
-                                        <div className="text-sm font-medium text-slate-900">{notice.cpv_code || '—'}</div>
-                                    </div>
-                                </div>
+                                )}
 
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppsummering</div>
@@ -788,6 +874,15 @@ export default function SavedNoticeShow({ notice }) {
                                         {notice.summary || 'Ingen oppsummering er registrert ennå.'}
                                     </div>
                                 </div>
+
+                                {isPrivateRequest && notice.notes ? (
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notater</div>
+                                        <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
+                                            {notice.notes}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         </section>
 

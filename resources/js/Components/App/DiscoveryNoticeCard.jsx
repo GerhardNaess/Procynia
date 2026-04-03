@@ -96,6 +96,7 @@ function statusBadge(status, deadline) {
 
 function worklistPayloadFromNotice(notice) {
     return {
+        source_type: 'public_notice',
         notice_id: notice.notice_id,
         title: notice.title,
         buyer_name: notice.buyer_name,

@@ -12,6 +12,20 @@ class SavedNotice extends Model
 {
     use HasFactory;
 
+    public const SOURCE_TYPE_PUBLIC_NOTICE = 'public_notice';
+
+    public const SOURCE_TYPE_PRIVATE_REQUEST = 'private_request';
+
+    public const SOURCE_TYPES = [
+        self::SOURCE_TYPE_PUBLIC_NOTICE,
+        self::SOURCE_TYPE_PRIVATE_REQUEST,
+    ];
+
+    public const SOURCE_TYPE_LABELS = [
+        self::SOURCE_TYPE_PUBLIC_NOTICE => 'Offentlig kunngjøring',
+        self::SOURCE_TYPE_PRIVATE_REQUEST => 'Privat forespørsel',
+    ];
+
     public const BID_STATUS_DISCOVERED = 'discovered';
 
     public const BID_STATUS_QUALIFYING = 'qualifying';
@@ -226,6 +240,7 @@ class SavedNotice extends Model
 
     protected $fillable = [
         'customer_id',
+        'source_type',
         'organizational_department_id',
         'saved_by_user_id',
         'bid_status',
@@ -240,7 +255,11 @@ class SavedNotice extends Model
         'title',
         'buyer_name',
         'external_url',
+        'reference_number',
+        'contact_person_name',
+        'contact_person_email',
         'summary',
+        'notes',
         'publication_date',
         'deadline',
         'status',
@@ -260,6 +279,10 @@ class SavedNotice extends Model
         'follow_up_mode',
         'follow_up_offset_months',
         'next_process_date_at',
+    ];
+
+    protected $attributes = [
+        'source_type' => self::SOURCE_TYPE_PUBLIC_NOTICE,
     ];
 
     protected $casts = [
@@ -284,6 +307,23 @@ class SavedNotice extends Model
     public function savedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'saved_by_user_id');
+    }
+
+    public function isPublicNotice(): bool
+    {
+        return (string) ($this->source_type ?? self::SOURCE_TYPE_PUBLIC_NOTICE) === self::SOURCE_TYPE_PUBLIC_NOTICE;
+    }
+
+    public function isPrivateRequest(): bool
+    {
+        return (string) ($this->source_type ?? self::SOURCE_TYPE_PUBLIC_NOTICE) === self::SOURCE_TYPE_PRIVATE_REQUEST;
+    }
+
+    public function getSourceTypeLabelAttribute(): string
+    {
+        $sourceType = (string) ($this->source_type ?? self::SOURCE_TYPE_PUBLIC_NOTICE);
+
+        return self::SOURCE_TYPE_LABELS[$sourceType] ?? $sourceType;
     }
 
     public function organizationalDepartment(): BelongsTo

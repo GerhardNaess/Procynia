@@ -178,28 +178,66 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $validated = $request->validate([
-            'notice_id' => ['required', 'string', 'max:255'],
-            'title' => ['required', 'string', 'max:1000'],
-            'buyer_name' => ['nullable', 'string', 'max:1000'],
-            'external_url' => ['nullable', 'url', 'max:2000'],
-            'summary' => ['nullable', 'string'],
-            'publication_date' => ['nullable', 'date'],
-            'deadline' => ['nullable', 'date'],
-            'status' => ['nullable', 'string', 'max:255'],
-            'cpv_code' => ['nullable', 'string', 'max:255'],
-            'rfi_submission_deadline_at' => ['nullable', 'date'],
-            'rfp_submission_deadline_at' => ['nullable', 'date'],
-        ]);
+        $sourceType = (string) $request->string('source_type');
+        $sourceType = in_array($sourceType, SavedNotice::SOURCE_TYPES, true)
+            ? $sourceType
+            : SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE;
 
-        $record = SavedNotice::query()->firstOrNew([
-            'customer_id' => $customerId,
-            'external_id' => $validated['notice_id'],
-        ]);
+        if ($sourceType === SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST) {
+            $validated = $request->validate([
+                'source_type' => ['nullable', 'string', Rule::in(SavedNotice::SOURCE_TYPES)],
+                'title' => ['required', 'string', 'max:1000'],
+                'buyer_name' => ['required', 'string', 'max:1000'],
+                'summary' => ['required', 'string'],
+                'deadline' => ['nullable', 'date'],
+                'reference_number' => ['nullable', 'string', 'max:255'],
+                'contact_person_name' => ['nullable', 'string', 'max:255'],
+                'contact_person_email' => ['nullable', 'email', 'max:255'],
+                'external_url' => ['nullable', 'url', 'max:2000'],
+                'notes' => ['nullable', 'string'],
+                'status' => ['nullable', 'string', 'max:255'],
+            ]);
+
+            $record = new SavedNotice();
+            $record->customer_id = $customerId;
+            $record->source_type = SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST;
+            $record->external_id = sprintf(
+                'private-request-%d-%d-%s',
+                $customerId,
+                $user->id,
+                (string) Str::ulid(),
+            );
+        } else {
+            $validated = $request->validate([
+                'source_type' => ['nullable', 'string', Rule::in(SavedNotice::SOURCE_TYPES)],
+                'notice_id' => ['required', 'string', 'max:255'],
+                'title' => ['required', 'string', 'max:1000'],
+                'buyer_name' => ['nullable', 'string', 'max:1000'],
+                'external_url' => ['nullable', 'url', 'max:2000'],
+                'summary' => ['nullable', 'string'],
+                'publication_date' => ['nullable', 'date'],
+                'deadline' => ['nullable', 'date'],
+                'status' => ['nullable', 'string', 'max:255'],
+                'cpv_code' => ['nullable', 'string', 'max:255'],
+                'rfi_submission_deadline_at' => ['nullable', 'date'],
+                'rfp_submission_deadline_at' => ['nullable', 'date'],
+                'reference_number' => ['nullable', 'string', 'max:255'],
+                'contact_person_name' => ['nullable', 'string', 'max:255'],
+                'contact_person_email' => ['nullable', 'email', 'max:255'],
+                'notes' => ['nullable', 'string'],
+            ]);
+
+            $record = SavedNotice::query()->firstOrNew([
+                'customer_id' => $customerId,
+                'external_id' => $validated['notice_id'],
+            ]);
+        }
+
         $isNewRecord = ! $record->exists;
         $hadCaseAccess = ! $record->exists || $this->savedNoticeAccess->canView($user, $record);
 
         $record->fill([
+            'source_type' => $sourceType,
             'title' => $validated['title'],
             'buyer_name' => $validated['buyer_name'] ?? null,
             'external_url' => $validated['external_url'] ?? null,
@@ -208,6 +246,10 @@ class NoticeController extends Controller
             'deadline' => $validated['deadline'] ?? null,
             'status' => $validated['status'] ?? null,
             'cpv_code' => $validated['cpv_code'] ?? null,
+            'reference_number' => $validated['reference_number'] ?? null,
+            'contact_person_name' => $validated['contact_person_name'] ?? null,
+            'contact_person_email' => $validated['contact_person_email'] ?? null,
+            'notes' => $validated['notes'] ?? null,
             'archived_at' => null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
             'rfp_submission_deadline_at' => $validated['rfp_submission_deadline_at'] ?? null,
@@ -217,6 +259,10 @@ class NoticeController extends Controller
             $record->saved_by_user_id = $user->id;
             $record->bid_status = SavedNotice::BID_STATUS_DISCOVERED;
             $record->organizational_department_id = $user->primaryAffiliationDepartmentId();
+
+            if ($sourceType === SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST) {
+                $record->opportunity_owner_user_id = $user->id;
+            }
         }
 
         $record->save();
@@ -911,6 +957,8 @@ class NoticeController extends Controller
             'id' => $notice->id,
             'saved_notice_id' => $notice->id,
             'notice_id' => $notice->external_id,
+            'source_type' => $notice->source_type,
+            'source_type_label' => $notice->source_type_label,
             'title' => $notice->title,
             'buyer_name' => $notice->buyer_name,
             'summary' => $notice->summary,
@@ -923,18 +971,22 @@ class NoticeController extends Controller
             'saved_search_name' => null,
             'cpv_code' => $notice->cpv_code,
             'is_new' => false,
-            'external_url' => $notice->external_url ?: $this->publicNoticeUrl($notice->external_id),
+            'external_url' => $this->savedNoticeExternalUrl($notice),
             'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
             'is_saved' => $notice->archived_at === null,
             'bid_status' => $notice->bid_status,
             'bid_status_label' => $notice->bid_status_label,
             'submissions_count' => (int) ($notice->submissions_count ?? 0),
             'opportunity_owner_name' => $notice->opportunityOwner?->name,
+            'reference_number' => $notice->reference_number,
+            'contact_person_name' => $notice->contact_person_name,
+            'contact_person_email' => $notice->contact_person_email,
             'next_deadline_type' => $nextDeadline['type'],
             'next_deadline_at' => optional($nextDeadline['at'])?->toIso8601String(),
             'deadline_state' => $nextDeadline['state'],
             'saved_by_name' => $notice->savedBy?->name,
             'saved_at' => optional($notice->created_at)?->toIso8601String(),
+            'notes' => $notice->notes,
             'questions_deadline_at' => optional($notice->questions_deadline_at)?->toIso8601String(),
             'questions_rfi_deadline_at' => optional($notice->questions_rfi_deadline_at)?->toIso8601String(),
             'rfi_submission_deadline_at' => optional($notice->rfi_submission_deadline_at)?->toIso8601String(),
@@ -967,9 +1019,11 @@ class NoticeController extends Controller
         return [
             'id' => $notice->id,
             'notice_id' => $notice->external_id,
+            'source_type' => $notice->source_type,
+            'source_type_label' => $notice->source_type_label,
             'title' => $notice->title,
             'organization_name' => $notice->buyer_name,
-            'external_url' => $notice->external_url ?: $this->publicNoticeUrl($notice->external_id),
+            'external_url' => $this->savedNoticeExternalUrl($notice),
             'summary' => $notice->summary,
             'cpv_code' => $notice->cpv_code,
             'publication_date' => optional($notice->publication_date)?->toIso8601String(),
@@ -985,6 +1039,11 @@ class NoticeController extends Controller
             'bid_closure_note' => $notice->bid_closure_note,
             'bid_submitted_at' => optional($notice->bid_submitted_at)?->toIso8601String(),
             'archived_at' => optional($notice->archived_at)?->toIso8601String(),
+            'reference_number' => $notice->reference_number,
+            'contact_person_name' => $notice->contact_person_name,
+            'contact_person_email' => $notice->contact_person_email,
+            'notes' => $notice->notes,
+            'saved_at' => optional($notice->created_at)?->toIso8601String(),
             'opportunity_owner' => $notice->opportunityOwner
                 ? [
                     'id' => $notice->opportunityOwner->id,
@@ -1328,6 +1387,15 @@ class NoticeController extends Controller
         }
 
         return sprintf((string) config('doffin.public_notice_url'), rawurlencode($noticeId));
+    }
+
+    private function savedNoticeExternalUrl(SavedNotice $notice): ?string
+    {
+        if ($notice->isPrivateRequest()) {
+            return $notice->external_url;
+        }
+
+        return $notice->external_url ?: $this->publicNoticeUrl($notice->external_id);
     }
 
     private function emptySearchResult(): array
