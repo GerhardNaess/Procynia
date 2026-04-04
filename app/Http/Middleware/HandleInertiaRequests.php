@@ -50,7 +50,6 @@ class HandleInertiaRequests extends Middleware
                     'can_manage_customer_departments' => $this->customerContext->canCreateCustomerDepartments($user),
                     'can_manage_watch_profiles' => $user->canAccessCustomerFrontend(),
                     'can_manage_department_watch_profiles' => $this->customerContext->isCustomerAdmin($user) || $this->customerContext->hasDepartmentMembership($user),
-                    'can_access_department_inbox' => $this->customerContext->hasDepartmentMembership($user),
                     'customer' => $customer ? [
                         'id' => $customer->id,
                         'name' => $customer->name,
@@ -124,6 +123,7 @@ class HandleInertiaRequests extends Middleware
                     'open_notice' => __('procynia.frontend.open_notice'),
                     'organization_name' => __('procynia.frontend.organization_name'),
                     'overview_nav' => __('procynia.frontend.overview_nav'),
+                    'infosenter_nav' => __('procynia.frontend.infosenter_nav'),
                     'published' => __('procynia.notice.publication_date'),
                     'procurements_nav' => __('procynia.frontend.procurements_nav'),
                     'procurements_subtitle' => __('procynia.frontend.procurements_subtitle'),

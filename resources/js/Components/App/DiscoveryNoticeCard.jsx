@@ -141,12 +141,12 @@ export default function DiscoveryNoticeCard({
         });
     };
 
-    const deleteNoticeFromInbox = () => {
+    const deleteNoticeFromDiscovery = () => {
         if (!canDelete) {
             return;
         }
 
-        const confirmMessage = deleteAction.confirmMessage ?? 'Delete this inbox item?';
+        const confirmMessage = deleteAction.confirmMessage ?? 'Delete this discovery item?';
 
         if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
             return;
@@ -251,7 +251,7 @@ export default function DiscoveryNoticeCard({
                         {canDelete ? (
                             <button
                                 type="button"
-                                onClick={deleteNoticeFromInbox}
+                                onClick={deleteNoticeFromDiscovery}
                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                             >
                                 {deleteAction.label ?? 'Slett'}

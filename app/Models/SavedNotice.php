@@ -346,6 +346,21 @@ class SavedNotice extends Model
         return $this->hasMany(BidSubmission::class)->orderBy('sequence_number');
     }
 
+    public function businessReviews(): HasMany
+    {
+        return $this->hasMany(SavedNoticeBusinessReview::class)
+            ->orderBy('business_review_at')
+            ->orderBy('id');
+    }
+
+    public function infoItems(): HasMany
+    {
+        return $this->hasMany(SavedNoticeInfoItem::class)
+            ->orderByRaw('CASE WHEN status = ? THEN 1 ELSE 0 END', [SavedNoticeInfoItem::STATUS_CLOSED])
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
     public function userAccesses(): HasMany
     {
         return $this->hasMany(SavedNoticeUserAccess::class)->orderByDesc('created_at');

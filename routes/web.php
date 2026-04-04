@@ -3,9 +3,9 @@
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
+use App\Http\Controllers\App\InfoCenterController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\WatchProfileController;
-use App\Http\Controllers\App\WatchProfileInboxController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
@@ -40,20 +40,21 @@ Route::prefix('app')
         Route::redirect('/', '/app/notices?mode=saved');
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
+        Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
+        Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
+        Route::get('/messages/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
 
         Route::get('/notices', [NoticeController::class, 'index'])->name('notices.index');
         Route::get('/suppliers', [SupplierController::class, 'index'])->name('suppliers.index');
         Route::get('/suppliers/{supplier}', [SupplierController::class, 'show'])->name('suppliers.show');
-        Route::get('/inbox/user', [WatchProfileInboxController::class, 'userInbox'])->name('inbox.user');
-        Route::get('/inbox/department', [WatchProfileInboxController::class, 'departmentInbox'])->name('inbox.department');
-        Route::delete('/inbox/user/{record}', [WatchProfileInboxController::class, 'destroyUserInboxRecord'])->name('inbox.user.destroy');
-        Route::delete('/inbox/department/{record}', [WatchProfileInboxController::class, 'destroyDepartmentInboxRecord'])->name('inbox.department.destroy');
         Route::get('/notices/cpv-suggestions', [NoticeController::class, 'cpvSuggestions'])->name('notices.cpv-suggestions');
         Route::post('/notices/save', [NoticeController::class, 'storeSavedNotice'])->name('notices.save');
         Route::get('/notices/saved/{savedNotice}', [NoticeController::class, 'showSavedNotice'])->name('notices.saved.show');
         Route::post('/notices/saved/{savedNotice}/case-access', [NoticeController::class, 'storeSavedNoticeCaseAccess'])->name('notices.saved.case-access.store');
         Route::delete('/notices/saved/{savedNotice}/case-access/{caseAccess}', [NoticeController::class, 'destroySavedNoticeCaseAccess'])->name('notices.saved.case-access.destroy');
         Route::post('/notices/saved/{savedNotice}/phase-comments', [NoticeController::class, 'storeSavedNoticePhaseComment'])->name('notices.saved.phase-comments.store');
+        Route::post('/notices/saved/{savedNotice}/info-items', [NoticeController::class, 'storeSavedNoticeInfoItem'])->name('notices.saved.info-items.store');
+        Route::patch('/notices/saved/{savedNotice}/info-items/{infoItem}/close', [NoticeController::class, 'closeSavedNoticeInfoItem'])->name('notices.saved.info-items.close');
         Route::post('/notices/saved/{savedNotice}/submissions', [NoticeController::class, 'storeSavedNoticeSubmission'])->name('notices.saved.submissions.store');
         Route::patch('/notices/saved/{savedNotice}/status', [NoticeController::class, 'updateSavedNoticeStatus'])->name('notices.saved.status.update');
         Route::patch('/notices/saved/{savedNotice}/opportunity-owner', [NoticeController::class, 'updateSavedNoticeOpportunityOwner'])->name('notices.saved.opportunity-owner.update');

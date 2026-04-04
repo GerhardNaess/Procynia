@@ -7,6 +7,8 @@ use App\Models\Notice;
 use App\Models\NoticeAttention;
 use App\Models\NoticeDocument;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeBusinessReview;
+use App\Models\SavedNoticeInfoItem;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
@@ -17,6 +19,7 @@ use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
+use Illuminate\Support\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -47,6 +50,7 @@ class NoticeController extends Controller
         $user = $request->user();
         $customerId = $this->customerContext->currentCustomerId($user);
         $mode = $this->noticeMode((string) $request->string('mode'));
+        $useCockpitScope = $request->boolean('cockpit_scope');
 
         $filters = [
             'q' => trim((string) $request->string('q')),
@@ -57,6 +61,7 @@ class NoticeController extends Controller
             'status' => trim((string) $request->string('status')),
             'relevance' => trim((string) $request->string('relevance')),
             'bid_status' => trim((string) $request->string('bid_status')),
+            'cockpit_scope' => $useCockpitScope ? '1' : '',
         ];
 
         if ($customerId === null) {
@@ -81,7 +86,7 @@ class NoticeController extends Controller
 
         $page = max(1, (int) $request->integer('page', 1));
         $perPage = 15;
-        $worklist = $this->savedNoticeCounts($user);
+        $worklist = $this->savedNoticeCounts($user, $customerId, $useCockpitScope);
 
         if ($mode !== 'live') {
             return Inertia::render('App/Notices/Index', [
@@ -96,7 +101,7 @@ class NoticeController extends Controller
                 'savedSearches' => $this->savedSearchesForUser($user, $customerId),
                 'worklist' => $worklist,
                 'monitoring' => $this->monitoringSummary($user, $customerId),
-                'notices' => $this->savedNoticeResult($request, $user, $mode, $page, $perPage),
+                'notices' => $this->savedNoticeResult($request, $user, $mode, $page, $perPage, $customerId, $useCockpitScope),
             ]);
         }
 
@@ -299,6 +304,18 @@ class NoticeController extends Controller
             'questions_rfp_deadline_at' => ['nullable', 'date'],
             'rfp_submission_deadline_at' => ['nullable', 'date'],
             'award_date_at' => ['nullable', 'date'],
+            'reference_number' => ['nullable', 'string', 'max:255'],
+            'contact_person_name' => ['nullable', 'string', 'max:255'],
+            'contact_person_email' => ['nullable', 'email', 'max:255'],
+            'notes' => ['nullable', 'string'],
+            'business_reviews' => ['sometimes', 'array'],
+            'business_reviews.*.id' => [
+                'nullable',
+                'integer',
+                Rule::exists(SavedNoticeBusinessReview::class, 'id')->where(fn ($query) => $query
+                    ->where('saved_notice_id', $record->id)),
+            ],
+            'business_reviews.*.business_review_at' => ['required', 'date'],
         ]);
 
         $updates = [];
@@ -310,6 +327,10 @@ class NoticeController extends Controller
             'questions_rfp_deadline_at',
             'rfp_submission_deadline_at',
             'award_date_at',
+            'reference_number',
+            'contact_person_name',
+            'contact_person_email',
+            'notes',
         ] as $field) {
             if (array_key_exists($field, $validated)) {
                 $updates[$field] = $validated[$field];
@@ -318,6 +339,10 @@ class NoticeController extends Controller
 
         $record->fill($updates);
         $record->save();
+
+        if (array_key_exists('business_reviews', $validated)) {
+            $this->syncSavedNoticeBusinessReviews($record, is_array($validated['business_reviews']) ? $validated['business_reviews'] : []);
+        }
 
         return redirect()
             ->back()
@@ -475,6 +500,14 @@ class NoticeController extends Controller
             ->with([
                 'opportunityOwner:id,name,bid_role',
                 'bidManager:id,name,bid_role',
+                'businessReviews:id,saved_notice_id,business_review_at',
+                'infoItems' => fn ($query) => $query
+                    ->with([
+                        'owner:id,name,email,bid_role',
+                        'createdBy:id,name,email,bid_role',
+                    ])
+                    ->orderByDesc('created_at')
+                    ->orderByDesc('id'),
                 'phaseComments' => fn ($query) => $query
                     ->with(['user:id,name,email,bid_role'])
                     ->orderBy('created_at'),
@@ -585,6 +618,124 @@ class NoticeController extends Controller
         return redirect()
             ->route('app.notices.saved.show', ['savedNotice' => $record->id])
             ->with('success', 'Kommentaren ble lagret.');
+    }
+
+    public function storeSavedNoticeInfoItem(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'type' => ['required', 'string', Rule::in(SavedNoticeInfoItem::TYPES)],
+            'direction' => ['required', 'string', Rule::in(SavedNoticeInfoItem::DIRECTIONS)],
+            'channel' => ['required', 'string', Rule::in(SavedNoticeInfoItem::CHANNELS)],
+            'subject' => ['nullable', 'string', 'max:255'],
+            'body' => ['required', 'string'],
+            'status' => ['required', 'string', Rule::in(SavedNoticeInfoItem::STATUSES)],
+            'requires_response' => ['nullable', 'boolean'],
+            'response_due_at' => ['nullable', 'date'],
+            'closure_comment' => ['nullable', 'string', 'max:4000'],
+            'owner_user_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                    ->where('customer_id', $customerId)
+                    ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])),
+            ],
+        ]);
+
+        $subject = trim((string) ($validated['subject'] ?? ''));
+        $body = trim((string) $validated['body']);
+
+        if ($body === '') {
+            throw ValidationException::withMessages([
+                'body' => 'Aksjonen kan ikke være tom.',
+            ]);
+        }
+
+        $responseDueAt = isset($validated['response_due_at']) && $validated['response_due_at'] !== null
+            ? Carbon::parse($validated['response_due_at'])->startOfDay()
+            : null;
+        $closureComment = trim((string) ($validated['closure_comment'] ?? ''));
+
+        $record->infoItems()->create([
+            'type' => (string) $validated['type'],
+            'direction' => (string) $validated['direction'],
+            'channel' => (string) $validated['channel'],
+            'subject' => $subject !== '' ? $subject : null,
+            'body' => $body,
+            'status' => (string) $validated['status'],
+            'requires_response' => (bool) ($validated['requires_response'] ?? false),
+            'response_due_at' => $responseDueAt,
+            'owner_user_id' => isset($validated['owner_user_id']) && $validated['owner_user_id'] !== null
+                ? (int) $validated['owner_user_id']
+                : null,
+            'created_by_user_id' => $user->id,
+            'closed_at' => (string) $validated['status'] === SavedNoticeInfoItem::STATUS_CLOSED
+                ? now()
+                : null,
+            'closure_comment' => $closureComment !== '' ? $closureComment : null,
+        ]);
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Aksjonen ble lagret.');
+    }
+
+    public function closeSavedNoticeInfoItem(Request $request, SavedNotice $savedNotice, SavedNoticeInfoItem $infoItem): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        if ($customerId === null) {
+            return redirect()
+                ->back()
+                ->with('error', 'Customer context is required.');
+        }
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereKey($savedNotice->id)
+            ->firstOrFail();
+
+        abort_unless($this->savedNoticeAccess->canManage($user, $record), 403);
+
+        $targetInfoItem = $record->infoItems()
+            ->whereKey($infoItem->id)
+            ->firstOrFail();
+
+        if ($targetInfoItem->status === SavedNoticeInfoItem::STATUS_CLOSED) {
+            return redirect()
+                ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+                ->with('error', 'Aksjonen er allerede lukket.');
+        }
+
+        $validated = $request->validate([
+            'closure_comment' => ['nullable', 'string', 'max:4000'],
+        ]);
+
+        $closureComment = trim((string) ($validated['closure_comment'] ?? ''));
+
+        $targetInfoItem->forceFill([
+            'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+            'closed_at' => now(),
+            'closure_comment' => $closureComment !== '' ? $closureComment : null,
+        ])->save();
+
+        return redirect()
+            ->route('app.notices.saved.show', ['savedNotice' => $record->id])
+            ->with('success', 'Aksjonen ble lukket.');
     }
 
     public function destroySavedNoticeCaseAccess(Request $request, SavedNotice $savedNotice, SavedNoticeUserAccess $caseAccess): RedirectResponse
@@ -876,20 +1027,30 @@ class NoticeController extends Controller
         };
     }
 
-    private function customerSavedNoticeVisibleQuery(User $user): Builder
+    private function customerSavedNoticeVisibleQuery(User $user, ?int $customerId = null, bool $useCockpitScope = false): Builder
     {
+        if ($useCockpitScope) {
+            $customerId ??= $this->customerContext->currentCustomerId($user);
+
+            if ($customerId === null) {
+                return SavedNotice::query()->whereRaw('1 = 0');
+            }
+
+            return $this->savedNoticeAccess->cockpitScopeQueryFor($user, $customerId);
+        }
+
         return $this->savedNoticeAccess->visibleQueryFor($user);
     }
 
-    private function activeSavedNoticeVisibleQuery(User $user): Builder
+    private function activeSavedNoticeVisibleQuery(User $user, ?int $customerId = null, bool $useCockpitScope = false): Builder
     {
-        return $this->customerSavedNoticeVisibleQuery($user)
+        return $this->customerSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)
             ->whereNull('archived_at');
     }
 
-    private function archivedSavedNoticeVisibleQuery(User $user): Builder
+    private function archivedSavedNoticeVisibleQuery(User $user, ?int $customerId = null, bool $useCockpitScope = false): Builder
     {
-        return $this->customerSavedNoticeVisibleQuery($user)
+        return $this->customerSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)
             ->whereNotNull('archived_at');
     }
 
@@ -910,19 +1071,19 @@ class NoticeController extends Controller
             ->whereNotNull('archived_at');
     }
 
-    private function savedNoticeCounts(User $user): array
+    private function savedNoticeCounts(User $user, int $customerId, bool $useCockpitScope = false): array
     {
         return [
-            'saved_count' => $this->activeSavedNoticeVisibleQuery($user)->count(),
-            'history_count' => $this->archivedSavedNoticeVisibleQuery($user)->count(),
+            'saved_count' => $this->activeSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)->count(),
+            'history_count' => $this->archivedSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)->count(),
         ];
     }
 
-    private function savedNoticeResult(Request $request, User $user, string $mode, int $page, int $perPage): array
+    private function savedNoticeResult(Request $request, User $user, string $mode, int $page, int $perPage, int $customerId, bool $useCockpitScope = false): array
     {
         $query = $mode === 'history'
-            ? $this->archivedSavedNoticeVisibleQuery($user)
-            : $this->activeSavedNoticeVisibleQuery($user);
+            ? $this->archivedSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)
+            : $this->activeSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope);
         $bidStatus = trim((string) $request->string('bid_status'));
 
         if ($bidStatus !== '' && in_array($bidStatus, SavedNotice::BID_STATUSES, true)) {
@@ -935,6 +1096,7 @@ class NoticeController extends Controller
                 'savedBy:id,name',
                 'opportunityOwner:id,name',
                 'bidManager:id,name',
+                'businessReviews:id,saved_notice_id,business_review_at',
             ])
             ->withCount('submissions')
             ->orderByDesc('updated_at')
@@ -982,7 +1144,9 @@ class NoticeController extends Controller
             'contact_person_name' => $notice->contact_person_name,
             'contact_person_email' => $notice->contact_person_email,
             'next_deadline_type' => $nextDeadline['type'],
-            'next_deadline_at' => optional($nextDeadline['at'])?->toIso8601String(),
+            'next_deadline_at' => $nextDeadline['type'] === 'Business Review'
+                ? $nextDeadline['at']?->toDateString()
+                : $nextDeadline['at']?->toIso8601String(),
             'deadline_state' => $nextDeadline['state'],
             'saved_by_name' => $notice->savedBy?->name,
             'saved_at' => optional($notice->created_at)?->toIso8601String(),
@@ -993,6 +1157,12 @@ class NoticeController extends Controller
             'questions_rfp_deadline_at' => optional($notice->questions_rfp_deadline_at)?->toIso8601String(),
             'rfp_submission_deadline_at' => optional($notice->rfp_submission_deadline_at)?->toIso8601String(),
             'award_date_at' => optional($notice->award_date_at)?->toIso8601String(),
+            'business_reviews' => $notice->businessReviews
+                ->map(fn (SavedNoticeBusinessReview $businessReview): array => [
+                    'id' => $businessReview->id,
+                    'business_review_at' => $businessReview->business_review_at?->toDateString(),
+                ])
+                ->all(),
             'selected_supplier_name' => $notice->selected_supplier_name,
             'contract_value_mnok' => $notice->contract_value_mnok !== null ? (float) $notice->contract_value_mnok : null,
             'contract_period_text' => $notice->contract_period_text,
@@ -1029,7 +1199,9 @@ class NoticeController extends Controller
             'publication_date' => optional($notice->publication_date)?->toIso8601String(),
             'deadline' => optional($notice->deadline)?->toIso8601String(),
             'next_deadline_type' => $nextDeadline['type'],
-            'next_deadline_at' => optional($nextDeadline['at'])?->toIso8601String(),
+            'next_deadline_at' => $nextDeadline['type'] === 'Business Review'
+                ? $nextDeadline['at']?->toDateString()
+                : $nextDeadline['at']?->toIso8601String(),
             'deadline_state' => $nextDeadline['state'],
             'bid_status' => $notice->bid_status,
             'bid_status_label' => $notice->bid_status_label,
@@ -1043,6 +1215,86 @@ class NoticeController extends Controller
             'contact_person_name' => $notice->contact_person_name,
             'contact_person_email' => $notice->contact_person_email,
             'notes' => $notice->notes,
+            'info_items' => [
+                'can_create' => true,
+                'store_url' => route('app.notices.saved.info-items.store', ['savedNotice' => $notice->id]),
+                'defaults' => [
+                    'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                    'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                    'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                    'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                ],
+                'type_options' => collect(SavedNoticeInfoItem::typeOptions())
+                    ->map(fn (string $label, string $value): array => [
+                        'value' => $value,
+                        'label' => $label,
+                    ])
+                    ->values()
+                    ->all(),
+                'direction_options' => collect(SavedNoticeInfoItem::directionOptions())
+                    ->map(fn (string $label, string $value): array => [
+                        'value' => $value,
+                        'label' => $label,
+                    ])
+                    ->values()
+                    ->all(),
+                'channel_options' => collect(SavedNoticeInfoItem::channelOptions())
+                    ->map(fn (string $label, string $value): array => [
+                        'value' => $value,
+                        'label' => $label,
+                    ])
+                    ->values()
+                    ->all(),
+                'status_options' => collect(SavedNoticeInfoItem::statusOptions())
+                    ->map(fn (string $label, string $value): array => [
+                        'value' => $value,
+                        'label' => $label,
+                    ])
+                    ->values()
+                    ->all(),
+                'owner_options' => $this->customerOpportunityOwnerOptions((int) $notice->customer_id),
+                'items' => $notice->infoItems
+                    ->map(fn (SavedNoticeInfoItem $infoItem): array => [
+                        'id' => $infoItem->id,
+                        'type' => $infoItem->type,
+                        'type_label' => $infoItem->type_label,
+                        'direction' => $infoItem->direction,
+                        'direction_label' => $infoItem->direction_label,
+                        'channel' => $infoItem->channel,
+                        'channel_label' => $infoItem->channel_label,
+                        'subject' => $infoItem->subject,
+                        'body' => $infoItem->body,
+                        'status' => $infoItem->status,
+                        'status_label' => $infoItem->status_label,
+                        'requires_response' => (bool) $infoItem->requires_response,
+                        'response_due_at' => optional($infoItem->response_due_at)?->toDateString(),
+                        'closed_at' => optional($infoItem->closed_at)?->toIso8601String(),
+                        'closure_comment' => $infoItem->closure_comment,
+                        'created_at' => optional($infoItem->created_at)?->toIso8601String(),
+                        'can_close' => $canManageCase && $infoItem->status !== SavedNoticeInfoItem::STATUS_CLOSED,
+                        'close_url' => $canManageCase && $infoItem->status !== SavedNoticeInfoItem::STATUS_CLOSED
+                            ? route('app.notices.saved.info-items.close', [
+                                'savedNotice' => $notice->id,
+                                'infoItem' => $infoItem->id,
+                            ])
+                            : null,
+                        'owner' => $infoItem->owner ? [
+                            'id' => $infoItem->owner->id,
+                            'name' => $infoItem->owner->name,
+                        ] : null,
+                        'created_by' => $infoItem->createdBy ? [
+                            'id' => $infoItem->createdBy->id,
+                            'name' => $infoItem->createdBy->name,
+                        ] : null,
+                    ])
+                    ->all(),
+            ],
+            'business_reviews' => $notice->businessReviews
+                ->map(fn (SavedNoticeBusinessReview $businessReview): array => [
+                    'id' => $businessReview->id,
+                    'business_review_at' => $businessReview->business_review_at?->toDateString(),
+                ])
+                ->all(),
             'saved_at' => optional($notice->created_at)?->toIso8601String(),
             'opportunity_owner' => $notice->opportunityOwner
                 ? [
@@ -1154,6 +1406,57 @@ class NoticeController extends Controller
                     : null,
             ],
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $businessReviews
+     */
+    private function syncSavedNoticeBusinessReviews(SavedNotice $notice, array $businessReviews): void
+    {
+        $existingReviews = $notice->businessReviews()
+            ->get()
+            ->keyBy('id');
+        $keptReviewIds = [];
+
+        foreach ($businessReviews as $reviewData) {
+            if (! is_array($reviewData)) {
+                continue;
+            }
+
+            $reviewId = isset($reviewData['id']) && $reviewData['id'] !== ''
+                ? (int) $reviewData['id']
+                : null;
+            $businessReviewAt = $reviewData['business_review_at'] ?? null;
+            $normalizedBusinessReviewAt = $businessReviewAt !== null
+                ? Carbon::parse($businessReviewAt)->startOfDay()
+                : null;
+
+            if ($reviewId !== null && $existingReviews->has($reviewId)) {
+                $review = $existingReviews->get($reviewId);
+
+                $review->forceFill([
+                    'business_review_at' => $normalizedBusinessReviewAt,
+                ])->save();
+
+                $keptReviewIds[] = $review->id;
+
+                continue;
+            }
+
+            $review = $notice->businessReviews()->create([
+                'business_review_at' => $normalizedBusinessReviewAt,
+            ]);
+
+            $keptReviewIds[] = $review->id;
+        }
+
+        $notice->businessReviews()
+            ->when($keptReviewIds !== [], function (Builder $query) use ($keptReviewIds): Builder {
+                return $query->whereNotIn('id', $keptReviewIds);
+            }, function (Builder $query): Builder {
+                return $query;
+            })
+            ->delete();
     }
 
     private function grantSavedNoticeAccess(SavedNotice $notice, User $grantedBy, User $user, string $accessRole): void
@@ -1270,6 +1573,13 @@ class NoticeController extends Controller
     private function nextRelevantSavedNoticeDeadline(SavedNotice $notice): array
     {
         $now = now();
+        $businessReviewCandidates = $notice->businessReviews
+            ->map(fn (SavedNoticeBusinessReview $businessReview): array => [
+                'type' => 'Business Review',
+                'at' => $businessReview->business_review_at,
+            ])
+            ->filter(fn (array $candidate): bool => $candidate['at'] !== null)
+            ->values();
         $candidates = collect([
             [
                 'type' => 'RFI',
@@ -1279,7 +1589,10 @@ class NoticeController extends Controller
                 'type' => 'RFP',
                 'at' => $notice->rfp_submission_deadline_at,
             ],
-        ])->filter(fn (array $candidate): bool => $candidate['at'] !== null)->values();
+        ])
+            ->merge($businessReviewCandidates)
+            ->filter(fn (array $candidate): bool => $candidate['at'] !== null)
+            ->values();
 
         $upcoming = $candidates
             ->filter(fn (array $candidate): bool => $candidate['at']->greaterThan($now))

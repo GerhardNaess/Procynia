@@ -63,6 +63,7 @@ return [
         'saved_searches_nav' => 'Saved searches',
         'alerts_nav' => 'Alerts',
         'worklist_nav' => 'Worklist',
+        'infosenter_nav' => 'Info center',
         'customer_area' => 'Customer area',
         'customer_footer' => 'Procynia AS · Customer area',
         'customer_access_required' => 'This user does not have access to the customer area.',

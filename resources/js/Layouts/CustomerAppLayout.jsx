@@ -88,12 +88,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'suppliers';
         }
 
-        if (pathname.startsWith('/app/inbox/')) {
-            return 'inbox';
-        }
-
         if (pathname.startsWith('/app/watch-profiles')) {
             return 'watch-profiles';
+        }
+
+        if (pathname.startsWith('/app/info-center')) {
+            return 'info-center';
         }
 
         if (
@@ -111,7 +111,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'overview', label: 'Oversikt', href: '/app/dashboard' },
         { key: 'procurements', label: 'Kunngjøringer', href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
-        { key: 'inbox', label: 'Inbox', href: '/app/inbox/user' },
+        { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
         { key: 'suppliers', label: 'Konkurrenter', href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: 'Watch lists', href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: 'Kundemiljø', href: environmentHref }] : []),
@@ -141,13 +141,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             ];
         }
 
-        if (activeMainArea === 'inbox') {
-            return [
-                { key: 'user-inbox', label: 'Min innboks', href: '/app/inbox/user' },
-                ...(user?.can_access_department_inbox ? [{ key: 'department-inbox', label: 'Avdelingsinnboks', href: '/app/inbox/department' }] : []),
-            ];
-        }
-
         return [];
     })();
 
@@ -166,10 +159,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         if (activeMainArea === 'worklist') {
             return noticeMode === 'history' ? 'history' : 'saved';
-        }
-
-        if (activeMainArea === 'inbox') {
-            return pathname.startsWith('/app/inbox/department') ? 'department-inbox' : 'user-inbox';
         }
 
         return null;

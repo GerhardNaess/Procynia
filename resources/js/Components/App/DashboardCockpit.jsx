@@ -80,8 +80,16 @@ function toDateKey(date) {
     return `${year}-${month}-${day}`;
 }
 
-function buildCalendarDays(monthStartIso) {
-    const monthStart = monthStartIso ? new Date(monthStartIso) : new Date();
+function startOfMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date, amount) {
+    return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+}
+
+function buildCalendarDays(monthStartValue, locale = 'nb-NO') {
+    const monthStart = monthStartValue ? new Date(monthStartValue) : new Date();
     const firstOfMonth = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
     const offset = (firstOfMonth.getDay() + 6) % 7;
     const firstCell = new Date(firstOfMonth);
@@ -103,12 +111,45 @@ function buildCalendarDays(monthStartIso) {
     }
 
     return {
-        monthLabel: new Intl.DateTimeFormat('nb-NO', {
+        monthLabel: new Intl.DateTimeFormat(locale, {
             month: 'long',
             year: 'numeric',
         }).format(firstOfMonth),
+        monthValue: `${firstOfMonth.getFullYear()}-${String(firstOfMonth.getMonth() + 1).padStart(2, '0')}`,
+        yearValue: String(firstOfMonth.getFullYear()),
         days,
     };
+}
+
+function buildCalendarYearOptions(deadlineItems, fallbackDate) {
+    const years = new Set();
+
+    deadlineItems.forEach((item) => {
+        if (!item?.date) {
+            return;
+        }
+
+        years.add(new Date(item.date).getFullYear());
+    });
+
+    const fallbackYear = fallbackDate.getFullYear();
+
+    for (let year = fallbackYear - 2; year <= fallbackYear + 2; year += 1) {
+        years.add(year);
+    }
+
+    return Array.from(years).sort((left, right) => left - right);
+}
+
+function buildMonthOptions(locale = 'nb-NO') {
+    return Array.from({ length: 12 }, (_, index) => {
+        const date = new Date(2026, index, 1);
+
+        return {
+            value: String(index),
+            label: new Intl.DateTimeFormat(locale, { month: 'long' }).format(date),
+        };
+    });
 }
 
 const DASHBOARD_INFO_TEXTS = {
@@ -116,8 +157,8 @@ const DASHBOARD_INFO_TEXTS = {
     'attention_missing-bid-manager': 'Viser saker som mangler eksplisitt operativt ansvar.',
     'attention_go-no-go-pending': 'Viser saker i beslutningsfase uten endelig utfall.',
     'attention_inactive-seven-days': 'Viser saker uten kommentarer eller innsendinger de siste 7 dagene.',
-    attention: 'Viser sakene som bør følges opp først. Tallene samler frister, ansvar, beslutninger og aktivitet som krever handling nå.',
-    deadlines: 'Viser markerte operative frister i valgt måned. Bruk kalenderen til å finne frister som nærmer seg eller allerede er passert.',
+    attention: 'Viser sakene som bør følges opp først. Tallene samler frister, Business Reviews, ansvar, beslutninger og aktivitet som krever handling nå.',
+    deadlines: 'Viser markerte operative frister og Business Reviews i valgt måned. Bruk kalenderen til å finne datoer som nærmer seg eller allerede er passert.',
     portfolio: 'Gir rask status på saksporteføljen. Bruk denne gruppen for å se totalvolum, aktive saker og saker som allerede har fått et registrert utfall.',
     portfolio_total: 'Viser alle saker i porteføljen, både aktive saker og saker som allerede er avsluttet.',
     portfolio_active: 'Viser saker som fortsatt følges opp operativt og ikke har nådd et registrert utfall.',
@@ -125,15 +166,15 @@ const DASHBOARD_INFO_TEXTS = {
     pipeline_quality: 'Viser hvor sakene stopper opp og hvor raskt de går videre mellom hovedstegene.',
     pipeline_quality_qualifying_to_go_no_go: 'Andel saker som går fra kvalifisering til beslutningsfase.',
     pipeline_quality_go_no_go_to_in_progress: 'Andel saker som går fra beslutning til aktivt arbeid.',
-    responsibility_activity: 'Viser hvem som har ansvar, og om porteføljen holdes i gang med jevn aktivitet.',
-    responsibility_bid_manager_count: 'Antall saker som har en eksplisitt bid-manager.',
-    responsibility_opportunity_owner_count: 'Antall saker som har en eksplisitt kommersiell eier.',
-    responsibility_bid_manager_people: 'Hvilke bid-managere som har flest saker akkurat nå.',
-    responsibility_opportunity_owner_people: 'Hvilke kommersielle eiere som har flest saker akkurat nå.',
-    responsibility_last_comment: 'Hvor nylig det sist ble kommentert på en sak.',
-    responsibility_activity_14_days: 'Hvor mange aktiviteter som har skjedd de siste 14 dagene.',
-    responsibility_last_activity: 'Hvor nylig det sist var aktivitet i porteføljen.',
-    responsibility_inactive_7_days: 'Saker som ikke har hatt aktivitet de siste 7 dagene.',
+    responsibility_activity: 'Viser sakene i cockpit-skopet, watch lists og aktivitet.',
+    responsibility_bid_manager_cases: 'Antall saker i cockpit-skopet med bid-manager.',
+    responsibility_opportunity_owner_cases: 'Antall saker i cockpit-skopet med kommersiell eier.',
+    responsibility_saved_watch_lists: 'Antall watch lists du har lagret.',
+    responsibility_contributor_cases: 'Antall saker i cockpit-skopet med aktiv bidragsyter-tilgang.',
+    responsibility_last_comment: 'Hvor nylig det sist ble kommentert på en sak i cockpit-skopet.',
+    responsibility_activity_14_days: 'Hvor mange aktiviteter som har skjedd på saker i cockpit-skopet de siste 14 dagene.',
+    responsibility_last_activity: 'Hvor nylig det sist var aktivitet på en sak i cockpit-skopet.',
+    responsibility_inactive_7_days: 'Saker i cockpit-skopet som ikke har hatt aktivitet de siste 7 dagene.',
     pipeline_stages: 'Viser volum og gjennomsnittlig tempo i hver fase.',
     stage_discovered: 'Saker som nettopp er oppdaget og ennå ikke er startet opp.',
     stage_qualifying: 'Saker som vurderes før videre beslutning.',
@@ -317,8 +358,10 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
     const deadlines = cockpit?.deadlines ?? { month_start: null, month_label: '', items: [], upcoming: [] };
     const pipelineQuality = cockpit?.pipeline_quality ?? { conversions: [], stages: [], warning: null };
     const responsibility = cockpit?.responsibility_activity ?? {
-        bid_managers: { assigned_count: 0, people: [] },
-        opportunity_owners: { assigned_count: 0, people: [] },
+        bid_manager_cases_count: 0,
+        opportunity_owner_cases_count: 0,
+        saved_watch_lists_count: 0,
+        contributor_cases_count: 0,
         activity: {
             last_comment_at: null,
             last_activity_at: null,
@@ -328,7 +371,22 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
     };
     const outcomes = cockpit?.outcomes ?? [];
     const deadlineGroups = useMemo(() => groupByDate(deadlines.items ?? []), [deadlines.items]);
-    const calendar = useMemo(() => buildCalendarDays(deadlines.month_start), [deadlines.month_start]);
+    const initialCalendarDate = useMemo(() => {
+        if (deadlines.month_start) {
+            return startOfMonth(new Date(deadlines.month_start));
+        }
+
+        return startOfMonth(new Date());
+    }, [deadlines.month_start]);
+    const [visibleMonthStart, setVisibleMonthStart] = useState(initialCalendarDate);
+    const [selectedDateKey, setSelectedDateKey] = useState(null);
+    const [jumpDateValue, setJumpDateValue] = useState('');
+    const calendar = useMemo(() => buildCalendarDays(visibleMonthStart, locale), [visibleMonthStart, locale]);
+    const monthOptions = useMemo(() => buildMonthOptions(locale), [locale]);
+    const calendarYearOptions = useMemo(
+        () => buildCalendarYearOptions(deadlines.items ?? [], initialCalendarDate),
+        [deadlines.items, initialCalendarDate],
+    );
     const stageMax = Math.max(...(pipelineQuality.stages ?? []).map((stage) => Number(stage.count ?? 0)), 1);
 
     return (
@@ -342,7 +400,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                 </p>
             </section>
 
-            <div className="grid gap-6 xl:grid-cols-12 xl:items-stretch">
+            <div className="grid gap-5 xl:grid-cols-12 xl:items-stretch">
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
                         title="Oppmerksomhet nå"
@@ -351,14 +409,15 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full border-rose-200 bg-rose-50/70"
+                        dense
                     >
-                        <div className="space-y-2.5">
+                        <div className="space-y-2">
                             {attentionItems.length > 0 ? attentionItems.map((item) => (
                                 <Link
                                     key={item.key}
                                     href={item.href}
                                     className={classNames(
-                                        'group flex items-center gap-4 rounded-2xl border px-4 py-3 transition',
+                                        'group flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
                                         item.severity === 'danger'
                                             ? 'border-rose-200 bg-white hover:border-rose-300 hover:bg-rose-50'
                                             : item.severity === 'warning'
@@ -371,7 +430,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         <div className="truncate text-sm font-semibold text-slate-950">
                                             {item.title}
                                         </div>
-                                        <div className="mt-0.5 text-xs leading-5 text-slate-500">
+                                        <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
                                             {item.subtitle}
                                         </div>
                                     </div>
@@ -387,7 +446,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                     </span>
                                 </Link>
                             )) : (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
                                     Ingen saker krever umiddelbar oppmerksomhet.
                                 </div>
                             )}
@@ -398,26 +457,119 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
                         title="Fristkalender"
-                        subtitle={`Markerte frister for ${calendar.monthLabel}`}
+                        subtitle={`Markerte frister og Business Reviews for ${calendar.monthLabel}`}
                         infoKey="deadlines"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full border-violet-200 bg-violet-50/60"
+                        dense
                     >
-                        <div className="space-y-4">
-                            <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                    <div className="text-sm font-semibold text-slate-900">
-                                        {calendar.monthLabel}
+                        <div className="space-y-3">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-2.5">
+                                <div className="flex flex-col gap-2.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                aria-label="Forrige måned"
+                                                onClick={() => setVisibleMonthStart((current) => addMonths(current, -1))}
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                            >
+                                                ←
+                                            </button>
+                                            <div className="text-[15px] font-semibold capitalize text-slate-900">
+                                                {calendar.monthLabel}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                aria-label="Neste måned"
+                                                onClick={() => setVisibleMonthStart((current) => addMonths(current, 1))}
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+                                            >
+                                                →
+                                            </button>
+                                        </div>
+                                        <div className="text-[11px] text-slate-500">
+                                            Hold over markerte dager for detaljer
+                                        </div>
                                     </div>
-                                    <div className="text-xs text-slate-500">
-                                        Hover markerte dager for detaljer
+
+                                    <div className="grid gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,0.8fr)_minmax(0,1.1fr)]">
+                                        <label className="block">
+                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Måned
+                                            </span>
+                                            <select
+                                                value={String(visibleMonthStart.getMonth())}
+                                                onChange={(event) => {
+                                                    const nextMonth = Number(event.target.value);
+                                                    setVisibleMonthStart(new Date(visibleMonthStart.getFullYear(), nextMonth, 1));
+                                                }}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                            >
+                                                {monthOptions.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <label className="block">
+                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                År
+                                            </span>
+                                            <select
+                                                value={calendar.yearValue}
+                                                onChange={(event) => {
+                                                    const nextYear = Number(event.target.value);
+                                                    setVisibleMonthStart(new Date(nextYear, visibleMonthStart.getMonth(), 1));
+                                                }}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                            >
+                                                {calendarYearOptions.map((year) => (
+                                                    <option key={year} value={String(year)}>
+                                                        {year}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
+
+                                        <div>
+                                            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="deadline-date-jump">
+                                                Gå til dato
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    id="deadline-date-jump"
+                                                    type="date"
+                                                    value={jumpDateValue}
+                                                    onChange={(event) => setJumpDateValue(event.target.value)}
+                                                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-200"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!jumpDateValue) {
+                                                            return;
+                                                        }
+
+                                                        const nextDate = new Date(`${jumpDateValue}T00:00:00`);
+                                                        setVisibleMonthStart(startOfMonth(nextDate));
+                                                        setSelectedDateKey(toDateKey(nextDate));
+                                                    }}
+                                                    className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+                                                >
+                                                    Vis
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-7 gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="mt-2 grid grid-cols-7 gap-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     {['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'].map((label) => (
-                                        <div key={label} className="px-1 py-1 text-center">
+                                        <div key={label} className="px-1 py-0.5 text-center">
                                             {label}
                                         </div>
                                     ))}
@@ -426,14 +578,18 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                 <div className="mt-1 grid grid-cols-7 gap-0.5">
                                     {calendar.days.map((day) => {
                                         const items = deadlineGroups[day.dateKey] ?? [];
+                                        const isSelected = selectedDateKey === day.dateKey;
 
                                         return (
-                                            <div
+                                            <button
                                                 key={day.dateKey}
+                                                type="button"
+                                                onClick={() => setSelectedDateKey(day.dateKey)}
                                                 className={classNames(
-                                                    'group relative min-h-12 rounded-2xl border px-1 py-1 transition',
+                                                    'group relative min-h-10 rounded-xl border px-1 py-0.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
                                                     day.inCurrentMonth ? 'border-slate-200 bg-white' : 'border-slate-100 bg-slate-50/70 text-slate-300',
                                                     day.isToday ? 'ring-2 ring-violet-200' : '',
+                                                    isSelected ? 'border-violet-400 bg-violet-50' : '',
                                                 )}
                                             >
                                                 <div className="flex items-start justify-between gap-2">
@@ -441,7 +597,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                                         {day.dayOfMonth}
                                                     </div>
                                                     {items.length > 0 ? (
-                                                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-100 px-1 text-[10px] font-semibold text-violet-700">
+                                                        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-100 px-1 text-[9px] font-semibold text-violet-700">
                                                             {items.length}
                                                         </span>
                                                     ) : null}
@@ -450,7 +606,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                                 {items.length > 0 ? (
                                                     <DeadlinePopover items={items} locale={locale} />
                                                 ) : null}
-                                            </div>
+                                            </button>
                                         );
                                     })}
                                 </div>
@@ -551,101 +707,64 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                 <div className="xl:col-span-4">
                     <Card
                         title="Ansvar & Aktivitet"
-                        subtitle="Hvem som eier tempo og oppfølging."
+                        subtitle="Saker i cockpit-skopet, watch lists og aktivitet."
                         infoKey="responsibility_activity"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
                     >
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Bid-manager"
-                                    infoKey="responsibility_bid_manager_count"
+                                    title="Saker med bid-manager"
+                                    infoKey="responsibility_bid_manager_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                        {formatNumber(responsibility.bid_managers.assigned_count ?? 0, locale)}
+                                        {formatNumber(responsibility.bid_manager_cases_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                                 <InfoTile
-                                    title="Kommersiell eier"
-                                    infoKey="responsibility_opportunity_owner_count"
+                                    title="Saker med kommersiell eier"
+                                    infoKey="responsibility_opportunity_owner_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                        {formatNumber(responsibility.opportunity_owners.assigned_count ?? 0, locale)}
+                                        {formatNumber(responsibility.opportunity_owner_cases_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                             </div>
 
-                            <div className="grid gap-3 lg:grid-cols-2">
+                            <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Ansvarlige bid-managere"
-                                    infoKey="responsibility_bid_manager_people"
+                                    title="Lagrede watch lists"
+                                    infoKey="responsibility_saved_watch_lists"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-white px-4 py-4"
+                                    className="border-slate-200 bg-slate-50/70 px-4 py-3"
                                 >
-                                    <div className="mt-3 space-y-2">
-                                        {(responsibility.bid_managers.people ?? []).length > 0 ? responsibility.bid_managers.people.map((person) => (
-                                            <div key={`bid-manager-${person.id}`} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
-                                                <div className="min-w-0">
-                                                    <div className="truncate text-sm font-medium text-slate-950">
-                                                        {person.name}
-                                                    </div>
-                                                    <div className="text-xs text-slate-500">
-                                                        {person.count} saker
-                                                    </div>
-                                                </div>
-                                                <div className="text-sm font-semibold text-slate-700">
-                                                    {formatNumber(person.count, locale)}
-                                                </div>
-                                            </div>
-                                        )) : (
-                                            <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
-                                                Ingen bid-managere med saker akkurat nå.
-                                            </div>
-                                        )}
+                                    <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                                        {formatNumber(responsibility.saved_watch_lists_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
-
                                 <InfoTile
-                                    title="Kommersielle eiere"
-                                    infoKey="responsibility_opportunity_owner_people"
+                                    title="Saker med bidragsyter"
+                                    infoKey="responsibility_contributor_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-white px-4 py-4"
+                                    className="border-slate-200 bg-slate-50/70 px-4 py-3"
                                 >
-                                    <div className="mt-3 space-y-2">
-                                        {(responsibility.opportunity_owners.people ?? []).length > 0 ? responsibility.opportunity_owners.people.map((person) => (
-                                            <div key={`owner-${person.id}`} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2">
-                                                <div className="min-w-0">
-                                                    <div className="truncate text-sm font-medium text-slate-950">
-                                                        {person.name}
-                                                    </div>
-                                                    <div className="text-xs text-slate-500">
-                                                        {person.count} saker
-                                                    </div>
-                                                </div>
-                                                <div className="text-sm font-semibold text-slate-700">
-                                                    {formatNumber(person.count, locale)}
-                                                </div>
-                                            </div>
-                                        )) : (
-                                            <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-sm text-slate-500">
-                                                Ingen kommersielle eiere med saker akkurat nå.
-                                            </div>
-                                        )}
+                                    <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
+                                        {formatNumber(responsibility.contributor_cases_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                             </div>
 
-                            <div className="grid gap-3 sm:grid-cols-4">
+                            <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
                                     title="Siste kommentar"
                                     infoKey="responsibility_last_comment"
@@ -657,17 +776,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         {formatRelativeTime(responsibility.activity.last_comment_at, locale)}
                                     </div>
                                 </InfoTile>
-                                <InfoTile
-                                    title="Aktivitet 14 dager"
-                                    infoKey="responsibility_activity_14_days"
-                                    openInfoKey={openInfoKey}
-                                    setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-violet-50/70 px-4 py-3"
-                                >
-                                    <div className="mt-1 text-base font-semibold text-slate-950">
-                                        {formatNumber(responsibility.activity.activity_count_14_days ?? 0, locale)}
-                                    </div>
-                                </InfoTile>
+
                                 <InfoTile
                                     title="Siste aktivitet"
                                     infoKey="responsibility_last_activity"
@@ -679,6 +788,20 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         {formatRelativeTime(responsibility.activity.last_activity_at, locale)}
                                     </div>
                                 </InfoTile>
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <InfoTile
+                                    title="Aktivitet siste 14 dager"
+                                    infoKey="responsibility_activity_14_days"
+                                    openInfoKey={openInfoKey}
+                                    setOpenInfoKey={setOpenInfoKey}
+                                    className="border-slate-200 bg-violet-50/70 px-4 py-3"
+                                >
+                                    <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                                        {formatNumber(responsibility.activity.activity_count_14_days ?? 0, locale)}
+                                    </div>
+                                </InfoTile>
                                 <InfoTile
                                     title="Uten aktivitet 7 dager"
                                     infoKey="responsibility_inactive_7_days"
@@ -686,7 +809,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-amber-50/70 px-4 py-3"
                                 >
-                                    <div className="mt-1 text-base font-semibold text-slate-950">
+                                    <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.activity.inactive_7_days_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>

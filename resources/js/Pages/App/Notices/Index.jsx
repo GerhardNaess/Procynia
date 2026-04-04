@@ -146,19 +146,6 @@ function BellIcon(props) {
     );
 }
 
-function ListIcon(props) {
-    return (
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
-            <path d="M7 5h9" strokeLinecap="round" />
-            <path d="M7 10h9" strokeLinecap="round" />
-            <path d="M7 15h9" strokeLinecap="round" />
-            <path d="M4 5h.01" strokeLinecap="round" />
-            <path d="M4 10h.01" strokeLinecap="round" />
-            <path d="M4 15h.01" strokeLinecap="round" />
-        </svg>
-    );
-}
-
 function BuildingIcon(props) {
     return (
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
@@ -594,6 +581,11 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         questions_rfp_deadline_at: '',
         rfp_submission_deadline_at: '',
         award_date_at: '',
+        reference_number: '',
+        contact_person_name: '',
+        contact_person_email: '',
+        notes: '',
+        business_reviews: [],
     });
     const historyForm = useForm({
         selected_supplier_name: '',
@@ -624,10 +616,6 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         (value) => (value ?? '').trim() !== '',
     );
     const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements);
-    const worklistSummary = [
-        { key: 'saved', label: 'Registrerte kunngjøringer', count: worklist?.saved_count ?? 0 },
-        { key: 'history', label: 'Historikk', count: worklist?.history_count ?? 0 },
-    ];
     const canManageWatchProfiles = Boolean(auth?.user?.can_manage_watch_profiles);
     const monitoringHitsCount = Number(monitoring?.new_hits_last_day_count ?? 0);
     const monitoringHitsLabel = monitoringHitsCount === 1 ? '1 nytt treff siste døgn' : `${monitoringHitsCount} nye treff siste døgn`;
@@ -679,28 +667,6 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             historyForm.clearErrors();
         }
     }, [isHistoryMode]);
-
-    const visitMode = (nextMode) => {
-        router.get(
-            '/app/notices',
-            buildNoticeQuery({
-                mode: nextMode,
-                q: filters.q,
-                organization_name: filters.organization_name,
-                cpv: filters.cpv,
-                keywords: filters.keywords,
-                publication_period: filters.publication_period,
-                status: filters.status,
-                relevance: filters.relevance,
-                bid_status: filters.bid_status,
-            }),
-            {
-                preserveState: true,
-                preserveScroll: true,
-                replace: true,
-            },
-        );
-    };
 
     const saveNotice = (notice) => {
         router.post(
@@ -779,6 +745,14 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
             rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
             award_date_at: dateInputValue(notice.award_date_at),
+            reference_number: notice.reference_number ?? '',
+            contact_person_name: notice.contact_person_name ?? '',
+            contact_person_email: notice.contact_person_email ?? '',
+            notes: notice.notes ?? '',
+            business_reviews: (notice.business_reviews ?? []).map((review) => ({
+                id: review.id,
+                business_review_at: dateInputValue(review.business_review_at),
+            })),
         });
     };
 
@@ -798,6 +772,31 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 deadlineForm.clearErrors();
             },
         });
+    };
+
+    const addBusinessReview = () => {
+        deadlineForm.setData('business_reviews', [
+            ...deadlineForm.data.business_reviews,
+            { id: null, business_review_at: '' },
+        ]);
+    };
+
+    const updateBusinessReviewAt = (index, value) => {
+        deadlineForm.setData(
+            'business_reviews',
+            deadlineForm.data.business_reviews.map((review, currentIndex) => (
+                currentIndex === index
+                    ? { ...review, business_review_at: value }
+                    : review
+            )),
+        );
+    };
+
+    const removeBusinessReview = (index) => {
+        deadlineForm.setData(
+            'business_reviews',
+            deadlineForm.data.business_reviews.filter((_, currentIndex) => currentIndex !== index),
+        );
     };
 
     const openHistoryEditor = (notice) => {
@@ -903,6 +902,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 keywords,
                 publication_period: publicationDate,
                 status,
+                cockpit_scope: filters.cockpit_scope,
             }),
             {
                 preserveState: true,
@@ -926,6 +926,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             '/app/notices',
             {
                 mode: 'live',
+                cockpit_scope: filters.cockpit_scope,
             },
             {
                 preserveState: true,
@@ -949,6 +950,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 status: filters.status,
                 relevance: filters.relevance,
                 bid_status: nextBidStatus,
+                cockpit_scope: filters.cockpit_scope,
             }),
             {
                 preserveState: true,
@@ -1468,6 +1470,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                 className: 'bg-slate-100 text-slate-700 ring-slate-200',
                                             };
                                         const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest ? savedNoticeTimelineSteps(notice) : [];
+                                        const businessReviews = (notice.business_reviews ?? []).filter((review) => review.business_review_at);
                                         const isDetailsExpanded = Boolean(expandedSavedNoticeIds[notice.id]);
                                         const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
                                         const isEditingHistory = isHistoryMode && editingHistoryNoticeId === notice.id;
@@ -1553,24 +1556,125 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                             </p>
                                                                         </div>
                                                                     </div>
-                                                                    <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                                                                        {privateRequestSummaryFields(notice, locale).map((field) => (
-                                                                            <div
-                                                                                key={field.key}
-                                                                                className={classNames(
-                                                                                    'rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]',
-                                                                                    field.span ? 'sm:col-span-2' : '',
-                                                                                )}
-                                                                            >
-                                                                                <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                    {field.label}
-                                                                                </dt>
-                                                                                <dd className="mt-1 text-sm font-medium leading-6 text-slate-900">
-                                                                                    {field.value}
-                                                                                </dd>
+                                                                    {isEditingDeadlines ? (
+                                                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                                            <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                                                <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : 'Ikke registrert'}
+                                                                                </div>
                                                                             </div>
-                                                                        ))}
-                                                                    </dl>
+                                                                            <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                                                <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                    {notice.buyer_name || 'Ikke registrert'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                                                                <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                    {notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="space-y-1.5">
+                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`reference_number_${notice.id}`}>
+                                                                                    Referanse
+                                                                                </label>
+                                                                                <input
+                                                                                    id={`reference_number_${notice.id}`}
+                                                                                    type="text"
+                                                                                    value={deadlineForm.data.reference_number}
+                                                                                    onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                />
+                                                                                {deadlineForm.errors.reference_number ? (
+                                                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.reference_number}</p>
+                                                                                ) : null}
+                                                                            </div>
+                                                                            <div className="space-y-1.5">
+                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`contact_person_name_${notice.id}`}>
+                                                                                    Kontaktperson
+                                                                                </label>
+                                                                                <input
+                                                                                    id={`contact_person_name_${notice.id}`}
+                                                                                    type="text"
+                                                                                    value={deadlineForm.data.contact_person_name}
+                                                                                    onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                />
+                                                                                {deadlineForm.errors.contact_person_name ? (
+                                                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_name}</p>
+                                                                                ) : null}
+                                                                            </div>
+                                                                            <div className="space-y-1.5">
+                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`contact_person_email_${notice.id}`}>
+                                                                                    Kontakt e-post
+                                                                                </label>
+                                                                                <input
+                                                                                    id={`contact_person_email_${notice.id}`}
+                                                                                    type="email"
+                                                                                    value={deadlineForm.data.contact_person_email}
+                                                                                    onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                />
+                                                                                {deadlineForm.errors.contact_person_email ? (
+                                                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_email}</p>
+                                                                                ) : null}
+                                                                            </div>
+                                                                            <div className="sm:col-span-2">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                                                <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                    {notice.external_url ? (
+                                                                                        <a
+                                                                                            href={notice.external_url}
+                                                                                            target="_blank"
+                                                                                            rel="noreferrer"
+                                                                                            className="font-medium text-violet-700 transition hover:text-violet-800"
+                                                                                        >
+                                                                                            {noticeExternalLinkLabel(notice)}
+                                                                                        </a>
+                                                                                    ) : (
+                                                                                        'Ikke registrert'
+                                                                                    )}
+                                                                                </div>
+                                                                            </div>
+                                                                            <div className="sm:col-span-2 space-y-1.5">
+                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`notes_${notice.id}`}>
+                                                                                    Notater
+                                                                                </label>
+                                                                                <textarea
+                                                                                    id={`notes_${notice.id}`}
+                                                                                    value={deadlineForm.data.notes}
+                                                                                    onChange={(event) => deadlineForm.setData('notes', event.target.value)}
+                                                                                    rows={4}
+                                                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    placeholder="Valgfritt notat"
+                                                                                />
+                                                                                {deadlineForm.errors.notes ? (
+                                                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.notes}</p>
+                                                                                ) : null}
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                                            {privateRequestSummaryFields(notice, locale).map((field) => (
+                                                                                <div
+                                                                                    key={field.key}
+                                                                                    className={classNames(
+                                                                                        'rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]',
+                                                                                        field.span ? 'sm:col-span-2' : '',
+                                                                                    )}
+                                                                                >
+                                                                                    <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                        {field.label}
+                                                                                    </dt>
+                                                                                    <dd className="mt-1 text-sm font-medium leading-6 text-slate-900">
+                                                                                        {field.value}
+                                                                                    </dd>
+                                                                                </div>
+                                                                            ))}
+                                                                        </dl>
+                                                                    )}
                                                                 </div>
                                                             ) : timelineSteps.length > 0 ? (
                                                                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
@@ -1604,78 +1708,32 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                             );
                                                                         })}
                                                                     </div>
+                                                                    {businessReviews.length > 0 ? (
+                                                                        <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
+                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                                                Business Review
+                                                                            </div>
+                                                                            <div className="mt-3 space-y-3">
+                                                                                {businessReviews.map((review) => (
+                                                                                    <div key={review.id} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5">
+                                                                                        <span
+                                                                                            className="h-3 w-3 rounded-full bg-blue-700 ring-4 ring-blue-100"
+                                                                                            aria-hidden="true"
+                                                                                        />
+                                                                                        <div className="min-w-0">
+                                                                                            <div className="text-sm font-medium text-slate-900">
+                                                                                                {formatDate(review.business_review_at, locale)}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : null}
                                                                 </div>
                                                             ) : null
                                                         ) : null}
 
-                                                        <div className="mt-4 flex flex-wrap gap-2">
-                                                            <span
-                                                                className={classNames(
-                                                                    'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
-                                                                    noticeSourceBadgeClassName(notice),
-                                                                )}
-                                                            >
-                                                                <CalendarIcon className="h-3.5 w-3.5" />
-                                                                {noticeSourceTypeLabel(notice)}
-                                                            </span>
-                                                            <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                <CalendarIcon className="h-3.5 w-3.5" />
-                                                                {noticeSourceTimelineLabel(notice, locale)}
-                                                            </span>
-                                                            <span
-                                                                className={classNames(
-                                                                    'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
-                                                                    deadlineBadge.className,
-                                                                )}
-                                                            >
-                                                                <ClockIcon className="h-3.5 w-3.5" />
-                                                                {deadlineBadge.label}
-                                                            </span>
-                                                            {isPrivateRequest ? (
-                                                                <span className="inline-flex items-center gap-2 rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                                    {notice.reference_number ? `Referanse: ${notice.reference_number}` : 'Privat forespørsel'}
-                                                                </span>
-                                                            ) : (
-                                                                <>
-                                                                    <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                                                                        Publisert {formatDate(notice.publication_date, locale)}
-                                                                    </span>
-                                                                    <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                                                                        {notice.cpv_code ? `CPV: ${notice.cpv_code}` : 'Kategori: Doffin-kunngjøring'}
-                                                                    </span>
-                                                                </>
-                                                            )}
-                                                            {isSavedOrHistoryMode && notice.bid_status_label ? (
-                                                                <span
-                                                                    className={classNames(
-                                                                        'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
-                                                                        bidStatusBadgeClassName(notice.bid_status),
-                                                                    )}
-                                                                >
-                                                                    {notice.bid_status_label}
-                                                                </span>
-                                                            ) : null}
-                                                            {isSavedOrHistoryMode && notice.opportunity_owner_name ? (
-                                                                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                    Kommersiell eier: {notice.opportunity_owner_name}
-                                                                </span>
-                                                            ) : null}
-                                                            {isSavedOrHistoryMode && notice.submissions_count > 0 ? (
-                                                                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                    {notice.submissions_count} innsendinger
-                                                                </span>
-                                                            ) : null}
-                                                            {isLiveMode || notice.status ? (
-                                                                <span
-                                                                    className={classNames(
-                                                                        'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset',
-                                                                        statusTag.className,
-                                                                    )}
-                                                                >
-                                                                    {statusTag.label}
-                                                                </span>
-                                                            ) : null}
-                                                        </div>
                                                     </div>
 
                                                     <div className="flex shrink-0 flex-row gap-3 lg:flex-col">
@@ -1721,7 +1779,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                                 >
-                                                                Rediger frister
+                                                                Rediger
                                                             </button>
                                                         ) : null}
                                                         {isLiveMode ? (
@@ -1828,7 +1886,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                                 <span>Ikke registrert</span>
                                                                             )}
                                                                         </div>
-                                                                        {notice.notes ? (
+                                                                        {notice.notes && !isEditingDeadlines ? (
                                                                             <div className="sm:col-span-2">
                                                                                 <span className="font-medium text-slate-700">Notater:</span>{' '}
                                                                                 <span className="whitespace-pre-line">{notice.notes}</span>
@@ -1985,6 +2043,69 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                             <p className="text-sm text-rose-600">{deadlineForm.errors.award_date_at}</p>
                                                                         ) : null}
                                                                     </label>
+
+                                                                    <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 md:col-span-2">
+                                                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                                                            <div>
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                                                    Business Review
+                                                                                </div>
+                                                                                <p className="mt-1 text-sm text-blue-950/75">
+                                                                                    Registrer ett eller flere BR-tidspunkter mellom RFI og RFP.
+                                                                                </p>
+                                                                            </div>
+
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={addBusinessReview}
+                                                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                                                                            >
+                                                                                Legg til BR
+                                                                            </button>
+                                                                        </div>
+
+                                                                        <div className="mt-4 space-y-3">
+                                                                            {deadlineForm.data.business_reviews.length > 0 ? (
+                                                                                deadlineForm.data.business_reviews.map((review, index) => (
+                                                                                    <div
+                                                                                        key={review.id ?? `business-review-${index}`}
+                                                                                        className="rounded-2xl border border-blue-200 bg-white px-4 py-4"
+                                                                                    >
+                                                                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                                                                                            <label className="min-w-0 flex-1 space-y-2">
+                                                                                                <span className="text-sm font-medium text-slate-700">
+                                                                                                    Business Review {index + 1}
+                                                                                                </span>
+                                                                                                <input
+                                                                                                    type="date"
+                                                                                                    value={review.business_review_at}
+                                                                                                    onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
+                                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                                                                                                />
+                                                                                                {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
+                                                                                                    <p className="text-sm text-rose-600">
+                                                                                                        {deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
+                                                                                                    </p>
+                                                                                                ) : null}
+                                                                                            </label>
+
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => removeBusinessReview(index)}
+                                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                                            >
+                                                                                                Slett
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))
+                                                                            ) : (
+                                                                                <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-sm text-blue-900/70">
+                                                                                    Ingen Business Review er registrert ennå.
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
 
                                                                 <div className="mt-4 flex flex-wrap gap-2.5">
@@ -2276,44 +2397,6 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                             </button>
                         </section>
 
-                        <section className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                            <div className="mb-5 flex items-center gap-3">
-                                <ListIcon className="h-5 w-5 text-slate-500" />
-                                <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.worklist_title}</h2>
-                            </div>
-
-                            <div className="space-y-3">
-                                {worklistSummary.map((item) => (
-                                    <button
-                                        key={item.key}
-                                        type="button"
-                                        onClick={() => visitMode(item.key)}
-                                        className={classNames(
-                                            'flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left transition',
-                                            mode === item.key ? 'bg-violet-50 ring-1 ring-violet-200' : 'bg-slate-50 hover:bg-slate-100',
-                                        )}
-                                    >
-                                        <span className={classNames('text-sm', mode === item.key ? 'text-violet-800' : 'text-slate-700')}>{item.label}</span>
-                                        <span
-                                            className={classNames(
-                                                'inline-flex h-7 min-w-[28px] items-center justify-center rounded-full px-2 text-xs font-semibold',
-                                                mode === item.key ? 'bg-violet-200 text-violet-800' : 'bg-slate-200 text-slate-700',
-                                            )}
-                                        >
-                                            {item.count}
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={() => visitMode('live')}
-                                className="mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                            >
-                                {isLiveMode ? 'Live søk er aktivt' : 'Til live søk i Doffin'}
-                            </button>
-                        </section>
                     </aside>
                 </div>
             </div>

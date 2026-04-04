@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -136,6 +137,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'publication_period' => '',
                 'status' => 'ACTIVE',
                 'relevance' => '',
+                'bid_status' => '',
+                'cockpit_scope' => '',
             ], 1, 15)
             ->andReturn([
                 'numHitsTotal' => 1,
@@ -201,7 +204,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             'is_active' => true,
         ]));
 
-        $controller = new NoticeController($customerContext, $cpvSearchService, $liveSearchService, $documentService);
+        $controller = new NoticeController(
+            $customerContext,
+            $cpvSearchService,
+            $liveSearchService,
+            $documentService,
+            new SavedNoticeAccessService(),
+        );
         $response = $controller->index($request)->toResponse($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
@@ -275,7 +284,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             'is_active' => true,
         ]));
 
-        $controller = new NoticeController($customerContext, $cpvSearchService, $liveSearchService, $documentService);
+        $controller = new NoticeController(
+            $customerContext,
+            $cpvSearchService,
+            $liveSearchService,
+            $documentService,
+            new SavedNoticeAccessService(),
+        );
         $response = $controller->index($request)->toResponse($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
@@ -324,7 +339,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             'is_active' => true,
         ]));
 
-        $controller = new NoticeController($customerContext, $cpvSearchService, $liveSearchService, $documentService);
+        $controller = new NoticeController(
+            $customerContext,
+            $cpvSearchService,
+            $liveSearchService,
+            $documentService,
+            new SavedNoticeAccessService(),
+        );
         $response = $controller->index($request)->toResponse($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 

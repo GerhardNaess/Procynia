@@ -4,10 +4,11 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticePhaseComment;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
-use App\Models\WatchProfileInboxRecord;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Carbon\CarbonInterface;
@@ -36,7 +37,6 @@ class DashboardController extends Controller
             'cockpit' => $cockpit,
             'pipeline' => $pipeline,
             'stats' => $this->resolveStats($user, $customerId),
-            'recentInboxItems' => $this->resolveRecentInboxItems($user, $customerId),
             'recentWorklistItems' => $this->resolveRecentWorklistItems($user),
             'watchProfileSummary' => $this->resolveWatchProfileSummary($user, $customerId),
             'quickLinks' => $this->resolveQuickLinks($user),
@@ -50,7 +50,8 @@ class DashboardController extends Controller
     private function buildCockpitPayload(User $user, int $customerId, array $pipeline): array
     {
         $activeNotices = $this->dashboardActiveSavedNotices($user, $customerId);
-        $deadlineItems = $this->buildDeadlineItems($activeNotices);
+        $cockpitScopeNotices = $this->cockpitScopeSavedNotices($user, $customerId);
+        $deadlineItems = $this->buildDeadlineItems($cockpitScopeNotices);
 
         return [
             'portfolio' => [
@@ -59,7 +60,7 @@ class DashboardController extends Controller
                 'outcome' => $pipeline['outcome_total_count'],
             ],
             'attention' => [
-                'items' => $this->resolveAttentionItems($activeNotices, $deadlineItems),
+                'items' => $this->resolveAttentionItems($cockpitScopeNotices, $deadlineItems),
             ],
             'deadlines' => [
                 'month_start' => now()->startOfMonth()->toIso8601String(),
@@ -68,7 +69,7 @@ class DashboardController extends Controller
                 'upcoming' => array_slice($deadlineItems, 0, 6),
             ],
             'pipeline_quality' => $this->resolvePipelineQualitySummary($activeNotices, $pipeline),
-            'responsibility_activity' => $this->resolveResponsibilityActivitySummary($activeNotices),
+            'responsibility_activity' => $this->resolveResponsibilityActivitySummary($user, $customerId, $cockpitScopeNotices),
             'outcomes' => $pipeline['outcomes'],
             'pipeline' => $pipeline,
         ];
@@ -99,12 +100,73 @@ class DashboardController extends Controller
             ->with([
                 'bidManager:id,name',
                 'opportunityOwner:id,name',
+                'businessReviews:id,saved_notice_id,business_review_at',
                 'phaseComments:id,saved_notice_id,user_id,phase_status,comment,created_at',
                 'submissions:id,saved_notice_id,sequence_number,label,submitted_at',
             ])
             ->orderByDesc('updated_at')
             ->orderByDesc('id')
             ->get();
+    }
+
+    /**
+     * @return Collection<int, SavedNotice>
+     */
+    private function cockpitScopeSavedNotices(User $user, int $customerId): Collection
+    {
+        return $this->savedNoticeAccess->cockpitScopeQueryFor($user, $customerId)
+            ->whereNull('archived_at')
+            ->select([
+                'id',
+                'customer_id',
+                'bid_manager_user_id',
+                'opportunity_owner_user_id',
+                'bid_status',
+                'title',
+                'buyer_name',
+                'deadline',
+                'questions_deadline_at',
+                'questions_rfi_deadline_at',
+                'rfi_submission_deadline_at',
+                'questions_rfp_deadline_at',
+                'rfp_submission_deadline_at',
+                'award_date_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->with([
+                'bidManager:id,name',
+                'opportunityOwner:id,name',
+                'businessReviews:id,saved_notice_id,business_review_at',
+                'phaseComments:id,saved_notice_id,user_id,phase_status,comment,created_at',
+                'submissions:id,saved_notice_id,sequence_number,label,submitted_at',
+            ])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->get();
+    }
+
+    private function savedWatchListsCount(User $user, int $customerId): int
+    {
+        return $user->watchProfiles()
+            ->where('customer_id', $customerId)
+            ->count();
+    }
+
+    private function contributorCasesCount(Collection $notices): int
+    {
+        $noticeIds = $notices->pluck('id')->filter()->unique()->all();
+
+        if ($noticeIds === []) {
+            return 0;
+        }
+
+        return SavedNoticeUserAccess::query()
+            ->whereIn('saved_notice_id', $noticeIds)
+            ->active()
+            ->where('access_role', SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR)
+            ->distinct()
+            ->count('saved_notice_id');
     }
 
     private function resolveAttentionItems(Collection $notices, array $deadlineItems): array
@@ -135,7 +197,7 @@ class DashboardController extends Controller
                 'subtitle' => 'Saker med operative frister som nærmer seg eller er passert.',
                 'count' => $deadlineSoonCount,
                 'severity' => $deadlineSoonCount > 0 ? 'danger' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved']),
+                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
             ],
             [
                 'key' => 'missing-bid-manager',
@@ -143,7 +205,7 @@ class DashboardController extends Controller
                 'subtitle' => 'Saker som mangler eksplisitt operativt ansvar.',
                 'count' => $missingBidManagerCount,
                 'severity' => $missingBidManagerCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved']),
+                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
             ],
             [
                 'key' => 'go-no-go-pending',
@@ -151,7 +213,7 @@ class DashboardController extends Controller
                 'subtitle' => 'Saker som står i beslutningsfasen uten endelig utfall.',
                 'count' => $goNoGoCount,
                 'severity' => $goNoGoCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved', 'bid_status' => SavedNotice::BID_STATUS_GO_NO_GO]),
+                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1, 'bid_status' => SavedNotice::BID_STATUS_GO_NO_GO]),
             ],
             [
                 'key' => 'inactive-seven-days',
@@ -159,7 +221,7 @@ class DashboardController extends Controller
                 'subtitle' => 'Saker som ikke har fått kommentarer eller innsendinger nylig.',
                 'count' => $inactiveSevenDaysCount,
                 'severity' => $inactiveSevenDaysCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved']),
+                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
             ],
         ];
     }
@@ -169,7 +231,7 @@ class DashboardController extends Controller
         $items = $notices
             ->flatMap(fn (SavedNotice $notice): Collection => collect($this->deadlineEntriesForNotice($notice)))
             ->sortBy(function (array $item): string {
-                return sprintf('%s-%s', $item['date_key'], $item['saved_notice_id']);
+                return sprintf('%s-%s', $item['date'], $item['id']);
             })
             ->values();
 
@@ -210,6 +272,29 @@ class DashboardController extends Controller
                 'deadline_type' => $attribute,
                 'deadline_type_label' => $label,
                 'date' => $date->toIso8601String(),
+                'date_key' => $date->toDateString(),
+                'bid_manager_name' => $notice->bidManager?->name,
+                'phase_label' => $notice->bid_status_label,
+                'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
+                'severity' => $date->lessThan(now()->startOfDay()->addDays(5)) ? 'warning' : 'neutral',
+            ];
+        }
+
+        foreach ($notice->businessReviews as $businessReview) {
+            $date = $businessReview->business_review_at;
+
+            if ($date === null) {
+                continue;
+            }
+
+            $entries[] = [
+                'id' => $notice->id.':business_review:'.$businessReview->id,
+                'saved_notice_id' => $notice->id,
+                'title' => $notice->title,
+                'buyer_name' => $notice->buyer_name,
+                'deadline_type' => 'business_review',
+                'deadline_type_label' => 'Business Review',
+                'date' => $date->toDateString(),
                 'date_key' => $date->toDateString(),
                 'bid_manager_name' => $notice->bidManager?->name,
                 'phase_label' => $notice->bid_status_label,
@@ -292,12 +377,10 @@ class DashboardController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function resolveResponsibilityActivitySummary(Collection $notices): array
+    private function resolveResponsibilityActivitySummary(User $user, int $customerId, Collection $notices): array
     {
         $bidManagerAssignments = $notices->whereNotNull('bid_manager_user_id');
         $opportunityOwnerAssignments = $notices->whereNotNull('opportunity_owner_user_id');
-        $bidManagers = $this->topResponsiblePeople($bidManagerAssignments, 'bidManager');
-        $opportunityOwners = $this->topResponsiblePeople($opportunityOwnerAssignments, 'opportunityOwner');
 
         $recentComments = $notices->flatMap(function (SavedNotice $notice): Collection {
             return $notice->phaseComments
@@ -336,14 +419,10 @@ class DashboardController extends Controller
             ->first();
 
         return [
-            'bid_managers' => [
-                'assigned_count' => $bidManagerAssignments->count(),
-                'people' => $bidManagers,
-            ],
-            'opportunity_owners' => [
-                'assigned_count' => $opportunityOwnerAssignments->count(),
-                'people' => $opportunityOwners,
-            ],
+            'bid_manager_cases_count' => $bidManagerAssignments->count(),
+            'opportunity_owner_cases_count' => $opportunityOwnerAssignments->count(),
+            'saved_watch_lists_count' => $this->savedWatchListsCount($user, $customerId),
+            'contributor_cases_count' => $this->contributorCasesCount($notices),
             'activity' => [
                 'last_comment_at' => $recentComments->sortByDesc('created_at')->first()['created_at'] ?? null,
                 'last_activity_at' => $lastActivityNotice instanceof SavedNotice
@@ -357,31 +436,6 @@ class DashboardController extends Controller
                 })->count(),
             ],
         ];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function topResponsiblePeople(Collection $notices, string $relation): array
-    {
-        return $notices
-            ->groupBy("{$relation}_user_id")
-            ->filter(function (Collection $group, mixed $userId): bool {
-                return $userId !== null;
-            })
-            ->map(function (Collection $group, mixed $userId) use ($relation): array {
-                $model = $group->first()->{$relation};
-
-                return [
-                    'id' => (int) $userId,
-                    'name' => $model?->name ?? 'Ukjent',
-                    'count' => $group->count(),
-                ];
-            })
-            ->sortByDesc('count')
-            ->take(5)
-            ->values()
-            ->all();
     }
 
     private function latestSavedNoticeActivityAt(SavedNotice $notice): ?CarbonInterface
@@ -439,25 +493,10 @@ class DashboardController extends Controller
 
     private function resolveStats(User $user, int $customerId): array
     {
-        $userInboxCount = (clone $this->userInboxQuery($user, $customerId))->count();
-        $departmentInboxAvailable = $this->customerContext->hasDepartmentMembership($user);
-        $departmentInboxCount = $departmentInboxAvailable
-            ? (clone $this->departmentInboxQuery($user, $customerId))->count()
-            : 0;
         $worklistCount = (clone $this->activeSavedNoticeQuery($user))->count();
         $activeWatchProfileCount = (clone $this->activeAccessibleWatchProfilesQuery($user, $customerId))->count();
 
         return [
-            'userInbox' => [
-                'value' => $userInboxCount,
-                'href' => route('app.inbox.user'),
-                'is_available' => true,
-            ],
-            'departmentInbox' => [
-                'value' => $departmentInboxCount,
-                'href' => $departmentInboxAvailable ? route('app.inbox.department') : null,
-                'is_available' => $departmentInboxAvailable,
-            ],
             'worklist' => [
                 'value' => $worklistCount,
                 'href' => route('app.notices.index', ['mode' => 'saved']),
@@ -468,47 +507,6 @@ class DashboardController extends Controller
                 'href' => route('app.watch-profiles.index'),
                 'is_available' => true,
             ],
-        ];
-    }
-
-    private function resolveRecentInboxItems(User $user, int $customerId): array
-    {
-        $personalItems = $this->userInboxQuery($user, $customerId)
-            ->limit(5)
-            ->get()
-            ->map(fn (WatchProfileInboxRecord $record): array => $this->recentInboxItem($record, 'Min inbox', route('app.inbox.user')))
-            ->all();
-
-        $departmentItems = ! $this->customerContext->hasDepartmentMembership($user)
-            ? []
-            : $this->departmentInboxQuery($user, $customerId)
-                ->limit(5)
-                ->get()
-                ->map(fn (WatchProfileInboxRecord $record): array => $this->recentInboxItem($record, 'Avdeling', route('app.inbox.department')))
-                ->all();
-
-        return collect([...$personalItems, ...$departmentItems])
-            ->sortByDesc(function (array $item): int {
-                $timestamp = strtotime((string) ($item['discovered_at'] ?? '')) ?: 0;
-
-                return ($timestamp * 1000000) + ((int) ($item['relevance_score'] ?? 0) * 1000) + (int) $item['id'];
-            })
-            ->take(5)
-            ->values()
-            ->all();
-    }
-
-    private function recentInboxItem(WatchProfileInboxRecord $record, string $sourceLabel, string $href): array
-    {
-        return [
-            'id' => $record->id,
-            'title' => $record->title,
-            'buyer_name' => $record->buyer_name,
-            'publication_date' => optional($record->publication_date)?->toIso8601String(),
-            'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
-            'source_label' => $sourceLabel,
-            'href' => $href,
-            'relevance_score' => $record->relevance_score,
         ];
     }
 
@@ -565,16 +563,6 @@ class DashboardController extends Controller
                 'label' => 'Gå til kunngjøringer',
                 'href' => route('app.notices.index'),
             ],
-            [
-                'key' => 'userInbox',
-                'label' => 'Åpne min inbox',
-                'href' => route('app.inbox.user'),
-            ],
-            $this->customerContext->hasDepartmentMembership($user) ? [
-                'key' => 'departmentInbox',
-                'label' => 'Åpne avdelingsinnboks',
-                'href' => route('app.inbox.department'),
-            ] : null,
             [
                 'key' => 'worklist',
                 'label' => 'Åpne arbeidsliste',
@@ -652,26 +640,6 @@ class DashboardController extends Controller
                 'count' => $normalizedCounts[$status],
             ], $outcomeStatuses),
         ];
-    }
-
-    private function userInboxQuery(User $user, int $customerId): Builder
-    {
-        return WatchProfileInboxRecord::query()
-            ->userInbox($user)
-            ->where('customer_id', $customerId)
-            ->orderByDesc('discovered_at')
-            ->orderByDesc('relevance_score')
-            ->orderByDesc('id');
-    }
-
-    private function departmentInboxQuery(User $user, int $customerId): Builder
-    {
-        return WatchProfileInboxRecord::query()
-            ->departmentInbox($user)
-            ->where('customer_id', $customerId)
-            ->orderByDesc('discovered_at')
-            ->orderByDesc('relevance_score')
-            ->orderByDesc('id');
     }
 
     private function activeSavedNoticeQuery(User $user): Builder

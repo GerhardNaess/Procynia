@@ -63,6 +63,7 @@ return [
         'saved_searches_nav' => 'Lagrede søk',
         'alerts_nav' => 'Varsler',
         'worklist_nav' => 'Arbeidsliste',
+        'infosenter_nav' => 'Infosenter',
         'customer_area' => 'Kundeområde',
         'customer_footer' => 'Procynia AS · Kundeområde',
         'customer_access_required' => 'Denne brukeren har ikke tilgang til kundeområdet.',

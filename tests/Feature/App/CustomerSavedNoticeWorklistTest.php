@@ -7,6 +7,8 @@ use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeBusinessReview;
+use App\Models\SavedNoticeInfoItem;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
@@ -24,6 +26,10 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
     private bool $createdBidSubmissionsTable = false;
 
+    private bool $createdSavedNoticeBusinessReviewsTable = false;
+
+    private bool $createdSavedNoticeInfoItemsTable = false;
+
     private bool $createdSavedNoticeUserAccessTable = false;
 
     private bool $createdSavedNoticePhaseCommentsTable = false;
@@ -35,6 +41,8 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->useProjectPostgresConnection();
         $this->ensureSavedNoticesTable();
         $this->ensureBidSubmissionsTable();
+        $this->ensureSavedNoticeBusinessReviewsTable();
+        $this->ensureSavedNoticeInfoItemsTable();
         $this->ensureSavedNoticeUserAccessTable();
         $this->ensureSavedNoticePhaseCommentsTable();
         DB::beginTransaction();
@@ -54,6 +62,14 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
         if ($this->createdBidSubmissionsTable) {
             Schema::dropIfExists('bid_submissions');
+        }
+
+        if ($this->createdSavedNoticeBusinessReviewsTable) {
+            Schema::dropIfExists('saved_notice_business_reviews');
+        }
+
+        if ($this->createdSavedNoticeInfoItemsTable) {
+            Schema::dropIfExists('saved_notice_info_items');
         }
 
         if ($this->createdSavedNoticeUserAccessTable) {
@@ -101,6 +117,151 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(1, $historyPage['props']['notices']['meta']['total']);
         $this->assertSame('Primar historikk', $historyPage['props']['notices']['data'][0]['title']);
         $this->assertArrayNotHasKey('pipeline', $historyPage['props']);
+    }
+
+    public function test_cockpit_scope_drilldown_uses_role_based_saved_notices(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $regularUser = User::factory()->create([
+                'name' => 'regular',
+                'email' => 'regular@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $customer->id,
+                'department_id' => $department->id,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+                'is_active' => true,
+            ]);
+            $bidManagerUser = User::factory()->create([
+                'name' => 'bid-manager',
+                'email' => 'bid-manager@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_BID_MANAGER,
+                'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+                'customer_id' => $customer->id,
+                'department_id' => null,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+                'is_active' => true,
+            ]);
+            $systemOwnerUser = User::factory()->create([
+                'name' => 'system-owner',
+                'email' => 'system-owner@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+                'customer_id' => $customer->id,
+                'department_id' => null,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+                'is_active' => true,
+            ]);
+            $otherUser = User::factory()->create([
+                'name' => 'other',
+                'email' => 'other@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $customer->id,
+                'department_id' => $department->id,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+                'is_active' => true,
+            ]);
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1101',
+                'Regular active bid-manager case',
+                bidManagerUserId: $regularUser->id,
+                deadline: '2026-04-05 00:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1102',
+                'Regular active opportunity-owner case',
+                opportunityOwnerUserId: $regularUser->id,
+                deadline: '2026-04-12 00:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1103',
+                'Foreign active go/no-go case',
+                bidStatus: SavedNotice::BID_STATUS_GO_NO_GO,
+                deadline: '2026-04-04 00:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1104',
+                'Foreign inactive case',
+                bidManagerUserId: $otherUser->id,
+                deadline: '2026-04-20 00:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1105',
+                'Regular archived case',
+                archived: true,
+                bidManagerUserId: $regularUser->id,
+                deadline: '2026-04-22 00:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-1106',
+                'Foreign archived case',
+                archived: true,
+                bidManagerUserId: $otherUser->id,
+                deadline: '2026-04-24 00:00:00',
+            );
+
+            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/notices?mode=saved&cockpit_scope=1'));
+
+            $this->assertSame('1', $regularPage['props']['filters']['cockpit_scope']);
+            $this->assertSame(2, $regularPage['props']['worklist']['saved_count']);
+            $this->assertSame(1, $regularPage['props']['worklist']['history_count']);
+            $this->assertSame(2, $regularPage['props']['notices']['meta']['total']);
+            $this->assertEqualsCanonicalizing(
+                ['Regular active bid-manager case', 'Regular active opportunity-owner case'],
+                array_column($regularPage['props']['notices']['data'], 'title'),
+            );
+
+            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/notices?mode=saved&cockpit_scope=1'));
+
+            $this->assertSame('1', $bidManagerPage['props']['filters']['cockpit_scope']);
+            $this->assertSame(4, $bidManagerPage['props']['worklist']['saved_count']);
+            $this->assertSame(2, $bidManagerPage['props']['worklist']['history_count']);
+            $this->assertSame(4, $bidManagerPage['props']['notices']['meta']['total']);
+            $this->assertEqualsCanonicalizing(
+                [
+                    'Regular active bid-manager case',
+                    'Regular active opportunity-owner case',
+                    'Foreign active go/no-go case',
+                    'Foreign inactive case',
+                ],
+                array_column($bidManagerPage['props']['notices']['data'], 'title'),
+            );
+
+            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/notices?mode=saved&cockpit_scope=1'));
+
+            $this->assertSame('1', $systemOwnerPage['props']['filters']['cockpit_scope']);
+            $this->assertSame(4, $systemOwnerPage['props']['worklist']['saved_count']);
+            $this->assertSame(2, $systemOwnerPage['props']['worklist']['history_count']);
+            $this->assertSame(4, $systemOwnerPage['props']['notices']['meta']['total']);
+            $this->assertEqualsCanonicalizing(
+                [
+                    'Regular active bid-manager case',
+                    'Regular active opportunity-owner case',
+                    'Foreign active go/no-go case',
+                    'Foreign inactive case',
+                ],
+                array_column($systemOwnerPage['props']['notices']['data'], 'title'),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_saved_mode_can_filter_worklist_by_bid_status(): void
@@ -832,6 +993,1576 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame('kari.kontakt@example.com', $showPage['props']['notice']['contact_person_email']);
         $this->assertSame('Brukes i pilotløp', $showPage['props']['notice']['notes']);
         $this->assertSame('https://example.com/private-invite', $showPage['props']['notice']['external_url']);
+    }
+
+    public function test_customer_can_update_deadlines_and_private_request_case_info_in_one_save_flow(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1022-private',
+            'Privat forespørsel til oppdatering',
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+            referenceNumber: 'PRIV-2026-OLD',
+            contactPersonName: 'Gammel Kontakt',
+            contactPersonEmail: 'gammel.kontakt@example.com',
+            notes: 'Gammelt notat',
+        );
+
+        $questionsRfiDeadline = now()->addDays(2)->toDateString();
+        $rfiDeadline = now()->addDays(5)->toDateString();
+        $questionsRfpDeadline = now()->addDays(7)->toDateString();
+        $rfpDeadline = now()->addDays(11)->toDateString();
+        $awardDate = now()->addDays(18)->toDateString();
+        $referenceNumber = 'PRIV-2026-002';
+        $contactPersonName = 'Kari Kontakt';
+        $contactPersonEmail = 'kari.kontakt@example.com';
+        $notes = "Oppdatert notat\nmed linjeskift";
+
+        $response = $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=saved')
+            ->patch("/app/notices/saved/{$savedNotice->id}/deadlines", [
+                'questions_rfi_deadline_at' => $questionsRfiDeadline,
+                'rfi_submission_deadline_at' => $rfiDeadline,
+                'questions_rfp_deadline_at' => $questionsRfpDeadline,
+                'rfp_submission_deadline_at' => $rfpDeadline,
+                'award_date_at' => $awardDate,
+                'reference_number' => $referenceNumber,
+                'contact_person_name' => $contactPersonName,
+                'contact_person_email' => $contactPersonEmail,
+                'notes' => $notes,
+            ]);
+
+        $response->assertRedirect('/app/notices?mode=saved');
+
+        $savedNotice->refresh();
+
+        $this->assertSame($questionsRfiDeadline, $savedNotice->questions_rfi_deadline_at?->toDateString());
+        $this->assertSame($rfiDeadline, $savedNotice->rfi_submission_deadline_at?->toDateString());
+        $this->assertSame($questionsRfpDeadline, $savedNotice->questions_rfp_deadline_at?->toDateString());
+        $this->assertSame($rfpDeadline, $savedNotice->rfp_submission_deadline_at?->toDateString());
+        $this->assertSame($awardDate, $savedNotice->award_date_at?->toDateString());
+        $this->assertSame($referenceNumber, $savedNotice->reference_number);
+        $this->assertSame($contactPersonName, $savedNotice->contact_person_name);
+        $this->assertSame($contactPersonEmail, $savedNotice->contact_person_email);
+        $this->assertSame($notes, $savedNotice->notes);
+
+        $savedPayload = $this->savedNoticePayload($context['admin'], $savedNotice);
+        $this->assertSame($referenceNumber, $savedPayload['reference_number']);
+        $this->assertSame($contactPersonName, $savedPayload['contact_person_name']);
+        $this->assertSame($contactPersonEmail, $savedPayload['contact_person_email']);
+        $this->assertSame($notes, $savedPayload['notes']);
+
+        $showPage = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertSame($referenceNumber, $showPage['props']['notice']['reference_number']);
+        $this->assertSame($contactPersonName, $showPage['props']['notice']['contact_person_name']);
+        $this->assertSame($contactPersonEmail, $showPage['props']['notice']['contact_person_email']);
+        $this->assertSame($notes, $showPage['props']['notice']['notes']);
+    }
+
+    public function test_saved_notice_detail_payload_includes_multiple_info_items(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 09:00:00'));
+
+        try {
+            $context = $this->customerAdminContext();
+            $owner = User::factory()->create([
+                'name' => 'Info Owner',
+                'email' => 'info.owner@example.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-payload',
+                'Sak med infosenter',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+            );
+
+            $firstInfoItem = SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Første notat',
+                'body' => 'Første linje',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'closed_at' => null,
+            ]);
+
+            Carbon::setTestNow(Carbon::parse('2026-04-03 10:00:00'));
+
+            $secondInfoItem = SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_DECISION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_PROCYNIA,
+                'subject' => 'Beslutning',
+                'body' => 'Andre linje',
+                'status' => SavedNoticeInfoItem::STATUS_WAITING,
+                'requires_response' => true,
+                'response_due_at' => now()->addDays(7)->startOfDay(),
+                'owner_user_id' => $owner->id,
+                'created_by_user_id' => $owner->id,
+                'closed_at' => null,
+            ]);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $infoItems = $showPage['props']['notice']['info_items']['items'];
+
+            $this->assertCount(2, $infoItems);
+            $this->assertSame($secondInfoItem->id, $infoItems[0]['id']);
+            $this->assertSame('Beslutning', $infoItems[0]['subject']);
+            $this->assertSame($owner->name, $infoItems[0]['owner']['name']);
+            $this->assertSame($owner->name, $infoItems[0]['created_by']['name']);
+            $this->assertSame('2026-04-10', $infoItems[0]['response_due_at']);
+            $this->assertSame($firstInfoItem->id, $infoItems[1]['id']);
+            $this->assertSame('Første notat', $infoItems[1]['subject']);
+            $this->assertNull($infoItems[1]['owner']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_customer_can_create_info_item_on_own_saved_notice(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 11:00:00'));
+
+        try {
+            $context = $this->customerAdminContext();
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-create',
+                'Sak for oppretting',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+            );
+            $owner = User::factory()->create([
+                'name' => 'Chosen Owner',
+                'email' => 'chosen.owner@example.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+
+            $response = $this->actingAs($context['admin'])
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->post("/app/notices/saved/{$savedNotice->id}/info-items", [
+                    'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                    'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                    'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                    'subject' => 'Opprettet i Procynia',
+                    'body' => 'Dette er et nytt infoelement.',
+                    'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                    'requires_response' => true,
+                    'response_due_at' => '2026-04-10',
+                    'owner_user_id' => $owner->id,
+                ]);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+            $infoItem = SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->firstOrFail();
+
+            $this->assertSame(SavedNoticeInfoItem::TYPE_CLARIFICATION, $infoItem->type);
+            $this->assertSame(SavedNoticeInfoItem::DIRECTION_INBOUND, $infoItem->direction);
+            $this->assertSame(SavedNoticeInfoItem::CHANNEL_MANUAL, $infoItem->channel);
+            $this->assertSame('Opprettet i Procynia', $infoItem->subject);
+            $this->assertSame('Dette er et nytt infoelement.', $infoItem->body);
+            $this->assertSame(SavedNoticeInfoItem::STATUS_OPEN, $infoItem->status);
+            $this->assertTrue($infoItem->requires_response);
+            $this->assertSame('2026-04-10', $infoItem->response_due_at?->toDateString());
+            $this->assertSame($owner->id, $infoItem->owner_user_id);
+            $this->assertSame($context['admin']->id, $infoItem->created_by_user_id);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $this->assertCount(1, $showPage['props']['notice']['info_items']['items']);
+            $this->assertSame('Opprettet i Procynia', $showPage['props']['notice']['info_items']['items'][0]['subject']);
+            $this->assertSame($owner->name, $showPage['props']['notice']['info_items']['items'][0]['owner']['name']);
+            $this->assertSame($context['admin']->name, $showPage['props']['notice']['info_items']['items'][0]['created_by']['name']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_commercial_owner_can_create_action_on_owned_saved_notice(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 11:15:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $commercialOwner = User::factory()->create([
+                'name' => 'Commercial Owner',
+                'email' => 'commercial-owner@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-commercial-owner',
+                'Sak for kommersiell eier',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                opportunityOwnerUserId: $commercialOwner->id,
+            );
+
+            $response = $this->actingAs($commercialOwner)
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->post("/app/notices/saved/{$savedNotice->id}/info-items", [
+                    'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                    'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                    'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                    'subject' => 'Oppfølging fra eier',
+                    'body' => 'Dette er en aksjon som eier følger opp.',
+                    'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                    'requires_response' => true,
+                    'response_due_at' => '2026-04-09',
+                    'owner_user_id' => $commercialOwner->id,
+                ]);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+            $infoItem = SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->firstOrFail();
+
+            $this->assertSame(SavedNoticeInfoItem::TYPE_CLARIFICATION, $infoItem->type);
+            $this->assertSame(SavedNoticeInfoItem::DIRECTION_INTERNAL, $infoItem->direction);
+            $this->assertSame(SavedNoticeInfoItem::CHANNEL_MANUAL, $infoItem->channel);
+            $this->assertSame('Oppfølging fra eier', $infoItem->subject);
+            $this->assertSame('Dette er en aksjon som eier følger opp.', $infoItem->body);
+            $this->assertSame(SavedNoticeInfoItem::STATUS_OPEN, $infoItem->status);
+            $this->assertTrue($infoItem->requires_response);
+            $this->assertSame('2026-04-09', $infoItem->response_due_at?->toDateString());
+            $this->assertSame($commercialOwner->id, $infoItem->owner_user_id);
+            $this->assertSame($commercialOwner->id, $infoItem->created_by_user_id);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_bid_manager_can_create_action_on_managed_saved_notice(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 11:30:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $bidManager = User::factory()->create([
+                'name' => 'Bid Manager',
+                'email' => 'bid-manager@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_BID_MANAGER,
+                'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+                'customer_id' => $context['customer']->id,
+                'department_id' => null,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-bid-manager',
+                'Sak for bid-manager',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                bidManagerUserId: $bidManager->id,
+            );
+
+            $response = $this->actingAs($bidManager)
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->post("/app/notices/saved/{$savedNotice->id}/info-items", [
+                    'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                    'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                    'channel' => SavedNoticeInfoItem::CHANNEL_PROCYNIA,
+                    'subject' => 'Bid-manager oppfølging',
+                    'body' => 'Dette er en handling som bid-manager følger opp.',
+                    'status' => SavedNoticeInfoItem::STATUS_WAITING,
+                    'requires_response' => true,
+                    'response_due_at' => '2026-04-08',
+                    'owner_user_id' => $bidManager->id,
+                ]);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+            $infoItem = SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->firstOrFail();
+
+            $this->assertSame(SavedNoticeInfoItem::TYPE_MESSAGE, $infoItem->type);
+            $this->assertSame(SavedNoticeInfoItem::DIRECTION_OUTBOUND, $infoItem->direction);
+            $this->assertSame(SavedNoticeInfoItem::CHANNEL_PROCYNIA, $infoItem->channel);
+            $this->assertSame('Bid-manager oppfølging', $infoItem->subject);
+            $this->assertSame('Dette er en handling som bid-manager følger opp.', $infoItem->body);
+            $this->assertSame(SavedNoticeInfoItem::STATUS_WAITING, $infoItem->status);
+            $this->assertTrue($infoItem->requires_response);
+            $this->assertSame('2026-04-08', $infoItem->response_due_at?->toDateString());
+            $this->assertSame($bidManager->id, $infoItem->owner_user_id);
+            $this->assertSame($bidManager->id, $infoItem->created_by_user_id);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_commercial_owner_can_close_info_item_without_comment_and_it_leaves_my_tasks_views(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 13:00:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $commercialOwner = User::factory()->create([
+                'name' => 'Commercial Owner',
+                'email' => 'commercial-owner-close@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-close-commercial-owner',
+                'Sak for lukking',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                opportunityOwnerUserId: $commercialOwner->id,
+            );
+
+            $infoItem = SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Skal lukkes',
+                'body' => 'Dette er en åpen aksjon.',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => now()->addDays(2)->startOfDay(),
+                'owner_user_id' => $commercialOwner->id,
+                'created_by_user_id' => $commercialOwner->id,
+                'closed_at' => null,
+                'closure_comment' => null,
+            ]);
+
+            $response = $this->actingAs($commercialOwner)
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->patch("/app/notices/saved/{$savedNotice->id}/info-items/{$infoItem->id}/close", []);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+            $infoItem->refresh();
+
+            $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->status);
+            $this->assertNotNull($infoItem->closed_at);
+            $this->assertNull($infoItem->closure_comment);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($commercialOwner)->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $this->assertCount(1, $showPage['props']['notice']['info_items']['items']);
+            $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $showPage['props']['notice']['info_items']['items'][0]['status']);
+            $this->assertNull($showPage['props']['notice']['info_items']['items'][0]['closure_comment']);
+
+            $infoCenterPage = $this->inertiaPage(
+                $this->actingAs($commercialOwner)->get('/app/info-center?view=my_tasks'),
+            );
+
+            $this->assertCount(0, $infoCenterPage['props']['infoCenter']['items']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_bid_manager_can_close_info_item_with_comment_and_history_retains_comment(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 13:20:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $bidManager = User::factory()->create([
+                'name' => 'Bid Manager',
+                'email' => 'bid-manager-close@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_BID_MANAGER,
+                'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+                'customer_id' => $context['customer']->id,
+                'department_id' => null,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-close-bid-manager',
+                'Sak for lukking med kommentar',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                bidManagerUserId: $bidManager->id,
+            );
+
+            $infoItem = SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_PROCYNIA,
+                'subject' => 'Svar må sendes',
+                'body' => 'Denne aksjonen skal avsluttes med kommentar.',
+                'status' => SavedNoticeInfoItem::STATUS_WAITING,
+                'requires_response' => true,
+                'response_due_at' => now()->addDays(1)->startOfDay(),
+                'owner_user_id' => $bidManager->id,
+                'created_by_user_id' => $bidManager->id,
+                'closed_at' => null,
+                'closure_comment' => null,
+            ]);
+            $closureComment = 'Aksjonen ble løst i dialog med saken.';
+
+            $response = $this->actingAs($bidManager)
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->patch("/app/notices/saved/{$savedNotice->id}/info-items/{$infoItem->id}/close", [
+                    'closure_comment' => $closureComment,
+                ]);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+            $infoItem->refresh();
+
+            $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->status);
+            $this->assertNotNull($infoItem->closed_at);
+            $this->assertSame($closureComment, $infoItem->closure_comment);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $this->assertCount(1, $showPage['props']['notice']['info_items']['items']);
+            $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $showPage['props']['notice']['info_items']['items'][0]['status']);
+            $this->assertSame($closureComment, $showPage['props']['notice']['info_items']['items'][0]['closure_comment']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_cannot_close_an_already_closed_info_item(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 13:40:00'));
+
+        try {
+            $context = $this->customerAdminContext();
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-info-close-closed',
+                'Allerede lukket sak',
+                sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+                opportunityOwnerUserId: $context['admin']->id,
+            );
+            $infoItem = SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Allerede lukket',
+                'body' => 'Denne er allerede lukket.',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => $context['admin']->id,
+                'created_by_user_id' => $context['admin']->id,
+                'closed_at' => now()->subDay(),
+                'closure_comment' => 'Avsluttet tidligere.',
+            ]);
+
+            $response = $this->actingAs($context['admin'])
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from("/app/notices/saved/{$savedNotice->id}")
+                ->patch("/app/notices/saved/{$savedNotice->id}/info-items/{$infoItem->id}/close", []);
+
+            $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+            $response->assertSessionHas('error', 'Aksjonen er allerede lukket.');
+
+            $this->assertSame(SavedNoticeInfoItem::STATUS_CLOSED, $infoItem->fresh()->status);
+            $this->assertSame('Avsluttet tidligere.', $infoItem->fresh()->closure_comment);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_cannot_close_an_info_item_on_a_foreign_saved_notice(): void
+    {
+        $primary = $this->customerAdminContext('Procynia AS');
+        $secondary = $this->customerAdminContext('Annen Kunde AS');
+        $foreignNotice = $this->createSavedNotice(
+            $secondary['customer']->id,
+            '2026-1022-info-close-foreign',
+            'Fremmed sak',
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+            opportunityOwnerUserId: $secondary['admin']->id,
+        );
+        $foreignInfoItem = SavedNoticeInfoItem::query()->create([
+            'saved_notice_id' => $foreignNotice->id,
+            'type' => SavedNoticeInfoItem::TYPE_NOTE,
+            'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+            'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+            'subject' => 'Skal ikke kunne lukkes',
+            'body' => 'Dette er en fremmed sak.',
+            'status' => SavedNoticeInfoItem::STATUS_OPEN,
+            'requires_response' => true,
+            'response_due_at' => now()->addDays(3)->startOfDay(),
+            'owner_user_id' => $secondary['admin']->id,
+            'created_by_user_id' => $secondary['admin']->id,
+            'closed_at' => null,
+            'closure_comment' => null,
+        ]);
+
+        $this->actingAs($primary['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from("/app/notices/saved/{$foreignNotice->id}")
+            ->patch("/app/notices/saved/{$foreignNotice->id}/info-items/{$foreignInfoItem->id}/close", [
+                'closure_comment' => 'Skal ikke lagres',
+            ])
+            ->assertNotFound();
+    }
+
+    public function test_customer_cannot_create_info_item_for_foreign_saved_notice(): void
+    {
+        $primary = $this->customerAdminContext('Procynia AS');
+        $secondary = $this->customerAdminContext('Annen Kunde AS');
+        $foreignNotice = $this->createSavedNotice(
+            $secondary['customer']->id,
+            '2026-1022-info-foreign',
+            'Fremmed sak',
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        );
+
+        $this->actingAs($primary['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from("/app/notices/saved/{$foreignNotice->id}")
+            ->post("/app/notices/saved/{$foreignNotice->id}/info-items", [
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Skal ikke lagres',
+                'body' => 'Ikke lov',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(0, $foreignNotice->fresh()->infoItems()->count());
+    }
+
+    public function test_info_item_owner_must_belong_to_same_customer(): void
+    {
+        $context = $this->customerAdminContext();
+        $foreignContext = $this->customerAdminContext('Annen Kunde AS');
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1022-info-owner',
+            'Eierkontroll',
+            sourceType: SavedNotice::SOURCE_TYPE_PRIVATE_REQUEST,
+        );
+
+        $foreignOwner = User::factory()->create([
+            'name' => 'Foreign Owner',
+            'email' => 'foreign.owner@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $foreignContext['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from("/app/notices/saved/{$savedNotice->id}")
+            ->post("/app/notices/saved/{$savedNotice->id}/info-items", [
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Ugyldig eier',
+                'body' => 'Valideringen skal stoppe dette',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'owner_user_id' => $foreignOwner->id,
+            ])
+            ->assertSessionHasErrors(['owner_user_id']);
+
+        $this->assertSame(0, $savedNotice->fresh()->infoItems()->count());
+    }
+
+    public function test_global_info_center_filters_visible_items_by_view_and_hides_foreign_user_names(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $department = $this->createDepartment($context['customer']->id, 'Sales');
+            $viewer = User::factory()->create([
+                'name' => 'Viewer User',
+                'email' => 'viewer@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'department_id' => $department->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+            ]);
+            $bidManagerUser = User::factory()->create([
+                'name' => 'Bid Manager User',
+                'email' => 'bid.manager@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_BID_MANAGER,
+                'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+                'customer_id' => $context['customer']->id,
+                'department_id' => null,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $otherContext = $this->customerAdminContext('Annen Kunde AS');
+            $otherDepartment = $this->createDepartment($otherContext['customer']->id, 'External');
+            $foreignUser = User::factory()->create([
+                'name' => 'Foreign User',
+                'email' => 'foreign@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $otherContext['customer']->id,
+                'department_id' => $otherDepartment->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $otherDepartment->id,
+            ]);
+            $systemOwnerUser = $context['admin'];
+            $regularUser = $viewer;
+
+            $visibleNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1100-info-visible',
+                'Synlig sak for infosenter',
+                savedByUserId: $viewer->id,
+                organizationalDepartmentId: $department->id,
+            );
+            $foreignNotice = $this->createSavedNotice(
+                $otherContext['customer']->id,
+                '2026-1100-info-foreign',
+                'Fremmed sak for infosenter',
+                savedByUserId: $foreignUser->id,
+                organizationalDepartmentId: $otherDepartment->id,
+            );
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Behov for svar',
+                'body' => 'Dette krever oppfølging',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-06 00:00:00',
+                'owner_user_id' => $foreignUser->id,
+                'created_by_user_id' => $foreignUser->id,
+                'created_at' => '2026-04-03 09:00:00',
+                'updated_at' => '2026-04-03 09:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_PROCYNIA,
+                'subject' => 'Innkommende notat',
+                'body' => 'Innkommende innhold',
+                'status' => SavedNoticeInfoItem::STATUS_WAITING,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 10:00:00',
+                'updated_at' => '2026-04-03 10:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_EMAIL,
+                'subject' => 'Utgående fra andre',
+                'body' => 'Skal ikke vises i utgående for viewer',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 11:00:00',
+                'updated_at' => '2026-04-03 11:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_EMAIL,
+                'subject' => 'Utgående til meg',
+                'body' => 'Skal vises i utgående fordi jeg opprettet den',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => $viewer->id,
+                'created_by_user_id' => $viewer->id,
+                'closed_at' => '2026-04-03 11:15:00',
+                'closure_comment' => 'Lukket historisk.',
+                'created_at' => '2026-04-03 11:15:00',
+                'updated_at' => '2026-04-03 11:15:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_EMAIL,
+                'subject' => 'Utgående til annen',
+                'body' => 'Skal vises i utgående fordi jeg opprettet den',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => $context['admin']->id,
+                'created_by_user_id' => $viewer->id,
+                'closed_at' => '2026-04-03 11:20:00',
+                'closure_comment' => 'Lukket historisk.',
+                'created_at' => '2026-04-03 11:20:00',
+                'updated_at' => '2026-04-03 11:20:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Intern oppfølging',
+                'body' => 'Skal også vises i utgående fordi jeg opprettet den',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $viewer->id,
+                'closed_at' => '2026-04-03 11:25:00',
+                'closure_comment' => 'Lukket historisk.',
+                'created_at' => '2026-04-03 11:25:00',
+                'updated_at' => '2026-04-03 11:25:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Min åpne oppgave',
+                'body' => 'Skal kun vises i my_tasks',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => $viewer->id,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 12:00:00',
+                'updated_at' => '2026-04-03 12:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_DECISION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Strategisk beslutning',
+                'body' => 'Skal kun løfte den kommersielle oversikten',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 12:30:00',
+                'updated_at' => '2026-04-03 12:30:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $visibleNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Strategisk avklaring',
+                'body' => 'Skal også bare påvirke den kommersielle visningen',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 12:45:00',
+                'updated_at' => '2026-04-03 12:45:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $foreignNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_DECISION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Fremmed oppgave',
+                'body' => 'Denne må ikke lekke',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-06 00:00:00',
+                'owner_user_id' => $foreignUser->id,
+                'created_by_user_id' => $foreignUser->id,
+                'created_at' => '2026-04-03 13:00:00',
+                'updated_at' => '2026-04-03 13:00:00',
+            ]);
+
+            $defaultPage = $this->inertiaPage(
+                $this->actingAs($viewer)->get('/app/info-center'),
+            );
+
+            $this->assertSame('App/InfoCenter/Index', $defaultPage['component']);
+            $this->assertSame('commercial_owner', $defaultPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('commercial_owner', $defaultPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame(2, $defaultPage['props']['infoCenter']['role_context']['operational_activity_score']);
+            $this->assertFalse($defaultPage['props']['infoCenter']['role_context']['is_case_operational']);
+            $this->assertSame('awaiting_response', $defaultPage['props']['infoCenter']['default_view']);
+            $this->assertSame('awaiting_response', $defaultPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($defaultPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame('Opprettet av meg', collect($defaultPage['props']['infoCenter']['view_options'])->firstWhere('value', 'outbound')['label']);
+            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($defaultPage['props']['infoCenter']['summary']['items'], 'key'));
+            $this->assertCount(0, $defaultPage['props']['infoCenter']['items']);
+            $this->assertSame(0, $defaultPage['props']['infoCenter']['pagination']['total']);
+
+            $myTasksPage = $this->inertiaPage(
+                $this->actingAs($viewer)->get('/app/info-center?view=my_tasks'),
+            );
+
+            $this->assertSame('my_tasks', $myTasksPage['props']['infoCenter']['active_view']);
+            $this->assertSame(
+                ['Min åpne oppgave'],
+                array_column($myTasksPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+            $this->assertSame(1, $myTasksPage['props']['infoCenter']['pagination']['total']);
+            $this->assertSame('Synlig sak for infosenter', $myTasksPage['props']['infoCenter']['items'][0]['saved_notice']['title']);
+            $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $visibleNotice->id]), $myTasksPage['props']['infoCenter']['items'][0]['saved_notice']['show_url']);
+            $this->assertSame('Viewer User', $myTasksPage['props']['infoCenter']['items'][0]['owner']['name']);
+            $this->assertSame($context['admin']->name, $myTasksPage['props']['infoCenter']['items'][0]['created_by']['name']);
+
+            $inboundPage = $this->inertiaPage(
+                $this->actingAs($viewer)->get('/app/info-center?view=inbound'),
+            );
+
+            $this->assertSame('inbound', $inboundPage['props']['infoCenter']['active_view']);
+            $this->assertSame(
+                ['Behov for svar', 'Innkommende notat'],
+                array_column($inboundPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+            $this->assertSame(2, $inboundPage['props']['infoCenter']['pagination']['total']);
+
+            $outboundPage = $this->inertiaPage(
+                $this->actingAs($viewer)->get('/app/info-center?view=outbound'),
+            );
+
+            $this->assertEqualsCanonicalizing(
+                ['Utgående til meg', 'Utgående til annen', 'Intern oppfølging'],
+                array_column($outboundPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+            $this->assertSame(3, $outboundPage['props']['infoCenter']['pagination']['total']);
+            $this->assertSame(
+                ['Viewer User', 'Viewer User', 'Viewer User'],
+                collect($outboundPage['props']['infoCenter']['items'])->pluck('created_by.name')->all(),
+            );
+            $this->assertContains(SavedNoticeInfoItem::STATUS_CLOSED, array_column($outboundPage['props']['infoCenter']['items'], 'status'));
+            $this->assertFalse(
+                collect($outboundPage['props']['infoCenter']['items'])
+                    ->pluck('subject_label')
+                    ->contains('Utgående fra andre'),
+            );
+
+            $allTitles = collect([
+                ...array_column($defaultPage['props']['infoCenter']['items'], 'subject_label'),
+                ...array_column($inboundPage['props']['infoCenter']['items'], 'subject_label'),
+                ...array_column($outboundPage['props']['infoCenter']['items'], 'subject_label'),
+                ...array_column($myTasksPage['props']['infoCenter']['items'], 'subject_label'),
+            ]);
+
+            $this->assertFalse($allTitles->contains('Fremmed oppgave'));
+
+            $bidManagerPage = $this->inertiaPage(
+                $this->actingAs($bidManagerUser)->get('/app/info-center'),
+            );
+
+            $this->assertSame('operational', $bidManagerPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('operational', $bidManagerPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('my_tasks', $bidManagerPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $bidManagerPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($bidManagerPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'awaiting_response', 'due_soon'], array_column($bidManagerPage['props']['infoCenter']['summary']['items'], 'key'));
+
+            $systemOwnerPage = $this->inertiaPage(
+                $this->actingAs($systemOwnerUser)->get('/app/info-center'),
+            );
+
+            $this->assertSame('operational', $systemOwnerPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('operational', $systemOwnerPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('my_tasks', $systemOwnerPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $systemOwnerPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($systemOwnerPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'awaiting_response', 'due_soon'], array_column($systemOwnerPage['props']['infoCenter']['summary']['items'], 'key'));
+
+            $commercialPage = $this->inertiaPage(
+                $this->actingAs($regularUser)->get('/app/info-center'),
+            );
+
+            $this->assertSame('commercial_owner', $commercialPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('commercial_owner', $commercialPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('awaiting_response', $commercialPage['props']['infoCenter']['default_view']);
+            $this->assertSame('awaiting_response', $commercialPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($commercialPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($commercialPage['props']['infoCenter']['summary']['items'], 'key'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_global_info_center_splits_my_tasks_from_awaiting_response_and_keeps_legacy_action_required_alias(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $department = $this->createDepartment($context['customer']->id, 'Sales');
+            $bidManager = User::factory()->create([
+                'name' => 'Bid Manager',
+                'email' => 'bid-manager-info-center@procynia.test',
+                'role' => User::ROLE_CUSTOMER_ADMIN,
+                'bid_role' => User::BID_ROLE_BID_MANAGER,
+                'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+                'customer_id' => $context['customer']->id,
+                'department_id' => null,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+                'primary_department_id' => null,
+            ]);
+            $otherUser = User::factory()->create([
+                'name' => 'Other User',
+                'email' => 'other-user-info-center@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'department_id' => $department->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+            ]);
+
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1300-info-center-split',
+                'Sak for oppgave-splitt',
+                savedByUserId: $bidManager->id,
+                bidManagerUserId: $bidManager->id,
+                organizationalDepartmentId: $department->id,
+            );
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Min oppgave',
+                'body' => 'Skal vises i mine oppgaver.',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-04 00:00:00',
+                'owner_user_id' => $bidManager->id,
+                'created_by_user_id' => $bidManager->id,
+                'created_at' => '2026-04-03 09:00:00',
+                'updated_at' => '2026-04-03 09:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Lukket oppgave',
+                'body' => 'Skal ikke vises i mine oppgaver.',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-02 00:00:00',
+                'owner_user_id' => $bidManager->id,
+                'created_by_user_id' => $bidManager->id,
+                'closed_at' => '2026-04-03 10:00:00',
+                'closure_comment' => 'Historisk lukket.',
+                'created_at' => '2026-04-03 10:00:00',
+                'updated_at' => '2026-04-03 10:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_MESSAGE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_EMAIL,
+                'subject' => 'Venter på svar',
+                'body' => 'Skal vises i venter på svar.',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-05 00:00:00',
+                'owner_user_id' => $otherUser->id,
+                'created_by_user_id' => $bidManager->id,
+                'created_at' => '2026-04-03 11:00:00',
+                'updated_at' => '2026-04-03 11:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_OUTBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Historisk utsendt',
+                'body' => 'Skal fortsatt vises i opprettet av meg.',
+                'status' => SavedNoticeInfoItem::STATUS_CLOSED,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-01 00:00:00',
+                'owner_user_id' => $otherUser->id,
+                'created_by_user_id' => $bidManager->id,
+                'closed_at' => '2026-04-03 11:30:00',
+                'closure_comment' => 'Lukket etter svar.',
+                'created_at' => '2026-04-03 11:30:00',
+                'updated_at' => '2026-04-03 11:30:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Innkommende notat',
+                'body' => 'Skal fortsatt vises i innkommende.',
+                'status' => SavedNoticeInfoItem::STATUS_WAITING,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $otherUser->id,
+                'created_at' => '2026-04-03 08:30:00',
+                'updated_at' => '2026-04-03 08:30:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Fremmed venting',
+                'body' => 'Skal ikke vises i mine svaravventinger.',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-06 00:00:00',
+                'owner_user_id' => $otherUser->id,
+                'created_by_user_id' => $otherUser->id,
+                'created_at' => '2026-04-03 12:00:00',
+                'updated_at' => '2026-04-03 12:00:00',
+            ]);
+
+            $defaultPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center'),
+            );
+
+            $this->assertSame('operational', $defaultPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('my_tasks', $defaultPage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $defaultPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($defaultPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'awaiting_response', 'due_soon'], array_column($defaultPage['props']['infoCenter']['summary']['items'], 'key'));
+
+            $myTasksPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center?view=my_tasks'),
+            );
+
+            $this->assertSame('my_tasks', $myTasksPage['props']['infoCenter']['active_view']);
+            $this->assertSame(
+                ['Min oppgave'],
+                array_column($myTasksPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+            $this->assertFalse(
+                collect($myTasksPage['props']['infoCenter']['items'])
+                    ->pluck('subject_label')
+                    ->contains('Lukket oppgave'),
+            );
+
+            $awaitingResponsePage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center?view=awaiting_response'),
+            );
+
+            $this->assertSame('awaiting_response', $awaitingResponsePage['props']['infoCenter']['active_view']);
+            $this->assertSame(
+                ['Venter på svar'],
+                array_column($awaitingResponsePage['props']['infoCenter']['items'], 'subject_label'),
+            );
+            $this->assertFalse(
+                collect($awaitingResponsePage['props']['infoCenter']['items'])
+                    ->pluck('subject_label')
+                    ->contains('Min oppgave'),
+            );
+
+            $legacyPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center?view=action_required'),
+            );
+
+            $this->assertSame('my_tasks', $legacyPage['props']['infoCenter']['active_view']);
+            $this->assertSame(
+                array_column($myTasksPage['props']['infoCenter']['items'], 'subject_label'),
+                array_column($legacyPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+
+            $outboundPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center?view=outbound'),
+            );
+
+            $this->assertEqualsCanonicalizing(
+                ['Min oppgave', 'Lukket oppgave', 'Venter på svar', 'Historisk utsendt'],
+                array_column($outboundPage['props']['infoCenter']['items'], 'subject_label'),
+            );
+
+            $inboundPage = $this->inertiaPage(
+                $this->actingAs($bidManager)->get('/app/info-center?view=inbound'),
+            );
+
+            $this->assertSame(['Innkommende notat'], array_column($inboundPage['props']['infoCenter']['items'], 'subject_label'));
+            $this->assertFalse(
+                collect($awaitingResponsePage['props']['infoCenter']['items'])
+                    ->pluck('subject_label')
+                    ->contains('Fremmed venting'),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_global_info_center_resolves_case_aware_persona_from_visible_operational_load(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $context = $this->customerAdminContext('Procynia AS');
+            $department = $this->createDepartment($context['customer']->id, 'Sales');
+            $strategicOwner = User::factory()->create([
+                'name' => 'Strategic Owner',
+                'email' => 'strategic-owner@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'department_id' => $department->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+            ]);
+            $activeOwner = User::factory()->create([
+                'name' => 'Active Owner',
+                'email' => 'active-owner@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'department_id' => $department->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+            ]);
+            $otherContext = $this->customerAdminContext('Annen Kunde AS');
+            $otherDepartment = $this->createDepartment($otherContext['customer']->id, 'External');
+            $foreignUser = User::factory()->create([
+                'name' => 'Foreign User',
+                'email' => 'foreign@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $otherContext['customer']->id,
+                'department_id' => $otherDepartment->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $otherDepartment->id,
+            ]);
+
+            $strategicNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1201-strategic-owner',
+                'Strategisk eiercase',
+                savedByUserId: $context['admin']->id,
+                opportunityOwnerUserId: $strategicOwner->id,
+                organizationalDepartmentId: $department->id,
+            );
+            $activeNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1202-active-owner',
+                'Operativ eiercase',
+                savedByUserId: $context['admin']->id,
+                opportunityOwnerUserId: $activeOwner->id,
+                organizationalDepartmentId: $department->id,
+            );
+            $hiddenNotice = $this->createSavedNotice(
+                $otherContext['customer']->id,
+                '2026-1203-hidden-owner',
+                'Skjult operativ sak',
+                savedByUserId: $otherContext['admin']->id,
+                opportunityOwnerUserId: $foreignUser->id,
+                organizationalDepartmentId: $otherDepartment->id,
+            );
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $strategicNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_DECISION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Strategisk beslutning',
+                'body' => 'Ikke operativt belastende',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 08:30:00',
+                'updated_at' => '2026-04-03 08:30:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $strategicNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Strategisk avklaring',
+                'body' => 'Bør holdes på styringsnivå',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 08:45:00',
+                'updated_at' => '2026-04-03 08:45:00',
+            ]);
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $activeNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_CLARIFICATION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INBOUND,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Behov for svar',
+                'body' => 'Svar kreves fra eier',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-04 00:00:00',
+                'owner_user_id' => $activeOwner->id,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 09:00:00',
+                'updated_at' => '2026-04-03 09:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $activeNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Egen oppfølging',
+                'body' => 'Opprettet av eier',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $activeOwner->id,
+                'created_at' => '2026-04-03 09:30:00',
+                'updated_at' => '2026-04-03 09:30:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $activeNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Forfalt oppgave',
+                'body' => 'Krever oppfølging',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-02 00:00:00',
+                'owner_user_id' => $activeOwner->id,
+                'created_by_user_id' => $context['admin']->id,
+                'created_at' => '2026-04-03 10:00:00',
+                'updated_at' => '2026-04-03 10:00:00',
+            ]);
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $hiddenNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_DECISION,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Skjult beslutning',
+                'body' => 'Skulle ha gitt operativt utslag dersom den var synlig',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => true,
+                'response_due_at' => '2026-04-04 00:00:00',
+                'owner_user_id' => $strategicOwner->id,
+                'created_by_user_id' => $strategicOwner->id,
+                'created_at' => '2026-04-03 11:00:00',
+                'updated_at' => '2026-04-03 11:00:00',
+            ]);
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $hiddenNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Skjult oppfølging',
+                'body' => 'Skal ikke påvirke tilgjengelig persona',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => $strategicOwner->id,
+                'created_by_user_id' => $strategicOwner->id,
+                'created_at' => '2026-04-03 11:15:00',
+                'updated_at' => '2026-04-03 11:15:00',
+            ]);
+
+            $strategicPage = $this->inertiaPage(
+                $this->actingAs($strategicOwner)->get('/app/info-center'),
+            );
+
+            $this->assertSame('commercial_owner', $strategicPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('commercial_owner', $strategicPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('Styrings- og oppfølgingsflate', $strategicPage['props']['infoCenter']['role_context']['label']);
+            $this->assertSame('Se beslutninger, avklaringer og eierskap som påvirker retning og risiko.', $strategicPage['props']['infoCenter']['role_context']['headline']);
+            $this->assertSame('Du kan fortsatt opprette, tildele og følge opp aksjoner når saken krever det.', $strategicPage['props']['infoCenter']['role_context']['subheadline']);
+            $this->assertSame(0, $strategicPage['props']['infoCenter']['role_context']['operational_activity_score']);
+            $this->assertFalse($strategicPage['props']['infoCenter']['role_context']['is_case_operational']);
+            $this->assertSame('awaiting_response', $strategicPage['props']['infoCenter']['default_view']);
+            $this->assertSame('awaiting_response', $strategicPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($strategicPage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['decision', 'clarification', 'awaiting_response'], array_column($strategicPage['props']['infoCenter']['summary']['items'], 'key'));
+            $this->assertSame(0, $strategicPage['props']['infoCenter']['pagination']['total']);
+
+            $strategicFallbackPage = $this->inertiaPage(
+                $this->actingAs($strategicOwner)->get('/app/info-center?view=bogus'),
+            );
+
+            $this->assertSame('awaiting_response', $strategicFallbackPage['props']['infoCenter']['active_view']);
+
+            $trivialOwner = User::factory()->create([
+                'name' => 'Trivial Owner',
+                'email' => 'trivial-owner@procynia.test',
+                'role' => User::ROLE_USER,
+                'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+                'customer_id' => $context['customer']->id,
+                'department_id' => $department->id,
+                'is_active' => true,
+                'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+                'primary_department_id' => $department->id,
+            ]);
+            $trivialNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1204-trivial-owner',
+                'Triviell eiercase',
+                savedByUserId: $context['admin']->id,
+                opportunityOwnerUserId: $trivialOwner->id,
+                organizationalDepartmentId: $department->id,
+            );
+
+            SavedNoticeInfoItem::query()->create([
+                'saved_notice_id' => $trivialNotice->id,
+                'type' => SavedNoticeInfoItem::TYPE_NOTE,
+                'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
+                'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+                'subject' => 'Triviell oppfølging',
+                'body' => 'Én enkel åpen aktivitet skal ikke flippe persona',
+                'status' => SavedNoticeInfoItem::STATUS_OPEN,
+                'requires_response' => false,
+                'response_due_at' => null,
+                'owner_user_id' => null,
+                'created_by_user_id' => $trivialOwner->id,
+                'created_at' => '2026-04-03 09:15:00',
+                'updated_at' => '2026-04-03 09:15:00',
+            ]);
+
+            $trivialPage = $this->inertiaPage(
+                $this->actingAs($trivialOwner)->get('/app/info-center'),
+            );
+
+            $this->assertSame('commercial_owner', $trivialPage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('commercial_owner', $trivialPage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame(2, $trivialPage['props']['infoCenter']['role_context']['operational_activity_score']);
+            $this->assertFalse($trivialPage['props']['infoCenter']['role_context']['is_case_operational']);
+            $this->assertSame('awaiting_response', $trivialPage['props']['infoCenter']['default_view']);
+            $this->assertSame('awaiting_response', $trivialPage['props']['infoCenter']['active_view']);
+            $this->assertSame(['awaiting_response', 'my_tasks', 'outbound', 'inbound'], array_column($trivialPage['props']['infoCenter']['view_options'], 'value'));
+
+            $activePage = $this->inertiaPage(
+                $this->actingAs($activeOwner)->get('/app/info-center'),
+            );
+
+            $this->assertSame('commercial_owner', $activePage['props']['infoCenter']['role_context']['base_persona']);
+            $this->assertSame('operational', $activePage['props']['infoCenter']['role_context']['persona']);
+            $this->assertSame('Operativ arbeidsflate', $activePage['props']['infoCenter']['role_context']['label']);
+            $this->assertSame('Opprett og følg opp aksjoner, svarfrister og beslutninger.', $activePage['props']['infoCenter']['role_context']['headline']);
+            $this->assertSame('Du følger opp sakene aktivt, så dette sporet skiller egne oppgaver fra det du venter svar på.', $activePage['props']['infoCenter']['role_context']['subheadline']);
+            $this->assertTrue($activePage['props']['infoCenter']['role_context']['operational_activity_score'] >= 3);
+            $this->assertTrue($activePage['props']['infoCenter']['role_context']['is_case_operational']);
+            $this->assertSame('my_tasks', $activePage['props']['infoCenter']['default_view']);
+            $this->assertSame('my_tasks', $activePage['props']['infoCenter']['active_view']);
+            $this->assertSame(['my_tasks', 'awaiting_response', 'outbound', 'inbound'], array_column($activePage['props']['infoCenter']['view_options'], 'value'));
+            $this->assertSame(['my_tasks', 'awaiting_response', 'due_soon'], array_column($activePage['props']['infoCenter']['summary']['items'], 'key'));
+            $this->assertSame(
+                ['Forfalt oppgave', 'Behov for svar'],
+                array_column($activePage['props']['infoCenter']['items'], 'subject_label'),
+            );
+
+            $activeFallbackPage = $this->inertiaPage(
+                $this->actingAs($activeOwner)->get('/app/info-center?view=bogus'),
+            );
+
+            $this->assertSame('my_tasks', $activeFallbackPage['props']['infoCenter']['active_view']);
+
+            $allVisibleTitles = collect([
+                ...array_column($strategicPage['props']['infoCenter']['items'], 'subject_label'),
+                ...array_column($activePage['props']['infoCenter']['items'], 'subject_label'),
+            ]);
+
+            $this->assertFalse($allVisibleTitles->contains('Skjult beslutning'));
+            $this->assertFalse($allVisibleTitles->contains('Skjult oppfølging'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_customer_can_create_update_and_delete_business_reviews_in_the_deadlines_save_flow(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $context = $this->customerAdminContext();
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1022-business-review',
+                'Sak med business reviews',
+                questionsRfiDeadlineAt: '2026-04-08 00:00:00',
+                rfiSubmissionDeadlineAt: '2026-04-11 00:00:00',
+                questionsRfpDeadlineAt: '2026-04-15 00:00:00',
+                rfpSubmissionDeadlineAt: '2026-04-20 00:00:00',
+                awardDateAt: '2026-04-28 00:00:00',
+            );
+
+            $firstReview = $this->createBusinessReview($savedNotice->id, '2026-04-14');
+            $secondReview = $this->createBusinessReview($savedNotice->id, '2026-04-16');
+
+            $updatedFirstReviewAt = '2026-04-15';
+            $createdReviewAt = '2026-04-19';
+
+            $response = $this->actingAs($context['admin'])
+                ->withSession(['_token' => 'test-token'])
+                ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+                ->from('/app/notices?mode=saved')
+                ->patch("/app/notices/saved/{$savedNotice->id}/deadlines", [
+                    'questions_rfi_deadline_at' => '2026-04-09',
+                    'rfi_submission_deadline_at' => '2026-04-12',
+                    'questions_rfp_deadline_at' => '2026-04-16',
+                    'rfp_submission_deadline_at' => '2026-04-21',
+                    'award_date_at' => '2026-04-29',
+                    'business_reviews' => [
+                        [
+                            'id' => $firstReview->id,
+                            'business_review_at' => $updatedFirstReviewAt,
+                        ],
+                        [
+                            'business_review_at' => $createdReviewAt,
+                        ],
+                    ],
+                ]);
+
+            $response->assertRedirect('/app/notices?mode=saved');
+
+            $savedNotice->refresh();
+
+            $this->assertSame('2026-04-09', $savedNotice->questions_rfi_deadline_at?->toDateString());
+            $this->assertSame('2026-04-12', $savedNotice->rfi_submission_deadline_at?->toDateString());
+            $this->assertSame('2026-04-16', $savedNotice->questions_rfp_deadline_at?->toDateString());
+            $this->assertSame('2026-04-21', $savedNotice->rfp_submission_deadline_at?->toDateString());
+            $this->assertSame('2026-04-29', $savedNotice->award_date_at?->toDateString());
+
+            $businessReviews = $savedNotice->businessReviews()
+                ->orderBy('business_review_at')
+                ->get();
+
+            $this->assertCount(2, $businessReviews);
+            $this->assertSame($updatedFirstReviewAt, $businessReviews[0]->business_review_at?->toDateString());
+            $this->assertSame($createdReviewAt, $businessReviews[1]->business_review_at?->toDateString());
+            $this->assertDatabaseMissing('saved_notice_business_reviews', [
+                'id' => $secondReview->id,
+            ]);
+
+            $savedPayload = $this->savedNoticePayload($context['admin'], $savedNotice);
+            $this->assertCount(2, $savedPayload['business_reviews']);
+            $this->assertSame($updatedFirstReviewAt, (string) $savedPayload['business_reviews'][0]['business_review_at']);
+            $this->assertSame($createdReviewAt, (string) $savedPayload['business_reviews'][1]['business_review_at']);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $this->assertCount(2, $showPage['props']['notice']['business_reviews']);
+            $this->assertSame($updatedFirstReviewAt, (string) $showPage['props']['notice']['business_reviews'][0]['business_review_at']);
+            $this->assertSame($createdReviewAt, (string) $showPage['props']['notice']['business_reviews'][1]['business_review_at']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_saved_notice_next_deadline_summary_can_point_to_business_review(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $context = $this->customerAdminContext();
+            $savedNotice = $this->createSavedNotice(
+                $context['customer']->id,
+                '2026-1023-business-review-summary',
+                'Sak med BR som neste frist',
+                questionsRfiDeadlineAt: '2026-04-01 00:00:00',
+                rfiSubmissionDeadlineAt: '2026-04-02 00:00:00',
+                questionsRfpDeadlineAt: '2026-04-20 00:00:00',
+                rfpSubmissionDeadlineAt: '2026-04-25 00:00:00',
+                awardDateAt: '2026-05-05 00:00:00',
+            );
+
+            $this->createBusinessReview($savedNotice->id, '2026-04-10');
+
+            $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+            $this->assertSame('upcoming', $payload['deadline_state']);
+            $this->assertSame('Business Review', $payload['next_deadline_type']);
+            $this->assertSame('2026-04-10', (string) $payload['next_deadline_at']);
+
+            $showPage = $this->inertiaPage(
+                $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+            );
+
+            $this->assertSame('Business Review', $showPage['props']['notice']['next_deadline_type']);
+            $this->assertSame('2026-04-10', (string) $showPage['props']['notice']['next_deadline_at']);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_customer_can_update_deadlines_for_own_active_saved_notice(): void
@@ -2384,6 +4115,14 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         ]);
     }
 
+    private function createBusinessReview(int $savedNoticeId, string $businessReviewAt): SavedNoticeBusinessReview
+    {
+        return SavedNoticeBusinessReview::query()->create([
+            'saved_notice_id' => $savedNoticeId,
+            'business_review_at' => $businessReviewAt,
+        ]);
+    }
+
     private function savedNoticePayload(User $user, SavedNotice $savedNotice, string $mode = 'saved'): array
     {
         $page = $this->inertiaPage(
@@ -2683,6 +4422,61 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         });
 
         $this->createdBidSubmissionsTable = true;
+    }
+
+    private function ensureSavedNoticeBusinessReviewsTable(): void
+    {
+        if (Schema::hasTable('saved_notice_business_reviews')) {
+            return;
+        }
+
+        Schema::create('saved_notice_business_reviews', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('saved_notice_id')->constrained('saved_notices')->cascadeOnDelete();
+            $table->timestamp('business_review_at');
+            $table->timestamps();
+
+            $table->index(['saved_notice_id', 'business_review_at']);
+        });
+
+        $this->createdSavedNoticeBusinessReviewsTable = true;
+    }
+
+    private function ensureSavedNoticeInfoItemsTable(): void
+    {
+        if (Schema::hasTable('saved_notice_info_items')) {
+            if (! Schema::hasColumn('saved_notice_info_items', 'closure_comment')) {
+                Schema::table('saved_notice_info_items', function (Blueprint $table): void {
+                    $table->text('closure_comment')->nullable();
+                });
+            }
+
+            return;
+        }
+
+        Schema::create('saved_notice_info_items', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('saved_notice_id')->constrained('saved_notices')->cascadeOnDelete();
+            $table->string('type');
+            $table->string('direction');
+            $table->string('channel');
+            $table->string('subject')->nullable();
+            $table->text('body');
+            $table->string('status');
+            $table->boolean('requires_response')->default(false);
+            $table->timestamp('response_due_at')->nullable();
+            $table->foreignId('owner_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('closed_at')->nullable();
+            $table->text('closure_comment')->nullable();
+            $table->timestamps();
+
+            $table->index(['saved_notice_id', 'created_at']);
+            $table->index(['saved_notice_id', 'status']);
+            $table->index(['saved_notice_id', 'response_due_at']);
+        });
+
+        $this->createdSavedNoticeInfoItemsTable = true;
     }
 
     private function ensureSavedNoticeUserAccessTable(): void

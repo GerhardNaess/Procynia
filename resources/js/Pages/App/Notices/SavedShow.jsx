@@ -48,6 +48,19 @@ function actionButtonClassName(tone, status = null) {
     return 'border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-300 hover:bg-violet-100';
 }
 
+function infoItemStatusBadgeClassName(status) {
+    switch (status) {
+        case 'open':
+            return 'bg-emerald-100 text-emerald-700 ring-emerald-200';
+        case 'waiting':
+            return 'bg-amber-100 text-amber-800 ring-amber-200';
+        case 'closed':
+            return 'bg-slate-100 text-slate-700 ring-slate-200';
+        default:
+            return 'bg-slate-100 text-slate-700 ring-slate-200';
+    }
+}
+
 function bidStatusBadgeClassName(status) {
     switch (status) {
         case 'qualifying':
@@ -369,6 +382,8 @@ export default function SavedNoticeShow({ notice }) {
     const page = usePage();
     const { auth, errors = {} } = page.props;
     const locale = document.documentElement.lang || 'no-NO';
+    const infoItems = notice.info_items;
+    const infoItemDefaults = infoItems.defaults;
     const submissionForm = useForm({});
     const statusForm = useForm({
         status: '',
@@ -388,15 +403,36 @@ export default function SavedNoticeShow({ notice }) {
         questions_rfp_deadline_at: '',
         rfp_submission_deadline_at: '',
         award_date_at: '',
+        reference_number: '',
+        contact_person_name: '',
+        contact_person_email: '',
+        notes: '',
+        business_reviews: [],
     });
     const phaseCommentForm = useForm({
         comment: '',
+    });
+    const infoItemForm = useForm({
+        type: infoItemDefaults.type,
+        direction: infoItemDefaults.direction,
+        channel: infoItemDefaults.channel,
+        subject: '',
+        body: '',
+        status: infoItemDefaults.status,
+        requires_response: false,
+        response_due_at: '',
+        owner_user_id: '',
+    });
+    const closeInfoItemForm = useForm({
+        closure_comment: '',
     });
     const caseAccessForm = useForm({
         user_id: '',
         access_role: notice.actions?.case_access?.access_role_options?.[0]?.value ?? 'contributor',
     });
     const [isEditingDeadlines, setIsEditingDeadlines] = useState(false);
+    const [isCreatingInfoItem, setIsCreatingInfoItem] = useState(false);
+    const [closingInfoItemId, setClosingInfoItemId] = useState(null);
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
     const [openActionSection, setOpenActionSection] = useState('decision');
     const [openCommentPhases, setOpenCommentPhases] = useState({});
@@ -470,6 +506,16 @@ export default function SavedNoticeShow({ notice }) {
     const externalLinkLabel = noticeExternalLinkLabel(notice);
     const sourceBadgeClassName = noticeSourceBadgeClassName(notice);
     const deadlineSummary = deadlineStateLabel(notice, locale);
+    const businessReviews = notice.business_reviews ?? [];
+    const infoItemEntries = infoItems.items;
+    const infoItemSummary = infoItemEntries.length > 0
+        ? `${infoItemEntries.length} registrerte aksjoner og oppfølginger`
+        : 'Ingen registrerte aksjoner eller oppfølginger';
+    const infoItemTypeOptions = infoItems.type_options;
+    const infoItemDirectionOptions = infoItems.direction_options;
+    const infoItemChannelOptions = infoItems.channel_options;
+    const infoItemStatusOptions = infoItems.status_options;
+    const infoItemOwnerOptions = infoItems.owner_options;
     const bidManagerSummary = notice.bid_manager?.name || 'Ikke satt';
     const opportunityOwnerSummary = notice.opportunity_owner?.name || 'Ikke satt';
     const administrationSummary = notice.archived_at ? 'Saken er arkivert' : 'Sekundære handlinger';
@@ -516,6 +562,14 @@ export default function SavedNoticeShow({ notice }) {
             questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
             rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
             award_date_at: dateInputValue(notice.award_date_at),
+            reference_number: notice.reference_number ?? '',
+            contact_person_name: notice.contact_person_name ?? '',
+            contact_person_email: notice.contact_person_email ?? '',
+            notes: notice.notes ?? '',
+            business_reviews: (notice.business_reviews ?? []).map((review) => ({
+                id: review.id,
+                business_review_at: dateInputValue(review.business_review_at),
+            })),
         });
     };
 
@@ -523,6 +577,31 @@ export default function SavedNoticeShow({ notice }) {
         setIsEditingDeadlines(false);
         deadlineForm.reset();
         deadlineForm.clearErrors();
+    };
+
+    const addBusinessReview = () => {
+        deadlineForm.setData('business_reviews', [
+            ...deadlineForm.data.business_reviews,
+            { id: null, business_review_at: '' },
+        ]);
+    };
+
+    const updateBusinessReviewAt = (index, value) => {
+        deadlineForm.setData(
+            'business_reviews',
+            deadlineForm.data.business_reviews.map((review, currentIndex) => (
+                currentIndex === index
+                    ? { ...review, business_review_at: value }
+                    : review
+            )),
+        );
+    };
+
+    const removeBusinessReview = (index) => {
+        deadlineForm.setData(
+            'business_reviews',
+            deadlineForm.data.business_reviews.filter((_, currentIndex) => currentIndex !== index),
+        );
     };
 
     const submitDeadlineEditor = () => {
@@ -631,6 +710,72 @@ export default function SavedNoticeShow({ notice }) {
             onSuccess: () => {
                 phaseCommentForm.reset('comment');
                 phaseCommentForm.clearErrors();
+            },
+        });
+    };
+
+    const openInfoItemCreator = () => {
+        setIsCreatingInfoItem(true);
+        infoItemForm.reset();
+        infoItemForm.clearErrors();
+    };
+
+    const cancelInfoItemCreator = () => {
+        setIsCreatingInfoItem(false);
+        infoItemForm.reset();
+        infoItemForm.clearErrors();
+    };
+
+    const submitInfoItemCreator = () => {
+        if (!infoItems.store_url) {
+            return;
+        }
+
+        infoItemForm.clearErrors();
+        infoItemForm.post(infoItems.store_url, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                setIsCreatingInfoItem(false);
+                infoItemForm.reset();
+                infoItemForm.clearErrors();
+            },
+        });
+    };
+
+    const openInfoItemCloser = (item) => {
+        if (!item?.can_close || item.status === 'closed') {
+            return;
+        }
+
+        if (closingInfoItemId === item.id) {
+            cancelInfoItemCloser();
+
+            return;
+        }
+
+        closeInfoItemForm.reset();
+        closeInfoItemForm.clearErrors();
+        setClosingInfoItemId(item.id);
+    };
+
+    const cancelInfoItemCloser = () => {
+        setClosingInfoItemId(null);
+        closeInfoItemForm.reset();
+        closeInfoItemForm.clearErrors();
+    };
+
+    const submitInfoItemCloser = (item) => {
+        if (!item?.close_url) {
+            return;
+        }
+
+        closeInfoItemForm.clearErrors();
+        closeInfoItemForm.patch(item.close_url, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: () => {
+                cancelInfoItemCloser();
             },
         });
     };
@@ -794,51 +939,148 @@ export default function SavedNoticeShow({ notice }) {
                                 </div>
 
                                 {isPrivateRequest ? (
-                                    <div className="grid gap-4 md:grid-cols-2">
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
-                                            <div className="text-sm font-medium text-slate-900">
-                                                {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                    isEditingDeadlines ? (
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                <div className="text-sm font-medium text-slate-900">
+                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="reference_number">
+                                                    Referanse
+                                                </label>
+                                                <input
+                                                    id="reference_number"
+                                                    type="text"
+                                                    value={deadlineForm.data.reference_number}
+                                                    onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                                {deadlineForm.errors.reference_number ? (
+                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.reference_number}</p>
+                                                ) : null}
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_name">
+                                                    Kontaktperson
+                                                </label>
+                                                <input
+                                                    id="contact_person_name"
+                                                    type="text"
+                                                    value={deadlineForm.data.contact_person_name}
+                                                    onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                                {deadlineForm.errors.contact_person_name ? (
+                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_name}</p>
+                                                ) : null}
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_email">
+                                                    Kontakt e-post
+                                                </label>
+                                                <input
+                                                    id="contact_person_email"
+                                                    type="email"
+                                                    value={deadlineForm.data.contact_person_email}
+                                                    onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                                {deadlineForm.errors.contact_person_email ? (
+                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_email}</p>
+                                                ) : null}
+                                            </div>
+                                            <div className="space-y-1 md:col-span-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                <div className="text-sm font-medium text-slate-900">
+                                                    {notice.external_url ? (
+                                                        <a
+                                                            href={notice.external_url}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="font-semibold text-violet-700 transition hover:text-violet-800"
+                                                        >
+                                                            {externalLinkLabel}
+                                                        </a>
+                                                    ) : (
+                                                        'Ikke registrert'
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5 md:col-span-2">
+                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="notes">
+                                                    Notater
+                                                </label>
+                                                <textarea
+                                                    id="notes"
+                                                    value={deadlineForm.data.notes}
+                                                    onChange={(event) => deadlineForm.setData('notes', event.target.value)}
+                                                    rows={4}
+                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    placeholder="Valgfritt notat"
+                                                />
+                                                {deadlineForm.errors.notes ? (
+                                                    <p className="text-sm text-rose-600">{deadlineForm.errors.notes}</p>
+                                                ) : null}
                                             </div>
                                         </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Referanse</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.reference_number || 'Ikke registrert'}</div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontaktperson</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || 'Ikke registrert'}</div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontakt e-post</div>
-                                            <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || 'Ikke registrert'}</div>
-                                        </div>
-                                        <div className="space-y-1 md:col-span-2">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
-                                            <div className="text-sm font-medium text-slate-900">
-                                                {notice.external_url ? (
-                                                    <a
-                                                        href={notice.external_url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="font-semibold text-violet-700 transition hover:text-violet-800"
-                                                    >
-                                                        {externalLinkLabel}
-                                                    </a>
-                                                ) : (
-                                                    'Ikke registrert'
-                                                )}
+                                    ) : (
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                <div className="text-sm font-medium text-slate-900">
+                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Referanse</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || 'Ikke registrert'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontaktperson</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || 'Ikke registrert'}</div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontakt e-post</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || 'Ikke registrert'}</div>
+                                            </div>
+                                            <div className="space-y-1 md:col-span-2">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                <div className="text-sm font-medium text-slate-900">
+                                                    {notice.external_url ? (
+                                                        <a
+                                                            href={notice.external_url}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="font-semibold text-violet-700 transition hover:text-violet-800"
+                                                        >
+                                                            {externalLinkLabel}
+                                                        </a>
+                                                    ) : (
+                                                        'Ikke registrert'
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    )
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-1">
@@ -868,6 +1110,92 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
                                 )}
 
+                                {isEditingDeadlines ? (
+                                    <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                    Business Review
+                                                </div>
+                                                <p className="mt-1 text-sm text-blue-950/75">
+                                                    Registrer ett eller flere BR-tidspunkter mellom RFI og RFP.
+                                                </p>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={addBusinessReview}
+                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                                            >
+                                                Legg til BR
+                                            </button>
+                                        </div>
+
+                                        <div className="mt-4 space-y-3">
+                                            {businessReviews.length > 0 ? (
+                                                businessReviews.map((review, index) => (
+                                                    <div
+                                                        key={review.id ?? `business-review-${index}`}
+                                                        className="rounded-2xl border border-blue-200 bg-white px-4 py-4"
+                                                    >
+                                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                                                            <label className="min-w-0 flex-1 space-y-2">
+                                                                <span className="text-sm font-medium text-slate-700">
+                                                                    Business Review {index + 1}
+                                                                </span>
+                                                                <input
+                                                                    type="date"
+                                                                    value={review.business_review_at}
+                                                                    onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
+                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                                                                />
+                                                                {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
+                                                                    <p className="text-sm text-rose-600">
+                                                                        {deadlineForm.errors[`business_reviews.${index}.business_review_at`]}
+                                                                    </p>
+                                                                ) : null}
+                                                            </label>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeBusinessReview(index)}
+                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                            >
+                                                                Slett
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-sm text-blue-900/70">
+                                                    Ingen Business Review er registrert ennå.
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : businessReviews.length > 0 ? (
+                                    <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                            Business Review
+                                        </div>
+                                        <div className="mt-3 space-y-3">
+                                            {businessReviews.map((review) => (
+                                                <div key={review.id} className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5">
+                                                    <span
+                                                        className="h-3 w-3 rounded-full bg-blue-700 ring-4 ring-blue-100"
+                                                        aria-hidden="true"
+                                                    />
+                                                    <div className="min-w-0">
+                                                        <div className="text-sm font-medium text-slate-900">
+                                                            {formatDate(review.business_review_at, locale)}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : null}
+
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppsummering</div>
                                     <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
@@ -875,7 +1203,7 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
                                 </div>
 
-                                {isPrivateRequest && notice.notes ? (
+                                {isPrivateRequest && notice.notes && !isEditingDeadlines ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notater</div>
                                         <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
@@ -1054,6 +1382,374 @@ export default function SavedNoticeShow({ notice }) {
                                     })}
                                 </div>
                             </div>
+                        </section>
+
+                        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="space-y-2">
+                                    <div>
+                                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">Infosenter</h2>
+                                        <p className="mt-1 text-sm text-slate-500">Opprett og følg opp aksjoner, avklaringer og beslutninger i saken.</p>
+                                    </div>
+                                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                        {infoItemSummary}
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={openInfoItemCreator}
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                >
+                                    Ny aksjon
+                                </button>
+                            </div>
+
+                            {isCreatingInfoItem ? (
+                                <form
+                                    onSubmit={(event) => {
+                                        event.preventDefault();
+                                        submitInfoItemCreator();
+                                    }}
+                                    className="mt-5 space-y-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                >
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <label className="space-y-2 md:col-span-2">
+                                            <span className="text-sm font-medium text-slate-700">Emne</span>
+                                            <input
+                                                type="text"
+                                                value={infoItemForm.data.subject}
+                                                onChange={(event) => infoItemForm.setData('subject', event.target.value)}
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                placeholder="Hva gjelder oppfølgingen?"
+                                            />
+                                            {infoItemForm.errors.subject ? (
+                                                <p className="text-sm text-rose-600">{infoItemForm.errors.subject}</p>
+                                            ) : null}
+                                        </label>
+
+                                        <label className="space-y-2 md:col-span-2">
+                                            <span className="text-sm font-medium text-slate-700">Beskrivelse / oppfølging</span>
+                                            <textarea
+                                                value={infoItemForm.data.body}
+                                                onChange={(event) => infoItemForm.setData('body', event.target.value)}
+                                                rows={5}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                placeholder="Beskriv aksjonen, avklaringen eller beslutningen"
+                                            />
+                                            {infoItemForm.errors.body ? (
+                                                <p className="text-sm text-rose-600">{infoItemForm.errors.body}</p>
+                                            ) : null}
+                                        </label>
+
+                                        <label className="space-y-2">
+                                            <span className="text-sm font-medium text-slate-700">Ansvarlig</span>
+                                            <select
+                                                value={infoItemForm.data.owner_user_id}
+                                                onChange={(event) => infoItemForm.setData('owner_user_id', event.target.value)}
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            >
+                                                <option value="">Ingen ansvarlig</option>
+                                                {infoItemOwnerOptions.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {infoItemForm.errors.owner_user_id ? (
+                                                <p className="text-sm text-rose-600">{infoItemForm.errors.owner_user_id}</p>
+                                            ) : null}
+                                        </label>
+
+                                        <label className="space-y-2">
+                                            <span className="text-sm font-medium text-slate-700">Oppfølgingsfrist</span>
+                                            <input
+                                                type="date"
+                                                value={infoItemForm.data.response_due_at}
+                                                onChange={(event) => infoItemForm.setData('response_due_at', event.target.value)}
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            />
+                                            {infoItemForm.errors.response_due_at ? (
+                                                <p className="text-sm text-rose-600">{infoItemForm.errors.response_due_at}</p>
+                                            ) : null}
+                                        </label>
+
+                                        <label className="space-y-2">
+                                            <span className="text-sm font-medium text-slate-700">Status</span>
+                                            <select
+                                                value={infoItemForm.data.status}
+                                                onChange={(event) => infoItemForm.setData('status', event.target.value)}
+                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            >
+                                                {infoItemStatusOptions.map((option) => (
+                                                    <option key={option.value} value={option.value}>
+                                                        {option.label}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            {infoItemForm.errors.status ? (
+                                                <p className="text-sm text-rose-600">{infoItemForm.errors.status}</p>
+                                            ) : null}
+                                        </label>
+
+                                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 md:col-span-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={infoItemForm.data.requires_response}
+                                                onChange={(event) => infoItemForm.setData('requires_response', event.target.checked)}
+                                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                            />
+                                            <div className="space-y-1">
+                                                <span className="block text-sm font-medium text-slate-700">Krever svar og oppfølging</span>
+                                                <p className="text-xs text-slate-500">
+                                                    Bruk når oppfølgingen må ha svar før den kan lukkes.
+                                                </p>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                            Klassifisering
+                                        </div>
+                                        <p className="mt-1 text-sm text-slate-500">
+                                            Velg hvordan oppfølgingen skal kategoriseres i saken.
+                                        </p>
+                                        <div className="mt-4 grid gap-4 md:grid-cols-3">
+                                            <label className="space-y-2">
+                                                <span className="text-sm font-medium text-slate-700">Type</span>
+                                                <select
+                                                    value={infoItemForm.data.type}
+                                                    onChange={(event) => infoItemForm.setData('type', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                >
+                                                    {infoItemTypeOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {infoItemForm.errors.type ? (
+                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.type}</p>
+                                                ) : null}
+                                            </label>
+
+                                            <label className="space-y-2">
+                                                <span className="text-sm font-medium text-slate-700">Retning</span>
+                                                <select
+                                                    value={infoItemForm.data.direction}
+                                                    onChange={(event) => infoItemForm.setData('direction', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                >
+                                                    {infoItemDirectionOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {infoItemForm.errors.direction ? (
+                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.direction}</p>
+                                                ) : null}
+                                            </label>
+
+                                            <label className="space-y-2">
+                                                <span className="text-sm font-medium text-slate-700">Kanal</span>
+                                                <select
+                                                    value={infoItemForm.data.channel}
+                                                    onChange={(event) => infoItemForm.setData('channel', event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                >
+                                                    {infoItemChannelOptions.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {infoItemForm.errors.channel ? (
+                                                    <p className="text-sm text-rose-600">{infoItemForm.errors.channel}</p>
+                                                ) : null}
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-3">
+                                        <button
+                                            type="submit"
+                                            disabled={infoItemForm.processing || infoItemForm.data.body.trim() === ''}
+                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {infoItemForm.processing ? 'Lagrer...' : 'Lagre aksjon'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={cancelInfoItemCreator}
+                                            disabled={infoItemForm.processing}
+                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            Avbryt
+                                        </button>
+                                    </div>
+                                </form>
+                            ) : null}
+
+                            {infoItemEntries.length > 0 ? (
+                                <div className="mt-5 space-y-3">
+                                    {infoItemEntries.map((item) => {
+                                        const isClosed = item.status === 'closed';
+                                        const canCloseItem = Boolean(item.can_close) && !isClosed;
+                                        const isCloseFormOpen = closingInfoItemId === item.id;
+
+                                        return (
+                                            <article key={item.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                    <div className="min-w-0 space-y-3">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span
+                                                                className={classNames(
+                                                                    'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
+                                                                    infoItemStatusBadgeClassName(item.status),
+                                                                )}
+                                                            >
+                                                                {item.status_label}
+                                                            </span>
+                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                                {item.type_label}
+                                                            </span>
+                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                                {item.direction_label}
+                                                            </span>
+                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                                                                {item.channel_label}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="text-sm font-semibold text-slate-950">
+                                                            {item.subject || 'Uten emne'}
+                                                        </div>
+
+                                                        <div className="whitespace-pre-line text-sm leading-6 text-slate-700">
+                                                            {item.body}
+                                                        </div>
+
+                                                        <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                                                            {item.owner ? (
+                                                                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                    Ansvarlig: {item.owner.name}
+                                                                </span>
+                                                            ) : null}
+                                                            {item.status !== 'closed' && item.requires_response ? (
+                                                                <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
+                                                                    Venter på svar
+                                                                </span>
+                                                            ) : null}
+                                                            {item.response_due_at ? (
+                                                                <span className="rounded-full bg-violet-50 px-2.5 py-1 font-medium text-violet-700">
+                                                                    Oppfølgingsfrist: {formatDate(item.response_due_at, locale)}
+                                                                </span>
+                                                            ) : null}
+                                                            {item.closed_at ? (
+                                                                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+                                                                    Lukket {formatDate(item.closed_at, locale, { hour: '2-digit', minute: '2-digit' })}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+
+                                                        {isClosed && item.closure_comment ? (
+                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Kommentar ved lukking
+                                                                </div>
+                                                                <div className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+                                                                    {item.closure_comment}
+                                                                </div>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+
+                                                    <div className="shrink-0 space-y-2 text-xs text-slate-500 lg:text-right">
+                                                        <div className="font-medium text-slate-700">
+                                                            Opprettet {formatDate(item.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
+                                                        </div>
+                                                        <div>
+                                                            {item.created_by ? `Av ${item.created_by.name}` : 'Av —'}
+                                                        </div>
+
+                                                        {canCloseItem ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openInfoItemCloser(item)}
+                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+                                                            >
+                                                                {isCloseFormOpen ? 'Skjul lukking' : 'Lukk aksjon'}
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+
+                                                {isCloseFormOpen ? (
+                                                    <form
+                                                        onSubmit={(event) => {
+                                                            event.preventDefault();
+                                                            submitInfoItemCloser(item);
+                                                        }}
+                                                        className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4"
+                                                    >
+                                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                            <div>
+                                                                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                                                                    Lukk aksjon
+                                                                </div>
+                                                                <p className="mt-1 text-sm text-slate-600">
+                                                                    Kommentar ved lukking er valgfri, men anbefales for historikken.
+                                                                </p>
+                                                            </div>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelInfoItemCloser}
+                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            >
+                                                                Avbryt
+                                                            </button>
+                                                        </div>
+
+                                                        <label className="mt-4 block space-y-2">
+                                                            <span className="text-sm font-medium text-slate-700">Kommentar ved lukking</span>
+                                                            <textarea
+                                                                value={closeInfoItemForm.data.closure_comment}
+                                                                onChange={(event) => closeInfoItemForm.setData('closure_comment', event.target.value)}
+                                                                rows={3}
+                                                                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
+                                                                placeholder="Beskriv kort hva som ble gjort eller avklart"
+                                                            />
+                                                            <p className="text-xs leading-5 text-slate-500">
+                                                                Notatet blir liggende i historikken sammen med lukket status.
+                                                            </p>
+                                                            {closeInfoItemForm.errors.closure_comment ? (
+                                                                <p className="text-sm text-rose-600">{closeInfoItemForm.errors.closure_comment}</p>
+                                                            ) : null}
+                                                        </label>
+
+                                                        <div className="mt-4 flex flex-wrap gap-3">
+                                                            <button
+                                                                type="submit"
+                                                                disabled={closeInfoItemForm.processing}
+                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {closeInfoItemForm.processing ? 'Lukker...' : 'Lagre og lukk aksjon'}
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                ) : null}
+                                            </article>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                                    Ingen aksjoner eller oppfølginger er registrert ennå. Opprett første aksjon for å fordele ansvar og sette frist.
+                                </div>
+                            )}
                         </section>
 
                         {shouldShowSubmissions ? (

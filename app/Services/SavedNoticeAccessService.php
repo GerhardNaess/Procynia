@@ -46,6 +46,22 @@ class SavedNoticeAccessService
         return $this->applyVisibility($query, $user, true);
     }
 
+    public function cockpitScopeQueryFor(User $user, int $customerId): Builder
+    {
+        $query = SavedNotice::query()
+            ->where('customer_id', $customerId);
+
+        if ($user->isSystemOwner() || $user->isBidManager()) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $builder) use ($user): void {
+            $builder
+                ->where('bid_manager_user_id', $user->id)
+                ->orWhere('opportunity_owner_user_id', $user->id);
+        });
+    }
+
     public function canView(User $user, SavedNotice $notice): bool
     {
         return $this->visibleQueryFor($user)

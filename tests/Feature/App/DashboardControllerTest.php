@@ -6,10 +6,11 @@ use App\Models\Customer;
 use App\Models\Department;
 use App\Models\BidSubmission;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeBusinessReview;
 use App\Models\SavedNoticePhaseComment;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
-use App\Models\WatchProfileInboxRecord;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Carbon;
@@ -53,12 +54,6 @@ class DashboardControllerTest extends TestCase
         $hiddenDepartmentProfile = $this->createWatchProfile($customer->id, 'Hidden Department', null, $departmentB->id, true);
         $this->createWatchProfile($customer->id, 'Inactive Personal', $userA->id, null, false);
         $foreignProfile = $this->createWatchProfile($otherCustomer->id, 'Foreign Profile', $foreignUser->id, null, true);
-
-        $this->createInboxRecord($customer->id, $personalProfile->id, $userA->id, null, '2026-500001', 'Personal Hit', 'Procynia AS', '2026-03-29 10:00:00');
-        $this->createInboxRecord($customer->id, $departmentProfile->id, null, $departmentA->id, '2026-500002', 'Department Hit', 'Oslo kommune', '2026-03-29 09:00:00');
-        $this->createInboxRecord($customer->id, $hiddenPersonalProfile->id, $userB->id, null, '2026-500003', 'Hidden Personal Hit', 'Skjult', '2026-03-29 11:00:00');
-        $this->createInboxRecord($customer->id, $hiddenDepartmentProfile->id, null, $departmentB->id, '2026-500004', 'Hidden Department Hit', 'Skjult', '2026-03-29 12:00:00');
-        $this->createInboxRecord($otherCustomer->id, $foreignProfile->id, $foreignUser->id, null, '2026-500005', 'Foreign Hit', 'External', '2026-03-29 13:00:00');
 
         $savedNoticeA = $this->createSavedNotice(
             $customer->id,
@@ -138,14 +133,10 @@ class DashboardControllerTest extends TestCase
         $this->assertArrayHasKey('cockpit', $page['props']);
         $this->assertArrayHasKey('pipeline', $page['props']);
         $this->assertArrayHasKey('stats', $page['props']);
-        $this->assertArrayHasKey('recentInboxItems', $page['props']);
         $this->assertArrayHasKey('recentWorklistItems', $page['props']);
         $this->assertArrayHasKey('watchProfileSummary', $page['props']);
         $this->assertArrayHasKey('quickLinks', $page['props']);
 
-        $this->assertSame(1, $page['props']['stats']['userInbox']['value']);
-        $this->assertSame(1, $page['props']['stats']['departmentInbox']['value']);
-        $this->assertTrue($page['props']['stats']['departmentInbox']['is_available']);
         $this->assertSame(5, $page['props']['stats']['worklist']['value']);
         $this->assertSame(2, $page['props']['stats']['activeWatchProfiles']['value']);
         $this->assertSame(6, $page['props']['pipeline']['total_count']);
@@ -158,23 +149,18 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(5, $page['props']['cockpit']['portfolio']['active']);
         $this->assertSame(1, $page['props']['cockpit']['portfolio']['outcome']);
         $this->assertCount(2, $page['props']['cockpit']['pipeline_quality']['conversions']);
-        $this->assertSame(3, $page['props']['cockpit']['responsibility_activity']['bid_managers']['assigned_count']);
-        $this->assertSame(1, $page['props']['cockpit']['responsibility_activity']['opportunity_owners']['assigned_count']);
+        $this->assertSame(3, $page['props']['cockpit']['responsibility_activity']['bid_manager_cases_count']);
+        $this->assertSame(1, $page['props']['cockpit']['responsibility_activity']['opportunity_owner_cases_count']);
+        $this->assertSame(2, $page['props']['cockpit']['responsibility_activity']['saved_watch_lists_count']);
+        $this->assertSame(0, $page['props']['cockpit']['responsibility_activity']['contributor_cases_count']);
         $this->assertGreaterThanOrEqual(3, $page['props']['cockpit']['responsibility_activity']['activity']['activity_count_14_days']);
         $this->assertNotEmpty($page['props']['cockpit']['deadlines']['items']);
-
-        $this->assertContains('Personal Hit', array_column($page['props']['recentInboxItems'], 'title'));
-        $this->assertContains('Department Hit', array_column($page['props']['recentInboxItems'], 'title'));
-        $this->assertSame(['Min inbox', 'Avdeling'], array_column($page['props']['recentInboxItems'], 'source_label'));
         $this->assertContains('Saved Notice A', array_column($page['props']['recentWorklistItems'], 'title'));
         $this->assertContains('Saved Notice B', array_column($page['props']['recentWorklistItems'], 'title'));
 
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
         $this->assertEqualsCanonicalizing(['Personal Profile', 'Sales Profile'], array_column($page['props']['watchProfileSummary']['recent_profiles'], 'name'));
-
-        $quickLinkKeys = array_column($page['props']['quickLinks'], 'key');
-        $this->assertContains('departmentInbox', $quickLinkKeys);
         $this->assertNotContains('Foreign Profile', array_column($page['props']['watchProfileSummary']['recent_profiles'], 'name'));
     }
 
@@ -186,19 +172,335 @@ class DashboardControllerTest extends TestCase
         $personalProfile = $this->createWatchProfile($customer->id, 'Personal Profile', $user->id, null, true);
         $departmentProfile = $this->createWatchProfile($customer->id, 'Department Profile', null, $department->id, true);
 
-        $this->createInboxRecord($customer->id, $personalProfile->id, $user->id, null, '2026-700001', 'Personal Hit', 'Procynia AS', '2026-03-29 08:00:00');
-        $this->createInboxRecord($customer->id, $departmentProfile->id, null, $department->id, '2026-700002', 'Department Hit', 'Oslo kommune', '2026-03-29 09:00:00');
-
         $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
 
-        $this->assertSame(1, $page['props']['stats']['userInbox']['value']);
-        $this->assertSame(0, $page['props']['stats']['departmentInbox']['value']);
-        $this->assertFalse($page['props']['stats']['departmentInbox']['is_available']);
-        $this->assertNull($page['props']['stats']['departmentInbox']['href']);
-        $this->assertSame(['Personal Hit'], array_column($page['props']['recentInboxItems'], 'title'));
+        $this->assertSame(0, $page['props']['stats']['worklist']['value']);
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
         $this->assertSame(0, $page['props']['watchProfileSummary']['active_department_count']);
-        $this->assertNotContains('departmentInbox', array_column($page['props']['quickLinks'], 'key'));
+    }
+
+    public function test_dashboard_deadlines_include_business_reviews_in_calendar(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.business-review@procynia.test');
+
+            $savedNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-600007',
+                'Business Review Notice',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                deadlineAt: now()->addDays(20)->toDateTimeString(),
+                rfiSubmissionDeadlineAt: now()->subDay()->toDateTimeString(),
+                rfpSubmissionDeadlineAt: now()->addDays(12)->toDateTimeString(),
+                opportunityOwnerUserId: $user->id,
+            );
+
+            SavedNoticeBusinessReview::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'business_review_at' => now()->addDays(2)->toDateString(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+
+            $deadlineItems = $page['props']['cockpit']['deadlines']['items'];
+            $businessReviewItem = collect($deadlineItems)->firstWhere('deadline_type', 'business_review');
+            $this->assertNotNull($businessReviewItem);
+            $this->assertSame('Business Review', $businessReviewItem['deadline_type_label']);
+            $this->assertSame(now()->addDays(2)->toDateString(), $businessReviewItem['date']);
+            $this->assertContains('Business Review Notice', array_column($deadlineItems, 'title'));
+
+            $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
+            $this->assertSame(1, $attentionItems['deadline-soon']['count']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_responsibility_activity_uses_role_based_scope_for_supported_roles(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $regularUser = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.regular@procynia.test');
+            $otherUser = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.other@procynia.test');
+            $bidManagerUser = $this->createUser(
+                $customer->id,
+                null,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.bid-manager@procynia.test',
+                User::BID_ROLE_BID_MANAGER,
+                User::BID_MANAGER_SCOPE_COMPANY,
+            );
+            $systemOwnerUser = $this->createUser(
+                $customer->id,
+                null,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.system-owner@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $regularBidManagerNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-710001',
+                'Regular bid-manager notice',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                updatedAt: now()->subDays(20)->toDateTimeString(),
+                bidManagerUserId: $regularUser->id,
+                deadlineAt: now()->addDays(2)->toDateTimeString(),
+            );
+            $regularBidManagerComment = SavedNoticePhaseComment::query()->create([
+                'saved_notice_id' => $regularBidManagerNotice->id,
+                'user_id' => $regularUser->id,
+                'phase_status' => SavedNotice::BID_STATUS_DISCOVERED,
+                'comment' => 'Regular bid-manager comment',
+            ]);
+            $regularBidManagerComment->timestamps = false;
+            $regularBidManagerComment->forceFill([
+                'created_at' => now()->subHours(3),
+                'updated_at' => now()->subHours(3),
+            ])->saveQuietly();
+            BidSubmission::query()->create([
+                'saved_notice_id' => $regularBidManagerNotice->id,
+                'sequence_number' => 1,
+                'label' => 'Regular submission',
+                'submitted_at' => now()->subHours(2),
+                'created_at' => now()->subHours(2),
+                'updated_at' => now()->subHours(2),
+            ]);
+            SavedNoticeUserAccess::query()->create([
+                'saved_notice_id' => $regularBidManagerNotice->id,
+                'user_id' => $regularUser->id,
+                'granted_by_user_id' => $otherUser->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ]);
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-710002',
+                'Regular opportunity-owner notice',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                updatedAt: now()->subDays(2)->toDateTimeString(),
+                opportunityOwnerUserId: $regularUser->id,
+                deadlineAt: now()->addDays(4)->toDateTimeString(),
+            );
+
+            $foreignBidManagerNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-710003',
+                'Foreign bid-manager notice',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                updatedAt: now()->subHour()->toDateTimeString(),
+                bidManagerUserId: $otherUser->id,
+                deadlineAt: now()->addDay()->toDateTimeString(),
+            );
+            $foreignBidManagerComment = SavedNoticePhaseComment::query()->create([
+                'saved_notice_id' => $foreignBidManagerNotice->id,
+                'user_id' => $otherUser->id,
+                'phase_status' => SavedNotice::BID_STATUS_DISCOVERED,
+                'comment' => 'Foreign bid-manager comment',
+            ]);
+            $foreignBidManagerComment->timestamps = false;
+            $foreignBidManagerComment->forceFill([
+                'created_at' => now()->subMinutes(50),
+                'updated_at' => now()->subMinutes(50),
+            ])->saveQuietly();
+            BidSubmission::query()->create([
+                'saved_notice_id' => $foreignBidManagerNotice->id,
+                'sequence_number' => 1,
+                'label' => 'Foreign submission',
+                'submitted_at' => now()->subMinutes(30),
+                'created_at' => now()->subMinutes(30),
+                'updated_at' => now()->subMinutes(30),
+            ]);
+            SavedNoticeUserAccess::query()->create([
+                'saved_notice_id' => $foreignBidManagerNotice->id,
+                'user_id' => $otherUser->id,
+                'granted_by_user_id' => $regularUser->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ]);
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-710004',
+                'Foreign opportunity-owner notice',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                updatedAt: now()->subDays(10)->toDateTimeString(),
+                opportunityOwnerUserId: $otherUser->id,
+                deadlineAt: now()->addDays(7)->toDateTimeString(),
+            );
+
+            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/dashboard'));
+            $regularResponsibility = $regularPage['props']['cockpit']['responsibility_activity'];
+
+            $this->assertSame(1, $regularResponsibility['bid_manager_cases_count']);
+            $this->assertSame(1, $regularResponsibility['opportunity_owner_cases_count']);
+            $this->assertSame(1, $regularResponsibility['contributor_cases_count']);
+            $this->assertSame(now()->subHours(3)->toIso8601String(), $regularResponsibility['activity']['last_comment_at']);
+            $this->assertSame(now()->subHours(2)->toIso8601String(), $regularResponsibility['activity']['last_activity_at']);
+            $this->assertSame(3, $regularResponsibility['activity']['activity_count_14_days']);
+            $this->assertSame(0, $regularResponsibility['activity']['inactive_7_days_count']);
+
+            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/dashboard'));
+            $bidManagerResponsibility = $bidManagerPage['props']['cockpit']['responsibility_activity'];
+
+            $this->assertSame(2, $bidManagerResponsibility['bid_manager_cases_count']);
+            $this->assertSame(2, $bidManagerResponsibility['opportunity_owner_cases_count']);
+            $this->assertSame(2, $bidManagerResponsibility['contributor_cases_count']);
+            $this->assertSame(now()->subMinutes(50)->toIso8601String(), $bidManagerResponsibility['activity']['last_comment_at']);
+            $this->assertSame(now()->subMinutes(30)->toIso8601String(), $bidManagerResponsibility['activity']['last_activity_at']);
+            $this->assertSame(7, $bidManagerResponsibility['activity']['activity_count_14_days']);
+            $this->assertSame(1, $bidManagerResponsibility['activity']['inactive_7_days_count']);
+
+            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/dashboard'));
+            $systemOwnerResponsibility = $systemOwnerPage['props']['cockpit']['responsibility_activity'];
+
+            $this->assertSame(2, $systemOwnerResponsibility['bid_manager_cases_count']);
+            $this->assertSame(2, $systemOwnerResponsibility['opportunity_owner_cases_count']);
+            $this->assertSame(2, $systemOwnerResponsibility['contributor_cases_count']);
+            $this->assertSame(now()->subMinutes(50)->toIso8601String(), $systemOwnerResponsibility['activity']['last_comment_at']);
+            $this->assertSame(now()->subMinutes(30)->toIso8601String(), $systemOwnerResponsibility['activity']['last_activity_at']);
+            $this->assertSame(7, $systemOwnerResponsibility['activity']['activity_count_14_days']);
+            $this->assertSame(1, $systemOwnerResponsibility['activity']['inactive_7_days_count']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_attention_and_deadlines_use_role_based_scope_for_all_supported_roles(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $regularUser = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.regular@procynia.test');
+            $otherUser = $this->createUser($customer->id, $department->id, User::ROLE_USER, 'user.other@procynia.test');
+            $bidManagerUser = $this->createUser(
+                $customer->id,
+                null,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.bid-manager@procynia.test',
+                User::BID_ROLE_BID_MANAGER,
+                User::BID_MANAGER_SCOPE_COMPANY,
+            );
+            $systemOwnerUser = $this->createUser(
+                $customer->id,
+                null,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.system-owner@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-720001',
+                'Regular own bid-manager case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                deadlineAt: now()->addDays(2)->toDateTimeString(),
+                updatedAt: now()->subDay()->toDateTimeString(),
+                bidManagerUserId: $regularUser->id,
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-720002',
+                'Regular own opportunity-owner case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                deadlineAt: now()->addDays(9)->toDateTimeString(),
+                updatedAt: now()->subDay()->toDateTimeString(),
+                opportunityOwnerUserId: $regularUser->id,
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-720003',
+                'Foreign go/no-go case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_GO_NO_GO,
+                deadlineAt: now()->addDay()->toDateTimeString(),
+                updatedAt: now()->subDays(2)->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-720004',
+                'Foreign inactive case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                deadlineAt: now()->addDays(17)->toDateTimeString(),
+                updatedAt: now()->subDays(10)->toDateTimeString(),
+                bidManagerUserId: $otherUser->id,
+            );
+
+            $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/dashboard'));
+            $regularAttention = collect($regularPage['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $this->assertSame(4, $regularAttention->count());
+            $this->assertSame(1, $regularAttention['deadline-soon']['count']);
+            $this->assertSame(1, $regularAttention['missing-bid-manager']['count']);
+            $this->assertSame(0, $regularAttention['go-no-go-pending']['count']);
+            $this->assertSame(0, $regularAttention['inactive-seven-days']['count']);
+            $this->assertStringContainsString('cockpit_scope=1', $regularAttention['deadline-soon']['href']);
+            $this->assertSame(2, count($regularPage['props']['cockpit']['deadlines']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case', 'Regular own opportunity-owner case'],
+                array_column($regularPage['props']['cockpit']['deadlines']['items'], 'title'),
+            );
+
+            $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/dashboard'));
+            $bidManagerAttention = collect($bidManagerPage['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $this->assertSame(4, $bidManagerAttention->count());
+            $this->assertSame(2, $bidManagerAttention['deadline-soon']['count']);
+            $this->assertSame(2, $bidManagerAttention['missing-bid-manager']['count']);
+            $this->assertSame(1, $bidManagerAttention['go-no-go-pending']['count']);
+            $this->assertSame(1, $bidManagerAttention['inactive-seven-days']['count']);
+            $this->assertStringContainsString('cockpit_scope=1', $bidManagerAttention['deadline-soon']['href']);
+            $this->assertSame(4, count($bidManagerPage['props']['cockpit']['deadlines']['items']));
+            $this->assertEqualsCanonicalizing(
+                [
+                    'Regular own bid-manager case',
+                    'Regular own opportunity-owner case',
+                    'Foreign go/no-go case',
+                    'Foreign inactive case',
+                ],
+                array_column($bidManagerPage['props']['cockpit']['deadlines']['items'], 'title'),
+            );
+
+            $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/dashboard'));
+            $systemOwnerAttention = collect($systemOwnerPage['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $this->assertSame(4, $systemOwnerAttention->count());
+            $this->assertSame(2, $systemOwnerAttention['deadline-soon']['count']);
+            $this->assertSame(2, $systemOwnerAttention['missing-bid-manager']['count']);
+            $this->assertSame(1, $systemOwnerAttention['go-no-go-pending']['count']);
+            $this->assertSame(1, $systemOwnerAttention['inactive-seven-days']['count']);
+            $this->assertStringContainsString('cockpit_scope=1', $systemOwnerAttention['deadline-soon']['href']);
+            $this->assertSame(4, count($systemOwnerPage['props']['cockpit']['deadlines']['items']));
+            $this->assertEqualsCanonicalizing(
+                [
+                    'Regular own bid-manager case',
+                    'Regular own opportunity-owner case',
+                    'Foreign go/no-go case',
+                    'Foreign inactive case',
+                ],
+                array_column($systemOwnerPage['props']['cockpit']['deadlines']['items'], 'title'),
+            );
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_dashboard_treats_pivot_only_membership_as_department_access(): void
@@ -209,15 +511,13 @@ class DashboardControllerTest extends TestCase
         $user->departments()->attach($department->id);
         $departmentProfile = $this->createWatchProfile($customer->id, 'Department Profile', null, $department->id, true);
 
-        $this->createInboxRecord($customer->id, $departmentProfile->id, null, $department->id, '2026-700003', 'Department Hit', 'Oslo kommune', '2026-03-29 09:00:00');
-
         $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
 
-        $this->assertSame(1, $page['props']['stats']['departmentInbox']['value']);
-        $this->assertTrue($page['props']['stats']['departmentInbox']['is_available']);
-        $this->assertSame(['Department Hit'], array_column($page['props']['recentInboxItems'], 'title'));
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
-        $this->assertContains('departmentInbox', array_column($page['props']['quickLinks'], 'key'));
+        $this->assertEqualsCanonicalizing(
+            ['Department Profile'],
+            array_column($page['props']['watchProfileSummary']['recent_profiles'], 'name'),
+        );
     }
 
     private function createSchema(): void
@@ -283,6 +583,7 @@ class DashboardControllerTest extends TestCase
         Schema::create('saved_notices', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id');
+            $table->string('source_type')->default(SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE);
             $table->unsignedBigInteger('saved_by_user_id')->nullable();
             $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
             $table->unsignedBigInteger('bid_manager_user_id')->nullable();
@@ -340,24 +641,13 @@ class DashboardControllerTest extends TestCase
             $table->timestamps();
         });
 
-        Schema::create('watch_profile_inbox_records', function (Blueprint $table): void {
+        Schema::create('saved_notice_business_reviews', function (Blueprint $table): void {
             $table->id();
-            $table->unsignedBigInteger('watch_profile_id');
-            $table->unsignedBigInteger('customer_id');
-            $table->unsignedBigInteger('user_id')->nullable();
-            $table->unsignedBigInteger('department_id')->nullable();
-            $table->string('doffin_notice_id');
-            $table->string('title');
-            $table->string('buyer_name')->nullable();
-            $table->timestamp('publication_date')->nullable();
-            $table->timestamp('deadline')->nullable();
-            $table->string('external_url', 2000)->nullable();
-            $table->unsignedInteger('relevance_score')->nullable();
-            $table->timestamp('discovered_at');
-            $table->timestamp('last_seen_at')->nullable();
-            $table->json('raw_payload')->nullable();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->timestamp('business_review_at');
             $table->timestamps();
         });
+
     }
 
     private function createCustomer(string $name): Customer
@@ -379,12 +669,20 @@ class DashboardControllerTest extends TestCase
         ]);
     }
 
-    private function createUser(int $customerId, ?int $departmentId, string $role, string $email): User
+    private function createUser(
+        int $customerId,
+        ?int $departmentId,
+        string $role,
+        string $email,
+        ?string $bidRole = null,
+        ?string $bidManagerScope = null,
+    ): User
     {
         $user = User::factory()->create([
             'name' => Str::before($email, '@'),
             'role' => $role,
-            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'bid_role' => $bidRole ?? User::BID_ROLE_CONTRIBUTOR,
+            'bid_manager_scope' => $bidManagerScope,
             'customer_id' => $customerId,
             'department_id' => $departmentId,
             'primary_affiliation_scope' => $departmentId !== null
@@ -420,36 +718,6 @@ class DashboardControllerTest extends TestCase
         ]);
     }
 
-    private function createInboxRecord(
-        int $customerId,
-        int $watchProfileId,
-        ?int $userId,
-        ?int $departmentId,
-        string $noticeId,
-        string $title,
-        string $buyerName,
-        string $discoveredAt,
-    ): WatchProfileInboxRecord {
-        return WatchProfileInboxRecord::query()->create([
-            'watch_profile_id' => $watchProfileId,
-            'customer_id' => $customerId,
-            'user_id' => $userId,
-            'department_id' => $departmentId,
-            'doffin_notice_id' => $noticeId,
-            'title' => $title,
-            'buyer_name' => $buyerName,
-            'publication_date' => Carbon::parse($discoveredAt)->startOfDay(),
-            'deadline' => Carbon::parse($discoveredAt)->addDays(7),
-            'external_url' => "https://doffin.no/notices/{$noticeId}",
-            'relevance_score' => 30,
-            'discovered_at' => Carbon::parse($discoveredAt),
-            'last_seen_at' => Carbon::parse($discoveredAt),
-            'raw_payload' => [
-                'status' => 'ACTIVE',
-            ],
-        ]);
-    }
-
     private function createSavedNotice(
         int $customerId,
         string $externalId,
@@ -458,6 +726,11 @@ class DashboardControllerTest extends TestCase
         ?int $organizationalDepartmentId = null,
         string $bidStatus = SavedNotice::BID_STATUS_DISCOVERED,
         ?string $deadlineAt = null,
+        ?string $questionsRfiDeadlineAt = null,
+        ?string $rfiSubmissionDeadlineAt = null,
+        ?string $questionsRfpDeadlineAt = null,
+        ?string $rfpSubmissionDeadlineAt = null,
+        ?string $awardDateAt = null,
         ?string $updatedAt = null,
         ?int $bidManagerUserId = null,
         ?int $opportunityOwnerUserId = null,
@@ -476,6 +749,11 @@ class DashboardControllerTest extends TestCase
             'summary' => 'Summary',
             'publication_date' => '2026-03-20 00:00:00',
             'deadline' => $deadlineAt ?? '2026-04-20 00:00:00',
+            'questions_rfi_deadline_at' => $questionsRfiDeadlineAt,
+            'rfi_submission_deadline_at' => $rfiSubmissionDeadlineAt,
+            'questions_rfp_deadline_at' => $questionsRfpDeadlineAt,
+            'rfp_submission_deadline_at' => $rfpSubmissionDeadlineAt,
+            'award_date_at' => $awardDateAt,
             'status' => 'ACTIVE',
             'cpv_code' => '72000000',
             'archived_at' => $archived ? now() : null,
