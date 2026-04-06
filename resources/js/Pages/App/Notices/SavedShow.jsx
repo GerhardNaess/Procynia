@@ -390,6 +390,9 @@ export default function SavedNoticeShow({ notice }) {
         bid_closure_reason: '',
         bid_closure_note: '',
     });
+    const archiveHistoryForm = useForm({
+        history_type: '',
+    });
     const opportunityOwnerForm = useForm({
         opportunity_owner_user_id: notice.opportunity_owner?.id ? String(notice.opportunity_owner.id) : '',
     });
@@ -437,6 +440,7 @@ export default function SavedNoticeShow({ notice }) {
     const [openActionSection, setOpenActionSection] = useState('decision');
     const [openCommentPhases, setOpenCommentPhases] = useState({});
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
+    const [isArchiveHistoryFormOpen, setIsArchiveHistoryFormOpen] = useState(false);
     const shouldShowSubmissions = notice.submissions.length > 0
         || notice.bid_status === 'submitted'
         || notice.bid_status === 'negotiation';
@@ -444,6 +448,9 @@ export default function SavedNoticeShow({ notice }) {
     const closureReasonOptions = notice.actions?.closure_reasons ?? [];
     const opportunityOwnerOptions = notice.actions?.opportunity_owner_options ?? [];
     const bidManagerOptions = notice.actions?.bid_manager_options ?? [];
+    const historyTypeOptions = notice.actions?.history_type_options ?? [];
+    const archiveUrl = notice.actions?.archive_url ?? null;
+    const canArchiveNotice = notice.actions?.can_archive ?? Boolean(archiveUrl);
     const caseAccess = notice.actions?.case_access ?? {};
     const caseAccessUserOptions = caseAccess.user_options ?? [];
     const caseAccessRoleOptions = caseAccess.access_role_options ?? [];
@@ -625,12 +632,36 @@ export default function SavedNoticeShow({ notice }) {
         });
     };
 
-    const archiveSavedNotice = () => {
-        if (!notice.archived_at) {
-            router.patch(`/app/notices/saved/${notice.id}/archive`, {}, {
-                preserveScroll: true,
-            });
+    const openArchiveSavedNoticeForm = () => {
+        if (notice.archived_at || !canArchiveNotice) {
+            return;
         }
+
+        setIsArchiveHistoryFormOpen(true);
+        archiveHistoryForm.clearErrors();
+        archiveHistoryForm.setData('history_type', '');
+    };
+
+    const cancelArchiveSavedNoticeForm = () => {
+        setIsArchiveHistoryFormOpen(false);
+        archiveHistoryForm.reset();
+        archiveHistoryForm.clearErrors();
+    };
+
+    const submitArchiveSavedNotice = (event = null) => {
+        event?.preventDefault?.();
+
+        if (!archiveUrl || archiveHistoryForm.data.history_type.trim() === '') {
+            return;
+        }
+
+        archiveHistoryForm.clearErrors();
+        archiveHistoryForm.patch(archiveUrl, {
+            preserveScroll: true,
+            onSuccess: () => {
+                cancelArchiveSavedNoticeForm();
+            },
+        });
     };
 
     const createSubmission = () => {
@@ -827,6 +858,11 @@ export default function SavedNoticeShow({ notice }) {
                                 >
                                     {sourceTypeLabel}
                                 </span>
+                                {notice.archived_at && notice.history_type_label ? (
+                                    <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                                        Type: {notice.history_type_label}
+                                    </span>
+                                ) : null}
                                 {notice.archived_at ? (
                                     <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
                                         Arkivert
@@ -2248,17 +2284,77 @@ export default function SavedNoticeShow({ notice }) {
                                         isOpen={openActionSection === 'administration'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'administration' ? null : 'administration'))}
                                     >
-                                        <div className="flex flex-wrap gap-3">
-                                            {!notice.archived_at ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={archiveSavedNotice}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                        {!notice.archived_at && canArchiveNotice ? (
+                                            isArchiveHistoryFormOpen ? (
+                                                <form
+                                                    onSubmit={submitArchiveSavedNotice}
+                                                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                                 >
-                                                    Arkiver sak
-                                                </button>
-                                            ) : null}
-                                        </div>
+                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                        <div>
+                                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                                Flytt til historikk
+                                                            </div>
+                                                            <p className="mt-1 text-sm text-slate-600">
+                                                                Velg type før saken arkiveres i historikk.
+                                                            </p>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={cancelArchiveSavedNoticeForm}
+                                                            className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                        >
+                                                            Avbryt
+                                                        </button>
+                                                    </div>
+
+                                                    <label className="mt-4 block space-y-2">
+                                                        <span className="text-sm font-medium text-slate-700">Type</span>
+                                                        <select
+                                                            value={archiveHistoryForm.data.history_type}
+                                                            onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
+                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        >
+                                                            <option value="">Velg type</option>
+                                                            {historyTypeOptions.map((option) => (
+                                                                <option key={option.value} value={option.value}>
+                                                                    {option.label}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        {archiveHistoryForm.errors.history_type ? (
+                                                            <p className="text-sm text-rose-600">{archiveHistoryForm.errors.history_type}</p>
+                                                        ) : null}
+                                                    </label>
+
+                                                    <div className="mt-4 flex flex-wrap gap-3">
+                                                        <button
+                                                            type="button"
+                                                            onClick={submitArchiveSavedNotice}
+                                                            disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            {archiveHistoryForm.processing ? 'Flytter...' : 'Lagre og flytt til historikk'}
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={openArchiveSavedNoticeForm}
+                                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                    >
+                                                        Arkiver sak
+                                                    </button>
+                                                </div>
+                                            )
+                                        ) : !notice.archived_at ? (
+                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
+                                                Du har ikke tilgang til å flytte denne saken til historikk.
+                                            </div>
+                                        ) : null}
                                     </ActionAccordionSection>
                                 </div>
                             </div>

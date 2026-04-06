@@ -53,6 +53,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->string('status')->nullable();
             $table->string('cpv_code')->nullable();
             $table->timestamp('archived_at')->nullable();
+            $table->string('history_type')->nullable();
             $table->timestamp('questions_deadline_at')->nullable();
             $table->timestamp('questions_rfi_deadline_at')->nullable();
             $table->timestamp('rfi_submission_deadline_at')->nullable();
@@ -134,10 +135,13 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'organization_name' => '',
                 'cpv' => '90910000,72222300',
                 'keywords' => 'renhold, tingrett',
+                'publication_date_from' => '2026-03-01',
+                'publication_date_to' => '2026-03-31',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
                 'relevance' => '',
                 'bid_status' => '',
+                'history_type' => '',
                 'cockpit_scope' => '',
             ], 1, 15)
             ->andReturn([
@@ -191,6 +195,8 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             'q' => 'Domstoladministrasjonen',
             'cpv' => '90910000,72222300',
             'keywords' => 'renhold, tingrett',
+            'publication_date_from' => '2026-03-01',
+            'publication_date_to' => '2026-03-31',
             'status' => 'ACTIVE',
         ]);
         $request->headers->set('X-Inertia', 'true');
@@ -229,9 +235,70 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $this->assertSame(1, $page['props']['notices']['meta']['numHitsTotal']);
         $this->assertSame(1, $page['props']['notices']['meta']['numHitsAccessible']);
         $this->assertFalse($page['props']['notices']['meta']['is_capped']);
+        $this->assertSame('2026-03-01', $page['props']['filters']['publication_date_from']);
+        $this->assertSame('2026-03-31', $page['props']['filters']['publication_date_to']);
         $this->assertSame('2026-105164', $page['props']['notices']['data'][0]['notice_id']);
         $this->assertSame('Domstoladministrasjonen', $page['props']['notices']['data'][0]['buyer_name']);
         $this->assertSame('https://doffin.no/notices/2026-105164', $page['props']['notices']['data'][0]['external_url']);
+    }
+
+    public function test_index_uses_publication_period_as_a_fallback_date_range_when_explicit_dates_are_missing(): void
+    {
+        $customerContext = Mockery::mock(CustomerContext::class);
+        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
+        $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
+
+        $customerContext
+            ->shouldReceive('currentCustomerId')
+            ->once()
+            ->andReturn(1);
+
+        $liveSearchService
+            ->shouldReceive('search')
+            ->once()
+            ->with(Mockery::on(function (array $filters): bool {
+                return $filters['publication_period'] === '365'
+                    && $filters['publication_date_from'] === now()->subDays(365)->toDateString()
+                    && $filters['publication_date_to'] === now()->toDateString();
+            }), 1, 15)
+            ->andReturn([
+                'numHitsTotal' => 0,
+                'numHitsAccessible' => 0,
+                'hits' => [],
+                'page' => 1,
+                'perPage' => 15,
+            ]);
+
+        $request = Request::create('/app/notices', 'GET', [
+            'q' => 'Domstoladministrasjonen',
+            'publication_period' => '365',
+            'status' => 'ACTIVE',
+        ]);
+        $request->headers->set('X-Inertia', 'true');
+        $request->headers->set('X-Requested-With', 'XMLHttpRequest');
+        $request->setUserResolver(fn (): User => new User([
+            'id' => 23,
+            'name' => 'Customer Admin',
+            'email' => 'customer.admin@procynia.local',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'customer_id' => 1,
+            'is_active' => true,
+        ]));
+
+        $controller = new NoticeController(
+            $customerContext,
+            $cpvSearchService,
+            $liveSearchService,
+            $documentService,
+            new SavedNoticeAccessService(),
+        );
+        $response = $controller->index($request)->toResponse($request);
+        $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('365', $page['props']['filters']['publication_period']);
+        $this->assertSame(now()->subDays(365)->toDateString(), $page['props']['filters']['publication_date_from']);
+        $this->assertSame(now()->toDateString(), $page['props']['filters']['publication_date_to']);
     }
 
     public function test_index_exposes_true_doffin_total_and_clamps_live_pagination_to_the_accessible_window(): void

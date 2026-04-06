@@ -62,6 +62,21 @@ class SavedNotice extends Model
         self::BID_STATUS_ARCHIVED,
     ];
 
+    public const HISTORY_TYPE_WON = 'won';
+
+    public const HISTORY_TYPE_LOST = 'lost';
+
+    public const HISTORY_TYPE_ABORTED = 'aborted';
+
+    public const HISTORY_TYPE_NO_GO = 'no_go';
+
+    public const HISTORY_TYPES = [
+        self::HISTORY_TYPE_WON,
+        self::HISTORY_TYPE_LOST,
+        self::HISTORY_TYPE_ABORTED,
+        self::HISTORY_TYPE_NO_GO,
+    ];
+
     public const BID_STATUS_LABELS = [
         self::BID_STATUS_DISCOVERED => 'Registrert',
         self::BID_STATUS_QUALIFYING => 'Kvalifiseres',
@@ -74,6 +89,13 @@ class SavedNotice extends Model
         self::BID_STATUS_NO_GO => 'No-Go',
         self::BID_STATUS_WITHDRAWN => 'Trukket',
         self::BID_STATUS_ARCHIVED => 'Arkiv',
+    ];
+
+    public const HISTORY_TYPE_LABELS = [
+        self::HISTORY_TYPE_WON => 'Vunnet',
+        self::HISTORY_TYPE_LOST => 'Tapt',
+        self::HISTORY_TYPE_ABORTED => 'Avbrutt',
+        self::HISTORY_TYPE_NO_GO => 'NoGo',
     ];
 
     public const BID_CLOSURE_REASON_CAPACITY = 'capacity';
@@ -169,16 +191,12 @@ class SavedNotice extends Model
             self::BID_STATUS_WITHDRAWN,
         ],
         self::BID_STATUS_WON => [
-            self::BID_STATUS_ARCHIVED,
         ],
         self::BID_STATUS_LOST => [
-            self::BID_STATUS_ARCHIVED,
         ],
         self::BID_STATUS_NO_GO => [
-            self::BID_STATUS_ARCHIVED,
         ],
         self::BID_STATUS_WITHDRAWN => [
-            self::BID_STATUS_ARCHIVED,
         ],
         self::BID_STATUS_ARCHIVED => [],
     ];
@@ -219,10 +237,6 @@ class SavedNotice extends Model
         self::BID_STATUS_LOST => [
             'label' => 'Mark as Lost',
             'tone' => 'danger',
-        ],
-        self::BID_STATUS_ARCHIVED => [
-            'label' => 'Archive Case',
-            'tone' => 'secondary',
         ],
     ];
 
@@ -265,6 +279,7 @@ class SavedNotice extends Model
         'status',
         'cpv_code',
         'archived_at',
+        'history_type',
         'questions_deadline_at',
         'questions_rfi_deadline_at',
         'rfi_submission_deadline_at',
@@ -378,6 +393,13 @@ class SavedNotice extends Model
         return self::BID_STATUS_LABELS[$status] ?? $status;
     }
 
+    public function getHistoryTypeLabelAttribute(): string
+    {
+        $type = (string) ($this->history_type ?? '');
+
+        return self::HISTORY_TYPE_LABELS[$type] ?? $type;
+    }
+
     public function getBidClosureReasonLabelAttribute(): string
     {
         $reason = (string) ($this->bid_closure_reason ?? '');
@@ -419,6 +441,49 @@ class SavedNotice extends Model
             'value' => $reason,
             'label' => self::BID_CLOSURE_REASON_LABELS[$reason],
         ], self::BID_CLOSURE_REASONS);
+    }
+
+    public static function historyTypeOptions(): array
+    {
+        return array_map(fn (string $type): array => [
+            'value' => $type,
+            'label' => self::HISTORY_TYPE_LABELS[$type],
+        ], self::HISTORY_TYPES);
+    }
+
+    public static function historyTypeFromLegacyBidStatus(?string $bidStatus): ?string
+    {
+        return match ((string) ($bidStatus ?? '')) {
+            self::BID_STATUS_WON => self::HISTORY_TYPE_WON,
+            self::BID_STATUS_LOST => self::HISTORY_TYPE_LOST,
+            self::BID_STATUS_NO_GO => self::HISTORY_TYPE_NO_GO,
+            self::BID_STATUS_WITHDRAWN,
+            self::BID_STATUS_DISCOVERED,
+            self::BID_STATUS_QUALIFYING,
+            self::BID_STATUS_GO_NO_GO,
+            self::BID_STATUS_IN_PROGRESS,
+            self::BID_STATUS_SUBMITTED,
+            self::BID_STATUS_NEGOTIATION,
+            self::BID_STATUS_ARCHIVED => self::HISTORY_TYPE_ABORTED,
+            default => null,
+        };
+    }
+
+    public static function assertValidHistoryType(string $historyType): void
+    {
+        if (! in_array($historyType, self::HISTORY_TYPES, true)) {
+            throw new \InvalidArgumentException("Unsupported history type [{$historyType}].");
+        }
+    }
+
+    public function archiveWithHistoryType(string $historyType): self
+    {
+        self::assertValidHistoryType($historyType);
+
+        $this->history_type = $historyType;
+        $this->archived_at ??= now();
+
+        return $this;
     }
 
     public static function assertValidBidStatusTransition(

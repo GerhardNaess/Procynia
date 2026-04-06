@@ -4,6 +4,7 @@ use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\InfoCenterController;
+use App\Http\Controllers\App\UserNotificationController;
 use App\Http\Controllers\App\UserController;
 use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\NoticeController;
@@ -41,6 +42,8 @@ Route::prefix('app')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
+        Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
+        Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
         Route::get('/messages/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');
 

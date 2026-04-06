@@ -4,14 +4,6 @@ import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 
-const publicationOptions = [
-    { value: '', label: 'Alltid' },
-    { value: '7', label: 'Siste 7 dager' },
-    { value: '30', label: 'Siste 30 dager' },
-    { value: '90', label: 'Siste 90 dager' },
-    { value: '365', label: 'Siste 365 dager' },
-];
-
 const statusOptions = [
     { value: '', label: 'Alle statuser' },
     { value: 'ACTIVE', label: 'Aktiv' },
@@ -220,6 +212,48 @@ function dateInputValue(value) {
     return String(value).slice(0, 10);
 }
 
+function publicationDateRangeFromPeriod(period) {
+    const days = Number.parseInt(String(period ?? ''), 10);
+
+    if (!Number.isFinite(days) || days <= 0) {
+        return {
+            from: '',
+            to: '',
+        };
+    }
+
+    const to = new Date();
+    const from = new Date(to.getTime());
+
+    from.setDate(from.getDate() - days);
+
+    return {
+        from: from.toISOString().slice(0, 10),
+        to: to.toISOString().slice(0, 10),
+    };
+}
+
+function publicationDateRangeFromFilters(filters) {
+    const from = typeof filters?.publication_date_from === 'string' ? filters.publication_date_from : '';
+    const to = typeof filters?.publication_date_to === 'string' ? filters.publication_date_to : '';
+
+    if (from !== '' || to !== '') {
+        return {
+            from,
+            to,
+        };
+    }
+
+    if (typeof filters?.publication_period === 'string' && filters.publication_period.trim() !== '') {
+        return publicationDateRangeFromPeriod(filters.publication_period);
+    }
+
+    return {
+        from: '',
+        to: '',
+    };
+}
+
 function formatNumberWithSpaces(value) {
     if (value === null || value === undefined || value === '') {
         return '';
@@ -365,12 +399,6 @@ function normalizeCount(value) {
 
 function formatInteger(value, locale) {
     return new Intl.NumberFormat(locale).format(normalizeCount(value));
-}
-
-function pluralize(total, locale) {
-    const normalized = normalizeCount(total);
-
-    return `${formatInteger(normalized, locale)} ${normalized === 1 ? 'anskaffelse' : 'kunngjøringer'}`;
 }
 
 function summarizeText(value) {
@@ -534,7 +562,7 @@ function privateRequestSummaryFields(notice, locale) {
     ];
 }
 
-function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements) {
+function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits = 0, visibleHits = 0) {
     if (mode === 'saved') {
         return {
             title: 'Ingen lagrede kunngjøringer ennå.',
@@ -549,31 +577,53 @@ function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements) {
         };
     }
 
+    if (totalHits > 0 && visibleHits === 0) {
+        return {
+            title: 'Doffin ga treff, men ingen matcher nøkkelordene dine.',
+            body: 'Prøv bredere nøkkelord eller fjern noen filtre.',
+        };
+    }
+
     return {
         title: hasAppliedSearch || hasAppliedRefinements
-            ? 'Ingen Doffin-treff matcher søket ditt.'
-            : 'Ingen Doffin-treff er tilgjengelige akkurat nå.',
+            ? 'Ingen treff fra Doffin for dette søket.'
+            : 'Ingen treff fra Doffin akkurat nå.',
         body: hasAppliedRefinements
             ? 'Prøv et bredere søk eller fjern noen av filtrene.'
             : 'Søk i tittel, oppdragsgiver eller organisasjonsnummer for å finne kunngjøringer direkte i Doffin.',
     };
 }
 
-export default function NoticeIndex({ notices, filters, savedSearches = [], source, supportMode, cpvSelector, mode = 'live', worklist = {}, monitoring = {} }) {
+export default function NoticeIndex({
+    notices,
+    filters,
+    savedSearches = [],
+    source,
+    supportMode,
+    cpvSelector,
+    historyTypeOptions = [],
+    mode = 'live',
+    worklist = {},
+    monitoring = {},
+}) {
     const { auth, locale, translations } = usePage().props;
     const [selectedWatchListId, setSelectedWatchListId] = useState('');
     const [searchQuery, setSearchQuery] = useState(filters.q ?? '');
     const [organizationName, setOrganizationName] = useState(filters.organization_name ?? '');
     const [selectedCpvItems, setSelectedCpvItems] = useState(cpvSelector?.selected ?? []);
     const [keywords, setKeywords] = useState(filters.keywords ?? '');
-    const [publicationDate, setPublicationDate] = useState(filters.publication_period ?? '');
+    const initialPublicationDateRange = publicationDateRangeFromFilters(filters);
+    const [publicationDateFrom, setPublicationDateFrom] = useState(initialPublicationDateRange.from);
+    const [publicationDateTo, setPublicationDateTo] = useState(initialPublicationDateRange.to);
     const [status, setStatus] = useState(filters.status ?? '');
     const [bidStatusFilter, setBidStatusFilter] = useState(filters.bid_status ?? '');
+    const [historyTypeFilter, setHistoryTypeFilter] = useState(filters.history_type ?? '');
     const [relevance, setRelevance] = useState(filters.relevance ?? '');
     const [expandedSavedNoticeIds, setExpandedSavedNoticeIds] = useState({});
     const [expandedNoticeSummaryIds, setExpandedNoticeSummaryIds] = useState({});
     const [editingSavedNoticeId, setEditingSavedNoticeId] = useState(null);
     const [editingHistoryNoticeId, setEditingHistoryNoticeId] = useState(null);
+    const [archivingSavedNoticeId, setArchivingSavedNoticeId] = useState(null);
     const [isPrivateRequestFormOpen, setIsPrivateRequestFormOpen] = useState(false);
     const deadlineForm = useForm({
         questions_rfi_deadline_at: '',
@@ -595,6 +645,9 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         follow_up_offset_months: '',
         contract_period_months: '',
     });
+    const archiveHistoryForm = useForm({
+        history_type: '',
+    });
     const privateRequestForm = useForm({
         source_type: 'private_request',
         title: '',
@@ -611,11 +664,27 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
     const isSavedMode = mode === 'saved';
     const isHistoryMode = mode === 'history';
     const isSavedOrHistoryMode = mode === 'saved' || mode === 'history';
+    const worklistFilterOptions = isHistoryMode
+        ? [{ value: '', label: 'Alle typer' }, ...historyTypeOptions]
+        : bidStatusOptions;
+    const worklistFilterValue = isHistoryMode ? historyTypeFilter : bidStatusFilter;
+    const worklistFilterTitle = isHistoryMode ? 'Typefilter' : 'Fasefilter';
+    const worklistFilterDescription = isHistoryMode
+        ? 'Filtrer arbeidslisten etter type for å finne riktige saker raskere.'
+        : 'Filtrer arbeidslisten etter fase for å finne riktige saker raskere.';
+    const worklistFilterLabel = isHistoryMode ? 'Filtrer på type' : 'Filtrer på fase';
     const hasAppliedSearch = (filters.q ?? '').trim() !== '';
-    const hasAppliedRefinements = [filters.organization_name, filters.cpv, filters.keywords, filters.publication_period, filters.status].some(
+    const hasAppliedRefinements = [
+        filters.organization_name,
+        filters.cpv,
+        filters.keywords,
+        filters.publication_date_from,
+        filters.publication_date_to,
+        filters.publication_period,
+        filters.status,
+    ].some(
         (value) => (value ?? '').trim() !== '',
     );
-    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements);
     const canManageWatchProfiles = Boolean(auth?.user?.can_manage_watch_profiles);
     const monitoringHitsCount = Number(monitoring?.new_hits_last_day_count ?? 0);
     const monitoringHitsLabel = monitoringHitsCount === 1 ? '1 nytt treff siste døgn' : `${monitoringHitsCount} nye treff siste døgn`;
@@ -632,6 +701,8 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
     const historyNextFollowUpPreview = isHistoryFormManualOffset ? historyNextFollowUpPreviewDate(historyForm.data.follow_up_offset_months) : null;
     const totalHits = normalizeCount(notices?.meta?.numHitsTotal ?? notices?.meta?.total ?? 0);
     const accessibleHits = normalizeCount(notices?.meta?.numHitsAccessible ?? notices?.meta?.total ?? 0);
+    const visibleHits = normalizeCount(notices?.data?.length ?? 0);
+    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits);
     const isCappedLiveSearch = isLiveMode && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
 
     useEffect(() => {
@@ -639,16 +710,22 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         setOrganizationName(filters.organization_name ?? '');
         setSelectedCpvItems(cpvSelector?.selected ?? []);
         setKeywords(filters.keywords ?? '');
-        setPublicationDate(filters.publication_period ?? '');
+        const nextPublicationDateRange = publicationDateRangeFromFilters(filters);
+        setPublicationDateFrom(nextPublicationDateRange.from);
+        setPublicationDateTo(nextPublicationDateRange.to);
         setStatus(filters.status ?? '');
         setBidStatusFilter(filters.bid_status ?? '');
+        setHistoryTypeFilter(filters.history_type ?? '');
         setRelevance(filters.relevance ?? '');
     }, [
         filters.bid_status,
+        filters.history_type,
         cpvSelector?.selected,
         filters.keywords,
         filters.organization_name,
         filters.publication_period,
+        filters.publication_date_from,
+        filters.publication_date_to,
         filters.q,
         filters.relevance,
         filters.status,
@@ -700,12 +777,6 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             onError: () => {
                 setIsPrivateRequestFormOpen(true);
             },
-        });
-    };
-
-    const archiveNotice = (notice) => {
-        router.patch(`/app/notices/saved/${notice.saved_notice_id}/archive`, {}, {
-            preserveScroll: true,
         });
     };
 
@@ -900,7 +971,8 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 organization_name: organizationName,
                 cpv: selectedCpvItems.map((item) => item.code).join(','),
                 keywords,
-                publication_period: publicationDate,
+                publication_date_from: publicationDateFrom,
+                publication_date_to: publicationDateTo,
                 status,
                 cockpit_scope: filters.cockpit_scope,
             }),
@@ -917,9 +989,11 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         setOrganizationName('');
         setSelectedCpvItems([]);
         setKeywords('');
-        setPublicationDate('');
+        setPublicationDateFrom('');
+        setPublicationDateTo('');
         setStatus('');
         setBidStatusFilter('');
+        setHistoryTypeFilter('');
         setRelevance('');
 
         router.get(
@@ -935,8 +1009,12 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
         );
     };
 
-    const applySavedNoticeStatusFilter = (nextBidStatus) => {
-        setBidStatusFilter(nextBidStatus);
+    const applySavedNoticeFilter = (nextFilter) => {
+        if (isHistoryMode) {
+            setHistoryTypeFilter(nextFilter);
+        } else {
+            setBidStatusFilter(nextFilter);
+        }
 
         router.get(
             '/app/notices',
@@ -946,10 +1024,12 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 organization_name: filters.organization_name,
                 cpv: filters.cpv,
                 keywords: filters.keywords,
-                publication_period: filters.publication_period,
+                publication_date_from: filters.publication_date_from,
+                publication_date_to: filters.publication_date_to,
                 status: filters.status,
                 relevance: filters.relevance,
-                bid_status: nextBidStatus,
+                bid_status: isHistoryMode ? '' : nextFilter,
+                history_type: isHistoryMode ? nextFilter : '',
                 cockpit_scope: filters.cockpit_scope,
             }),
             {
@@ -958,6 +1038,38 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                 replace: true,
             },
         );
+    };
+
+    const openArchiveSavedNoticeForm = (notice) => {
+        setExpandedSavedNoticeIds((current) => ({
+            ...current,
+            [notice.id]: true,
+        }));
+        setArchivingSavedNoticeId(notice.id);
+        archiveHistoryForm.clearErrors();
+        archiveHistoryForm.setData('history_type', '');
+    };
+
+    const cancelArchiveSavedNoticeForm = () => {
+        setArchivingSavedNoticeId(null);
+        archiveHistoryForm.reset();
+        archiveHistoryForm.clearErrors();
+    };
+
+    const submitArchiveSavedNotice = (notice, event = null) => {
+        event?.preventDefault?.();
+
+        if (!notice.actions?.archive_url || archiveHistoryForm.data.history_type.trim() === '') {
+            return;
+        }
+
+        archiveHistoryForm.clearErrors();
+        archiveHistoryForm.patch(notice.actions.archive_url, {
+            preserveScroll: true,
+            onSuccess: () => {
+                cancelArchiveSavedNoticeForm();
+            },
+        });
     };
 
     const applyWatchListPrefill = (watchListId) => {
@@ -986,8 +1098,13 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
             setKeywords(prefill.keywords);
         }
 
-        if (typeof prefill.publication_period === 'string') {
-            setPublicationDate(prefill.publication_period);
+        if (typeof prefill.publication_date_from === 'string' || typeof prefill.publication_date_to === 'string') {
+            setPublicationDateFrom(typeof prefill.publication_date_from === 'string' ? prefill.publication_date_from : '');
+            setPublicationDateTo(typeof prefill.publication_date_to === 'string' ? prefill.publication_date_to : '');
+        } else if (typeof prefill.publication_period === 'string') {
+            const publicationDateRange = publicationDateRangeFromPeriod(prefill.publication_period);
+            setPublicationDateFrom(publicationDateRange.from);
+            setPublicationDateTo(publicationDateRange.to);
         }
 
         if (typeof prefill.status === 'string') {
@@ -1014,7 +1131,10 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                     <p className="text-[15px] text-slate-500">{pageSubtitle}</p>
                 </section>
 
-                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_308px] xl:items-start">
+                <div className={classNames(
+                    'grid gap-5 xl:items-start',
+                    isHistoryMode ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,1fr)_308px]',
+                )}>
                     <div className="space-y-5">
                         {isLiveMode ? (
                             <>
@@ -1134,18 +1254,27 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                         <p className="text-xs text-slate-400">Kommaseparer ord for å snevre inn hovedsøket.</p>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{translations.frontend.publish_date}</span>
-                                        <select
-                                            value={publicationDate}
-                                            onChange={(event) => setPublicationDate(event.target.value)}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                        >
-                                            {publicationOptions.map((option) => (
-                                                <option key={option.value || 'empty'} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <span className="text-sm font-medium text-slate-700">Kunngjøringsdato</span>
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            <label className="space-y-1">
+                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Fra dato</span>
+                                                <input
+                                                    type="date"
+                                                    value={publicationDateFrom}
+                                                    onChange={(event) => setPublicationDateFrom(event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                            </label>
+                                            <label className="space-y-1">
+                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Til dato</span>
+                                                <input
+                                                    type="date"
+                                                    value={publicationDateTo}
+                                                    onChange={(event) => setPublicationDateTo(event.target.value)}
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                />
+                                            </label>
+                                        </div>
                                     </label>
                                     <label className="space-y-2">
                                         <span className="text-sm font-medium text-slate-700">{translations.common.status}</span>
@@ -1402,21 +1531,21 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                                     <div>
-                                        <div className="text-sm font-medium text-slate-900">Fasefilter</div>
+                                        <div className="text-sm font-medium text-slate-900">{worklistFilterTitle}</div>
                                         <p className="mt-1 text-sm text-slate-500">
-                                            Filtrer arbeidslisten etter fase for å finne riktige saker raskere.
+                                            {worklistFilterDescription}
                                         </p>
                                     </div>
 
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">Filtrer på fase</span>
+                                            <span className="text-sm font-medium text-slate-700">{worklistFilterLabel}</span>
                                             <select
-                                                value={bidStatusFilter}
-                                                onChange={(event) => applySavedNoticeStatusFilter(event.target.value)}
+                                                value={worklistFilterValue}
+                                                onChange={(event) => applySavedNoticeFilter(event.target.value)}
                                                 className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
-                                                {bidStatusOptions.map((option) => (
+                                                {worklistFilterOptions.map((option) => (
                                                     <option key={option.value || 'empty'} value={option.value}>
                                                         {option.label}
                                                     </option>
@@ -1424,10 +1553,10 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                             </select>
                                         </label>
 
-                                        {bidStatusFilter ? (
+                                        {worklistFilterValue ? (
                                             <button
                                                 type="button"
-                                                onClick={() => applySavedNoticeStatusFilter('')}
+                                                onClick={() => applySavedNoticeFilter('')}
                                                 className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
                                                 Fjern filter
@@ -1443,7 +1572,7 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                     {source?.label}
                                 </div>
-                                <div className="text-[17px] font-semibold text-slate-950">{pluralize(notices.meta.total ?? 0, locale)}</div>
+                                <div className="text-[17px] font-semibold text-slate-950">{`${formatInteger(notices.meta.total ?? 0, locale)} treff fra Doffin`}</div>
                             </div>
 
                             {isCappedLiveSearch ? (
@@ -1526,6 +1655,14 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                                 {notice.buyer_name || 'Oppdragsgiver ikke angitt'}
                                                             </span>
                                                         </div>
+
+                                                        {isHistoryMode && notice.history_type_label ? (
+                                                            <div className="mt-2">
+                                                                <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                                                                    Type: {notice.history_type_label}
+                                                                </span>
+                                                            </div>
+                                                        ) : null}
 
                                                         <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
                                                             <div style={noticeSummaryStyle}>{summarizeText(notice.summary)}</div>
@@ -1800,10 +1937,14 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                         {isSavedMode ? (
                                                             <button
                                                                 type="button"
-                                                                onClick={() => archiveNotice(notice)}
+                                                                onClick={() => (
+                                                                    archivingSavedNoticeId === notice.id
+                                                                        ? cancelArchiveSavedNoticeForm()
+                                                                        : openArchiveSavedNoticeForm(notice)
+                                                                )}
                                                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                Flytt til historikk
+                                                                {archivingSavedNoticeId === notice.id ? 'Skjul flytting' : 'Flytt til historikk'}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
@@ -1836,6 +1977,62 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                                                         ) : null}
                                                     </div>
                                                 </div>
+
+                                                {isSavedMode && archivingSavedNoticeId === notice.id ? (
+                                                    <form
+                                                        onSubmit={(event) => submitArchiveSavedNotice(notice, event)}
+                                                        className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                                                    >
+                                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                            <div>
+                                                                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                                    Flytt til historikk
+                                                                </div>
+                                                                <p className="mt-1 text-sm text-slate-600">
+                                                                    Velg type før saken arkiveres i historikk.
+                                                                </p>
+                                                            </div>
+
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelArchiveSavedNoticeForm}
+                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            >
+                                                                Avbryt
+                                                            </button>
+                                                        </div>
+
+                                                        <label className="mt-4 block space-y-2">
+                                                            <span className="text-sm font-medium text-slate-700">Type</span>
+                                                            <select
+                                                                value={archiveHistoryForm.data.history_type}
+                                                                onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
+                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                            >
+                                                                <option value="">Velg type</option>
+                                                                {historyTypeOptions.map((option) => (
+                                                                    <option key={option.value} value={option.value}>
+                                                                        {option.label}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            {archiveHistoryForm.errors.history_type ? (
+                                                                <p className="text-sm text-rose-600">{archiveHistoryForm.errors.history_type}</p>
+                                                            ) : null}
+                                                        </label>
+
+                                                        <div className="mt-4 flex flex-wrap gap-3">
+                                                            <button
+                                                                type="button"
+                                                                onClick={(event) => submitArchiveSavedNotice(notice, event)}
+                                                                disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
+                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {archiveHistoryForm.processing ? 'Flytter...' : 'Lagre og flytt til historikk'}
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                ) : null}
 
                                                         {isSavedOrHistoryMode && isDetailsExpanded ? (
                                                             <div className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-600">
@@ -2294,8 +2491,8 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                         <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_8px_22px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 {notices.meta.from && notices.meta.to
-                                    ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)}`
-                                    : pluralize(notices.meta.total ?? 0, locale)}
+                                    ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)} treff fra Doffin`
+                                    : `${formatInteger(notices.meta.total ?? 0, locale)} treff fra Doffin`}
                             </div>
                             <div className="flex gap-3">
                                 <button
@@ -2318,86 +2515,87 @@ export default function NoticeIndex({ notices, filters, savedSearches = [], sour
                         </div>
                     </div>
 
-                    <aside className="space-y-4 xl:sticky xl:top-7 xl:self-start">
-                        <section id="saved-searches" className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                            <div className="mb-5 flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                    <BookmarkIcon className="h-5 w-5 text-slate-500" />
-                                    <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.saved_searches_title}</h2>
+                    {!isHistoryMode ? (
+                        <aside className="space-y-4 xl:sticky xl:top-7 xl:self-start">
+                            <section id="saved-searches" className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
+                                <div className="mb-5 flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3">
+                                        <BookmarkIcon className="h-5 w-5 text-slate-500" />
+                                        <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.saved_searches_title}</h2>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    >
+                                        {translations.frontend.see_all}
+                                    </button>
                                 </div>
+                                <div className="space-y-4">
+                                    {savedSearches.length === 0 ? (
+                                        <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                                            Ingen lagrede søk er tilgjengelige ennå.
+                                        </div>
+                                    ) : (
+                                        savedSearches.map((item) => (
+                                            <div key={item.id} className="space-y-2 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
+                                                <div className="text-base font-semibold text-slate-900">{item.name}</div>
+                                                <div className="text-sm leading-6 text-slate-500">{item.summary}</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {item.department ? (
+                                                        <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                                            {item.department}
+                                                        </span>
+                                                    ) : null}
+                                                    {item.frequency ? (
+                                                        <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                                                            {item.frequency}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </section>
+
+                            <section id="alerts-monitoring" className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
+                                <div className="mb-5 flex items-center gap-3">
+                                    <BellIcon className="h-5 w-5 text-slate-500" />
+                                    <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.alerts_monitoring_title}</h2>
+                                </div>
+
+                                <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 text-sm leading-6 text-violet-900">
+                                    Her ser du status for overvåkning basert på dine aktive watch profiles.
+                                </div>
+
+                                <div className="mt-5 space-y-3 text-sm text-slate-600">
+                                    <div className="flex items-center gap-3">
+                                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                                        {monitoringHitsLabel}
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                                        {monitoringNextUpdateText}
+                                    </div>
+                                </div>
+
                                 <button
                                     type="button"
-                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    onClick={canManageWatchProfiles ? () => router.get('/app/watch-profiles') : undefined}
+                                    disabled={!canManageWatchProfiles}
+                                    title={!canManageWatchProfiles ? 'Kun tilgjengelig for kundeadministrator.' : undefined}
+                                    className={classNames(
+                                        'mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition',
+                                        canManageWatchProfiles
+                                            ? 'hover:border-slate-300 hover:text-slate-950'
+                                            : 'cursor-not-allowed opacity-60',
+                                    )}
                                 >
-                                    {translations.frontend.see_all}
+                                    {translations.frontend.alert_settings}
                                 </button>
-                            </div>
-                            <div className="space-y-4">
-                                {savedSearches.length === 0 ? (
-                                    <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                                        Ingen lagrede søk er tilgjengelige ennå.
-                                    </div>
-                                ) : (
-                                    savedSearches.map((item) => (
-                                        <div key={item.id} className="space-y-2 border-b border-slate-100 pb-4 last:border-b-0 last:pb-0">
-                                            <div className="text-base font-semibold text-slate-900">{item.name}</div>
-                                            <div className="text-sm leading-6 text-slate-500">{item.summary}</div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {item.department ? (
-                                                    <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                                                        {item.department}
-                                                    </span>
-                                                ) : null}
-                                                {item.frequency ? (
-                                                    <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
-                                                        {item.frequency}
-                                                    </span>
-                                                ) : null}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </section>
-
-                        <section id="alerts-monitoring" className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                            <div className="mb-5 flex items-center gap-3">
-                                <BellIcon className="h-5 w-5 text-slate-500" />
-                                <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.alerts_monitoring_title}</h2>
-                            </div>
-
-                            <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 text-sm leading-6 text-violet-900">
-                                Her ser du status for overvåkning basert på dine aktive watch profiles.
-                            </div>
-
-                            <div className="mt-5 space-y-3 text-sm text-slate-600">
-                                <div className="flex items-center gap-3">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                                    {monitoringHitsLabel}
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                                    {monitoringNextUpdateText}
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={canManageWatchProfiles ? () => router.get('/app/watch-profiles') : undefined}
-                                disabled={!canManageWatchProfiles}
-                                title={!canManageWatchProfiles ? 'Kun tilgjengelig for kundeadministrator.' : undefined}
-                                className={classNames(
-                                    'mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition',
-                                    canManageWatchProfiles
-                                        ? 'hover:border-slate-300 hover:text-slate-950'
-                                        : 'cursor-not-allowed opacity-60',
-                                )}
-                            >
-                                {translations.frontend.alert_settings}
-                            </button>
-                        </section>
-
-                    </aside>
+                            </section>
+                        </aside>
+                    ) : null}
                 </div>
             </div>
         </CustomerAppLayout>

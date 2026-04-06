@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
+import NotificationBell from '../Components/App/NotificationBell';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -40,14 +41,27 @@ function withMenuCount(label, count) {
     return `${label} (${formatMenuCount(count)})`;
 }
 
+function emptyNotificationsState() {
+    return {
+        unread_count: 0,
+        limit: 10,
+        mark_all_read_url: null,
+        items: [],
+    };
+}
+
 export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+    const [notificationState, setNotificationState] = useState(page.props.notifications ?? emptyNotificationsState());
     const userMenuRef = useRef(null);
+    const notificationsMenuRef = useRef(null);
     const currentUrl = page.url ?? '';
     const user = auth?.user;
+    const locale = page.props.locale ?? 'nb-NO';
     const customerName = user?.customer?.name ?? translations.frontend.support_mode_customer;
     const customerLabel = user?.customer?.name
         ? translations.frontend.customer_area
@@ -180,22 +194,32 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
     useEffect(() => {
         setIsUserMenuOpen(false);
+        setIsNotificationsOpen(false);
     }, [currentUrl]);
 
     useEffect(() => {
-        if (!isUserMenuOpen) {
+        setNotificationState(page.props.notifications ?? emptyNotificationsState());
+    }, [page.props.notifications]);
+
+    useEffect(() => {
+        if (!isUserMenuOpen && !isNotificationsOpen) {
             return;
         }
 
         const handlePointerDown = (event) => {
-            if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+            const clickedUserMenu = userMenuRef.current && userMenuRef.current.contains(event.target);
+            const clickedNotificationsMenu = notificationsMenuRef.current && notificationsMenuRef.current.contains(event.target);
+
+            if (!clickedUserMenu && !clickedNotificationsMenu) {
                 setIsUserMenuOpen(false);
+                setIsNotificationsOpen(false);
             }
         };
 
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
                 setIsUserMenuOpen(false);
+                setIsNotificationsOpen(false);
             }
         };
 
@@ -206,18 +230,64 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleKeyDown);
         };
-    }, [isUserMenuOpen]);
+    }, [isNotificationsOpen, isUserMenuOpen]);
+
+    const toggleNotifications = () => {
+        setIsUserMenuOpen(false);
+        setIsNotificationsOpen((value) => !value);
+    };
 
     const logout = () => {
         setIsUserMenuOpen(false);
         router.post('/logout');
     };
 
+    const markNotificationAsRead = async (notification) => {
+        if (!notification?.mark_read_url) {
+            return;
+        }
+
+        try {
+            const response = await window.axios.patch(notification.mark_read_url);
+            const nextNotificationState = response?.data?.notifications;
+
+            if (nextNotificationState) {
+                setNotificationState(nextNotificationState);
+            }
+
+            if (notification.target_url) {
+                setIsNotificationsOpen(false);
+                router.visit(notification.target_url, {
+                    preserveScroll: true,
+                });
+            }
+        } catch (error) {
+            // Keep the current panel state if the canonical read request fails.
+        }
+    };
+
+    const markAllNotificationsAsRead = async () => {
+        if (!notificationState?.mark_all_read_url) {
+            return;
+        }
+
+        try {
+            const response = await window.axios.patch(notificationState.mark_all_read_url);
+            const nextNotificationState = response?.data?.notifications;
+
+            if (nextNotificationState) {
+                setNotificationState(nextNotificationState);
+            }
+        } catch (error) {
+            // Keep the current panel state if the canonical read-all request fails.
+        }
+    };
+
     return (
         <>
             <Head title={title ? `${title} · ${appName}` : appName} />
             <div className="min-h-screen bg-[#f6f7fb] text-slate-900">
-                <header className="border-b border-slate-200/80 bg-white/95 backdrop-blur-sm">
+                <header className="relative z-[60] border-b border-slate-200/80 bg-white/95 backdrop-blur-sm">
                     <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
@@ -254,6 +324,18 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
                             <div className="flex items-center justify-between gap-3 lg:justify-end">
                                 <div className="flex items-center gap-3 rounded-xl bg-transparent px-1 py-1">
+                                    <NotificationBell
+                                        menuRef={notificationsMenuRef}
+                                        isOpen={isNotificationsOpen}
+                                        locale={locale}
+                                        notifications={notificationState}
+                                        onToggle={toggleNotifications}
+                                        onMarkNotification={markNotificationAsRead}
+                                        onMarkAllRead={markAllNotificationsAsRead}
+                                    />
+
+                                    <span aria-hidden="true" className="h-9 w-px bg-slate-200" />
+
                                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-100 text-sm font-semibold text-amber-800">
                                         {customerInitial}
                                     </span>
@@ -266,7 +348,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                 <div ref={userMenuRef} className="relative">
                                     <button
                                         type="button"
-                                        onClick={() => setIsUserMenuOpen((value) => !value)}
+                                        onClick={() => {
+                                            setIsNotificationsOpen(false);
+                                            setIsUserMenuOpen((value) => !value);
+                                        }}
                                         className={classNames(
                                             'flex max-w-[240px] items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition',
                                             isUserMenuOpen
@@ -302,7 +387,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                     </button>
 
                                     {isUserMenuOpen ? (
-                                        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
+                                        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-[80] w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                                             <div className="space-y-1 border-b border-slate-200 px-4 py-4">
                                                 <div className="text-sm font-semibold text-slate-950">{userName}</div>
                                                 <div className="break-words text-sm text-slate-500">{userEmail}</div>

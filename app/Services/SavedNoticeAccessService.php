@@ -32,6 +32,19 @@ class SavedNoticeAccessService
         return $actor->resolvedBidRole() !== User::BID_ROLE_VIEWER;
     }
 
+    public function canArchive(User $actor, SavedNotice $notice): bool
+    {
+        if ($notice->archived_at !== null) {
+            return false;
+        }
+
+        if ($actor->resolvedBidRole() === User::BID_ROLE_VIEWER) {
+            return false;
+        }
+
+        return $this->canView($actor, $notice);
+    }
+
     public function visibleQueryFor(User $user): Builder
     {
         $query = SavedNotice::query();

@@ -20,27 +20,41 @@ class DoffinLiveSearchService
 
     public function search(array $filters, int $page = 1, int $perPage = 15): array
     {
+        $page = max(1, $page);
+        $perPage = max(1, $perPage);
+
         $query = Str::squish((string) ($filters['q'] ?? ''));
         $keywords = $this->normalizeKeywords((string) ($filters['keywords'] ?? ''));
         $organizationName = Str::squish((string) ($filters['organization_name'] ?? ''));
         $cpvCodes = $this->normalizeCpvCodes((string) ($filters['cpv'] ?? ''));
         $status = $this->normalizeStatus((string) ($filters['status'] ?? ''));
+        $publicationDateFrom = Str::squish((string) ($filters['publication_date_from'] ?? ''));
+        $publicationDateTo = Str::squish((string) ($filters['publication_date_to'] ?? ''));
+        $publicationPeriod = Str::squish((string) ($filters['publication_period'] ?? ''));
+        [$publicationDateFrom, $publicationDateTo] = $this->normalizePublicationDateRange(
+            $publicationDateFrom,
+            $publicationDateTo,
+            $publicationPeriod,
+        );
         $buyerIds = $organizationName !== ''
             ? $this->resolveBuyerIds($organizationName)
             : [];
 
-        return $this->postSearch([
-            'numHitsPerPage' => $perPage,
-            'page' => max(1, $page),
-            'searchString' => $this->buildSearchString($query, $keywords, $organizationName),
-            'sortBy' => 'RELEVANCE',
-            'facets' => $this->facets(
-                (string) ($filters['publication_period'] ?? ''),
-                $buyerIds,
-                $cpvCodes,
-                $status !== null ? [$status] : [],
-            ),
-        ]);
+        $payload = $this->buildSearchPayload(
+            $query,
+            $organizationName,
+            $publicationDateFrom,
+            $publicationDateTo,
+            $buyerIds,
+            $cpvCodes,
+            $status,
+        );
+
+        if ($keywords === []) {
+            return $this->fetchSinglePageSearch($payload, $page, $perPage);
+        }
+
+        return $this->harvestAndFilterKeywordSearch($payload, $keywords, $page, $perPage);
     }
 
     private function resolveBuyerIds(string $organizationName): array
@@ -50,7 +64,7 @@ class DoffinLiveSearchService
             'page' => 1,
             'searchString' => $organizationName,
             'sortBy' => 'RELEVANCE',
-            'facets' => $this->facets('', [], [], []),
+            'facets' => $this->facets('', '', [], [], []),
         ]);
 
         $needle = Str::lower($organizationName);
@@ -81,10 +95,8 @@ class DoffinLiveSearchService
             && str_contains($organizationId, $digitsNeedle);
     }
 
-    private function facets(string $publicationPeriod, array $buyerIds, array $cpvCodes, array $statuses): array
+    private function facets(string $publicationDateFrom, string $publicationDateTo, array $buyerIds, array $cpvCodes, array $statuses): array
     {
-        [$fromDate, $toDate] = $this->publicationRange($publicationPeriod);
-
         return [
             'cpvCodesLabel' => ['checkedItems' => []],
             'cpvCodesId' => ['checkedItems' => $cpvCodes],
@@ -92,8 +104,8 @@ class DoffinLiveSearchService
             'status' => ['checkedItems' => $statuses],
             'contractNature' => ['checkedItems' => []],
             'publicationDate' => [
-                'from' => $fromDate,
-                'to' => $toDate,
+                'from' => $publicationDateFrom !== '' ? $publicationDateFrom : null,
+                'to' => $publicationDateTo !== '' ? $publicationDateTo : null,
             ],
             'location' => ['checkedItems' => []],
             'buyer' => ['checkedItems' => $buyerIds],
@@ -133,21 +145,193 @@ class DoffinLiveSearchService
             ->all();
     }
 
-    private function buildSearchString(string $query, array $keywords, string $organizationName): string
+    private function buildSearchString(string $query, string $organizationName): string
     {
         if ($query !== '') {
             return $query;
         }
 
-        if ($organizationName !== '') {
-            return $organizationName;
+        return $organizationName !== '' ? $organizationName : '';
+    }
+
+    private function buildSearchPayload(
+        string $query,
+        string $organizationName,
+        string $publicationDateFrom,
+        string $publicationDateTo,
+        array $buyerIds,
+        array $cpvCodes,
+        ?string $status,
+    ): array {
+        return [
+            'searchString' => $this->buildSearchString($query, $organizationName),
+            'sortBy' => 'RELEVANCE',
+            'facets' => $this->facets(
+                $publicationDateFrom,
+                $publicationDateTo,
+                $buyerIds,
+                $cpvCodes,
+                $status !== null ? [$status] : [],
+            ),
+        ];
+    }
+
+    private function fetchSinglePageSearch(array $payload, int $page, int $perPage): array
+    {
+        $response = $this->postSearch($payload + [
+            'numHitsPerPage' => $perPage,
+            'page' => $page,
+        ]);
+
+        $response['hits'] = $this->filterResultsByKeywords($response['hits'] ?? [], []);
+        $response['page'] = $page;
+        $response['perPage'] = $perPage;
+
+        return $response;
+    }
+
+    private function harvestAndFilterKeywordSearch(array $payload, array $keywords, int $page, int $perPage): array
+    {
+        $firstPageResponse = $this->postSearch($payload + [
+            'numHitsPerPage' => $perPage,
+            'page' => 1,
+        ]);
+
+        $allHits = $this->normalizeHits($firstPageResponse['hits'] ?? []);
+        $accessibleTotal = $this->searchResultTotal($firstPageResponse);
+        $lastPage = max(1, (int) ceil($accessibleTotal / $perPage));
+
+        for ($currentPage = 2; $currentPage <= $lastPage; $currentPage++) {
+            $pageResponse = $this->postSearch($payload + [
+                'numHitsPerPage' => $perPage,
+                'page' => $currentPage,
+            ]);
+
+            $allHits = array_merge($allHits, $this->normalizeHits($pageResponse['hits'] ?? []));
         }
 
-        if (count($keywords) === 1) {
-            return $keywords[0];
+        $filteredHits = $this->filterResultsByKeywords($this->deduplicateHits($allHits), $keywords);
+        $filteredTotal = count($filteredHits);
+        $currentPage = max(1, min($page, max(1, (int) ceil($filteredTotal / $perPage))));
+        $offset = ($currentPage - 1) * $perPage;
+
+        return [
+            'page' => $currentPage,
+            'perPage' => $perPage,
+            'numHitsTotal' => $filteredTotal,
+            'numHitsAccessible' => $filteredTotal,
+            'hits' => array_slice($filteredHits, $offset, $perPage),
+        ];
+    }
+
+    private function normalizeHits(mixed $hits): array
+    {
+        return collect(is_array($hits) ? $hits : [])
+            ->filter(fn (mixed $hit): bool => is_array($hit))
+            ->values()
+            ->all();
+    }
+
+    private function deduplicateHits(array $hits): array
+    {
+        $seen = [];
+        $uniqueHits = [];
+
+        foreach ($hits as $hit) {
+            $key = (string) ($hit['id'] ?? '');
+
+            if ($key === '') {
+                $key = md5(serialize($hit));
+            }
+
+            if (array_key_exists($key, $seen)) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $uniqueHits[] = $hit;
         }
 
-        return '';
+        return $uniqueHits;
+    }
+
+    private function searchResultTotal(array $response): int
+    {
+        $accessibleTotal = (int) ($response['numHitsAccessible'] ?? 0);
+
+        if ($accessibleTotal > 0) {
+            return $accessibleTotal;
+        }
+
+        $total = (int) ($response['numHitsTotal'] ?? 0);
+
+        if ($total > 0) {
+            return $total;
+        }
+
+        return count($this->normalizeHits($response['hits'] ?? []));
+    }
+
+    /**
+     * Apply the keyword filter locally so Doffin only handles the canonical broad search string.
+     */
+    private function filterResultsByKeywords(array $hits, array $keywords): array
+    {
+        $normalizedKeywords = collect($keywords)
+            ->map(fn (string $keyword): string => Str::lower(Str::squish($keyword)))
+            ->filter(fn (string $keyword): bool => $keyword !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($normalizedKeywords === []) {
+            return $hits;
+        }
+
+        return collect($hits)
+            ->filter(function (mixed $hit) use ($normalizedKeywords): bool {
+                return is_array($hit) && $this->hitMatchesAllKeywords($hit, $normalizedKeywords);
+            })
+            ->values()
+            ->all();
+    }
+
+    private function hitMatchesAllKeywords(array $hit, array $keywords): bool
+    {
+        foreach ($keywords as $keyword) {
+            if (! $this->hitContainsKeyword($hit, $keyword)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function hitContainsKeyword(array $hit, string $keyword): bool
+    {
+        foreach ($this->searchableTextForHit($hit) as $text) {
+            if ($text !== '' && str_contains(Str::lower($text), $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function searchableTextForHit(array $hit): array
+    {
+        $buyerNames = collect($hit['buyer'] ?? [])
+            ->filter(fn (mixed $buyer): bool => is_array($buyer))
+            ->map(fn (array $buyer): string => Str::squish((string) ($buyer['name'] ?? '')))
+            ->filter(fn (string $buyerName): bool => $buyerName !== '')
+            ->values()
+            ->all();
+
+        return array_values(array_filter([
+            Str::squish((string) ($hit['heading'] ?? '')),
+            Str::squish((string) ($hit['description'] ?? '')),
+            ...$buyerNames,
+        ], fn (string $text): bool => $text !== ''));
     }
 
     private function normalizeStatus(string $value): ?string
@@ -155,6 +339,20 @@ class DoffinLiveSearchService
         $status = strtoupper(trim($value));
 
         return in_array($status, self::SUPPORTED_STATUSES, true) ? $status : null;
+    }
+
+    private function normalizePublicationDateRange(string $publicationDateFrom, string $publicationDateTo, string $publicationPeriod): array
+    {
+        if ($publicationDateFrom !== '' || $publicationDateTo !== '') {
+            return [$publicationDateFrom, $publicationDateTo];
+        }
+
+        [$fromDate, $toDate] = $this->publicationRange($publicationPeriod);
+
+        return [
+            $fromDate ?? '',
+            $toDate ?? '',
+        ];
     }
 
     private function publicationRange(string $publicationPeriod): array

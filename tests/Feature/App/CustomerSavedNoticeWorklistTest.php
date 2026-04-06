@@ -90,9 +90,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $secondary = $this->customerAdminContext('Annen Kunde AS');
 
         $this->createSavedNotice($primary['customer']->id, '2026-1001', 'Primar lagret');
-        $this->createSavedNotice($primary['customer']->id, '2026-1002', 'Primar historikk', archived: true);
+        $this->createSavedNotice($primary['customer']->id, '2026-1002', 'Primar historikk', archived: true, historyType: SavedNotice::HISTORY_TYPE_ABORTED);
         $this->createSavedNotice($secondary['customer']->id, '2026-1003', 'Skjult lagret');
-        $this->createSavedNotice($secondary['customer']->id, '2026-1004', 'Skjult historikk', archived: true);
+        $this->createSavedNotice($secondary['customer']->id, '2026-1004', 'Skjult historikk', archived: true, historyType: SavedNotice::HISTORY_TYPE_WON);
 
         $savedPage = $this->inertiaPage(
             $this->actingAs($primary['admin'])
@@ -116,6 +116,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(1, $historyPage['props']['worklist']['history_count']);
         $this->assertSame(1, $historyPage['props']['notices']['meta']['total']);
         $this->assertSame('Primar historikk', $historyPage['props']['notices']['data'][0]['title']);
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, $historyPage['props']['notices']['data'][0]['history_type']);
+        $this->assertSame('Avbrutt', $historyPage['props']['notices']['data'][0]['history_type_label']);
+        $this->assertSame(['won', 'lost', 'aborted', 'no_go'], array_column($historyPage['props']['historyTypeOptions'], 'value'));
         $this->assertArrayNotHasKey('pipeline', $historyPage['props']);
     }
 
@@ -2684,14 +2687,33 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             awardDateAt: now()->addDays(18)->startOfDay()->toDateTimeString(),
         );
 
+        $savedShowBeforeArchive = $this->inertiaPage(
+            $this->actingAs($context['admin'])
+                ->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertTrue($savedShowBeforeArchive['props']['notice']['actions']['can_archive']);
+        $this->assertNotNull($savedShowBeforeArchive['props']['notice']['actions']['archive_url']);
+
         $response = $this->actingAs($context['admin'])
             ->withSession(['_token' => 'test-token'])
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
             ->from('/app/notices?mode=saved')
-            ->patch("/app/notices/saved/{$savedNotice->id}/archive");
+            ->patch("/app/notices/saved/{$savedNotice->id}/archive", [
+                'history_type' => SavedNotice::HISTORY_TYPE_ABORTED,
+            ]);
 
         $response->assertRedirect('/app/notices?mode=saved');
         $this->assertNotNull($savedNotice->fresh()->archived_at);
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, $savedNotice->fresh()->history_type);
+
+        $savedShowAfterArchive = $this->inertiaPage(
+            $this->actingAs($context['admin'])
+                ->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertFalse($savedShowAfterArchive['props']['notice']['actions']['can_archive']);
+        $this->assertNull($savedShowAfterArchive['props']['notice']['actions']['archive_url']);
 
         $savedPage = $this->inertiaPage(
             $this->actingAs($context['admin'])
@@ -2709,11 +2731,206 @@ class CustomerSavedNoticeWorklistTest extends TestCase
 
         $this->assertSame(1, $historyPage['props']['notices']['meta']['total']);
         $this->assertSame('Flytt meg', $historyPage['props']['notices']['data'][0]['title']);
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, $historyPage['props']['notices']['data'][0]['history_type']);
+        $this->assertSame('Avbrutt', $historyPage['props']['notices']['data'][0]['history_type_label']);
         $this->assertSame(substr((string) $savedNotice->fresh()->questions_rfi_deadline_at?->toIso8601String(), 0, 10), substr((string) $historyPage['props']['notices']['data'][0]['questions_rfi_deadline_at'], 0, 10));
         $this->assertSame(substr((string) $savedNotice->fresh()->rfi_submission_deadline_at?->toIso8601String(), 0, 10), substr((string) $historyPage['props']['notices']['data'][0]['rfi_submission_deadline_at'], 0, 10));
         $this->assertSame(substr((string) $savedNotice->fresh()->questions_rfp_deadline_at?->toIso8601String(), 0, 10), substr((string) $historyPage['props']['notices']['data'][0]['questions_rfp_deadline_at'], 0, 10));
         $this->assertSame(substr((string) $savedNotice->fresh()->rfp_submission_deadline_at?->toIso8601String(), 0, 10), substr((string) $historyPage['props']['notices']['data'][0]['rfp_submission_deadline_at'], 0, 10));
         $this->assertSame(substr((string) $savedNotice->fresh()->award_date_at?->toIso8601String(), 0, 10), substr((string) $historyPage['props']['notices']['data'][0]['award_date_at'], 0, 10));
+    }
+
+    public function test_customer_viewer_with_access_does_not_get_archive_action(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1005-viewer', 'Lesetilgang uten arkiv');
+        $viewer = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+
+        SavedNoticeUserAccess::query()->create([
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $viewer->id,
+            'granted_by_user_id' => $context['admin']->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_VIEWER,
+        ]);
+
+        $page = $this->inertiaPage(
+            $this->actingAs($viewer)
+                ->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertFalse($page['props']['notice']['actions']['can_archive']);
+        $this->assertNull($page['props']['notice']['actions']['archive_url']);
+    }
+
+    public function test_customer_contributor_with_access_can_archive_saved_notice(): void
+    {
+        $context = $this->customerAdminContext();
+        $bidManager = User::factory()->create([
+            'name' => 'Archive Bid Manager',
+            'email' => 'archive.bid.manager@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_BID_MANAGER,
+            'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $contributor = User::factory()->create([
+            'name' => 'Archive Contributor',
+            'email' => 'archive.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_DEPARTMENT,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1005-contributor-archive',
+            'Contributor kan arkivere',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+            bidManagerUserId: $bidManager->id,
+        );
+
+        $this->actingAs($bidManager)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $contributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $page = $this->inertiaPage(
+            $this->actingAs($contributor)->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertTrue($page['props']['notice']['actions']['can_archive']);
+        $this->assertNotNull($page['props']['notice']['actions']['archive_url']);
+
+        $savedPage = $this->inertiaPage(
+            $this->actingAs($contributor)->get('/app/notices?mode=saved'),
+        );
+
+        $this->assertTrue($savedPage['props']['notices']['data'][0]['actions']['can_archive']);
+        $this->assertNotNull($savedPage['props']['notices']['data'][0]['actions']['archive_url']);
+
+        $response = $this->actingAs($contributor)
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->patch(route('app.notices.saved.archive', ['savedNotice' => $savedNotice->id]), [
+                'history_type' => SavedNotice::HISTORY_TYPE_ABORTED,
+            ]);
+
+        $response->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, $savedNotice->fresh()->history_type);
+        $this->assertNotNull($savedNotice->fresh()->archived_at);
+    }
+
+    public function test_customer_cannot_archive_saved_notice_without_history_type(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1005-missing-type', 'Mangler type');
+
+        $response = $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=saved')
+            ->patch("/app/notices/saved/{$savedNotice->id}/archive", [])
+            ->assertRedirect('/app/notices?mode=saved');
+
+        $this->assertNull($savedNotice->fresh()->archived_at);
+        $response->assertSessionHasErrors('history_type');
+    }
+
+    public function test_customer_cannot_archive_saved_notice_with_invalid_history_type(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, '2026-1005-invalid-type', 'Ugyldig type');
+
+        $response = $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from('/app/notices?mode=saved')
+            ->patch("/app/notices/saved/{$savedNotice->id}/archive", [
+                'history_type' => 'pipeline',
+            ])
+            ->assertRedirect('/app/notices?mode=saved');
+
+        $this->assertNull($savedNotice->fresh()->archived_at);
+        $response->assertSessionHasErrors('history_type');
+    }
+
+    public function test_history_mode_filters_by_canonical_history_type(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-history-won',
+            'Vunnet sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_WON,
+        );
+        $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-history-lost',
+            'Tapt sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_LOST,
+        );
+        $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-history-aborted',
+            'Avbrutt sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+        );
+        $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-history-no-go',
+            'NoGo sak',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_NO_GO,
+        );
+
+        foreach ([
+            SavedNotice::HISTORY_TYPE_WON => 'Vunnet sak',
+            SavedNotice::HISTORY_TYPE_LOST => 'Tapt sak',
+            SavedNotice::HISTORY_TYPE_ABORTED => 'Avbrutt sak',
+            SavedNotice::HISTORY_TYPE_NO_GO => 'NoGo sak',
+        ] as $historyType => $expectedTitle) {
+            $page = $this->inertiaPage(
+                $this->actingAs($context['admin'])
+                    ->get('/app/notices?mode=history&history_type=' . $historyType),
+            );
+
+            $this->assertSame($historyType, $page['props']['filters']['history_type']);
+            $this->assertSame(1, $page['props']['notices']['meta']['total']);
+            $this->assertSame($expectedTitle, $page['props']['notices']['data'][0]['title']);
+            $this->assertSame($historyType, $page['props']['notices']['data'][0]['history_type']);
+        }
+    }
+
+    public function test_legacy_archived_bid_statuses_map_to_canonical_history_types(): void
+    {
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_DISCOVERED));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_WON, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_WON));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_LOST, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_LOST));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_NO_GO, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_NO_GO));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_WITHDRAWN));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_ABORTED, SavedNotice::historyTypeFromLegacyBidStatus(SavedNotice::BID_STATUS_ARCHIVED));
     }
 
     public function test_customer_can_delete_only_active_saved_notices_from_own_customer(): void
@@ -2832,6 +3049,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $savedNotice->refresh();
 
         $this->assertNull($savedNotice->archived_at);
+        $this->assertNull($savedNotice->history_type);
 
         $savedPage = $this->inertiaPage(
             $this->actingAs($context['admin'])
@@ -3790,17 +4008,18 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             ->withSession(['_token' => 'test-token'])
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
             ->from("/app/notices/saved/{$savedNotice->id}")
-            ->patch("/app/notices/saved/{$savedNotice->id}/status", [
-                'status' => SavedNotice::BID_STATUS_ARCHIVED,
+            ->patch("/app/notices/saved/{$savedNotice->id}/archive", [
+                'history_type' => SavedNotice::HISTORY_TYPE_WON,
             ]);
 
         $response->assertRedirect("/app/notices/saved/{$savedNotice->id}");
 
         $savedNotice->refresh();
 
-        $this->assertSame(SavedNotice::BID_STATUS_ARCHIVED, $savedNotice->bid_status);
+        $this->assertSame(SavedNotice::BID_STATUS_WON, $savedNotice->bid_status);
         $this->assertSame('2026-03-20 10:00:00', $savedNotice->bid_closed_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-03-31 17:00:00', $savedNotice->archived_at?->format('Y-m-d H:i:s'));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_WON, $savedNotice->history_type);
     }
 
     public function test_customer_cannot_change_saved_notice_status_outside_customer_scope(): void
@@ -4034,6 +4253,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         string $externalId,
         string $title,
         bool $archived = false,
+        ?string $historyType = null,
         ?string $questionsDeadlineAt = null,
         ?string $questionsRfiDeadlineAt = null,
         ?string $rfiSubmissionDeadlineAt = null,
@@ -4094,6 +4314,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'status' => $status,
             'cpv_code' => $isPrivateRequest ? null : '72000000',
             'archived_at' => $archived ? now() : null,
+            'history_type' => $archived
+                ? ($historyType ?? SavedNotice::historyTypeFromLegacyBidStatus($bidStatus) ?? SavedNotice::HISTORY_TYPE_ABORTED)
+                : null,
             'reference_number' => $referenceNumber,
             'contact_person_name' => $contactPersonName,
             'contact_person_email' => $contactPersonEmail,
@@ -4183,6 +4406,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 $table->string('status')->nullable();
                 $table->string('cpv_code')->nullable();
                 $table->timestamp('archived_at')->nullable();
+                $table->string('history_type')->nullable()->index();
                 $table->timestamp('questions_deadline_at')->nullable();
                 $table->timestamp('questions_rfi_deadline_at')->nullable();
                 $table->timestamp('rfi_submission_deadline_at')->nullable();
@@ -4211,6 +4435,12 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         if (! Schema::hasColumn('saved_notices', 'archived_at')) {
             Schema::table('saved_notices', function (Blueprint $table): void {
                 $table->timestamp('archived_at')->nullable();
+            });
+        }
+
+        if (! Schema::hasColumn('saved_notices', 'history_type')) {
+            Schema::table('saved_notices', function (Blueprint $table): void {
+                $table->string('history_type')->nullable()->index();
             });
         }
 

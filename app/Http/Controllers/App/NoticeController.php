@@ -51,16 +51,26 @@ class NoticeController extends Controller
         $customerId = $this->customerContext->currentCustomerId($user);
         $mode = $this->noticeMode((string) $request->string('mode'));
         $useCockpitScope = $request->boolean('cockpit_scope');
+        $publicationPeriod = trim((string) $request->string('publication_period'));
+        $publicationDateFrom = trim((string) $request->string('publication_date_from'));
+        $publicationDateTo = trim((string) $request->string('publication_date_to'));
+
+        if ($publicationDateFrom === '' && $publicationDateTo === '' && $publicationPeriod !== '') {
+            [$publicationDateFrom, $publicationDateTo] = $this->publicationDateRangeFromPeriod($publicationPeriod);
+        }
 
         $filters = [
             'q' => trim((string) $request->string('q')),
             'organization_name' => trim((string) $request->string('organization_name')),
             'cpv' => trim((string) $request->string('cpv')),
             'keywords' => trim((string) $request->string('keywords')),
-            'publication_period' => trim((string) $request->string('publication_period')),
+            'publication_date_from' => $publicationDateFrom,
+            'publication_date_to' => $publicationDateTo,
+            'publication_period' => $publicationPeriod,
             'status' => trim((string) $request->string('status')),
             'relevance' => trim((string) $request->string('relevance')),
             'bid_status' => trim((string) $request->string('bid_status')),
+            'history_type' => trim((string) $request->string('history_type')),
             'cockpit_scope' => $useCockpitScope ? '1' : '',
         ];
 
@@ -81,6 +91,10 @@ class NoticeController extends Controller
                 ],
                 'monitoring' => $this->monitoringSummary(null, null),
                 'notices' => $this->emptySearchResult(),
+                'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
+                    ->map(fn (array $option): array => $option)
+                    ->values()
+                    ->all(),
             ]);
         }
 
@@ -102,6 +116,10 @@ class NoticeController extends Controller
                 'worklist' => $worklist,
                 'monitoring' => $this->monitoringSummary($user, $customerId),
                 'notices' => $this->savedNoticeResult($request, $user, $mode, $page, $perPage, $customerId, $useCockpitScope),
+                'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
+                    ->map(fn (array $option): array => $option)
+                    ->values()
+                    ->all(),
             ]);
         }
 
@@ -110,6 +128,8 @@ class NoticeController extends Controller
             'keywords' => $filters['keywords'],
             'organization_name' => $filters['organization_name'],
             'cpv' => $filters['cpv'],
+            'publication_date_from' => $filters['publication_date_from'],
+            'publication_date_to' => $filters['publication_date_to'],
             'publication_period' => $filters['publication_period'],
             'status' => $filters['status'],
             'page' => $page,
@@ -118,6 +138,8 @@ class NoticeController extends Controller
         ]);
 
         $searchResponse = $this->liveSearchService->search($filters, $page, $perPage);
+        $page = max(1, (int) ($searchResponse['page'] ?? $page));
+        $perPage = max(1, (int) ($searchResponse['perPage'] ?? $perPage));
         $hits = collect($searchResponse['hits'] ?? [])
             ->filter(fn (mixed $hit): bool => is_array($hit))
             ->values();
@@ -156,6 +178,10 @@ class NoticeController extends Controller
                 'data' => $items,
                 'meta' => $this->livePaginationMeta($request, $page, $perPage, $accessibleTotal, count($items), $total),
             ],
+            'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
+                ->map(fn (array $option): array => $option)
+                ->values()
+                ->all(),
         ]);
     }
 
@@ -256,6 +282,7 @@ class NoticeController extends Controller
             'contact_person_email' => $validated['contact_person_email'] ?? null,
             'notes' => $validated['notes'] ?? null,
             'archived_at' => null,
+            'history_type' => null,
             'rfi_submission_deadline_at' => $validated['rfi_submission_deadline_at'] ?? null,
             'rfp_submission_deadline_at' => $validated['rfp_submission_deadline_at'] ?? null,
         ]);
@@ -426,13 +453,18 @@ class NoticeController extends Controller
                 ->with('error', 'Customer context is required.');
         }
 
-        $record = $this->activeSavedNoticeManageableQuery($user)
+        $validated = $request->validate([
+            'history_type' => ['required', 'string', Rule::in(SavedNotice::HISTORY_TYPES)],
+        ]);
+
+        $record = $this->customerSavedNoticeVisibleQuery($user)
+            ->whereNull('archived_at')
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
-        $record->forceFill([
-            'archived_at' => now(),
-        ])->save();
+        abort_unless($this->savedNoticeAccess->canArchive($user, $record), 403);
+
+        $record->archiveWithHistoryType((string) $validated['history_type'])->save();
 
         return redirect()
             ->back()
@@ -523,9 +555,10 @@ class NoticeController extends Controller
         $canManageCase = $this->savedNoticeAccess->canManage($user, $record);
         $canManageContributorAccess = $this->savedNoticeAccess->canManageContributorAccess($user, $record);
         $canComment = $this->savedNoticeAccess->canComment($user, $record);
+        $canArchive = $this->savedNoticeAccess->canArchive($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment),
+            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive),
         ]);
     }
 
@@ -1051,7 +1084,8 @@ class NoticeController extends Controller
     private function archivedSavedNoticeVisibleQuery(User $user, ?int $customerId = null, bool $useCockpitScope = false): Builder
     {
         return $this->customerSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)
-            ->whereNotNull('archived_at');
+            ->whereNotNull('archived_at')
+            ->whereIn('history_type', SavedNotice::HISTORY_TYPES);
     }
 
     private function customerSavedNoticeManageableQuery(User $user): Builder
@@ -1068,7 +1102,8 @@ class NoticeController extends Controller
     private function archivedSavedNoticeManageableQuery(User $user): Builder
     {
         return $this->customerSavedNoticeManageableQuery($user)
-            ->whereNotNull('archived_at');
+            ->whereNotNull('archived_at')
+            ->whereIn('history_type', SavedNotice::HISTORY_TYPES);
     }
 
     private function savedNoticeCounts(User $user, int $customerId, bool $useCockpitScope = false): array
@@ -1085,8 +1120,13 @@ class NoticeController extends Controller
             ? $this->archivedSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)
             : $this->activeSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope);
         $bidStatus = trim((string) $request->string('bid_status'));
+        $historyType = trim((string) $request->string('history_type'));
 
-        if ($bidStatus !== '' && in_array($bidStatus, SavedNotice::BID_STATUSES, true)) {
+        if ($mode === 'history') {
+            if ($historyType !== '' && in_array($historyType, SavedNotice::HISTORY_TYPES, true)) {
+                $query->where('history_type', $historyType);
+            }
+        } elseif ($bidStatus !== '' && in_array($bidStatus, SavedNotice::BID_STATUSES, true)) {
             $query->where('bid_status', $bidStatus);
         }
 
@@ -1105,15 +1145,16 @@ class NoticeController extends Controller
 
         return [
             'data' => $records
-                ->map(fn (SavedNotice $notice): array => $this->savedNoticeListItem($notice))
+                ->map(fn (SavedNotice $notice): array => $this->savedNoticeListItem($user, $notice))
                 ->all(),
             'meta' => $this->livePaginationMeta($request, $page, $perPage, $total, $records->count()),
         ];
     }
 
-    private function savedNoticeListItem(SavedNotice $notice): array
+    private function savedNoticeListItem(User $user, SavedNotice $notice): array
     {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
+        $canArchive = $this->savedNoticeAccess->canArchive($user, $notice);
 
         return [
             'id' => $notice->id,
@@ -1138,6 +1179,8 @@ class NoticeController extends Controller
             'is_saved' => $notice->archived_at === null,
             'bid_status' => $notice->bid_status,
             'bid_status_label' => $notice->bid_status_label,
+            'history_type' => $notice->history_type,
+            'history_type_label' => $notice->history_type ? $notice->history_type_label : null,
             'submissions_count' => (int) ($notice->submissions_count ?? 0),
             'opportunity_owner_name' => $notice->opportunityOwner?->name,
             'reference_number' => $notice->reference_number,
@@ -1171,6 +1214,12 @@ class NoticeController extends Controller
             'follow_up_mode' => $notice->follow_up_mode,
             'follow_up_offset_months' => $notice->follow_up_offset_months,
             'next_process_date_at' => optional($notice->next_process_date_at)?->toIso8601String(),
+            'actions' => [
+                'can_archive' => $canArchive,
+                'archive_url' => $canArchive
+                    ? route('app.notices.saved.archive', ['savedNotice' => $notice->id])
+                    : null,
+            ],
         ];
     }
 
@@ -1179,6 +1228,7 @@ class NoticeController extends Controller
         bool $canManageCase,
         bool $canManageContributorAccess,
         bool $canComment,
+        bool $canArchive,
     ): array
     {
         $nextDeadline = $this->nextRelevantSavedNoticeDeadline($notice);
@@ -1205,6 +1255,8 @@ class NoticeController extends Controller
             'deadline_state' => $nextDeadline['state'],
             'bid_status' => $notice->bid_status,
             'bid_status_label' => $notice->bid_status_label,
+            'history_type' => $notice->history_type,
+            'history_type_label' => $notice->history_type ? $notice->history_type_label : null,
             'bid_closed_at' => optional($notice->bid_closed_at)?->toIso8601String(),
             'bid_closure_reason' => $notice->bid_closure_reason,
             'bid_closure_reason_label' => $notice->bid_closure_reason ? $notice->bid_closure_reason_label : null,
@@ -1404,6 +1456,14 @@ class NoticeController extends Controller
                 'create_submission_url' => $canCreateSubmission
                     ? route('app.notices.saved.submissions.store', ['savedNotice' => $notice->id])
                     : null,
+                'can_archive' => $canArchive,
+                'archive_url' => $canArchive
+                    ? route('app.notices.saved.archive', ['savedNotice' => $notice->id])
+                    : null,
+                'history_type_options' => collect(SavedNotice::historyTypeOptions())
+                    ->map(fn (array $option): array => $option)
+                    ->values()
+                    ->all(),
             ],
         ];
     }
@@ -1728,6 +1788,20 @@ class NoticeController extends Controller
                 'numHitsAccessible' => 0,
                 'is_capped' => false,
             ],
+        ];
+    }
+
+    private function publicationDateRangeFromPeriod(string $publicationPeriod): array
+    {
+        if (! in_array($publicationPeriod, ['1', '7', '30', '90', '365'], true)) {
+            return ['', ''];
+        }
+
+        $days = (int) $publicationPeriod;
+
+        return [
+            Carbon::now()->subDays($days)->toDateString(),
+            Carbon::now()->toDateString(),
         ];
     }
 

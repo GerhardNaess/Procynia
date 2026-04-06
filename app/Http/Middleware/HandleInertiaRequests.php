@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Services\UserNotificationService;
 use App\Support\CustomerContext;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -13,6 +14,7 @@ class HandleInertiaRequests extends Middleware
 
     public function __construct(
         private readonly CustomerContext $customerContext,
+        private readonly UserNotificationService $notificationService,
     ) {
     }
 
@@ -60,6 +62,14 @@ class HandleInertiaRequests extends Middleware
                     ] : null,
                 ] : null,
             ],
+            'notifications' => $user instanceof User
+                ? $this->notificationService->panelPayload($user)
+                : [
+                    'unread_count' => 0,
+                    'limit' => UserNotificationService::DEFAULT_LIMIT,
+                    'mark_all_read_url' => route('app.notifications.read-all'),
+                    'items' => [],
+                ],
             'flash' => [
                 'success' => fn (): ?string => $request->session()->get('success'),
                 'error' => fn (): ?string => $request->session()->get('error'),
