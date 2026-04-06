@@ -668,9 +668,9 @@ export default function NoticeIndex({
         ? [{ value: '', label: 'Alle typer' }, ...historyTypeOptions]
         : bidStatusOptions;
     const worklistFilterValue = isHistoryMode ? historyTypeFilter : bidStatusFilter;
-    const worklistFilterTitle = isHistoryMode ? 'Typefilter' : 'Fasefilter';
+    const worklistFilterTitle = isHistoryMode ? 'Type avslutning' : 'Fasefilter';
     const worklistFilterDescription = isHistoryMode
-        ? 'Filtrer arbeidslisten etter type for å finne riktige saker raskere.'
+        ? 'Filtrer arbeidslisten etter avslutningstype for å finne riktige saker raskere.'
         : 'Filtrer arbeidslisten etter fase for å finne riktige saker raskere.';
     const worklistFilterLabel = isHistoryMode ? 'Filtrer på type' : 'Filtrer på fase';
     const hasAppliedSearch = (filters.q ?? '').trim() !== '';
@@ -1538,8 +1538,8 @@ export default function NoticeIndex({
                                     </div>
 
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                                        <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">{worklistFilterLabel}</span>
+                                        <label className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                                            <span className="whitespace-nowrap text-sm font-medium text-slate-700">{worklistFilterLabel}</span>
                                             <select
                                                 value={worklistFilterValue}
                                                 onChange={(event) => applySavedNoticeFilter(event.target.value)}
