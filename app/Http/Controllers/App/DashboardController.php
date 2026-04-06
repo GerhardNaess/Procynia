@@ -49,8 +49,13 @@ class DashboardController extends Controller
      */
     private function buildCockpitPayload(User $user, int $customerId, array $pipeline): array
     {
-        $activeNotices = $this->dashboardActiveSavedNotices($user, $customerId);
         $cockpitScopeNotices = $this->cockpitScopeSavedNotices($user, $customerId);
+        $archivedNotices = $this->cockpitScopeArchivedSavedNotices($user, $customerId);
+        $trendArchivedNotices = $this->cockpitScopeArchivedSavedNotices(
+            $user,
+            $customerId,
+            now()->startOfMonth()->subMonthsNoOverflow(11),
+        );
         $deadlineItems = $this->buildDeadlineItems($cockpitScopeNotices);
 
         return [
@@ -68,7 +73,7 @@ class DashboardController extends Controller
                 'items' => $deadlineItems,
                 'upcoming' => array_slice($deadlineItems, 0, 6),
             ],
-            'pipeline_quality' => $this->resolvePipelineQualitySummary($activeNotices, $pipeline),
+            'bid_quality' => $this->resolveBidQualitySummary($cockpitScopeNotices, $archivedNotices, $trendArchivedNotices),
             'responsibility_activity' => $this->resolveResponsibilityActivitySummary($user, $customerId, $cockpitScopeNotices),
             'outcomes' => $pipeline['outcomes'],
             'pipeline' => $pipeline,
@@ -146,6 +151,33 @@ class DashboardController extends Controller
             ->get();
     }
 
+    /**
+     * @return Collection<int, SavedNotice>
+     */
+    private function cockpitScopeArchivedSavedNotices(User $user, int $customerId, ?CarbonInterface $since = null): Collection
+    {
+        return $this->savedNoticeAccess->cockpitScopeQueryFor($user, $customerId)
+            ->whereNotNull('archived_at')
+            ->whereIn('history_type', SavedNotice::HISTORY_TYPES)
+            ->where('archived_at', '>=', $since ?? now()->subDays(90)->startOfDay())
+            ->select([
+                'id',
+                'customer_id',
+                'bid_manager_user_id',
+                'opportunity_owner_user_id',
+                'bid_status',
+                'history_type',
+                'title',
+                'buyer_name',
+                'created_at',
+                'archived_at',
+                'updated_at',
+            ])
+            ->orderByDesc('archived_at')
+            ->orderByDesc('id')
+            ->get();
+    }
+
     private function savedWatchListsCount(User $user, int $customerId): int
     {
         return $user->watchProfiles()
@@ -171,59 +203,277 @@ class DashboardController extends Controller
 
     private function resolveAttentionItems(Collection $notices, array $deadlineItems): array
     {
+        return [
+            $this->buildAttentionCategory(
+                'deadline-soon',
+                'Frister innen 5 dager',
+                'Saker med operative frister som nærmer seg eller er passert.',
+                $this->buildDeadlineSoonAttentionItems($deadlineItems),
+                'danger',
+            ),
+            $this->buildAttentionCategory(
+                'missing-bid-manager',
+                'Saker uten bid-manager',
+                'Saker som mangler eksplisitt operativt ansvar.',
+                $this->buildMissingBidManagerAttentionItems($notices),
+                'warning',
+            ),
+            $this->buildAttentionCategory(
+                'missing-commercial-owner',
+                'Saker uten kommersiell eier',
+                'Saker som mangler eksplisitt kommersielt ansvar.',
+                $this->buildMissingCommercialOwnerAttentionItems($notices),
+                'warning',
+            ),
+            $this->buildAttentionCategory(
+                'go-no-go-pending',
+                'Go / No-Go uten beslutning',
+                'Saker som står i beslutningsfasen uten endelig utfall.',
+                $this->buildGoNoGoPendingAttentionItems($notices),
+                'warning',
+            ),
+            $this->buildAttentionCategory(
+                'inactive-seven-days',
+                'Uten aktivitet siste 7 dager',
+                'Saker som ikke har fått kommentarer eller innsendinger nylig.',
+                $this->buildInactiveSevenDaysAttentionItems($notices),
+                'warning',
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<string, mixed>
+     */
+    private function buildAttentionCategory(string $key, string $title, string $subtitle, array $items, string $severity): array
+    {
+        return [
+            'key' => $key,
+            'title' => $title,
+            'subtitle' => $subtitle,
+            'count' => count($items),
+            'severity' => count($items) > 0 ? $severity : 'neutral',
+            'items' => $items,
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $deadlineItems
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildDeadlineSoonAttentionItems(array $deadlineItems): array
+    {
         $deadlineLimit = now()->addDays(5)->endOfDay();
-        $deadlineSoonCount = collect($deadlineItems)
+
+        return collect($deadlineItems)
             ->filter(function (array $item) use ($deadlineLimit): bool {
                 $date = Carbon::parse($item['date']);
 
                 return $date->lessThanOrEqualTo($deadlineLimit);
             })
-            ->pluck('saved_notice_id')
-            ->unique()
-            ->count();
+            ->groupBy('saved_notice_id')
+            ->map(function (Collection $group): array {
+                $item = $group->sortBy('date')->first();
+                $date = Carbon::parse($item['date']);
+                $daysUntil = $this->attentionDaysUntil($date);
 
-        $missingBidManagerCount = $notices->whereNull('bid_manager_user_id')->count();
-        $goNoGoCount = $notices->where('bid_status', SavedNotice::BID_STATUS_GO_NO_GO)->count();
-        $inactiveSevenDaysCount = $notices->filter(function (SavedNotice $notice): bool {
-            $latestActivityAt = $this->latestSavedNoticeActivityAt($notice);
+                return [
+                    'id' => 'deadline-soon:'.$item['saved_notice_id'],
+                    'saved_notice_id' => $item['saved_notice_id'],
+                    'title' => $item['title'],
+                    'buyer_name' => $item['buyer_name'],
+                    'reason' => $this->attentionDeadlineReason((string) $item['deadline_type_label'], $daysUntil),
+                    'secondary' => sprintf(
+                        '%s · Frist: %s',
+                        $this->attentionBuyerLabel($item['buyer_name']),
+                        $this->attentionDateLabel($date),
+                    ),
+                    'show_url' => $item['show_url'],
+                    'severity' => $daysUntil <= 0 ? 'danger' : 'warning',
+                    'metadata' => [
+                        'deadline_type' => $item['deadline_type'],
+                        'deadline_type_label' => $item['deadline_type_label'],
+                        'date' => $date->toIso8601String(),
+                        'date_key' => $item['date_key'],
+                        'days_until' => $daysUntil,
+                        'bid_manager_name' => $item['bid_manager_name'],
+                    ],
+                ];
+            })
+            ->sortBy(fn (array $item): string => (string) $item['metadata']['date'])
+            ->values()
+            ->all();
+    }
 
-            return $latestActivityAt === null || $latestActivityAt->lessThan(now()->subDays(7)->startOfDay());
-        })->count();
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildMissingBidManagerAttentionItems(Collection $notices): array
+    {
+        return $notices
+            ->whereNull('bid_manager_user_id')
+            ->sortBy(fn (SavedNotice $notice): int => $notice->deadline?->getTimestamp() ?? PHP_INT_MAX)
+            ->map(function (SavedNotice $notice): array {
+                return [
+                    'id' => $notice->id,
+                    'saved_notice_id' => $notice->id,
+                    'title' => $notice->title,
+                    'buyer_name' => $notice->buyer_name,
+                    'reason' => 'Mangler bid-manager',
+                    'secondary' => sprintf(
+                        '%s · Kommersiell eier: %s',
+                        $this->attentionBuyerLabel($notice->buyer_name),
+                        $notice->opportunityOwner?->name ?? 'Ikke registrert',
+                    ),
+                    'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
+                    'severity' => 'warning',
+                    'metadata' => [
+                        'bid_manager_name' => $notice->bidManager?->name,
+                        'opportunity_owner_name' => $notice->opportunityOwner?->name,
+                        'deadline' => $notice->deadline?->toIso8601String(),
+                        'bid_status' => $notice->bid_status,
+                    ],
+                ];
+            })
+            ->values()
+            ->all();
+    }
 
-        return [
-            [
-                'key' => 'deadline-soon',
-                'title' => 'Frister innen 5 dager',
-                'subtitle' => 'Saker med operative frister som nærmer seg eller er passert.',
-                'count' => $deadlineSoonCount,
-                'severity' => $deadlineSoonCount > 0 ? 'danger' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
-            ],
-            [
-                'key' => 'missing-bid-manager',
-                'title' => 'Saker uten bid-manager',
-                'subtitle' => 'Saker som mangler eksplisitt operativt ansvar.',
-                'count' => $missingBidManagerCount,
-                'severity' => $missingBidManagerCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
-            ],
-            [
-                'key' => 'go-no-go-pending',
-                'title' => 'Go / No-Go uten beslutning',
-                'subtitle' => 'Saker som står i beslutningsfasen uten endelig utfall.',
-                'count' => $goNoGoCount,
-                'severity' => $goNoGoCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1, 'bid_status' => SavedNotice::BID_STATUS_GO_NO_GO]),
-            ],
-            [
-                'key' => 'inactive-seven-days',
-                'title' => 'Uten aktivitet siste 7 dager',
-                'subtitle' => 'Saker som ikke har fått kommentarer eller innsendinger nylig.',
-                'count' => $inactiveSevenDaysCount,
-                'severity' => $inactiveSevenDaysCount > 0 ? 'warning' : 'neutral',
-                'href' => route('app.notices.index', ['mode' => 'saved', 'cockpit_scope' => 1]),
-            ],
-        ];
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildMissingCommercialOwnerAttentionItems(Collection $notices): array
+    {
+        return $notices
+            ->whereNull('opportunity_owner_user_id')
+            ->sortBy(fn (SavedNotice $notice): int => $notice->deadline?->getTimestamp() ?? PHP_INT_MAX)
+            ->map(function (SavedNotice $notice): array {
+                return [
+                    'id' => $notice->id,
+                    'saved_notice_id' => $notice->id,
+                    'title' => $notice->title,
+                    'buyer_name' => $notice->buyer_name,
+                    'reason' => 'Mangler kommersiell eier',
+                    'secondary' => sprintf(
+                        '%s · Bid-manager: %s',
+                        $this->attentionBuyerLabel($notice->buyer_name),
+                        $notice->bidManager?->name ?? 'Ikke registrert',
+                    ),
+                    'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
+                    'severity' => 'warning',
+                    'metadata' => [
+                        'bid_manager_name' => $notice->bidManager?->name,
+                        'opportunity_owner_name' => $notice->opportunityOwner?->name,
+                        'deadline' => $notice->deadline?->toIso8601String(),
+                        'bid_status' => $notice->bid_status,
+                    ],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildGoNoGoPendingAttentionItems(Collection $notices): array
+    {
+        return $notices
+            ->where('bid_status', SavedNotice::BID_STATUS_GO_NO_GO)
+            ->sortBy(fn (SavedNotice $notice): int => $notice->deadline?->getTimestamp() ?? PHP_INT_MAX)
+            ->map(function (SavedNotice $notice): array {
+                return [
+                    'id' => $notice->id,
+                    'saved_notice_id' => $notice->id,
+                    'title' => $notice->title,
+                    'buyer_name' => $notice->buyer_name,
+                    'reason' => 'Beslutning mangler',
+                    'secondary' => sprintf(
+                        '%s · Status: %s',
+                        $this->attentionBuyerLabel($notice->buyer_name),
+                        $notice->bid_status_label,
+                    ),
+                    'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
+                    'severity' => 'warning',
+                    'metadata' => [
+                        'bid_status' => $notice->bid_status,
+                        'bid_status_label' => $notice->bid_status_label,
+                        'deadline' => $notice->deadline?->toIso8601String(),
+                    ],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildInactiveSevenDaysAttentionItems(Collection $notices): array
+    {
+        return $notices
+            ->filter(function (SavedNotice $notice): bool {
+                $latestActivityAt = $this->latestSavedNoticeActivityAt($notice);
+
+                return $latestActivityAt === null || $latestActivityAt->lessThan(now()->subDays(7)->startOfDay());
+            })
+            ->sortBy(function (SavedNotice $notice): int {
+                return $this->latestSavedNoticeActivityAt($notice)?->getTimestamp() ?? 0;
+            })
+            ->map(function (SavedNotice $notice): array {
+                $latestActivityAt = $this->latestSavedNoticeActivityAt($notice);
+
+                return [
+                    'id' => $notice->id,
+                    'saved_notice_id' => $notice->id,
+                    'title' => $notice->title,
+                    'buyer_name' => $notice->buyer_name,
+                    'reason' => $latestActivityAt instanceof CarbonInterface
+                        ? sprintf('Ingen aktivitet siden %s', $this->attentionDateLabel($latestActivityAt))
+                        : 'Ingen aktivitet registrert',
+                    'secondary' => $this->attentionBuyerLabel($notice->buyer_name),
+                    'show_url' => route('app.notices.saved.show', ['savedNotice' => $notice->id]),
+                    'severity' => 'warning',
+                    'metadata' => [
+                        'last_activity_at' => $latestActivityAt?->toIso8601String(),
+                    ],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function attentionBuyerLabel(?string $buyerName): string
+    {
+        return sprintf('Oppdragsgiver: %s', $buyerName ?: 'Ikke registrert');
+    }
+
+    private function attentionDateLabel(CarbonInterface $date): string
+    {
+        return $date->copy()->locale('nb')->translatedFormat('j. M Y');
+    }
+
+    private function attentionDaysUntil(CarbonInterface $date): int
+    {
+        return (int) now()->startOfDay()->diffInDays($date->copy()->startOfDay(), false);
+    }
+
+    private function attentionDeadlineReason(string $deadlineTypeLabel, int $daysUntil): string
+    {
+        if ($daysUntil < 0) {
+            return sprintf('%s forfalt for %d dager siden', $deadlineTypeLabel, abs($daysUntil));
+        }
+
+        if ($daysUntil === 0) {
+            return sprintf('%s i dag', $deadlineTypeLabel);
+        }
+
+        if ($daysUntil === 1) {
+            return sprintf('%s i morgen', $deadlineTypeLabel);
+        }
+
+        return sprintf('%s om %d dager', $deadlineTypeLabel, $daysUntil);
     }
 
     private function buildDeadlineItems(Collection $notices): array
@@ -307,71 +557,331 @@ class DashboardController extends Controller
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $deadlineItems
+     * @param  Collection<int, SavedNotice>  $activeNotices
+     * @param  Collection<int, SavedNotice>  $archivedNotices
+     * @param  Collection<int, SavedNotice>  $trendArchivedNotices
      * @return array<string, mixed>
      */
-    private function resolvePipelineQualitySummary(Collection $notices, array $pipeline): array
+    private function resolveBidQualitySummary(Collection $activeNotices, Collection $archivedNotices, Collection $trendArchivedNotices): array
     {
-        $stageRows = [];
-        $stageOrder = [
-            SavedNotice::BID_STATUS_DISCOVERED,
-            SavedNotice::BID_STATUS_QUALIFYING,
-            SavedNotice::BID_STATUS_GO_NO_GO,
-            SavedNotice::BID_STATUS_IN_PROGRESS,
-            SavedNotice::BID_STATUS_SUBMITTED,
-            SavedNotice::BID_STATUS_NEGOTIATION,
-        ];
+        $activeCount = $activeNotices->count();
+        $activeWithBidManager = $activeNotices->whereNotNull('bid_manager_user_id')->count();
+        $activeWithOpportunityOwner = $activeNotices->whereNotNull('opportunity_owner_user_id')->count();
+        $staleActiveCount = $activeNotices->filter(function (SavedNotice $notice): bool {
+            $latestActivityAt = $this->latestSavedNoticeActivityAt($notice);
 
-        foreach ($stageOrder as $stageKey) {
-            $stageNotices = $notices->where('bid_status', $stageKey);
-            $averageHours = $stageNotices->isEmpty()
-                ? null
-                : round($stageNotices->avg(function (SavedNotice $notice): float {
-                    $base = $notice->updated_at instanceof CarbonInterface
-                        ? $notice->updated_at
-                        : now();
+            return $latestActivityAt === null || $latestActivityAt->lessThan(now()->subDays(7)->startOfDay());
+        })->count();
 
-                    return now()->diffInMinutes($base) / 60;
-                }), 1);
+        $recentClosedNotices = $archivedNotices->values();
+        $recentClosedCount = $recentClosedNotices->count();
+        $wonCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_WON)->count();
+        $lostCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_LOST)->count();
+        $abortedCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_ABORTED)->count();
+        $noGoCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_NO_GO)->count();
+        $winLossCount = $wonCount + $lostCount;
+        $medianCycleTrendSeries = $this->buildMedianCycleTrendSeries($trendArchivedNotices);
 
-            $stageRows[] = [
-                'key' => $stageKey,
-                'label' => SavedNotice::BID_STATUS_LABELS[$stageKey] ?? $stageKey,
-                'count' => $this->pipelineStageCount($pipeline, $stageKey),
-                'average_age_hours' => $averageHours,
-            ];
-        }
-
-        $qualifyingCount = $this->pipelineStageCount($pipeline, SavedNotice::BID_STATUS_QUALIFYING);
-        $goNoGoCount = $this->pipelineStageCount($pipeline, SavedNotice::BID_STATUS_GO_NO_GO);
-        $inProgressCount = $this->pipelineStageCount($pipeline, SavedNotice::BID_STATUS_IN_PROGRESS);
-
-        $warning = null;
-
-        if ($goNoGoCount > 0 && $goNoGoCount >= max($qualifyingCount, $inProgressCount)) {
-            $warning = [
-                'label' => 'Flest saker stopper i Go / No-Go',
-                'count' => $goNoGoCount,
-                'severity' => 'warning',
-            ];
-        }
+        $outcomeSubtitle = sprintf(
+            'Vunnet %d · Tapt %d · Avbrutt %d · NoGo %d',
+            $wonCount,
+            $lostCount,
+            $abortedCount,
+            $noGoCount,
+        );
 
         return [
-            'conversions' => [
-                [
-                    'key' => 'qualifying_to_go_no_go',
-                    'label' => 'Kvalifiseres -> Go / No-Go',
-                    'value' => $this->formatConversionRate($goNoGoCount, $qualifyingCount + $goNoGoCount),
-                ],
-                [
-                    'key' => 'go_no_go_to_in_progress',
-                    'label' => 'Go / No-Go -> Under arbeid',
-                    'value' => $this->formatConversionRate($inProgressCount, $goNoGoCount + $inProgressCount),
-                ],
+            'title' => 'Bid-kvalitet og styring',
+            'subtitle' => 'Objektive styringsmål for ansvar, flyt og utfall i cockpit-skopet.',
+            'items' => [
+                $this->buildBidQualityMetric(
+                    'bid_manager_coverage',
+                    'Aktive saker med bid-manager',
+                    $activeCount > 0 ? round(($activeWithBidManager / $activeCount) * 100, 1) : null,
+                    '%',
+                    $activeCount > 0
+                        ? sprintf('%d av %d aktive saker har operativt ansvar satt.', $activeWithBidManager, $activeCount)
+                        : 'Ingen aktive saker i cockpit-skopet akkurat nå.',
+                    'Andel aktive saker i cockpit-skopet med bid_manager_user_id satt.',
+                    ['bid_manager', 'management'],
+                    'nå-situasjon',
+                    $this->qualitySeverityForHigherIsBetter(
+                        $activeCount > 0 ? round(($activeWithBidManager / $activeCount) * 100, 1) : null,
+                        90,
+                        75,
+                    ),
+                    [
+                        'numerator' => $activeWithBidManager,
+                        'denominator' => $activeCount,
+                    ],
+                ),
+                $this->buildBidQualityMetric(
+                    'opportunity_owner_coverage',
+                    'Aktive saker med kommersiell eier',
+                    $activeCount > 0 ? round(($activeWithOpportunityOwner / $activeCount) * 100, 1) : null,
+                    '%',
+                    $activeCount > 0
+                        ? sprintf('%d av %d aktive saker har kommersiell eier satt.', $activeWithOpportunityOwner, $activeCount)
+                        : 'Ingen aktive saker i cockpit-skopet akkurat nå.',
+                    'Andel aktive saker i cockpit-skopet med opportunity_owner_user_id satt.',
+                    ['commercial_owner', 'management'],
+                    'nå-situasjon',
+                    $this->qualitySeverityForHigherIsBetter(
+                        $activeCount > 0 ? round(($activeWithOpportunityOwner / $activeCount) * 100, 1) : null,
+                        90,
+                        75,
+                    ),
+                    [
+                        'numerator' => $activeWithOpportunityOwner,
+                        'denominator' => $activeCount,
+                    ],
+                ),
+                $this->buildBidQualityMetric(
+                    'inactive_active_share_7d',
+                    'Aktive saker uten aktivitet siste 7 dager',
+                    $activeCount > 0 ? round(($staleActiveCount / $activeCount) * 100, 1) : null,
+                    '%',
+                    $activeCount > 0
+                        ? sprintf('%d av %d aktive saker har ikke hatt aktivitet siste 7 dager.', $staleActiveCount, $activeCount)
+                        : 'Ingen aktive saker i cockpit-skopet akkurat nå.',
+                    'Andel aktive saker der siste aktivitet er eldre enn 7 dager eller mangler helt.',
+                    ['bid_manager', 'commercial_owner', 'management'],
+                    'nå-situasjon',
+                    $this->qualitySeverityForLowerIsBetter(
+                        $activeCount > 0 ? round(($staleActiveCount / $activeCount) * 100, 1) : null,
+                        10,
+                        20,
+                    ),
+                    [
+                        'numerator' => $staleActiveCount,
+                        'denominator' => $activeCount,
+                    ],
+                ),
+                $this->buildBidQualityTrendMetric(
+                    'median_cycle_time_trend_12m',
+                    'Varighet på avsluttede saker',
+                    'Utvikling siste 12 måneder',
+                    'Median antall dager fra created_at til archived_at per måned for avsluttede saker med gyldige datoer.',
+                    ['bid_manager', 'commercial_owner', 'management'],
+                    'siste 12 måneder',
+                    'neutral',
+                    $medianCycleTrendSeries,
+                ),
+                $this->buildBidQualityMetric(
+                    'win_rate_90d',
+                    'Win rate blant vunnet og tapt',
+                    $winLossCount > 0 ? round(($wonCount / $winLossCount) * 100, 1) : null,
+                    '%',
+                    $winLossCount > 0
+                        ? sprintf('%d av %d saker med utfallet vunnet eller tapt endte som vunnet.', $wonCount, $winLossCount)
+                        : 'Ingen avsluttede saker med utfallet vunnet eller tapt i de siste 90 dagene.',
+                    'Vunnet / (Vunnet + Tapt) blant avsluttede saker med history_type i {won, lost} siste 90 dager.',
+                    ['commercial_owner', 'management'],
+                    'siste 90 dager',
+                    $this->qualitySeverityForHigherIsBetter(
+                        $winLossCount > 0 ? round(($wonCount / $winLossCount) * 100, 1) : null,
+                        50,
+                        30,
+                    ),
+                    [
+                        'numerator' => $wonCount,
+                        'denominator' => $winLossCount,
+                    ],
+                ),
+                $this->buildBidQualityMetric(
+                    'outcome_distribution_90d',
+                    'Utfallsfordeling siste 90 dager',
+                    $recentClosedCount,
+                    'saker',
+                    $outcomeSubtitle,
+                    'Fordeling av avsluttede saker etter history_type de siste 90 dagene.',
+                    ['commercial_owner', 'management'],
+                    'siste 90 dager',
+                    'neutral',
+                    [
+                        'breakdown' => [
+                            [
+                                'key' => SavedNotice::HISTORY_TYPE_WON,
+                                'label' => 'Vunnet',
+                                'count' => $wonCount,
+                                'share' => $recentClosedCount > 0 ? round(($wonCount / $recentClosedCount) * 100, 1) : null,
+                            ],
+                            [
+                                'key' => SavedNotice::HISTORY_TYPE_LOST,
+                                'label' => 'Tapt',
+                                'count' => $lostCount,
+                                'share' => $recentClosedCount > 0 ? round(($lostCount / $recentClosedCount) * 100, 1) : null,
+                            ],
+                            [
+                                'key' => SavedNotice::HISTORY_TYPE_ABORTED,
+                                'label' => 'Avbrutt',
+                                'count' => $abortedCount,
+                                'share' => $recentClosedCount > 0 ? round(($abortedCount / $recentClosedCount) * 100, 1) : null,
+                            ],
+                            [
+                                'key' => SavedNotice::HISTORY_TYPE_NO_GO,
+                                'label' => 'NoGo',
+                                'count' => $noGoCount,
+                                'share' => $recentClosedCount > 0 ? round(($noGoCount / $recentClosedCount) * 100, 1) : null,
+                            ],
+                        ],
+                    ],
+                ),
             ],
-            'stages' => $stageRows,
-            'warning' => $warning,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $extra
+     * @return array<string, mixed>
+     */
+    private function buildBidQualityMetric(
+        string $key,
+        string $title,
+        mixed $value,
+        string $unit,
+        string $subtitle,
+        string $definition,
+        array $audience,
+        string $trendBasis,
+        string $severity,
+        array $extra = [],
+    ): array {
+        return array_merge([
+            'key' => $key,
+            'title' => $title,
+            'value' => $value,
+            'unit' => $unit,
+            'subtitle' => $subtitle,
+            'definition' => $definition,
+            'audience' => $audience,
+            'trend_basis' => $trendBasis,
+            'severity' => $severity,
+        ], $extra);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $series
+     * @param  array<int, string>  $audience
+     * @param  array<string, mixed>  $extra
+     * @return array<string, mixed>
+     */
+    private function buildBidQualityTrendMetric(
+        string $key,
+        string $title,
+        string $subtitle,
+        string $definition,
+        array $audience,
+        string $period,
+        string $severity,
+        array $series,
+        array $extra = [],
+    ): array {
+        return array_merge([
+            'key' => $key,
+            'title' => $title,
+            'subtitle' => $subtitle,
+            'definition' => $definition,
+            'audience' => $audience,
+            'period' => $period,
+            'severity' => $severity,
+            'series' => $series,
+        ], $extra);
+    }
+
+    private function qualitySeverityForHigherIsBetter(?float $value, float $goodThreshold, float $warningThreshold): string
+    {
+        if ($value === null) {
+            return 'neutral';
+        }
+
+        if ($value >= $goodThreshold) {
+            return 'success';
+        }
+
+        if ($value >= $warningThreshold) {
+            return 'warning';
+        }
+
+        return 'danger';
+    }
+
+    private function qualitySeverityForLowerIsBetter(?float $value, float $goodThreshold, float $warningThreshold): string
+    {
+        if ($value === null) {
+            return 'neutral';
+        }
+
+        if ($value <= $goodThreshold) {
+            return 'success';
+        }
+
+        if ($value <= $warningThreshold) {
+            return 'warning';
+        }
+
+        return 'danger';
+    }
+
+    /**
+     * @param  array<int, float|int>  $values
+     */
+    private function median(array $values): ?float
+    {
+        $values = array_values(array_filter($values, static fn ($value): bool => $value !== null));
+
+        if ($values === []) {
+            return null;
+        }
+
+        sort($values, SORT_NUMERIC);
+
+        $count = count($values);
+        $middleIndex = intdiv($count, 2);
+
+        if ($count % 2 === 1) {
+            return round((float) $values[$middleIndex], 1);
+        }
+
+        return round(((float) $values[$middleIndex - 1] + (float) $values[$middleIndex]) / 2, 1);
+    }
+
+    /**
+     * @param  Collection<int, SavedNotice>  $archivedNotices
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildMedianCycleTrendSeries(Collection $archivedNotices): array
+    {
+        return $archivedNotices
+            ->filter(function (SavedNotice $notice): bool {
+                return $notice->created_at instanceof CarbonInterface && $notice->archived_at instanceof CarbonInterface;
+            })
+            ->groupBy(function (SavedNotice $notice): string {
+                return $notice->archived_at->format('Y-m');
+            })
+            ->sortKeys()
+            ->map(function (Collection $monthNotices, string $monthKey): array {
+                $durations = $monthNotices
+                    ->map(fn (SavedNotice $notice): float => round($notice->created_at->diffInMinutes($notice->archived_at) / 1440, 1))
+                    ->values()
+                    ->all();
+                $median = $this->median($durations);
+                $month = Carbon::parse($monthKey.'-01 00:00:00');
+
+                return [
+                    'month' => $month->format('Y-m'),
+                    'label' => $this->qualityMonthLabel($month),
+                    'median_days' => $median,
+                    'sample_size' => count($durations),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function qualityMonthLabel(CarbonInterface $date): string
+    {
+        return ucfirst(rtrim($date->format('M'), '.'));
     }
 
     /**
@@ -424,7 +934,6 @@ class DashboardController extends Controller
             'saved_watch_lists_count' => $this->savedWatchListsCount($user, $customerId),
             'contributor_cases_count' => $this->contributorCasesCount($notices),
             'activity' => [
-                'last_comment_at' => $recentComments->sortByDesc('created_at')->first()['created_at'] ?? null,
                 'last_activity_at' => $lastActivityNotice instanceof SavedNotice
                     ? $this->latestSavedNoticeActivityAt($lastActivityNotice)?->toIso8601String()
                     : null,

@@ -143,12 +143,28 @@ class DashboardControllerTest extends TestCase
         $this->assertSame(5, $page['props']['pipeline']['active_total_count']);
         $this->assertSame(1, $page['props']['pipeline']['outcome_total_count']);
 
-        $this->assertSame(4, count($page['props']['cockpit']['attention']['items']));
-        $this->assertSame(1, $page['props']['cockpit']['attention']['items'][0]['count']);
+        $this->assertSame(5, count($page['props']['cockpit']['attention']['items']));
+        $this->assertSame(
+            ['deadline-soon', 'missing-bid-manager', 'missing-commercial-owner', 'go-no-go-pending', 'inactive-seven-days'],
+            array_column($page['props']['cockpit']['attention']['items'], 'key'),
+        );
         $this->assertSame(6, $page['props']['cockpit']['portfolio']['total']);
         $this->assertSame(5, $page['props']['cockpit']['portfolio']['active']);
         $this->assertSame(1, $page['props']['cockpit']['portfolio']['outcome']);
-        $this->assertCount(2, $page['props']['cockpit']['pipeline_quality']['conversions']);
+        $this->assertArrayHasKey('bid_quality', $page['props']['cockpit']);
+        $this->assertArrayNotHasKey('pipeline_quality', $page['props']['cockpit']);
+        $this->assertSame('Bid-kvalitet og styring', $page['props']['cockpit']['bid_quality']['title']);
+        $this->assertSame(
+            [
+                'bid_manager_coverage',
+                'opportunity_owner_coverage',
+                'inactive_active_share_7d',
+                'median_cycle_time_trend_12m',
+                'win_rate_90d',
+                'outcome_distribution_90d',
+            ],
+            array_column($page['props']['cockpit']['bid_quality']['items'], 'key'),
+        );
         $this->assertSame(3, $page['props']['cockpit']['responsibility_activity']['bid_manager_cases_count']);
         $this->assertSame(1, $page['props']['cockpit']['responsibility_activity']['opportunity_owner_cases_count']);
         $this->assertSame(2, $page['props']['cockpit']['responsibility_activity']['saved_watch_lists_count']);
@@ -157,6 +173,32 @@ class DashboardControllerTest extends TestCase
         $this->assertNotEmpty($page['props']['cockpit']['deadlines']['items']);
         $this->assertContains('Saved Notice A', array_column($page['props']['recentWorklistItems'], 'title'));
         $this->assertContains('Saved Notice B', array_column($page['props']['recentWorklistItems'], 'title'));
+
+        $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
+        $this->assertSame(1, $attentionItems['deadline-soon']['count']);
+        $this->assertSame(1, count($attentionItems['deadline-soon']['items']));
+        $this->assertSame('Follow-up Notice', $attentionItems['deadline-soon']['items'][0]['title']);
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNoticeE->id]), $attentionItems['deadline-soon']['items'][0]['show_url']);
+        $this->assertArrayNotHasKey('href', $attentionItems['deadline-soon']);
+        $this->assertSame(1, $attentionItems['missing-bid-manager']['count']);
+        $this->assertSame('Follow-up Notice', $attentionItems['missing-bid-manager']['items'][0]['title']);
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNoticeE->id]), $attentionItems['missing-bid-manager']['items'][0]['show_url']);
+        $this->assertArrayNotHasKey('href', $attentionItems['missing-bid-manager']);
+        $this->assertSame(3, $attentionItems['missing-commercial-owner']['count']);
+        $this->assertEqualsCanonicalizing(
+            ['Saved Notice B', 'Go No Go Notice', 'In Progress Notice'],
+            array_column($attentionItems['missing-commercial-owner']['items'], 'title'),
+        );
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNoticeF->id]), $attentionItems['missing-commercial-owner']['items'][0]['show_url']);
+        $this->assertArrayNotHasKey('href', $attentionItems['missing-commercial-owner']);
+        $this->assertSame(1, $attentionItems['go-no-go-pending']['count']);
+        $this->assertSame('Go No Go Notice', $attentionItems['go-no-go-pending']['items'][0]['title']);
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNoticeD->id]), $attentionItems['go-no-go-pending']['items'][0]['show_url']);
+        $this->assertArrayNotHasKey('href', $attentionItems['go-no-go-pending']);
+        $this->assertSame(1, $attentionItems['inactive-seven-days']['count']);
+        $this->assertSame('Go No Go Notice', $attentionItems['inactive-seven-days']['items'][0]['title']);
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNoticeD->id]), $attentionItems['inactive-seven-days']['items'][0]['show_url']);
+        $this->assertArrayNotHasKey('href', $attentionItems['inactive-seven-days']);
 
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_personal_count']);
         $this->assertSame(1, $page['props']['watchProfileSummary']['active_department_count']);
@@ -348,7 +390,7 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(1, $regularResponsibility['bid_manager_cases_count']);
             $this->assertSame(1, $regularResponsibility['opportunity_owner_cases_count']);
             $this->assertSame(1, $regularResponsibility['contributor_cases_count']);
-            $this->assertSame(now()->subHours(3)->toIso8601String(), $regularResponsibility['activity']['last_comment_at']);
+            $this->assertArrayNotHasKey('last_comment_at', $regularResponsibility['activity']);
             $this->assertSame(now()->subHours(2)->toIso8601String(), $regularResponsibility['activity']['last_activity_at']);
             $this->assertSame(3, $regularResponsibility['activity']['activity_count_14_days']);
             $this->assertSame(0, $regularResponsibility['activity']['inactive_7_days_count']);
@@ -359,7 +401,7 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(2, $bidManagerResponsibility['bid_manager_cases_count']);
             $this->assertSame(2, $bidManagerResponsibility['opportunity_owner_cases_count']);
             $this->assertSame(2, $bidManagerResponsibility['contributor_cases_count']);
-            $this->assertSame(now()->subMinutes(50)->toIso8601String(), $bidManagerResponsibility['activity']['last_comment_at']);
+            $this->assertArrayNotHasKey('last_comment_at', $bidManagerResponsibility['activity']);
             $this->assertSame(now()->subMinutes(30)->toIso8601String(), $bidManagerResponsibility['activity']['last_activity_at']);
             $this->assertSame(7, $bidManagerResponsibility['activity']['activity_count_14_days']);
             $this->assertSame(1, $bidManagerResponsibility['activity']['inactive_7_days_count']);
@@ -370,7 +412,7 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(2, $systemOwnerResponsibility['bid_manager_cases_count']);
             $this->assertSame(2, $systemOwnerResponsibility['opportunity_owner_cases_count']);
             $this->assertSame(2, $systemOwnerResponsibility['contributor_cases_count']);
-            $this->assertSame(now()->subMinutes(50)->toIso8601String(), $systemOwnerResponsibility['activity']['last_comment_at']);
+            $this->assertArrayNotHasKey('last_comment_at', $systemOwnerResponsibility['activity']);
             $this->assertSame(now()->subMinutes(30)->toIso8601String(), $systemOwnerResponsibility['activity']['last_activity_at']);
             $this->assertSame(7, $systemOwnerResponsibility['activity']['activity_count_14_days']);
             $this->assertSame(1, $systemOwnerResponsibility['activity']['inactive_7_days_count']);
@@ -447,12 +489,29 @@ class DashboardControllerTest extends TestCase
             $regularPage = $this->inertiaPage($this->actingAs($regularUser)->get('/app/dashboard'));
             $regularAttention = collect($regularPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
-            $this->assertSame(4, $regularAttention->count());
+            $this->assertSame(5, $regularAttention->count());
             $this->assertSame(1, $regularAttention['deadline-soon']['count']);
+            $this->assertSame(1, count($regularAttention['deadline-soon']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case'],
+                array_column($regularAttention['deadline-soon']['items'], 'title'),
+            );
             $this->assertSame(1, $regularAttention['missing-bid-manager']['count']);
+            $this->assertSame(1, count($regularAttention['missing-bid-manager']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own opportunity-owner case'],
+                array_column($regularAttention['missing-bid-manager']['items'], 'title'),
+            );
+            $this->assertSame(1, $regularAttention['missing-commercial-owner']['count']);
+            $this->assertSame(1, count($regularAttention['missing-commercial-owner']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case'],
+                array_column($regularAttention['missing-commercial-owner']['items'], 'title'),
+            );
             $this->assertSame(0, $regularAttention['go-no-go-pending']['count']);
+            $this->assertSame([], $regularAttention['go-no-go-pending']['items']);
             $this->assertSame(0, $regularAttention['inactive-seven-days']['count']);
-            $this->assertStringContainsString('cockpit_scope=1', $regularAttention['deadline-soon']['href']);
+            $this->assertSame([], $regularAttention['inactive-seven-days']['items']);
             $this->assertSame(2, count($regularPage['props']['cockpit']['deadlines']['items']));
             $this->assertEqualsCanonicalizing(
                 ['Regular own bid-manager case', 'Regular own opportunity-owner case'],
@@ -462,12 +521,31 @@ class DashboardControllerTest extends TestCase
             $bidManagerPage = $this->inertiaPage($this->actingAs($bidManagerUser)->get('/app/dashboard'));
             $bidManagerAttention = collect($bidManagerPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
-            $this->assertSame(4, $bidManagerAttention->count());
+            $this->assertSame(5, $bidManagerAttention->count());
             $this->assertSame(2, $bidManagerAttention['deadline-soon']['count']);
+            $this->assertSame(2, count($bidManagerAttention['deadline-soon']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case', 'Foreign go/no-go case'],
+                array_column($bidManagerAttention['deadline-soon']['items'], 'title'),
+            );
             $this->assertSame(2, $bidManagerAttention['missing-bid-manager']['count']);
+            $this->assertSame(2, count($bidManagerAttention['missing-bid-manager']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own opportunity-owner case', 'Foreign go/no-go case'],
+                array_column($bidManagerAttention['missing-bid-manager']['items'], 'title'),
+            );
+            $this->assertSame(3, $bidManagerAttention['missing-commercial-owner']['count']);
+            $this->assertSame(3, count($bidManagerAttention['missing-commercial-owner']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case', 'Foreign go/no-go case', 'Foreign inactive case'],
+                array_column($bidManagerAttention['missing-commercial-owner']['items'], 'title'),
+            );
             $this->assertSame(1, $bidManagerAttention['go-no-go-pending']['count']);
+            $this->assertSame(1, count($bidManagerAttention['go-no-go-pending']['items']));
+            $this->assertSame('Foreign go/no-go case', $bidManagerAttention['go-no-go-pending']['items'][0]['title']);
             $this->assertSame(1, $bidManagerAttention['inactive-seven-days']['count']);
-            $this->assertStringContainsString('cockpit_scope=1', $bidManagerAttention['deadline-soon']['href']);
+            $this->assertSame(1, count($bidManagerAttention['inactive-seven-days']['items']));
+            $this->assertSame('Foreign inactive case', $bidManagerAttention['inactive-seven-days']['items'][0]['title']);
             $this->assertSame(4, count($bidManagerPage['props']['cockpit']['deadlines']['items']));
             $this->assertEqualsCanonicalizing(
                 [
@@ -482,12 +560,31 @@ class DashboardControllerTest extends TestCase
             $systemOwnerPage = $this->inertiaPage($this->actingAs($systemOwnerUser)->get('/app/dashboard'));
             $systemOwnerAttention = collect($systemOwnerPage['props']['cockpit']['attention']['items'])->keyBy('key');
 
-            $this->assertSame(4, $systemOwnerAttention->count());
+            $this->assertSame(5, $systemOwnerAttention->count());
             $this->assertSame(2, $systemOwnerAttention['deadline-soon']['count']);
+            $this->assertSame(2, count($systemOwnerAttention['deadline-soon']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case', 'Foreign go/no-go case'],
+                array_column($systemOwnerAttention['deadline-soon']['items'], 'title'),
+            );
             $this->assertSame(2, $systemOwnerAttention['missing-bid-manager']['count']);
+            $this->assertSame(2, count($systemOwnerAttention['missing-bid-manager']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own opportunity-owner case', 'Foreign go/no-go case'],
+                array_column($systemOwnerAttention['missing-bid-manager']['items'], 'title'),
+            );
+            $this->assertSame(3, $systemOwnerAttention['missing-commercial-owner']['count']);
+            $this->assertSame(3, count($systemOwnerAttention['missing-commercial-owner']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Regular own bid-manager case', 'Foreign go/no-go case', 'Foreign inactive case'],
+                array_column($systemOwnerAttention['missing-commercial-owner']['items'], 'title'),
+            );
             $this->assertSame(1, $systemOwnerAttention['go-no-go-pending']['count']);
+            $this->assertSame(1, count($systemOwnerAttention['go-no-go-pending']['items']));
+            $this->assertSame('Foreign go/no-go case', $systemOwnerAttention['go-no-go-pending']['items'][0]['title']);
             $this->assertSame(1, $systemOwnerAttention['inactive-seven-days']['count']);
-            $this->assertStringContainsString('cockpit_scope=1', $systemOwnerAttention['deadline-soon']['href']);
+            $this->assertSame(1, count($systemOwnerAttention['inactive-seven-days']['items']));
+            $this->assertSame('Foreign inactive case', $systemOwnerAttention['inactive-seven-days']['items'][0]['title']);
             $this->assertSame(4, count($systemOwnerPage['props']['cockpit']['deadlines']['items']));
             $this->assertEqualsCanonicalizing(
                 [
@@ -498,6 +595,393 @@ class DashboardControllerTest extends TestCase
                 ],
                 array_column($systemOwnerPage['props']['cockpit']['deadlines']['items'], 'title'),
             );
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_attention_cards_include_direct_case_links_and_case_metadata(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser(
+                $customer->id,
+                $department->id,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.attention.cockpit@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $deadlineSoonNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730001',
+                'Deadline soon case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                deadlineAt: now()->addDays(2)->toDateTimeString(),
+            );
+            $missingBidManagerNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730002',
+                'Missing bid-manager case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->addDays(9)->toDateTimeString(),
+            );
+            $missingCommercialOwnerNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730005',
+                'Missing commercial-owner case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                deadlineAt: now()->addDays(8)->toDateTimeString(),
+            );
+            $goNoGoNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730003',
+                'Go No-Go case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_GO_NO_GO,
+                bidManagerUserId: $user->id,
+                deadlineAt: now()->addDays(6)->toDateTimeString(),
+            );
+            $inactiveNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730004',
+                'Inactive case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                deadlineAt: now()->addDays(12)->toDateTimeString(),
+                updatedAt: now()->subDays(10)->toDateTimeString(),
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $this->assertAttentionCategoryPayload(
+                $attentionItems['deadline-soon'],
+                1,
+                ['Deadline soon case'],
+                [route('app.notices.saved.show', ['savedNotice' => $deadlineSoonNotice->id])],
+            );
+            $this->assertSame('Frist om 2 dager', $attentionItems['deadline-soon']['items'][0]['reason']);
+            $this->assertStringContainsString('Frist:', $attentionItems['deadline-soon']['items'][0]['secondary']);
+
+            $this->assertAttentionCategoryPayload(
+                $attentionItems['missing-bid-manager'],
+                1,
+                ['Missing bid-manager case'],
+                [route('app.notices.saved.show', ['savedNotice' => $missingBidManagerNotice->id])],
+            );
+            $this->assertSame('Mangler bid-manager', $attentionItems['missing-bid-manager']['items'][0]['reason']);
+            $this->assertStringContainsString('Kommersiell eier:', $attentionItems['missing-bid-manager']['items'][0]['secondary']);
+
+            $this->assertAttentionCategoryPayload(
+                $attentionItems['missing-commercial-owner'],
+                4,
+                ['Deadline soon case', 'Missing commercial-owner case', 'Go No-Go case', 'Inactive case'],
+                [
+                    route('app.notices.saved.show', ['savedNotice' => $deadlineSoonNotice->id]),
+                    route('app.notices.saved.show', ['savedNotice' => $missingCommercialOwnerNotice->id]),
+                    route('app.notices.saved.show', ['savedNotice' => $goNoGoNotice->id]),
+                    route('app.notices.saved.show', ['savedNotice' => $inactiveNotice->id]),
+                ],
+            );
+            $missingCommercialOwnerRow = collect($attentionItems['missing-commercial-owner']['items'])
+                ->firstWhere('title', 'Missing commercial-owner case');
+            $this->assertNotNull($missingCommercialOwnerRow);
+            $this->assertSame('Mangler kommersiell eier', $missingCommercialOwnerRow['reason']);
+            $this->assertStringContainsString('Bid-manager:', $missingCommercialOwnerRow['secondary']);
+
+            $this->assertAttentionCategoryPayload(
+                $attentionItems['go-no-go-pending'],
+                1,
+                ['Go No-Go case'],
+                [route('app.notices.saved.show', ['savedNotice' => $goNoGoNotice->id])],
+            );
+            $this->assertSame('Beslutning mangler', $attentionItems['go-no-go-pending']['items'][0]['reason']);
+            $this->assertStringContainsString('Status: Go / No-Go', $attentionItems['go-no-go-pending']['items'][0]['secondary']);
+
+            $this->assertAttentionCategoryPayload(
+                $attentionItems['inactive-seven-days'],
+                1,
+                ['Inactive case'],
+                [route('app.notices.saved.show', ['savedNotice' => $inactiveNotice->id])],
+            );
+            $this->assertStringStartsWith('Ingen aktivitet siden', $attentionItems['inactive-seven-days']['items'][0]['reason']);
+            $this->assertStringContainsString('2026', $attentionItems['inactive-seven-days']['items'][0]['reason']);
+            $this->assertSame('Oppdragsgiver: Procynia', $attentionItems['inactive-seven-days']['items'][0]['secondary']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_bid_quality_metrics_are_objective_and_period_based(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser(
+                $customer->id,
+                $department->id,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.bid-quality@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740001',
+                'Active with both owners',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->addDays(10)->toDateTimeString(),
+                updatedAt: now()->subDay()->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740002',
+                'Active bid-manager only',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                deadlineAt: now()->addDays(8)->toDateTimeString(),
+                updatedAt: now()->subHours(4)->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740003',
+                'Active owner only',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->addDays(7)->toDateTimeString(),
+                updatedAt: now()->subHours(6)->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740004',
+                'Inactive active case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                deadlineAt: now()->addDays(6)->toDateTimeString(),
+                updatedAt: now()->subDays(8)->toDateTimeString(),
+            );
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740005',
+                'Won case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_WON,
+                historyType: SavedNotice::HISTORY_TYPE_WON,
+                createdAt: '2026-01-01 08:00:00',
+                archivedAt: '2026-01-11 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740006',
+                'Lost case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_LOST,
+                historyType: SavedNotice::HISTORY_TYPE_LOST,
+                createdAt: '2026-01-01 08:00:00',
+                archivedAt: '2026-01-31 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740007',
+                'Aborted case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_ARCHIVED,
+                historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+                createdAt: '2026-01-10 08:00:00',
+                archivedAt: '2026-01-20 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-740008',
+                'No-Go case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_NO_GO,
+                historyType: SavedNotice::HISTORY_TYPE_NO_GO,
+                createdAt: '2026-01-10 08:00:00',
+                archivedAt: '2026-01-15 08:00:00',
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $bidQuality = collect($page['props']['cockpit']['bid_quality']['items'])->keyBy('key');
+
+            $this->assertSame(
+            [
+                    'bid_manager_coverage',
+                    'opportunity_owner_coverage',
+                    'inactive_active_share_7d',
+                    'median_cycle_time_trend_12m',
+                    'win_rate_90d',
+                    'outcome_distribution_90d',
+                ],
+                array_column($page['props']['cockpit']['bid_quality']['items'], 'key'),
+            );
+
+            $this->assertSame(50.0, $bidQuality['bid_manager_coverage']['value']);
+            $this->assertSame(4, $bidQuality['bid_manager_coverage']['denominator']);
+            $this->assertSame(2, $bidQuality['bid_manager_coverage']['numerator']);
+            $this->assertSame('%', $bidQuality['bid_manager_coverage']['unit']);
+            $this->assertSame('nå-situasjon', $bidQuality['bid_manager_coverage']['trend_basis']);
+
+            $this->assertSame(50.0, $bidQuality['opportunity_owner_coverage']['value']);
+            $this->assertSame(4, $bidQuality['opportunity_owner_coverage']['denominator']);
+            $this->assertSame(2, $bidQuality['opportunity_owner_coverage']['numerator']);
+
+            $this->assertSame(25.0, $bidQuality['inactive_active_share_7d']['value']);
+            $this->assertSame(4, $bidQuality['inactive_active_share_7d']['denominator']);
+            $this->assertSame(1, $bidQuality['inactive_active_share_7d']['numerator']);
+
+            $this->assertSame('siste 12 måneder', $bidQuality['median_cycle_time_trend_12m']['period']);
+            $this->assertCount(1, $bidQuality['median_cycle_time_trend_12m']['series']);
+            $this->assertSame('2026-01', $bidQuality['median_cycle_time_trend_12m']['series'][0]['month']);
+            $this->assertSame('Jan', $bidQuality['median_cycle_time_trend_12m']['series'][0]['label']);
+            $this->assertSame(10.0, $bidQuality['median_cycle_time_trend_12m']['series'][0]['median_days']);
+            $this->assertSame(4, $bidQuality['median_cycle_time_trend_12m']['series'][0]['sample_size']);
+
+            $this->assertSame(50.0, $bidQuality['win_rate_90d']['value']);
+            $this->assertSame(2, $bidQuality['win_rate_90d']['denominator']);
+            $this->assertSame(1, $bidQuality['win_rate_90d']['numerator']);
+            $this->assertSame('Win rate blant vunnet og tapt', $bidQuality['win_rate_90d']['title']);
+            $this->assertStringContainsString('Vunnet / (Vunnet + Tapt)', $bidQuality['win_rate_90d']['definition']);
+            $this->assertStringNotContainsString('Avbrutt', $bidQuality['win_rate_90d']['definition']);
+            $this->assertStringNotContainsString('NoGo', $bidQuality['win_rate_90d']['definition']);
+
+            $this->assertSame(4, $bidQuality['outcome_distribution_90d']['value']);
+            $this->assertSame('Vunnet 1 · Tapt 1 · Avbrutt 1 · NoGo 1', $bidQuality['outcome_distribution_90d']['subtitle']);
+            $this->assertSame(
+                [
+                    'won',
+                    'lost',
+                    'aborted',
+                    'no_go',
+                ],
+                array_column($bidQuality['outcome_distribution_90d']['breakdown'], 'key'),
+            );
+            $this->assertSame([1, 1, 1, 1], array_column($bidQuality['outcome_distribution_90d']['breakdown'], 'count'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_dashboard_bid_quality_median_cycle_time_trends_monthly_over_twelve_months(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser(
+                $customer->id,
+                $department->id,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.bid-quality-trend@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-750001',
+                'Trend active case',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                updatedAt: now()->subDay()->toDateTimeString(),
+                deadlineAt: now()->addDays(10)->toDateTimeString(),
+            );
+
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-750011',
+                'January won case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_WON,
+                historyType: SavedNotice::HISTORY_TYPE_WON,
+                createdAt: '2026-01-01 08:00:00',
+                archivedAt: '2026-01-11 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-750012',
+                'January lost case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_LOST,
+                historyType: SavedNotice::HISTORY_TYPE_LOST,
+                createdAt: '2026-01-05 08:00:00',
+                archivedAt: '2026-01-21 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-750013',
+                'February aborted case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_ARCHIVED,
+                historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+                createdAt: '2026-01-31 08:00:00',
+                archivedAt: '2026-02-10 08:00:00',
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-750014',
+                'March no-go case',
+                archived: true,
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_NO_GO,
+                historyType: SavedNotice::HISTORY_TYPE_NO_GO,
+                createdAt: '2026-03-01 08:00:00',
+                archivedAt: '2026-03-15 08:00:00',
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $trend = $page['props']['cockpit']['bid_quality']['items'][3];
+
+            $this->assertSame('median_cycle_time_trend_12m', $trend['key']);
+            $this->assertSame('siste 12 måneder', $trend['period']);
+            $this->assertSame([
+                [
+                    'month' => '2026-01',
+                    'label' => 'Jan',
+                    'median_days' => 13.0,
+                    'sample_size' => 2,
+                ],
+                [
+                    'month' => '2026-02',
+                    'label' => 'Feb',
+                    'median_days' => 10.0,
+                    'sample_size' => 1,
+                ],
+                [
+                    'month' => '2026-03',
+                    'label' => 'Mar',
+                    'median_days' => 14.0,
+                    'sample_size' => 1,
+                ],
+            ], $trend['series']);
         } finally {
             Carbon::setTestNow();
         }
@@ -609,6 +1093,7 @@ class DashboardControllerTest extends TestCase
             $table->unsignedInteger('contract_period_months')->nullable();
             $table->timestamp('next_process_date_at')->nullable();
             $table->string('bid_status')->default(SavedNotice::BID_STATUS_DISCOVERED);
+            $table->string('history_type')->nullable();
             $table->timestamps();
         });
 
@@ -734,6 +1219,9 @@ class DashboardControllerTest extends TestCase
         ?string $updatedAt = null,
         ?int $bidManagerUserId = null,
         ?int $opportunityOwnerUserId = null,
+        ?string $createdAt = null,
+        ?string $archivedAt = null,
+        ?string $historyType = null,
     ): SavedNotice
     {
         $notice = SavedNotice::query()->create([
@@ -756,9 +1244,21 @@ class DashboardControllerTest extends TestCase
             'award_date_at' => $awardDateAt,
             'status' => 'ACTIVE',
             'cpv_code' => '72000000',
-            'archived_at' => $archived ? now() : null,
+            'archived_at' => $archived ? Carbon::parse($archivedAt ?? now()) : null,
             'bid_status' => $bidStatus,
+            'history_type' => $historyType,
         ]);
+
+        if ($createdAt !== null || $archivedAt !== null || $updatedAt !== null) {
+            $notice->timestamps = false;
+            $notice->forceFill([
+                'created_at' => $createdAt !== null ? Carbon::parse($createdAt) : $notice->created_at,
+                'updated_at' => $updatedAt !== null
+                    ? Carbon::parse($updatedAt)
+                    : ($archivedAt !== null ? Carbon::parse($archivedAt) : $notice->updated_at),
+            ])->saveQuietly();
+            $notice->timestamps = true;
+        }
 
         if ($updatedAt !== null) {
             $notice->timestamps = false;
@@ -784,5 +1284,20 @@ class DashboardControllerTest extends TestCase
         $this->assertIsString($page);
 
         return json_decode($page, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    private function assertAttentionCategoryPayload(array $category, int $expectedCount, array $expectedTitles, array $expectedShowUrls): void
+    {
+        $this->assertSame($expectedCount, $category['count']);
+        $this->assertSame($expectedCount, count($category['items']));
+        $this->assertArrayNotHasKey('href', $category);
+        $this->assertEqualsCanonicalizing($expectedTitles, array_column($category['items'], 'title'));
+        $this->assertEqualsCanonicalizing($expectedShowUrls, array_column($category['items'], 'show_url'));
+
+        foreach ($category['items'] as $item) {
+            $this->assertArrayHasKey('reason', $item);
+            $this->assertArrayHasKey('secondary', $item);
+            $this->assertArrayHasKey('metadata', $item);
+        }
     }
 }

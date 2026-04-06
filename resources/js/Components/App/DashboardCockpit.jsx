@@ -153,27 +153,24 @@ function buildMonthOptions(locale = 'nb-NO') {
 }
 
 const DASHBOARD_INFO_TEXTS = {
-    'attention_deadline-soon': 'Viser saker med operative frister som nærmer seg eller er passert.',
-    'attention_missing-bid-manager': 'Viser saker som mangler eksplisitt operativt ansvar.',
-    'attention_go-no-go-pending': 'Viser saker i beslutningsfase uten endelig utfall.',
-    'attention_inactive-seven-days': 'Viser saker uten kommentarer eller innsendinger de siste 7 dagene.',
-    attention: 'Viser sakene som bør følges opp først. Tallene samler frister, Business Reviews, ansvar, beslutninger og aktivitet som krever handling nå.',
+    'attention_deadline-soon': 'Viser saker med operative frister som nærmer seg eller er passert. Åpne kategorien for å se konkrete saker direkte.',
+    'attention_missing-bid-manager': 'Viser saker som mangler eksplisitt operativt ansvar. Åpne kategorien for å gå direkte til sakene.',
+    'attention_go-no-go-pending': 'Viser saker i beslutningsfase uten endelig utfall. Åpne kategorien for å gå direkte til sakene.',
+    'attention_inactive-seven-days': 'Viser saker uten kommentarer eller innsendinger de siste 7 dagene. Åpne kategorien for å se konkrete saker direkte.',
+    attention: 'Viser konkrete saker som bør følges opp først. Åpne en kategori for å se og åpne sakene direkte.',
     deadlines: 'Viser markerte operative frister og Business Reviews i valgt måned. Bruk kalenderen til å finne datoer som nærmer seg eller allerede er passert.',
     portfolio: 'Gir rask status på saksporteføljen. Bruk denne gruppen for å se totalvolum, aktive saker og saker som allerede har fått et registrert utfall.',
     portfolio_total: 'Viser alle saker i porteføljen, både aktive saker og saker som allerede er avsluttet.',
     portfolio_active: 'Viser saker som fortsatt følges opp operativt og ikke har nådd et registrert utfall.',
     portfolio_outcome: 'Viser saker der utfallet er registrert, inkludert vunnet, tapt, No-Go, trukket og arkivert.',
-    pipeline_quality: 'Viser hvor sakene stopper opp og hvor raskt de går videre mellom hovedstegene.',
-    pipeline_quality_qualifying_to_go_no_go: 'Andel saker som går fra kvalifisering til beslutningsfase.',
-    pipeline_quality_go_no_go_to_in_progress: 'Andel saker som går fra beslutning til aktivt arbeid.',
-    responsibility_activity: 'Viser sakene i cockpit-skopet, watch lists og aktivitet.',
+    bid_quality: 'Viser objektive styringsmål for ansvar, flyt og utfall i aktive og avsluttede saker.',
+    responsibility_activity: 'Viser sakene i cockpit-skopet, watch lists og siste aktivitet.',
     responsibility_bid_manager_cases: 'Antall saker i cockpit-skopet med bid-manager.',
     responsibility_opportunity_owner_cases: 'Antall saker i cockpit-skopet med kommersiell eier.',
     responsibility_saved_watch_lists: 'Antall watch lists du har lagret.',
     responsibility_contributor_cases: 'Antall saker i cockpit-skopet med aktiv bidragsyter-tilgang.',
-    responsibility_last_comment: 'Hvor nylig det sist ble kommentert på en sak i cockpit-skopet.',
     responsibility_activity_14_days: 'Hvor mange aktiviteter som har skjedd på saker i cockpit-skopet de siste 14 dagene.',
-    responsibility_last_activity: 'Hvor nylig det sist var aktivitet på en sak i cockpit-skopet.',
+    responsibility_last_activity: 'Siste aktivitet viser siste brukerhandling på saken, som kommentar, statusendring, ansvar eller innsending.',
     responsibility_inactive_7_days: 'Saker i cockpit-skopet som ikke har hatt aktivitet de siste 7 dagene.',
     pipeline_stages: 'Viser volum og gjennomsnittlig tempo i hver fase.',
     stage_discovered: 'Saker som nettopp er oppdaget og ennå ikke er startet opp.',
@@ -190,11 +187,11 @@ const DASHBOARD_INFO_TEXTS = {
     outcome_archived: 'Saker som er arkivert og avsluttet uten aktivt arbeid.',
 };
 
-function InfoButton({ infoKey, title, openInfoKey, setOpenInfoKey }) {
+function InfoButton({ infoKey, title, infoText, openInfoKey, setOpenInfoKey }) {
     const isOpen = openInfoKey === infoKey;
-    const infoText = DASHBOARD_INFO_TEXTS[infoKey];
+    const resolvedInfoText = infoText ?? DASHBOARD_INFO_TEXTS[infoKey];
 
-    if (!infoText) {
+    if (!resolvedInfoText) {
         return null;
     }
 
@@ -231,7 +228,7 @@ function InfoButton({ infoKey, title, openInfoKey, setOpenInfoKey }) {
                     role="tooltip"
                     className="absolute right-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-[0_20px_40px_rgba(15,23,42,0.12)]"
                 >
-                    {infoText}
+                    {resolvedInfoText}
                 </div>
             ) : null}
         </span>
@@ -241,6 +238,7 @@ function InfoButton({ infoKey, title, openInfoKey, setOpenInfoKey }) {
 function InfoTile({
     title,
     infoKey,
+    infoText,
     openInfoKey,
     setOpenInfoKey,
     className = '',
@@ -257,7 +255,7 @@ function InfoTile({
                     </div>
                 </div>
                 {infoKey ? (
-                    <InfoButton infoKey={infoKey} title={title} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
+                    <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
                 ) : null}
             </div>
             <div className={classNames(dense ? 'mt-1.5' : 'mt-2')}>
@@ -267,7 +265,7 @@ function InfoTile({
     );
 }
 
-function Card({ title, subtitle, infoKey, action, children, className = '', openInfoKey, setOpenInfoKey, dense = false }) {
+function Card({ title, subtitle, infoKey, infoText, action, children, className = '', openInfoKey, setOpenInfoKey, dense = false }) {
     return (
         <section className={classNames('rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.05)]', dense ? 'p-4' : 'p-5', className)}>
             <div className={classNames('flex items-start justify-between gap-4', dense ? 'mb-3' : 'mb-4')}>
@@ -277,7 +275,7 @@ function Card({ title, subtitle, infoKey, action, children, className = '', open
                             {title}
                         </div>
                         {infoKey ? (
-                            <InfoButton infoKey={infoKey} title={title} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
+                            <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
                         ) : null}
                     </div>
                     {subtitle ? (
@@ -319,6 +317,255 @@ function SeverityDot({ severity }) {
     return <span className={classNames('mt-1.5 h-2.5 w-2.5 rounded-full', palette[severity] ?? palette.neutral)} />;
 }
 
+function AttentionCaseRow({ item }) {
+    return (
+        <Link
+            href={item.show_url}
+            className={classNames(
+                'group flex items-start gap-3 rounded-xl border bg-white px-3 py-2.5 transition',
+                item.severity === 'danger'
+                    ? 'border-rose-200 hover:border-rose-300 hover:bg-rose-50/80'
+                    : item.severity === 'warning'
+                        ? 'border-amber-200 hover:border-amber-300 hover:bg-amber-50/80'
+                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
+            )}
+        >
+            <SeverityDot severity={item.severity} />
+            <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-slate-950">
+                    {item.title}
+                </div>
+                <div className="mt-0.5 text-[11px] font-semibold text-slate-700">
+                    {item.reason}
+                </div>
+                <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                    {item.secondary}
+                </div>
+            </div>
+            <span className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700 opacity-0 transition group-hover:opacity-100">
+                Åpne sak
+            </span>
+        </Link>
+    );
+}
+
+function AttentionCategoryPanel({ item, isOpen, onToggle }) {
+    const palette = {
+        danger: 'border-rose-200 bg-rose-50/60',
+        warning: 'border-amber-200 bg-amber-50/60',
+        neutral: 'border-slate-200 bg-slate-50/60',
+    };
+
+    return (
+        <div className={classNames('overflow-hidden rounded-2xl border transition', palette[item.severity] ?? palette.neutral)}>
+            <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={onToggle}
+                className="flex w-full items-center gap-3 px-3 py-3 text-left"
+            >
+                <SeverityDot severity={item.severity} />
+                <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-slate-950">
+                        {item.title}
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                        {item.subtitle}
+                    </div>
+                </div>
+                <AttentionPill severity={item.severity} count={item.count} />
+                <span
+                    className={classNames(
+                        'inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white/80 text-lg leading-none text-slate-400 transition-transform',
+                        isOpen ? 'rotate-90 border-slate-400 text-slate-700' : '',
+                    )}
+                    aria-hidden="true"
+                >
+                    ›
+                </span>
+            </button>
+
+            {isOpen ? (
+                <div className="border-t border-white/70 px-3 py-3">
+                    {item.items.length > 0 ? (
+                        <div className="space-y-2">
+                            {item.items.map((attentionCase) => (
+                                <AttentionCaseRow key={attentionCase.id} item={attentionCase} />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
+                            Ingen saker matcher denne kategorien akkurat nå.
+                        </div>
+                    )}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function formatMetricValue(metric, locale) {
+    if (metric?.value === null || metric?.value === undefined) {
+        return '—';
+    }
+
+    if (metric.unit === '%') {
+        return formatPercent(metric.value, locale);
+    }
+
+    if (metric.unit === 'dager') {
+        return `${formatNumber(metric.value, locale)} dager`;
+    }
+
+    if (metric.unit === 'saker') {
+        return `${formatNumber(metric.value, locale)} saker`;
+    }
+
+    return `${formatNumber(metric.value, locale)}${metric.unit ? ` ${metric.unit}` : ''}`;
+}
+
+function QualityBreakdownChips({ breakdown, locale }) {
+    return (
+        <div className="mt-3 flex flex-wrap gap-2">
+            {breakdown.map((item) => (
+                <span
+                    key={item.key}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                >
+                    {item.label}
+                    <span className="font-semibold text-slate-900">
+                        {formatNumber(item.count ?? 0, locale)}
+                    </span>
+                    {item.share !== null && item.share !== undefined ? (
+                        <span className="text-slate-400">
+                            ({formatPercent(item.share, locale)})
+                        </span>
+                    ) : null}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, spanFullWidth = false }) {
+    const palette = {
+        success: 'border-emerald-200 bg-emerald-50/70',
+        warning: 'border-amber-200 bg-amber-50/70',
+        danger: 'border-rose-200 bg-rose-50/70',
+        neutral: 'border-slate-200 bg-slate-50/70',
+    };
+
+    return (
+        <InfoTile
+            title={metric.title}
+            infoKey={`bid_quality_${metric.key}`}
+            infoText={metric.definition}
+            openInfoKey={openInfoKey}
+            setOpenInfoKey={setOpenInfoKey}
+            className={classNames('px-4 py-3', palette[metric.severity] ?? palette.neutral, spanFullWidth ? 'sm:col-span-2' : '')}
+            dense
+        >
+            <div className="text-2xl font-semibold tracking-tight text-slate-950">
+                {formatMetricValue(metric, locale)}
+            </div>
+            <div className="mt-1 text-sm leading-5 text-slate-500">
+                {metric.subtitle}
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-3 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                <span>
+                    {metric.trend_basis}
+                </span>
+                {metric.numerator !== undefined && metric.denominator !== undefined ? (
+                    <span>
+                        {formatNumber(metric.numerator, locale)}
+                        {' av '}
+                        {formatNumber(metric.denominator, locale)}
+                    </span>
+                ) : metric.sample_size !== undefined ? (
+                    <span>
+                        {formatNumber(metric.sample_size, locale)}
+                        {' i grunnlag'}
+                    </span>
+                ) : null}
+            </div>
+            {Array.isArray(metric.breakdown) && metric.breakdown.length > 0 ? (
+                <QualityBreakdownChips breakdown={metric.breakdown} locale={locale} />
+            ) : null}
+        </InfoTile>
+    );
+}
+
+function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, spanFullWidth = false }) {
+    const series = Array.isArray(metric.series) ? metric.series : [];
+    const maxMedian = Math.max(...series.map((point) => Number(point.median_days ?? 0)), 1);
+
+    return (
+        <InfoTile
+            title={metric.title}
+            infoKey={`bid_quality_${metric.key}`}
+            infoText={metric.definition}
+            openInfoKey={openInfoKey}
+            setOpenInfoKey={setOpenInfoKey}
+            className={classNames('px-4 py-3', 'border-slate-200 bg-slate-50/70', spanFullWidth ? 'sm:col-span-2' : '')}
+            dense
+        >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-950">
+                        {metric.subtitle ?? 'Utvikling siste 12 måneder'}
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                        Median dager per måned. Grunnlag vises per datapunkt.
+                    </div>
+                </div>
+                <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                    {metric.period}
+                </div>
+            </div>
+
+            {series.length > 0 ? (
+                <div className="mt-4 grid gap-2" style={{ gridTemplateColumns: `repeat(${series.length}, minmax(0, 1fr))` }}>
+                    {series.map((point) => {
+                        const medianDays = Number(point.median_days ?? 0);
+                        const barHeight = Math.max(12, Math.round((medianDays / maxMedian) * 96));
+
+                        return (
+                            <div
+                                key={point.month}
+                                className="flex min-w-0 flex-col items-center"
+                                title={`${point.label} ${point.month} · median ${formatNumber(point.median_days, locale)} dager · grunnlag ${formatNumber(point.sample_size, locale)}`}
+                            >
+                                <div className="mb-1 text-[11px] font-semibold text-slate-900">
+                                    {formatNumber(point.median_days, locale)}
+                                    {' '}
+                                    d
+                                </div>
+                                <div className="flex h-32 w-full items-end rounded-xl bg-slate-100 px-1.5">
+                                    <div
+                                        className="w-full rounded-t-xl bg-violet-500"
+                                        style={{ height: `${barHeight}px` }}
+                                    />
+                                </div>
+                                <div className="mt-1 text-center text-[11px] font-semibold text-slate-900">
+                                    {point.label}
+                                </div>
+                                <div className="text-center text-[10px] text-slate-400">
+                                    n=
+                                    {formatNumber(point.sample_size, locale)}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                    Ingen månedlige datapunkter med gyldig grunnlag.
+                </div>
+            )}
+        </InfoTile>
+    );
+}
+
 function DeadlinePopover({ items, locale }) {
     return (
         <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_20px_40px_rgba(15,23,42,0.12)] group-hover:block group-focus-within:block">
@@ -353,17 +600,18 @@ function DeadlinePopover({ items, locale }) {
 
 export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
     const [openInfoKey, setOpenInfoKey] = useState(null);
+    const [openAttentionKey, setOpenAttentionKey] = useState(null);
     const portfolio = cockpit?.portfolio ?? { total: 0, active: 0, outcome: 0 };
     const attentionItems = cockpit?.attention?.items ?? [];
+    const bidQuality = cockpit?.bid_quality ?? { title: 'Bid-kvalitet og styring', subtitle: '', items: [] };
     const deadlines = cockpit?.deadlines ?? { month_start: null, month_label: '', items: [], upcoming: [] };
-    const pipelineQuality = cockpit?.pipeline_quality ?? { conversions: [], stages: [], warning: null };
+    const pipeline = cockpit?.pipeline ?? { stages: [], outcomes: [] };
     const responsibility = cockpit?.responsibility_activity ?? {
         bid_manager_cases_count: 0,
         opportunity_owner_cases_count: 0,
         saved_watch_lists_count: 0,
         contributor_cases_count: 0,
         activity: {
-            last_comment_at: null,
             last_activity_at: null,
             activity_count_14_days: 0,
             inactive_7_days_count: 0,
@@ -387,7 +635,8 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
         () => buildCalendarYearOptions(deadlines.items ?? [], initialCalendarDate),
         [deadlines.items, initialCalendarDate],
     );
-    const stageMax = Math.max(...(pipelineQuality.stages ?? []).map((stage) => Number(stage.count ?? 0)), 1);
+    const pipelineStages = pipeline.stages ?? [];
+    const stageMax = Math.max(...pipelineStages.map((stage) => Number(stage.count ?? 0)), 1);
 
     return (
         <div className="space-y-5">
@@ -404,7 +653,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
                         title="Oppmerksomhet nå"
-                        subtitle="Det som krever oppfølging først."
+                        subtitle="Klikk en kategori for å se konkrete saker og åpne dem direkte."
                         infoKey="attention"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
@@ -413,38 +662,12 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                     >
                         <div className="space-y-2">
                             {attentionItems.length > 0 ? attentionItems.map((item) => (
-                                <Link
+                                <AttentionCategoryPanel
                                     key={item.key}
-                                    href={item.href}
-                                    className={classNames(
-                                        'group flex items-center gap-3 rounded-2xl border px-3 py-2.5 transition',
-                                        item.severity === 'danger'
-                                            ? 'border-rose-200 bg-white hover:border-rose-300 hover:bg-rose-50'
-                                            : item.severity === 'warning'
-                                                ? 'border-amber-200 bg-white hover:border-amber-300 hover:bg-amber-50'
-                                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
-                                    )}
-                                >
-                                    <SeverityDot severity={item.severity} />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-semibold text-slate-950">
-                                            {item.title}
-                                        </div>
-                                        <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
-                                            {item.subtitle}
-                                        </div>
-                                    </div>
-                                    <InfoButton
-                                        infoKey={`attention_${item.key}`}
-                                        title={item.title}
-                                        openInfoKey={openInfoKey}
-                                        setOpenInfoKey={setOpenInfoKey}
-                                    />
-                                    <AttentionPill severity={item.severity} count={item.count} />
-                                    <span className="text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-slate-600">
-                                        →
-                                    </span>
-                                </Link>
+                                    item={item}
+                                    isOpen={openAttentionKey === item.key}
+                                    onToggle={() => setOpenAttentionKey((current) => (current === item.key ? null : item.key))}
+                                />
                             )) : (
                                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
                                     Ingen saker krever umiddelbar oppmerksomhet.
@@ -456,7 +679,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
-                        title="Fristkalender"
+                        title="Bidkalender"
                         subtitle={`Markerte frister og Business Reviews for ${calendar.monthLabel}`}
                         infoKey="deadlines"
                         openInfoKey={openInfoKey}
@@ -669,36 +892,41 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-5">
                     <Card
-                        title="Pipeline-kvalitet"
-                        subtitle="Konvertering mellom hovedsteg."
-                        infoKey="pipeline_quality"
+                        title={bidQuality.title ?? 'Bid-kvalitet og styring'}
+                        subtitle={bidQuality.subtitle ?? 'Objektive styringsmål for ansvar, flyt og utfall i cockpit-skopet.'}
+                        infoKey="bid_quality"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
                         dense
                     >
                         <div className="grid gap-2 sm:grid-cols-2">
-                            {(pipelineQuality.conversions ?? []).map((conversion) => (
-                                <InfoTile
-                                    key={conversion.key}
-                                    title={conversion.label}
-                                    infoKey={`pipeline_quality_${conversion.key}`}
-                                    openInfoKey={openInfoKey}
-                                    setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-white px-3 py-3"
-                                    dense
-                                >
-                                    <div className="text-2xl font-semibold tracking-tight text-slate-950">
-                                        {formatPercent(conversion.value, locale)}
-                                    </div>
-                                </InfoTile>
+                            {(bidQuality.items ?? []).map((metric) => (
+                                Array.isArray(metric.series) ? (
+                                    <BidQualityTrendTile
+                                        key={metric.key}
+                                        metric={metric}
+                                        locale={locale}
+                                        openInfoKey={openInfoKey}
+                                        setOpenInfoKey={setOpenInfoKey}
+                                        spanFullWidth
+                                    />
+                                ) : (
+                                    <BidQualityMetricTile
+                                        key={metric.key}
+                                        metric={metric}
+                                        locale={locale}
+                                        openInfoKey={openInfoKey}
+                                        setOpenInfoKey={setOpenInfoKey}
+                                        spanFullWidth={metric.key === 'outcome_distribution_90d'}
+                                    />
+                                )
                             ))}
                         </div>
 
-                        {pipelineQuality.warning ? (
-                            <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
-                                {pipelineQuality.warning.label}
-                                {pipelineQuality.warning.count ? ` (${formatNumber(pipelineQuality.warning.count, locale)})` : ''}
+                        {(bidQuality.items ?? []).length === 0 ? (
+                            <div className="mt-2 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                                Ingen bid-kvalitetsmålinger er tilgjengelige akkurat nå.
                             </div>
                         ) : null}
                     </Card>
@@ -707,7 +935,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                 <div className="xl:col-span-4">
                     <Card
                         title="Ansvar & Aktivitet"
-                        subtitle="Saker i cockpit-skopet, watch lists og aktivitet."
+                        subtitle="Saker i cockpit-skopet, watch lists og siste aktivitet."
                         infoKey="responsibility_activity"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
@@ -766,23 +994,11 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Siste kommentar"
-                                    infoKey="responsibility_last_comment"
-                                    openInfoKey={openInfoKey}
-                                    setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-violet-50/70 px-4 py-3"
-                                >
-                                    <div className="mt-1 text-base font-semibold text-slate-950">
-                                        {formatRelativeTime(responsibility.activity.last_comment_at, locale)}
-                                    </div>
-                                </InfoTile>
-
-                                <InfoTile
                                     title="Siste aktivitet"
                                     infoKey="responsibility_last_activity"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
-                                    className="border-slate-200 bg-violet-50/70 px-4 py-3"
+                                    className="border-slate-200 bg-violet-50/70 px-4 py-3 sm:col-span-2"
                                 >
                                     <div className="mt-1 text-base font-semibold text-slate-950">
                                         {formatRelativeTime(responsibility.activity.last_activity_at, locale)}
@@ -822,7 +1038,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
             <div className="grid gap-4 xl:grid-cols-12">
                 <div className="xl:col-span-8">
                     <Card
-                        title="Pipeline-kvalitet"
+                        title="Pipeline-stadier"
                         subtitle="Flyt, tempo og hvor sakene stopper opp."
                         infoKey="pipeline_stages"
                         openInfoKey={openInfoKey}
@@ -831,7 +1047,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                         dense
                     >
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                            {(pipelineQuality.stages ?? []).map((stage) => {
+                            {pipelineStages.map((stage) => {
                                 const width = Math.max(6, Math.round((Number(stage.count ?? 0) / stageMax) * 100));
 
                                 return (
