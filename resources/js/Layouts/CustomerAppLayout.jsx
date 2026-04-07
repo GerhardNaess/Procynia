@@ -110,6 +110,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'info-center';
         }
 
+        if (pathname.startsWith('/app/ai')) {
+            return 'ai';
+        }
+
         if (
             pathname.startsWith('/app/customer-environment')
             || pathname.startsWith('/app/departments')
@@ -126,12 +130,20 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'procurements', label: 'Kunngjøringer', href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
+        { key: 'ai', label: 'AI', href: '/app/ai' },
         { key: 'suppliers', label: 'Konkurrenter', href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: 'Watch lists', href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: 'Kundemiljø', href: environmentHref }] : []),
     ];
 
     const secondaryNavigation = (() => {
+        if (activeMainArea === 'ai') {
+            return [
+                { key: 'ai-work', label: 'AI-arbeid', href: '/app/ai' },
+                { key: 'knowledge-docs', label: 'Kunnskapsdokumenter', href: '/app/ai/knowledge-base' },
+            ];
+        }
+
         if (activeMainArea === 'procurements') {
             return [
                 { key: 'live', label: 'Live søk', href: '/app/notices' },
@@ -159,6 +171,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     })();
 
     const activeSecondaryKey = (() => {
+        if (activeMainArea === 'ai') {
+            return pathname.startsWith('/app/ai/knowledge-base') ? 'knowledge-docs' : 'ai-work';
+        }
+
         if (activeMainArea === 'procurements') {
             if (noticeTab === 'saved-searches') {
                 return 'saved-searches';

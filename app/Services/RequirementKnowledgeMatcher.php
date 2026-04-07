@@ -1,0 +1,197 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Collection;
+
+class RequirementKnowledgeMatcher
+{
+    private const MAX_RESULTS = 5;
+
+    private const HEURISTIC_BOOST = 2;
+
+    private const STOPWORDS = [
+        'and',
+        'are',
+        'av',
+        'be',
+        'den',
+        'det',
+        'en',
+        'er',
+        'et',
+        'for',
+        'from',
+        'had',
+        'has',
+        'i',
+        'in',
+        'is',
+        'it',
+        'med',
+        'og',
+        'of',
+        'on',
+        'over',
+        'på',
+        'som',
+        'the',
+        'til',
+        'to',
+        'we',
+        'you',
+    ];
+
+    /**
+     * Purpose: Match one requirement text against a scoped set of knowledge chunks.
+     * Inputs: The requirement text and a collection of chunk payloads.
+     * Returns: The top ranked knowledge matches, limited to a small deterministic set.
+     * Side effects: None.
+     */
+    public function match(string $requirementText, Collection $knowledgeChunks): Collection
+    {
+        $normalizedRequirementText = $this->normalizeText($requirementText);
+        $requirementTokens = $this->tokenize($normalizedRequirementText);
+
+        if ($requirementTokens === []) {
+            return collect();
+        }
+
+        $heuristicBoosts = $this->heuristicBoosts($normalizedRequirementText);
+
+        return $knowledgeChunks
+            ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts): ?array {
+                $chunkContent = (string) data_get($chunk, 'content', '');
+                $normalizedChunkContent = $this->normalizeText($chunkContent);
+
+                if ($normalizedChunkContent === '') {
+                    return null;
+                }
+
+                $chunkTokens = $this->tokenize($normalizedChunkContent);
+
+                if ($chunkTokens === []) {
+                    return null;
+                }
+
+                $score = count(array_intersect($requirementTokens, $chunkTokens));
+                $contentType = (string) data_get($chunk, 'content_type', '');
+
+                if ($contentType !== '' && isset($heuristicBoosts[$contentType])) {
+                    $score += self::HEURISTIC_BOOST;
+                }
+
+                if ($score <= 0) {
+                    return null;
+                }
+
+                return [
+                    'knowledge_item_id' => (int) data_get($chunk, 'knowledge_item_id'),
+                    'knowledge_item_title' => (string) data_get($chunk, 'knowledge_item_title', ''),
+                    'content_type' => $contentType,
+                    'chunk_id' => (int) data_get($chunk, 'chunk_id'),
+                    'chunk_index' => (int) data_get($chunk, 'chunk_index', 0),
+                    'chunk_content' => $chunkContent,
+                    'score' => $score,
+                    'knowledge_item_updated_at' => (string) data_get($chunk, 'knowledge_item_updated_at', ''),
+                ];
+            })
+            ->filter()
+            ->sort(function (array $left, array $right): int {
+                if ($left['score'] !== $right['score']) {
+                    return $right['score'] <=> $left['score'];
+                }
+
+                if ($left['knowledge_item_updated_at'] !== $right['knowledge_item_updated_at']) {
+                    return strcmp($right['knowledge_item_updated_at'], $left['knowledge_item_updated_at']);
+                }
+
+                if ($left['knowledge_item_id'] !== $right['knowledge_item_id']) {
+                    return $right['knowledge_item_id'] <=> $left['knowledge_item_id'];
+                }
+
+                if ($left['chunk_index'] !== $right['chunk_index']) {
+                    return $left['chunk_index'] <=> $right['chunk_index'];
+                }
+
+                return $left['chunk_id'] <=> $right['chunk_id'];
+            })
+            ->take(self::MAX_RESULTS)
+            ->values();
+    }
+
+    /**
+     * Purpose: Normalize text for deterministic chunk-to-requirement matching.
+     * Inputs: Raw text from a requirement or knowledge chunk.
+     * Returns: Lowercased text with punctuation collapsed to whitespace.
+     * Side effects: None.
+     */
+    private function normalizeText(string $value): string
+    {
+        $value = mb_strtolower($value, 'UTF-8');
+        $value = preg_replace('/[^\pL\pN\s]+/u', ' ', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+
+        return trim($value);
+    }
+
+    /**
+     * Purpose: Build a compact token list for deterministic scoring.
+     * Inputs: Normalized text.
+     * Returns: A de-duplicated token array with simple stop-word filtering.
+     * Side effects: None.
+     */
+    private function tokenize(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        $tokens = preg_split('/\s+/u', $value, -1, PREG_SPLIT_NO_EMPTY);
+
+        if (! is_array($tokens)) {
+            return [];
+        }
+
+        $tokens = array_map(static fn (string $token): string => trim($token), $tokens);
+        $tokens = array_filter($tokens, static function (string $token): bool {
+            if ($token === 'cv') {
+                return true;
+            }
+
+            if (mb_strlen($token, 'UTF-8') < 3) {
+                return false;
+            }
+
+            return ! in_array($token, self::STOPWORDS, true);
+        });
+        $tokens = array_values(array_unique($tokens));
+
+        return $tokens;
+    }
+
+    /**
+     * Purpose: Detect the canonical heuristic boosts for a requirement statement.
+     * Inputs: Normalized requirement text.
+     * Returns: A content-type keyed boost map.
+     * Side effects: None.
+     */
+    private function heuristicBoosts(string $requirementText): array
+    {
+        $boosts = [];
+
+        if (preg_match('/\berfaring\b/u', $requirementText) === 1) {
+            $boosts['reference'] = true;
+        }
+
+        if (preg_match('/\bmetode\b/u', $requirementText) === 1) {
+            $boosts['method'] = true;
+        }
+
+        if (preg_match('/\bcv\b/u', $requirementText) === 1) {
+            $boosts['cv'] = true;
+        }
+
+        return $boosts;
+    }
+}

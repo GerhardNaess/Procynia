@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\App\DashboardController;
+use App\Http\Controllers\App\AiController;
+use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\InfoCenterController;
@@ -42,6 +44,22 @@ Route::prefix('app')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
+        Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
+        Route::prefix('/ai/knowledge-base')->name('ai.knowledge-base.')->group(function (): void {
+            Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
+            Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');
+            Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
+            Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
+            Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
+            Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
+        });
+        Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
+        Route::post('/ai/{savedNotice}/documents', [AiController::class, 'storeDocuments'])->name('ai.documents.store');
+        Route::delete('/ai/{savedNotice}/documents/{document}', [AiController::class, 'destroyDocument'])->name('ai.documents.destroy');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/review-status', [AiController::class, 'updateRequirementReviewStatus'])
+            ->name('ai.requirements.review-status.update');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/work', [AiController::class, 'updateRequirementWork'])
+            ->name('ai.requirements.work.update');
         Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');

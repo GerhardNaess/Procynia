@@ -62,4 +62,9 @@ class Customer extends Model
     {
         return $this->hasMany(NoticeAttention::class);
     }
+
+    public function knowledgeItems(): HasMany
+    {
+        return $this->hasMany(KnowledgeItem::class);
+    }
 }

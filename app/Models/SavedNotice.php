@@ -386,6 +386,21 @@ class SavedNotice extends Model
         return $this->hasMany(SavedNoticePhaseComment::class)->orderBy('created_at');
     }
 
+    public function aiDocuments(): HasMany
+    {
+        return $this->hasMany(SavedNoticeAiDocument::class)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
+    public function aiRequirements(): HasMany
+    {
+        return $this->hasMany(SavedNoticeAiRequirement::class)
+            ->orderByDesc('saved_notice_ai_document_id')
+            ->orderBy('saved_notice_ai_document_chunk_id')
+            ->orderBy('id');
+    }
+
     public function getBidStatusLabelAttribute(): string
     {
         $status = (string) ($this->bid_status ?? '');
