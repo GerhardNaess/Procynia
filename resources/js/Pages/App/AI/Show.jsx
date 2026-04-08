@@ -108,6 +108,80 @@ const WORK_STATUS_OPTIONS = [
     { value: 'done', label: 'Ferdig' },
 ];
 
+const EVIDENCE_SELECTION_STATUS_META = {
+    suggested: {
+        label: 'Forslag',
+        className: 'bg-violet-100 text-violet-700 ring-violet-200',
+    },
+    selected: {
+        label: 'Valgt',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    rejected: {
+        label: 'Avvist',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+};
+
+const EVIDENCE_SELECTION_ACTIONS = [
+    {
+        label: 'Sett til forslag',
+        value: 'suggested',
+        className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+    },
+    {
+        label: 'Velg',
+        value: 'selected',
+        className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
+    },
+    {
+        label: 'Avvis',
+        value: 'rejected',
+        className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
+    },
+];
+
+const ASSESSMENT_STATUS_META = {
+    completed: {
+        label: 'Fullført',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    failed: {
+        label: 'Feilet',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+};
+
+const COVERAGE_STATUS_META = {
+    covered: {
+        label: 'Dekket',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    partial: {
+        label: 'Delvis dekket',
+        className: 'bg-amber-100 text-amber-700 ring-amber-200',
+    },
+    missing: {
+        label: 'Mangler grunnlag',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+};
+
+const RISK_LEVEL_META = {
+    low: {
+        label: 'Lav risiko',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    medium: {
+        label: 'Middels risiko',
+        className: 'bg-amber-100 text-amber-700 ring-amber-200',
+    },
+    high: {
+        label: 'Høy risiko',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+};
+
 function formatKnowledgeSnippet(value, maxLength = 200) {
     const normalizedValue = String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -138,6 +212,8 @@ export default function AiShow({
     requirements_count: requirementsCount = 0,
     requirements_overview: requirementsOverviewProp = {},
     requirements = [],
+    assessment_refresh_url: assessmentRefreshUrl = '',
+    evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
 }) {
@@ -149,6 +225,9 @@ export default function AiShow({
     const [searchInput, setSearchInput] = useState(searchQuery);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
+    const [refreshingAssessments, setRefreshingAssessments] = useState(false);
+    const [refreshingEvidence, setRefreshingEvidence] = useState(false);
+    const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [deletingDocumentId, setDeletingDocumentId] = useState(null);
     const documentUploadForm = useForm({
         documents: [],
@@ -167,7 +246,11 @@ export default function AiShow({
         : 'Ingen filer valgt ennå.';
     const hasSearchQuery = searchQuery.trim() !== '';
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
-    const requirementUpdatesLocked = reviewingRequirementId !== null || workingRequirementId !== null;
+    const requirementUpdatesLocked = reviewingRequirementId !== null
+        || workingRequirementId !== null
+        || refreshingAssessments
+        || refreshingEvidence
+        || updatingEvidenceId !== null;
     const confirmedRequirementsTotal = Number(requirementsOverview.confirmed_total ?? 0);
     const pendingRequirementsTotal = Number(requirementsOverview.pending_total ?? 0);
     const rejectedRequirementsTotal = Number(requirementsOverview.rejected_total ?? 0);
@@ -268,6 +351,74 @@ export default function AiShow({
             preserveState: true,
             onFinish: () => {
                 setWorkingRequirementId(null);
+            },
+        });
+    };
+
+    /**
+     * Purpose: Persist the selected state for one evidence row.
+     * Inputs: The evidence row and the next selection status.
+     * Returns: None.
+     * Side effects: Sends a PATCH request that updates the evidence selection state on the server.
+     */
+    const updateEvidenceSelectionStatus = (evidence, selectionStatus) => {
+        if (!evidence.selection_status_update_url || requirementUpdatesLocked) {
+            return;
+        }
+
+        setUpdatingEvidenceId(evidence.id);
+
+        router.patch(evidence.selection_status_update_url, {
+            selection_status: selectionStatus,
+        }, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => {
+                setUpdatingEvidenceId(null);
+            },
+        });
+    };
+
+    /**
+     * Purpose: Rebuild persisted evidence rows for the visible AI case.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Sends a POST request that regenerates deterministic evidence rows on the server.
+     */
+    const refreshEvidence = () => {
+        if (!evidenceRefreshUrl || requirementUpdatesLocked) {
+            return;
+        }
+
+        setRefreshingEvidence(true);
+
+        router.post(evidenceRefreshUrl, {}, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => {
+                setRefreshingEvidence(false);
+            },
+        });
+    };
+
+    /**
+     * Purpose: Rebuild persisted assessment rows for the visible AI case.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Sends a POST request that regenerates the requirement assessments on the server.
+     */
+    const refreshAssessments = () => {
+        if (!assessmentRefreshUrl || requirementUpdatesLocked) {
+            return;
+        }
+
+        setRefreshingAssessments(true);
+
+        router.post(assessmentRefreshUrl, {}, {
+            preserveScroll: true,
+            preserveState: true,
+            onFinish: () => {
+                setRefreshingAssessments(false);
             },
         });
     };
@@ -686,6 +837,40 @@ export default function AiShow({
                     </section>
 
                     <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="space-y-2">
+                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    Kravkandidater
+                                </div>
+                                <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                    Kravkandidater
+                                </h2>
+                                <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                                    Mulige krav identifisert i opplastede anbudsdokumenter. Bekreftede krav blir operative arbeidskrav.
+                                </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    onClick={refreshEvidence}
+                                    disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
+                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {refreshingEvidence ? 'Oppdaterer...' : 'Oppdater bevisgrunnlag'}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={refreshAssessments}
+                                    disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {refreshingAssessments ? 'Analyserer...' : 'Analyser krav'}
+                                </button>
+                            </div>
+                        </div>
+
                         {requirementRows.length === 0 ? (
                             <div className="mt-5 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                 <div className="text-lg font-semibold text-slate-900">
@@ -709,11 +894,26 @@ export default function AiShow({
                                         ? `Tekstbit ${requirement.chunk_index + 1}`
                                         : 'Tekstbit —';
                                     const isConfirmedRequirement = requirement.review_status === 'confirmed';
+                                    const assessment = requirement.assessment ?? null;
+                                    const hasAssessment = assessment !== null;
+                                    const assessmentCompleted = assessment?.assessment_status === 'completed';
+                                    const assessmentFailed = assessment?.assessment_status === 'failed';
+                                    const evidenceRows = Array.isArray(requirement.evidence) ? requirement.evidence : [];
+                                    const assessmentDateLabel = assessment?.assessed_at
+                                        ? new Intl.DateTimeFormat(locale, {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                        }).format(new Date(assessment.assessed_at))
+                                        : '—';
+                                    const showEvidenceSection = isConfirmedRequirement || evidenceRows.length > 0;
 
-                                return (
-                                    <article
-                                        key={requirement.id}
-                                        className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] ${
+                                    return (
+                                        <article
+                                            key={requirement.id}
+                                            className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] ${
                                                 isConfirmedRequirement
                                                     ? 'border-emerald-100 bg-emerald-50/40'
                                                     : 'border-slate-200 bg-white'
@@ -748,53 +948,222 @@ export default function AiShow({
                                                             </span>
                                                         </>
                                                     ) : null}
-                                            </div>
+                                                </div>
 
-                                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                                                    Kilde: {requirement.document_filename ?? '—'}
+                                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+                                                        Kilde: {requirement.document_filename ?? '—'}
                                                     </span>
                                                     <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
                                                         {chunkLabel}
-                                                </span>
-                                            </div>
+                                                    </span>
+                                                </div>
 
-                                            {isConfirmedRequirement ? (
                                                 <div className="space-y-3 border-t border-slate-200/80 pt-4">
-                                                    <div className="space-y-2">
+                                                    <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                            Relevant kunnskapsgrunnlag
+                                                            AI-vurdering
                                                         </div>
-                                                        {Array.isArray(requirement.matched_knowledge) && requirement.matched_knowledge.length > 0 ? (
-                                                            <div className="space-y-2">
-                                                                {requirement.matched_knowledge.slice(0, 5).map((match) => (
-                                                                    <div key={`${match.knowledge_item_id}-${match.chunk_id}`} className="rounded-2xl border border-slate-200 bg-white p-3">
-                                                                        <div className="flex flex-wrap items-center gap-2">
-                                                                            <div className="font-medium text-slate-950">
-                                                                                {match.knowledge_item_title}
-                                                                            </div>
-                                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                                {match.content_type_label ?? match.content_type}
+                                                        {hasAssessment && assessmentCompleted ? (
+                                                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                Vurdert {assessmentDateLabel}
+                                                            </span>
+                                                        ) : hasAssessment && assessmentFailed ? (
+                                                            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                Feilet
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+
+                                                    {isConfirmedRequirement ? (
+                                                        hasAssessment ? (
+                                                            assessmentCompleted ? (
+                                                                <div className="space-y-3">
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                            ASSESSMENT_STATUS_META[assessment.assessment_status]?.className
+                                                                                ?? ASSESSMENT_STATUS_META.completed.className
+                                                                        }`}>
+                                                                            {assessment.assessment_status_label ?? ASSESSMENT_STATUS_META.completed.label}
+                                                                        </span>
+                                                                        {assessment.coverage_status ? (
+                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                COVERAGE_STATUS_META[assessment.coverage_status]?.className
+                                                                                    ?? COVERAGE_STATUS_META.missing.className
+                                                                            }`}>
+                                                                                {assessment.coverage_status_label ?? COVERAGE_STATUS_META.missing.label}
                                                                             </span>
-                                                                        </div>
-                                                                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                                            {formatKnowledgeSnippet(match.chunk_content)}
-                                                                        </p>
+                                                                        ) : null}
+                                                                        {assessment.risk_level ? (
+                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                RISK_LEVEL_META[assessment.risk_level]?.className
+                                                                                    ?? RISK_LEVEL_META.high.className
+                                                                            }`}>
+                                                                                {assessment.risk_level_label ?? RISK_LEVEL_META.high.label}
+                                                                            </span>
+                                                                        ) : null}
                                                                     </div>
-                                                                ))}
+
+                                                                    <div className="grid gap-3 md:grid-cols-2">
+                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                Oppsummering
+                                                                            </div>
+                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                {assessment.requirement_summary ?? '—'}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                Begrunnelse
+                                                                            </div>
+                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                {assessment.coverage_rationale ?? '—'}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                Manglende grunnlag
+                                                                            </div>
+                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                {assessment.missing_information ?? '—'}
+                                                                            </p>
+                                                                        </div>
+
+                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                Anbefalt neste steg
+                                                                            </div>
+                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                {assessment.recommended_next_step ?? '—'}
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                                    AI-vurdering feilet for dette kravet. Kjør analyse på nytt for å forsøke igjen.
+                                                                </div>
+                                                            )
+                                                        ) : (
+                                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                AI-vurdering er ikke generert ennå. Bruk &quot;Analyser krav&quot; for å vurdere dette kravet.
+                                                            </div>
+                                                        )
+                                                    ) : (
+                                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                            AI-vurdering genereres når kravet er bekreftet.
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                {showEvidenceSection ? (
+                                                    <div className="space-y-3 border-t border-slate-200/80 pt-4">
+                                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                Bevisgrunnlag
+                                                            </div>
+                                                            {isConfirmedRequirement ? (
+                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                    Persistert
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+
+                                                        {evidenceRows.length > 0 ? (
+                                                            <div className="space-y-2">
+                                                                {evidenceRows.map((evidence) => {
+                                                                    const evidenceStatusMeta = EVIDENCE_SELECTION_STATUS_META[evidence.selection_status] ?? EVIDENCE_SELECTION_STATUS_META.suggested;
+                                                                    const evidenceChunkLabel = typeof evidence.knowledge_chunk?.chunk_index === 'number'
+                                                                        ? `Tekstbit ${Number(evidence.knowledge_chunk.chunk_index) + 1}`
+                                                                        : 'Tekstbit —';
+                                                                    const evidenceUpdating = updatingEvidenceId === evidence.id;
+
+                                                                    return (
+                                                                        <div
+                                                                            key={evidence.id}
+                                                                            className={`rounded-2xl border p-3 shadow-sm ${
+                                                                                evidence.selection_status === 'selected'
+                                                                                    ? 'border-emerald-200 bg-emerald-50/40'
+                                                                                    : evidence.selection_status === 'rejected'
+                                                                                        ? 'border-rose-200 bg-rose-50/40'
+                                                                                        : 'border-slate-200 bg-white'
+                                                                            }`}
+                                                                        >
+                                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                                <div className="font-medium text-slate-950">
+                                                                                    {evidence.knowledge_item?.original_filename ?? 'Ukjent dokument'}
+                                                                                </div>
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    {evidence.knowledge_item?.document_type_label ?? evidence.knowledge_item?.document_type ?? '—'}
+                                                                                </span>
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    {evidence.match_type_label ?? evidence.match_type}
+                                                                                </span>
+                                                                                {evidence.is_primary ? (
+                                                                                    <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                                                        Primær
+                                                                                    </span>
+                                                                                ) : null}
+                                                                            </div>
+
+                                                                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                                                <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ring-1 ring-inset ${evidenceStatusMeta.className}`}>
+                                                                                    {evidence.selection_status_label ?? evidenceStatusMeta.label}
+                                                                                </span>
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    Rank {Number(evidence.match_rank ?? 0)}
+                                                                                </span>
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    Score {Number(evidence.match_score ?? 0)}
+                                                                                </span>
+                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                    {evidenceChunkLabel}
+                                                                                </span>
+                                                                            </div>
+
+                                                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                                                {formatKnowledgeSnippet(evidence.knowledge_chunk?.content)}
+                                                                            </p>
+
+                                                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                                                {EVIDENCE_SELECTION_ACTIONS.map((action) => {
+                                                                                    const isCurrentStatus = evidence.selection_status === action.value;
+
+                                                                                    return (
+                                                                                        <button
+                                                                                            key={action.value}
+                                                                                            type="button"
+                                                                                            onClick={() => updateEvidenceSelectionStatus(evidence, action.value)}
+                                                                                            disabled={requirementUpdatesLocked || evidenceUpdating || isCurrentStatus}
+                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
+                                                                                        >
+                                                                                            {action.label}
+                                                                                        </button>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm text-slate-500">
-                                                                Ingen relevant kunnskap funnet.
+                                                                Ingen bevisgrunnlag lagret ennå. Oppdater bevisgrunnlag for å finne relevante kunnskapsdokumenter.
                                                             </p>
                                                         )}
                                                     </div>
+                                                ) : null}
 
-                                                    <div className="grid gap-3 md:grid-cols-2">
-                                                        <label className="block space-y-1">
-                                                            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                Arbeidsstatus
-                                                            </span>
+                                                <div className="flex flex-wrap gap-2 border-t border-slate-200/80 pt-4">
+                                                    {isConfirmedRequirement ? (
+                                                        <div className="grid w-full gap-3 md:grid-cols-2">
+                                                            <label className="block space-y-1">
+                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Arbeidsstatus
+                                                                </span>
                                                                 <select
                                                                     value={workStatus}
                                                                     onChange={(event) => updateRequirementWork(requirement, event.target.value, assignedUserId)}
@@ -829,22 +1198,9 @@ export default function AiShow({
                                                                 </select>
                                                             </label>
                                                         </div>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {reviewActions.map((action) => (
-                                                                <button
-                                                                    key={action.value}
-                                                                    type="button"
-                                                                    onClick={() => updateRequirementReviewStatus(requirement, action.value)}
-                                                                    disabled={requirementUpdatesLocked}
-                                                                    className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
-                                                                >
-                                                                    {action.label}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex flex-wrap gap-2 border-t border-slate-200/80 pt-4">
+                                                    ) : null}
+
+                                                    <div className="flex flex-wrap gap-2">
                                                         {reviewActions.map((action) => (
                                                             <button
                                                                 key={action.value}
@@ -857,7 +1213,7 @@ export default function AiShow({
                                                             </button>
                                                         ))}
                                                     </div>
-                                                )}
+                                                </div>
                                             </div>
                                         </article>
                                     );

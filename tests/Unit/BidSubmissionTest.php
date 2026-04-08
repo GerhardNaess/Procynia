@@ -39,6 +39,7 @@ class BidSubmissionTest extends TestCase
         Schema::create('saved_notices', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('customer_id')->nullable();
+            $table->string('source_type')->default(SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE);
             $table->unsignedBigInteger('saved_by_user_id')->nullable();
             $table->string('external_id')->nullable();
             $table->string('title')->nullable();

@@ -3,15 +3,19 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\SavedNoticeAiEvidence;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
+use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
+use App\Services\OpenAi\EmbeddingService;
+use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\RequirementExtractor;
 use App\Services\SavedNoticeAccessService;
@@ -19,10 +23,12 @@ use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Collection;
+use Throwable;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -82,6 +88,9 @@ class AiController extends Controller
             'aiRequirements.document',
             'aiRequirements.chunk',
             'aiRequirements.assignedUser',
+            'aiRequirements.assessment.assessedBy',
+            'aiRequirements.evidence.knowledgeItem',
+            'aiRequirements.evidence.knowledgeItemChunk',
         ])->loadCount([
             'infoItems',
             'phaseComments',
@@ -90,12 +99,7 @@ class AiController extends Controller
         ]);
 
         $analysisCase = $this->analysisCasePayload($record);
-        $knowledgeChunks = $record->aiRequirements->contains(
-            static fn (SavedNoticeAiRequirement $requirement): bool => $requirement->review_status === SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
-        )
-            ? $this->knowledgeChunksForMatching((int) $record->customer_id)
-            : collect();
-        $requirements = $this->aiRequirementsPayload($record, $knowledgeChunks);
+        $requirements = $this->aiRequirementsPayload($record);
         $requirementsOverview = $this->requirementsOverviewPayload($record);
 
         return Inertia::render('App/AI/Show', [
@@ -117,6 +121,8 @@ class AiController extends Controller
             'requirements_count' => count($requirements),
             'requirements_overview' => $requirementsOverview,
             'requirements' => $requirements,
+            'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
+            'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
             'documents' => $this->aiDocumentsPayload($record),
@@ -288,6 +294,160 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Rebuild persisted evidence rows for every confirmed requirement in the visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after refreshing the evidence rows.
+     * Side effects: Deletes stale auto-suggested evidence rows and recreates deterministic matches.
+     */
+    public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
+        $userId = $request->user()?->id;
+
+        $confirmedRequirements = $record->aiRequirements()
+            ->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED)
+            ->with([
+                'assessment',
+                'evidence.knowledgeItem',
+                'evidence.knowledgeItemChunk',
+            ])
+            ->orderBy('id')
+            ->get();
+
+        $requirementEmbeddings = $confirmedRequirements->mapWithKeys(function (SavedNoticeAiRequirement $requirement): array {
+            return [$requirement->id => $this->requirementEmbeddingFor($requirement)];
+        });
+
+        DB::transaction(function () use ($confirmedRequirements, $knowledgeChunks, $userId, $requirementEmbeddings): void {
+            foreach ($confirmedRequirements as $requirement) {
+                $this->syncRequirementEvidence(
+                    $requirement,
+                    $knowledgeChunks,
+                    $userId,
+                    $requirementEmbeddings->get($requirement->id),
+                );
+            }
+        });
+
+        return back()->with('success', 'Bevisgrunnlag oppdatert.');
+    }
+
+    /**
+     * Purpose: Rebuild persisted assessment rows for every confirmed requirement in the visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after refreshing the assessment rows.
+     * Side effects: Upserts one assessment row per confirmed requirement.
+     */
+    public function refreshAssessments(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $userId = $request->user()?->id;
+        $requirementAssessmentService = app(RequirementAssessmentService::class);
+
+        $confirmedRequirements = $record->aiRequirements()
+            ->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED)
+            ->orderBy('id')
+            ->get();
+
+        $failedCount = 0;
+
+        foreach ($confirmedRequirements as $requirement) {
+            try {
+                $requirementAssessmentService->assessRequirement($requirement, $userId);
+            } catch (Throwable) {
+                $this->persistFailedRequirementAssessment($requirement, $userId);
+                $failedCount++;
+            }
+        }
+
+        if ($failedCount > 0) {
+            return back()->with('warning', 'AI-vurdering feilet for ett eller flere krav.');
+        }
+
+        return back()->with('success', 'Krav analysert.');
+    }
+
+    /**
+     * Purpose: Update the selection state for one persisted evidence row.
+     * Inputs: The current request, route-bound saved notice, and route-bound evidence row.
+     * Returns: A redirect back to the AI case view after updating the evidence state.
+     * Side effects: Updates the evidence selection status and primary marker in the database.
+     */
+    public function updateEvidenceSelectionStatus(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiEvidence $evidence,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $ownedEvidence = SavedNoticeAiEvidence::query()
+            ->whereKey($evidence->id)
+            ->whereHas('requirement', static function ($query) use ($record): void {
+                $query->where('saved_notice_id', $record->id);
+            })
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'selection_status' => ['required', 'string', Rule::in(SavedNoticeAiEvidence::SELECTION_STATUSES)],
+        ]);
+
+        DB::transaction(function () use ($ownedEvidence, $validated): void {
+            $selectionStatus = $validated['selection_status'];
+
+            $ownedEvidence->forceFill([
+                'selection_status' => $selectionStatus,
+                'is_primary' => $selectionStatus === SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            ])->save();
+
+            if ($selectionStatus === SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED) {
+                $ownedEvidence->requirement
+                    ->evidence()
+                    ->where('id', '!=', $ownedEvidence->id)
+                    ->update(['is_primary' => false]);
+            }
+        });
+
+        return back();
+    }
+
+    /**
+     * Purpose: Persist a failed assessment result without overwriting a previously completed one.
+     * Inputs: The requirement row and the current user id.
+     * Returns: The persisted assessment row.
+     * Side effects: Creates or updates a failed assessment row when no completed assessment exists.
+     */
+    private function persistFailedRequirementAssessment(SavedNoticeAiRequirement $requirement, ?int $userId): SavedNoticeAiRequirementAssessment
+    {
+        $requirement->loadMissing('assessment');
+
+        if (
+            $requirement->assessment !== null
+            && $requirement->assessment->assessment_status === SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED
+        ) {
+            return $requirement->assessment;
+        }
+
+        return SavedNoticeAiRequirementAssessment::query()->updateOrCreate(
+            [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+            ],
+            [
+                'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_FAILED,
+                'coverage_status' => null,
+                'risk_level' => null,
+                'requirement_summary' => null,
+                'coverage_rationale' => null,
+                'missing_information' => null,
+                'recommended_next_step' => null,
+                'source_evidence_snapshot' => [],
+                'assessed_at' => null,
+                'assessed_by_user_id' => $userId,
+            ],
+        );
+    }
+
+    /**
      * Purpose: Resolve the authenticated customer context for the AI workspace.
      * Inputs: Incoming request carrying the current authenticated user.
      * Returns: The current user and customer id.
@@ -410,15 +570,10 @@ class AiController extends Controller
      * Returns: An ordered array of requirement rows for the AI case view.
      * Side effects: None.
      */
-    private function aiRequirementsPayload(SavedNotice $notice, Collection $knowledgeChunks): array
+    private function aiRequirementsPayload(SavedNotice $notice): array
     {
         return $notice->aiRequirements
-            ->map(function (SavedNoticeAiRequirement $requirement) use ($knowledgeChunks): array {
-                $matchedKnowledge = $requirement->review_status === SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED
-                    && $knowledgeChunks->isNotEmpty()
-                    ? $this->requirementKnowledgeMatcher->match((string) $requirement->requirement_text, $knowledgeChunks)
-                    : collect();
-
+            ->map(function (SavedNoticeAiRequirement $requirement): array {
                 return [
                     'id' => $requirement->id,
                     'requirement_text' => $requirement->requirement_text,
@@ -448,23 +603,101 @@ class AiController extends Controller
                         'id' => $requirement->assignedUser->id,
                         'name' => $requirement->assignedUser->name,
                     ] : null,
+                    'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
                     'work_update_url' => route('app.ai.requirements.work.update', [
                         'savedNotice' => $requirement->saved_notice_id,
                         'requirement' => $requirement->id,
                     ]),
-                    'matched_knowledge' => $matchedKnowledge
-                        ->map(static fn (array $match): array => [
-                            'knowledge_item_id' => $match['knowledge_item_id'],
-                            'knowledge_item_title' => $match['knowledge_item_title'],
-                            'content_type' => $match['content_type'],
-                            'content_type_label' => KnowledgeItem::CONTENT_TYPE_LABELS[$match['content_type']] ?? $match['content_type'],
-                            'chunk_id' => $match['chunk_id'],
-                            'chunk_index' => $match['chunk_index'],
-                            'chunk_content' => $match['chunk_content'],
-                            'score' => $match['score'],
-                        ])
-                        ->values()
-                        ->all(),
+                    'evidence' => $this->aiRequirementEvidencePayload($requirement),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Purpose: Convert a persisted AI assessment into a compact frontend payload.
+     * Inputs: A requirement assessment row or null when no assessment exists yet.
+     * Returns: A frontend-ready assessment array or null.
+     * Side effects: None.
+     */
+    private function aiRequirementAssessmentPayload(?SavedNoticeAiRequirementAssessment $assessment): ?array
+    {
+        if ($assessment === null) {
+            return null;
+        }
+
+        $assessmentStatus = $assessment->assessment_status;
+        $coverageStatus = $assessment->coverage_status;
+        $riskLevel = $assessment->risk_level;
+
+        return [
+            'id' => $assessment->id,
+            'assessment_status' => $assessmentStatus,
+            'assessment_status_label' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_LABELS[$assessmentStatus]
+                ?? $assessmentStatus,
+            'coverage_status' => $coverageStatus,
+            'coverage_status_label' => filled($coverageStatus)
+                ? (SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_LABELS[$coverageStatus] ?? $coverageStatus)
+                : null,
+            'risk_level' => $riskLevel,
+            'risk_level_label' => filled($riskLevel)
+                ? (SavedNoticeAiRequirementAssessment::RISK_LEVEL_LABELS[$riskLevel] ?? $riskLevel)
+                : null,
+            'requirement_summary' => $assessment->requirement_summary,
+            'coverage_rationale' => $assessment->coverage_rationale,
+            'missing_information' => $assessment->missing_information,
+            'recommended_next_step' => $assessment->recommended_next_step,
+            'assessed_at' => optional($assessment->assessed_at)?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Purpose: Convert the persisted evidence rows for one requirement into a compact frontend payload.
+     * Inputs: A requirement with its evidence relations loaded.
+     * Returns: An ordered array of evidence rows ready for rendering.
+     * Side effects: None.
+     */
+    private function aiRequirementEvidencePayload(SavedNoticeAiRequirement $requirement): array
+    {
+        return $requirement->evidence
+            ->map(function (SavedNoticeAiEvidence $evidence): array {
+                $knowledgeItem = $evidence->knowledgeItem;
+                $knowledgeChunk = $evidence->knowledgeItemChunk;
+                $selectionStatus = $evidence->selection_status;
+                $matchType = $evidence->match_type;
+                $knowledgeDocumentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+
+                return [
+                    'id' => $evidence->id,
+                    'selection_status' => $selectionStatus,
+                    'selection_status_label' => SavedNoticeAiEvidence::SELECTION_STATUS_LABELS[$selectionStatus]
+                        ?? $selectionStatus,
+                    'match_type' => $matchType,
+                    'match_type_label' => SavedNoticeAiEvidence::MATCH_TYPE_LABELS[$matchType]
+                        ?? $matchType,
+                    'match_score' => $evidence->match_score,
+                    'match_rank' => $evidence->match_rank,
+                    'is_primary' => $evidence->is_primary,
+                    'selection_status_update_url' => route('app.ai.evidence.selection-status.update', [
+                        'savedNotice' => $evidence->requirement->saved_notice_id,
+                        'evidence' => $evidence->id,
+                    ]),
+                    'knowledge_item' => [
+                        'id' => $knowledgeItem?->id,
+                        'original_filename' => $knowledgeItem?->original_filename,
+                        'document_type' => $knowledgeDocumentType,
+                        'document_type_label' => filled($knowledgeDocumentType)
+                            ? (KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocumentType] ?? $knowledgeDocumentType)
+                            : null,
+                    ],
+                    'knowledge_chunk' => [
+                        'id' => $knowledgeChunk?->id,
+                        'chunk_index' => $knowledgeChunk?->chunk_index,
+                        'content' => $knowledgeChunk?->content,
+                        'start_offset' => $knowledgeChunk?->start_offset,
+                        'end_offset' => $knowledgeChunk?->end_offset,
+                    ],
                 ];
             })
             ->values()
@@ -491,22 +724,23 @@ class AiController extends Controller
             ->orderBy('knowledge_item_chunks.id')
             ->limit(1000)
             ->get([
-                'knowledge_item_chunks.id as chunk_id',
-                'knowledge_item_chunks.knowledge_item_id',
-                'knowledge_item_chunks.chunk_index',
-                'knowledge_item_chunks.content',
+                'knowledge_item_chunks.*',
                 'knowledge_items.original_filename as knowledge_item_title',
                 'knowledge_items.document_type as content_type',
                 'knowledge_items.updated_at as knowledge_item_updated_at',
             ])
-            ->map(static fn (object $chunk): array => [
-                'chunk_id' => (int) $chunk->chunk_id,
+            ->map(static fn (KnowledgeItemChunk $chunk): array => [
+                'chunk_id' => (int) $chunk->id,
                 'knowledge_item_id' => (int) $chunk->knowledge_item_id,
-                'knowledge_item_title' => (string) $chunk->knowledge_item_title,
-                'content_type' => (string) $chunk->content_type,
+                'knowledge_item_title' => (string) $chunk->getAttribute('knowledge_item_title'),
+                'content_type' => (string) $chunk->getAttribute('content_type'),
                 'chunk_index' => (int) $chunk->chunk_index,
                 'content' => (string) $chunk->content,
-                'knowledge_item_updated_at' => (string) $chunk->knowledge_item_updated_at,
+                'embedding_vector' => is_array($chunk->embedding_vector) ? $chunk->embedding_vector : null,
+                'embedding_model' => (string) ($chunk->embedding_model ?? ''),
+                'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
+                'embedding_error' => $chunk->embedding_error,
+                'knowledge_item_updated_at' => (string) $chunk->getAttribute('knowledge_item_updated_at'),
             ])
             ->values();
     }
@@ -778,6 +1012,118 @@ class AiController extends Controller
         }
 
         $document->requirements()->createMany($payloads);
+    }
+
+    /**
+     * Purpose: Regenerate persisted evidence rows for one confirmed requirement.
+     * Inputs: The requirement, the scoped customer knowledge chunks, and the current user id.
+     * Returns: None.
+     * Side effects: Deletes stale auto-suggested evidence rows and creates deterministic matches.
+     */
+    private function syncRequirementEvidence(
+        SavedNoticeAiRequirement $requirement,
+        Collection $knowledgeChunks,
+        ?int $createdByUserId,
+        ?array $requirementEmbedding = null,
+    ): void {
+        $existingEvidence = $requirement->evidence()->get();
+        $preservedChunkIds = $existingEvidence
+            ->reject(static function (SavedNoticeAiEvidence $evidence): bool {
+                return $evidence->match_type === SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH
+                    && $evidence->selection_status === SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED;
+            })
+            ->pluck('knowledge_item_chunk_id')
+            ->all();
+
+        $requirement->evidence()
+            ->where('match_type', SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH)
+            ->where('selection_status', SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED)
+            ->delete();
+
+        if ($knowledgeChunks->isEmpty()) {
+            return;
+        }
+
+        $matches = $this->requirementKnowledgeMatcher->match(
+            (string) $requirement->requirement_text,
+            $knowledgeChunks,
+            $requirementEmbedding,
+        );
+
+        if ($matches->isEmpty()) {
+            return;
+        }
+
+        foreach ($matches->values() as $index => $match) {
+            $chunkId = (int) $match['chunk_id'];
+
+            if (in_array($chunkId, $preservedChunkIds, true)) {
+                continue;
+            }
+
+            $requirement->evidence()->create([
+                'knowledge_item_id' => (int) $match['knowledge_item_id'],
+                'knowledge_item_chunk_id' => $chunkId,
+                'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+                'match_score' => (int) $match['score'],
+                'match_rank' => $index + 1,
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+                'is_primary' => false,
+                'created_by_user_id' => $createdByUserId,
+            ]);
+        }
+    }
+
+    /**
+     * Purpose: Generate a temporary embedding for one requirement before evidence refresh.
+     * Inputs: The requirement row that is about to be matched.
+     * Returns: The embedding vector when available, otherwise null.
+     * Side effects: Logs controlled upstream failures and falls back to matcher-only retrieval.
+     */
+    private function requirementEmbeddingFor(SavedNoticeAiRequirement $requirement): ?array
+    {
+        $requirementText = trim((string) $requirement->requirement_text);
+
+        if ($requirementText === '') {
+            return null;
+        }
+
+        $outcome = app(EmbeddingService::class)->tryEmbedText($requirementText);
+
+        if (($outcome['ok'] ?? false) !== true) {
+            $this->logRequirementEmbeddingFailure($requirement, $outcome);
+
+            return null;
+        }
+
+        return is_array($outcome['embedding'] ?? null) ? $outcome['embedding'] : null;
+    }
+
+    /**
+     * Purpose: Log a temporary requirement embedding failure before evidence refresh.
+     * Inputs: The requirement row and the embedding outcome.
+     * Returns: None.
+     * Side effects: Writes a warning or error log entry.
+     */
+    private function logRequirementEmbeddingFailure(SavedNoticeAiRequirement $requirement, array $outcome): void
+    {
+        $context = [
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'saved_notice_id' => $requirement->saved_notice_id,
+            'error_type' => $outcome['error_type'] ?? null,
+            'error_message' => $outcome['error_message'] ?? null,
+            'upstream_status' => $outcome['upstream_status'] ?? null,
+            'request_id' => $outcome['request_id'] ?? null,
+            'response_body_excerpt' => $outcome['response_body_excerpt'] ?? null,
+        ];
+
+        if (in_array($outcome['error_type'] ?? null, ['unexpected_response', 'invalid_request'], true)) {
+            Log::error('Requirement embedding failed during evidence refresh.', $context);
+
+            return;
+        }
+
+        Log::warning('Requirement embedding failed during evidence refresh.', $context);
     }
 
     /**

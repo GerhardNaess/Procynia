@@ -562,7 +562,14 @@ function privateRequestSummaryFields(notice, locale) {
     ];
 }
 
-function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits = 0, visibleHits = 0) {
+function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits = 0, visibleHits = 0, liveSearchError = '') {
+    if (mode === 'live' && liveSearchError.trim() !== '') {
+        return {
+            title: 'Doffin-søket feilet.',
+            body: liveSearchError,
+        };
+    }
+
     if (mode === 'saved') {
         return {
             title: 'Ingen lagrede kunngjøringer ennå.',
@@ -689,6 +696,8 @@ export default function NoticeIndex({
     const monitoringHitsCount = Number(monitoring?.new_hits_last_day_count ?? 0);
     const monitoringHitsLabel = monitoringHitsCount === 1 ? '1 nytt treff siste døgn' : `${monitoringHitsCount} nye treff siste døgn`;
     const monitoringNextUpdateText = monitoring?.next_update_text ?? 'Automatisk oppdatering er ikke aktiv ennå.';
+    const liveSearchError = isLiveMode && typeof notices?.error === 'string' ? notices.error : '';
+    const liveSearchFallbackUsed = isLiveMode && Boolean(notices?.meta?.fallback_used);
     const watchListOptions = savedSearches.map((item) => ({
         value: String(item.id),
         label: item.name,
@@ -702,8 +711,12 @@ export default function NoticeIndex({
     const totalHits = normalizeCount(notices?.meta?.numHitsTotal ?? notices?.meta?.total ?? 0);
     const accessibleHits = normalizeCount(notices?.meta?.numHitsAccessible ?? notices?.meta?.total ?? 0);
     const visibleHits = normalizeCount(notices?.data?.length ?? 0);
-    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits);
-    const isCappedLiveSearch = isLiveMode && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
+    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits, liveSearchError);
+    const isCappedLiveSearch = isLiveMode && liveSearchError === '' && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
+    const liveSearchHeading = liveSearchError !== ''
+        ? 'Doffin-søket feilet'
+        : `${formatInteger(notices?.meta?.total ?? 0, locale)} treff fra Doffin`;
+    const showLiveSearchFallbackBanner = liveSearchFallbackUsed && liveSearchError === '';
 
     useEffect(() => {
         setSearchQuery(filters.q ?? '');
@@ -962,6 +975,23 @@ export default function NoticeIndex({
         });
     };
 
+    const handleLiveSearchHttpException = (response) => {
+        if (response?.data?.component !== 'App/Notices/Index') {
+            return true;
+        }
+
+        router.replace({
+            url: response.data.url,
+            component: response.data.component,
+            props: response.data.props ?? {},
+            flash: response.data.flash ?? {},
+            preserveState: true,
+            preserveScroll: true,
+        });
+
+        return false;
+    };
+
     const applyFilters = () => {
         router.get(
             '/app/notices',
@@ -979,6 +1009,7 @@ export default function NoticeIndex({
             {
                 preserveState: true,
                 replace: true,
+                onHttpException: handleLiveSearchHttpException,
             },
         );
     };
@@ -1005,6 +1036,7 @@ export default function NoticeIndex({
             {
                 preserveState: true,
                 replace: true,
+                onHttpException: handleLiveSearchHttpException,
             },
         );
     };
@@ -1572,13 +1604,19 @@ export default function NoticeIndex({
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                     {source?.label}
                                 </div>
-                                <div className="text-[17px] font-semibold text-slate-950">{`${formatInteger(notices.meta.total ?? 0, locale)} treff fra Doffin`}</div>
+                                <div className="text-[17px] font-semibold text-slate-950">{liveSearchHeading}</div>
                             </div>
 
                             {isCappedLiveSearch ? (
                                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
                                     Doffin rapporterer {formatInteger(totalHits, locale)} treff for dette søket. I denne søkeflyten er bare topp{' '}
                                     {formatInteger(accessibleHits, locale)} treff tilgjengelige for sidevisning. Bruk filtre for å snevre inn treffene og få tilgang til flere relevante kunngjøringer.
+                                </div>
+                            ) : null}
+
+                            {showLiveSearchFallbackBanner ? (
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                    Doffin brukte fallback for deler av søket. Resultatene kan være bredere enn normalt.
                                 </div>
                             ) : null}
 

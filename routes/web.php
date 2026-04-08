@@ -60,6 +60,12 @@ Route::prefix('app')
             ->name('ai.requirements.review-status.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/work', [AiController::class, 'updateRequirementWork'])
             ->name('ai.requirements.work.update');
+        Route::post('/ai/{savedNotice}/evidence/refresh', [AiController::class, 'refreshEvidence'])
+            ->name('ai.evidence.refresh');
+        Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])
+            ->name('ai.requirements.assessment.refresh');
+        Route::patch('/ai/{savedNotice}/evidence/{evidence}/selection-status', [AiController::class, 'updateEvidenceSelectionStatus'])
+            ->name('ai.evidence.selection-status.update');
         Route::patch('/notifications/read-all', [UserNotificationController::class, 'markAllRead'])->name('notifications.read-all');
         Route::patch('/notifications/{userNotification}/read', [UserNotificationController::class, 'markRead'])->name('notifications.read');
         Route::get('/inbox/{any?}', static fn () => redirect()->route('app.info-center.index'))->where('any', '.*');

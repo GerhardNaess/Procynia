@@ -42,5 +42,9 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="OPENAI_API_KEY" value="test-openai-key" force="true"/>
+        <env name="OPENAI_BASE_URL" value="https://api.openai.com/v1" force="true"/>
+        <env name="OPENAI_MODEL" value="gpt-4.1-mini" force="true"/>
+        <env name="OPENAI_EMBEDDING_MODEL" value="text-embedding-3-small" force="true"/>
     </php>
 </phpunit>

@@ -4,22 +4,33 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\DoffinHarvest;
 use App\Models\SupplierLookupRun;
-use App\Services\Doffin\DoffinAdminExecutionService;
 use App\Services\Doffin\SupplierLookupRunService;
 use App\Models\User;
 use Filament\Notifications\Notification;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Mockery;
 use Tests\TestCase;
 
 class DoffinHarvestPageTest extends TestCase
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->useTestingPostgresConnection();
+        DB::beginTransaction();
+    }
 
     protected function tearDown(): void
     {
         Mockery::close();
+
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        DB::disconnect(DB::getDefaultConnection());
 
         parent::tearDown();
     }
@@ -32,43 +43,16 @@ class DoffinHarvestPageTest extends TestCase
         $response->assertOk();
     }
 
-    public function test_run_harvest_calls_the_execution_service_and_sets_the_result_summary(): void
+    public function test_run_harvest_shows_the_disabled_message_and_does_not_call_the_execution_service(): void
     {
         $admin = $this->internalAdmin();
-        $service = Mockery::mock(DoffinAdminExecutionService::class);
-
-        $service->shouldReceive('runHarvest')
+        $service = Mockery::mock(SupplierLookupRunService::class);
+        $service->shouldReceive('statusPayloadForUuid')
             ->once()
-            ->with([
-                'from' => '2026-03-01',
-                'to' => '2026-03-29',
-                'supplier_name' => '',
-                'types' => ['RESULT'],
-            ])
-            ->andReturn([
-                'mode' => 'harvest',
-                'run_id' => 11,
-                'harvest' => [
-                    'windows_processed' => 2,
-                    'windows_split' => 1,
-                    'notices_seen' => 5,
-                    'records_built' => 6,
-                ],
-                'persistence' => [
-                    'notices_persisted' => 5,
-                    'suppliers_touched' => 4,
-                    'notices_created' => 5,
-                    'notices_updated' => 0,
-                    'suppliers_created' => 4,
-                    'suppliers_updated' => 0,
-                    'links_created' => 6,
-                    'links_updated' => 0,
-                ],
-                'selected_candidate' => null,
-                'winner_candidates' => [],
-            ]);
-
-        $this->app->instance(DoffinAdminExecutionService::class, $service);
+            ->with('')
+            ->andReturn(null);
+        $service->shouldNotReceive('startRun');
+        $this->app->instance(SupplierLookupRunService::class, $service);
 
         Livewire::actingAs($admin)
             ->test(DoffinHarvest::class)
@@ -77,10 +61,9 @@ class DoffinHarvestPageTest extends TestCase
             ->set('data.types', ['RESULT'])
             ->set('data.supplier_name', '')
             ->call('runHarvest')
-            ->assertSet('resultSummary.mode', 'harvest')
-            ->assertSet('resultSummary.harvest.notices_seen', 5);
+            ->assertSet('lastError', 'The synchronous Doffin harvest is temporarily disabled. Use the async supplier lookup action only.');
 
-        Notification::assertNotified('Doffin harvest completed');
+        Notification::assertNotified('Doffin execution failed');
     }
 
     public function test_run_supplier_lookup_queues_a_background_run_and_loads_the_status_panel(): void
@@ -151,24 +134,30 @@ class DoffinHarvestPageTest extends TestCase
         Notification::assertNotified('Supplier lookup queued');
     }
 
-    public function test_the_page_shows_failures_from_the_execution_service(): void
+    public function test_run_supplier_lookup_surfaces_service_failures(): void
     {
         $admin = $this->internalAdmin();
-        $service = Mockery::mock(DoffinAdminExecutionService::class);
+        $service = Mockery::mock(SupplierLookupRunService::class);
 
-        $service->shouldReceive('runHarvest')
+        $service->shouldReceive('statusPayloadForUuid')
             ->once()
-            ->andThrow(new \RuntimeException('Single-day window exceeded the accessible result cap.'));
+            ->with('')
+            ->andReturn(null);
 
-        $this->app->instance(DoffinAdminExecutionService::class, $service);
+        $service->shouldReceive('startRun')
+            ->once()
+            ->andThrow(new \RuntimeException('Supplier lookup failed.'));
+
+        $this->app->instance(SupplierLookupRunService::class, $service);
 
         Livewire::actingAs($admin)
             ->test(DoffinHarvest::class)
             ->set('data.from', '2026-03-29')
             ->set('data.to', '2026-03-29')
             ->set('data.types', ['RESULT'])
-            ->call('runHarvest')
-            ->assertSet('lastError', 'Single-day window exceeded the accessible result cap.');
+            ->set('data.supplier_name', '4Service Eir Renhold AS')
+            ->call('runSupplierLookup')
+            ->assertSet('lastError', 'Supplier lookup failed.');
 
         Notification::assertNotified('Doffin execution failed');
     }
@@ -180,5 +169,22 @@ class DoffinHarvestPageTest extends TestCase
             'customer_id' => null,
             'is_active' => true,
         ]);
+    }
+
+    private function useTestingPostgresConnection(): void
+    {
+        config([
+            'database.default' => 'pgsql',
+            'database.connections.pgsql.database' => 'procynia_test',
+            'database.connections.pgsql.host' => '127.0.0.1',
+            'database.connections.pgsql.port' => '5432',
+            'database.connections.pgsql.username' => 'gehard',
+            'database.connections.pgsql.password' => '',
+            'database.connections.pgsql.search_path' => 'public',
+        ]);
+
+        DB::purge('pgsql');
+        DB::setDefaultConnection('pgsql');
+        DB::reconnect('pgsql');
     }
 }

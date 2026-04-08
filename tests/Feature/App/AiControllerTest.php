@@ -10,16 +10,23 @@ use App\Models\SavedNoticeInfoItem;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\BidSubmission;
 use App\Models\Nationality;
+use App\Models\KnowledgeItemChunk;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
+use App\Models\SavedNoticeAiEvidence;
+use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementExtractor;
 use App\Models\User;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Mockery;
 use RuntimeException;
 use ZipArchive;
 use Tests\TestCase;
@@ -225,6 +232,7 @@ class AiControllerTest extends TestCase
                 && data_get($page, 'props.search_url') === route('app.ai.show', ['savedNotice' => $savedNotice->id])
                 && data_get($page, 'props.requirements_count') === 0
                 && data_get($page, 'props.requirements') === []
+                && data_get($page, 'props.assessment_refresh_url') === route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id])
                 && data_get($page, 'props.documents_upload_url') === route('app.ai.documents.store', ['savedNotice' => $savedNotice->id])
                 && data_get($case, 'id') === $savedNotice->id
                 && data_get($case, 'title') === 'Case view target'
@@ -416,10 +424,10 @@ class AiControllerTest extends TestCase
         $this->touchSavedNotice($savedNotice, '2026-04-06 10:45:00');
 
         $document = $this->createDocxUpload('requirements-pack.docx', implode("\n\n", [
-            'Krav til dokumentasjon',
             'Dokumentasjon må vedlegges.',
             'Tilbudet må leveres innen tilbudsfrist.',
-            'Tilbudet må leveres innen tilbudsfrist',
+            'Tilbudet må leveres innen tilbudsfrist.',
+            'Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.',
             'Leverandøren skal beskrive løsningen.',
         ]));
 
@@ -446,11 +454,12 @@ class AiControllerTest extends TestCase
             ->get();
 
         $this->assertSame(1, $chunks->count());
-        $this->assertSame(3, $requirements->count());
+        $this->assertSame(4, $requirements->count());
         $this->assertSame(
             [
                 SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
                 SavedNoticeAiRequirement::REQUIREMENT_TYPE_ADMINISTRATIVE,
+                SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
                 SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
             ],
             $requirements->pluck('requirement_type')->all(),
@@ -459,12 +468,14 @@ class AiControllerTest extends TestCase
             [
                 'Dokumentasjon må vedlegges.',
                 'Tilbudet må leveres innen tilbudsfrist.',
+                'Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.',
                 'Leverandøren skal beskrive løsningen.',
             ],
             $requirements->pluck('requirement_text')->all(),
         );
         $this->assertSame(
             [
+                SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
                 SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
                 SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
                 SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
@@ -476,11 +487,12 @@ class AiControllerTest extends TestCase
                 SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
                 SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
                 SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
+                SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
             ],
             $requirements->pluck('extraction_method')->all(),
         );
-        $this->assertSame([$savedDocument->id, $savedDocument->id, $savedDocument->id], $requirements->pluck('saved_notice_ai_document_id')->all());
-        $this->assertSame([$chunks->first()->id, $chunks->first()->id, $chunks->first()->id], $requirements->pluck('saved_notice_ai_document_chunk_id')->all());
+        $this->assertSame([$savedDocument->id, $savedDocument->id, $savedDocument->id, $savedDocument->id], $requirements->pluck('saved_notice_ai_document_id')->all());
+        $this->assertSame([$chunks->first()->id, $chunks->first()->id, $chunks->first()->id, $chunks->first()->id], $requirements->pluck('saved_notice_ai_document_chunk_id')->all());
 
         $response = $this->actingAs($context['user'])
             ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
@@ -491,8 +503,8 @@ class AiControllerTest extends TestCase
         $requirementsByText = $requirements->keyBy('requirement_text');
 
         $this->assertSame('App/AI/Show', data_get($page, 'component'));
-        $this->assertSame(3, data_get($page, 'props.requirements_count'));
-        $this->assertCount(3, $requirements);
+        $this->assertSame(4, data_get($page, 'props.requirements_count'));
+        $this->assertCount(4, $requirements);
         $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION, $requirementsByText->get('Dokumentasjon må vedlegges.')['requirement_type']);
         $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_PENDING, $requirementsByText->get('Dokumentasjon må vedlegges.')['review_status']);
         $this->assertSame(route('app.ai.requirements.review-status.update', [
@@ -502,6 +514,7 @@ class AiControllerTest extends TestCase
         $this->assertSame('requirements-pack.docx', $requirementsByText->get('Dokumentasjon må vedlegges.')['document_filename']);
         $this->assertSame(0, $requirementsByText->get('Dokumentasjon må vedlegges.')['chunk_index']);
         $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_ADMINISTRATIVE, $requirementsByText->get('Tilbudet må leveres innen tilbudsfrist.')['requirement_type']);
+        $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY, $requirementsByText->get('Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.')['requirement_type']);
         $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY, $requirementsByText->get('Leverandøren skal beskrive løsningen.')['requirement_type']);
         $this->assertSame(1, $requirements->filter(fn (array $requirement): bool => $requirement['requirement_text'] === 'Tilbudet må leveres innen tilbudsfrist.')->count());
     }
@@ -1146,24 +1159,24 @@ class AiControllerTest extends TestCase
         $this->assertSame(6, $requirements->count());
     }
 
-    public function test_ai_case_view_matches_relevant_knowledge_for_confirmed_requirements_only(): void
+    public function test_ai_case_view_refreshes_and_displays_persisted_evidence_for_confirmed_requirements_only(): void
     {
         $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4007', 'Knowledge matcher target', [
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4007', 'Evidence target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 14:10:00');
 
         $document = $this->createAiDocument($savedNotice, [
             'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'knowledge-match.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/knowledge-match.docx',
+            'original_filename' => 'evidence-target.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/evidence-target.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 3072,
             'extracted_text' => 'Requirement source text.',
             'text_extracted_at' => '2026-04-06 14:12:00',
         ]);
-        $chunk = $document->chunks()->create([
+        $sourceChunk = $document->chunks()->create([
             'chunk_index' => 0,
             'content' => 'Vi trenger erfaring med metode og cv i leveransen.',
             'char_start' => 0,
@@ -1171,18 +1184,18 @@ class AiControllerTest extends TestCase
             'word_count' => 9,
         ]);
 
-        $confirmedRequirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+        $confirmedRequirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
             'requirement_text' => 'Vi trenger erfaring med metode og cv i leveransen.',
             'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
             'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
             'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
             'assigned_user_id' => null,
         ]);
-        $pendingRequirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+        $pendingRequirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
             'requirement_text' => 'Vi trenger erfaring med metode og cv i leveransen.',
             'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
         ]);
-        $rejectedRequirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+        $rejectedRequirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
             'requirement_text' => 'Vi trenger erfaring med metode og cv i leveransen.',
             'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
         ]);
@@ -1194,6 +1207,7 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
         $this->syncKnowledgeItemChunks($cvKnowledge);
+        $cvChunk = $cvKnowledge->chunks()->firstOrFail();
 
         $referenceKnowledge = $this->createKnowledgeItem($context['customer'], [
             'title' => 'Reference profile',
@@ -1252,31 +1266,712 @@ class AiControllerTest extends TestCase
         ]);
         $this->syncKnowledgeItemChunks($foreignKnowledge);
 
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $confirmedRequirement->id,
+            'knowledge_item_id' => $cvKnowledge->id,
+            'knowledge_item_chunk_id' => $cvChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_MANUAL_ADD,
+            'match_score' => 10,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            'is_primary' => true,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [0.11, 0.22, 0.33],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
         $response = $this->actingAs($context['user'])
             ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
         $response->assertOk();
         $page = $this->inertiaPageFromResponse($response);
         $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
-        $confirmedMatches = collect(data_get($requirements->get($confirmedRequirement->id), 'matched_knowledge', []));
-        $pendingMatches = collect(data_get($requirements->get($pendingRequirement->id), 'matched_knowledge', []));
-        $rejectedMatches = collect(data_get($requirements->get($rejectedRequirement->id), 'matched_knowledge', []));
+        $confirmedEvidence = collect(data_get($requirements->get($confirmedRequirement->id), 'evidence', []));
+        $pendingEvidence = collect(data_get($requirements->get($pendingRequirement->id), 'evidence', []));
+        $rejectedEvidence = collect(data_get($requirements->get($rejectedRequirement->id), 'evidence', []));
 
+        $this->assertNotEmpty(data_get($page, 'props.evidence_refresh_url'));
         $this->assertSame(3, $requirements->count());
-        $this->assertSame(5, $confirmedMatches->count());
-        $this->assertSame([4, 3, 3, 1, 1], $confirmedMatches->pluck('score')->all());
-        $this->assertSame(KnowledgeItem::CONTENT_TYPE_CV, $confirmedMatches->first()['content_type']);
-        $this->assertSame('CV profile', $confirmedMatches->first()['knowledge_item_title']);
-        $this->assertTrue($confirmedMatches->every(static function (array $match): bool {
-            return filled($match['knowledge_item_id'])
-                && filled($match['knowledge_item_title'])
-                && filled($match['content_type'])
-                && array_key_exists('chunk_content', $match);
+        $this->assertSame(5, $confirmedEvidence->count());
+        $this->assertSame(SavedNoticeAiEvidence::MATCH_TYPE_MANUAL_ADD, $confirmedEvidence->first()['match_type']);
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $confirmedEvidence->first()['selection_status']);
+        $this->assertTrue($confirmedEvidence->first()['is_primary']);
+        $this->assertSame(1, $confirmedEvidence->filter(static function (array $evidence) use ($cvChunk): bool {
+            return (int) data_get($evidence, 'knowledge_chunk.id') === $cvChunk->id;
+        })->count());
+        $this->assertTrue($confirmedEvidence->every(static function (array $evidence): bool {
+            return filled($evidence['id'])
+                && filled($evidence['selection_status'])
+                && filled($evidence['match_type'])
+                && array_key_exists('knowledge_item', $evidence)
+                && array_key_exists('knowledge_chunk', $evidence)
+                && filled(data_get($evidence, 'knowledge_item.id'))
+                && filled(data_get($evidence, 'knowledge_item.original_filename'))
+                && filled(data_get($evidence, 'knowledge_chunk.content'));
         }));
-        $this->assertFalse($confirmedMatches->contains(fn (array $match): bool => $match['knowledge_item_title'] === 'Foreign knowledge'));
-        $this->assertFalse($confirmedMatches->contains(fn (array $match): bool => $match['knowledge_item_title'] === 'Inactive knowledge'));
-        $this->assertSame([], $pendingMatches->all());
-        $this->assertSame([], $rejectedMatches->all());
+        $this->assertFalse($confirmedEvidence->contains(fn (array $evidence): bool => data_get($evidence, 'knowledge_item.original_filename') === 'Foreign knowledge'));
+        $this->assertFalse($confirmedEvidence->contains(fn (array $evidence): bool => data_get($evidence, 'knowledge_item.original_filename') === 'Inactive knowledge'));
+        $this->assertSame([], $pendingEvidence->all());
+        $this->assertSame([], $rejectedEvidence->all());
+    }
+
+    public function test_ai_case_view_refreshes_evidence_using_hybrid_reranking_when_embeddings_are_available(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4012', 'Hybrid evidence target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 15:20:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'hybrid-evidence.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/hybrid-evidence.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 3072,
+            'extracted_text' => 'Hybrid evidence source text.',
+            'text_extracted_at' => '2026-04-06 15:21:00',
+        ]);
+        $requirementChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'erfaring metode',
+            'char_start' => 0,
+            'char_end' => 15,
+            'word_count' => 2,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $requirementChunk, [
+            'requirement_text' => 'erfaring metode',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $knowledgeA = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Hybrid A',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'erfaring metode',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeA);
+        $knowledgeAChunk = $knowledgeA->chunks()->firstOrFail();
+        $knowledgeAChunk->forceFill([
+            'embedding_vector' => [1.0, 0.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 15:22:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($knowledgeA, '2026-04-06 15:22:00');
+
+        $knowledgeB = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Hybrid B',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'erfaring metode',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeB);
+        $knowledgeBChunk = $knowledgeB->chunks()->firstOrFail();
+        $knowledgeBChunk->forceFill([
+            'embedding_vector' => [0.0, 1.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 15:23:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($knowledgeB, '2026-04-06 15:23:00');
+
+        $knowledgeC = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Hybrid C',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'erfaring metode',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeC);
+        $knowledgeCChunk = $knowledgeC->chunks()->firstOrFail();
+        $this->touchKnowledgeItem($knowledgeC, '2026-04-06 15:24:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $evidence = collect(data_get($requirements->get($requirement->id), 'evidence', []));
+
+        $this->assertSame(['Hybrid A', 'Hybrid B', 'Hybrid C'], $evidence->pluck('knowledge_item.original_filename')->all());
+        $this->assertSame([$knowledgeAChunk->id, $knowledgeBChunk->id, $knowledgeCChunk->id], $evidence->pluck('knowledge_chunk.id')->all());
+        $this->assertSame([1, 2, 3], $evidence->pluck('match_rank')->all());
+        $this->assertSame(2, $evidence->first()['match_score']);
+    }
+
+    public function test_ai_case_view_refreshes_evidence_with_base_matcher_fallback_when_requirement_embedding_fails(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4013', 'Fallback evidence target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 15:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'fallback-evidence.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/fallback-evidence.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 3072,
+            'extracted_text' => 'Fallback evidence source text.',
+            'text_extracted_at' => '2026-04-06 15:31:00',
+        ]);
+        $requirementChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'erfaring metode',
+            'char_start' => 0,
+            'char_end' => 15,
+            'word_count' => 2,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $requirementChunk, [
+            'requirement_text' => 'erfaring metode',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $knowledgeOldest = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Fallback Oldest',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'erfaring metode',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeOldest);
+        $knowledgeOldestChunk = $knowledgeOldest->chunks()->firstOrFail();
+        $this->touchKnowledgeItem($knowledgeOldest, '2026-04-06 15:32:00');
+
+        $knowledgeNewest = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Fallback Newest',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'erfaring metode',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeNewest);
+        $knowledgeNewestChunk = $knowledgeNewest->chunks()->firstOrFail();
+        $this->touchKnowledgeItem($knowledgeNewest, '2026-04-06 15:33:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => false,
+                'embedding' => null,
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => 'upstream_unavailable',
+                'error_message' => 'OpenAI embedding request failed with HTTP status [503].',
+                'upstream_status' => 503,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => '{"error":"upstream unavailable"}',
+            ];
+        });
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $evidence = collect(data_get($requirements->get($requirement->id), 'evidence', []));
+
+        $this->assertSame(['Fallback Newest', 'Fallback Oldest'], $evidence->pluck('knowledge_item.original_filename')->all());
+        $this->assertSame([$knowledgeNewestChunk->id, $knowledgeOldestChunk->id], $evidence->pluck('knowledge_chunk.id')->all());
+        $this->assertSame([1, 2], $evidence->pluck('match_rank')->all());
+        $this->assertSame(2, $evidence->first()['match_score']);
+    }
+
+    public function test_ai_evidence_selection_status_can_be_updated_for_confirmed_requirements_and_primary_selection_is_unique(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4008', 'Evidence selection target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 14:20:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'evidence-selection.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/evidence-selection.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 3072,
+            'extracted_text' => 'Requirement source text.',
+            'text_extracted_at' => '2026-04-06 14:22:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 3,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Dokumentasjon må vedlegges.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $knowledgeOne = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Selection knowledge one',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeOne);
+        $chunkOne = $knowledgeOne->chunks()->firstOrFail();
+
+        $knowledgeTwo = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Selection knowledge two',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_METHOD,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeTwo);
+        $chunkTwo = $knowledgeTwo->chunks()->firstOrFail();
+
+        $evidenceOne = SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeOne->id,
+            'knowledge_item_chunk_id' => $chunkOne->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 5,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => null,
+        ]);
+        $evidenceTwo = SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeTwo->id,
+            'knowledge_item_chunk_id' => $chunkTwo->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 4,
+            'match_rank' => 2,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => null,
+        ]);
+
+        $selectionStatusUrlOne = route('app.ai.evidence.selection-status.update', [
+            'savedNotice' => $savedNotice->id,
+            'evidence' => $evidenceOne->id,
+        ]);
+        $selectionStatusUrlTwo = route('app.ai.evidence.selection-status.update', [
+            'savedNotice' => $savedNotice->id,
+            'evidence' => $evidenceTwo->id,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($selectionStatusUrlTwo, [
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidenceTwo->refresh();
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceTwo->selection_status);
+        $this->assertTrue($evidenceTwo->is_primary);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($selectionStatusUrlOne, [
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidenceOne->refresh();
+        $evidenceTwo->refresh();
+
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceOne->selection_status);
+        $this->assertTrue($evidenceOne->is_primary);
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $evidenceTwo->selection_status);
+        $this->assertFalse($evidenceTwo->is_primary);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($selectionStatusUrlOne, [
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_REJECTED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidenceOne->refresh();
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_REJECTED, $evidenceOne->selection_status);
+        $this->assertFalse($evidenceOne->is_primary);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($selectionStatusUrlOne, [
+                'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidenceOne->refresh();
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED, $evidenceOne->selection_status);
+        $this->assertFalse($evidenceOne->is_primary);
+    }
+
+    public function test_ai_case_view_refreshes_requirement_assessments_for_confirmed_requirements_only_and_prefers_selected_evidence(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4009', 'Assessment target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 14:40:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'assessment-pack.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/assessment-pack.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Reference and method source text.',
+            'text_extracted_at' => '2026-04-06 14:41:00',
+        ]);
+        $selectedChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentert erfaring fra tilsvarende prosjekter er vedlagt.',
+            'char_start' => 0,
+            'char_end' => 60,
+            'word_count' => 7,
+        ]);
+        $suggestedChunk = $document->chunks()->create([
+            'chunk_index' => 1,
+            'content' => 'Dette er en metode for gjennomføring av leveransen.',
+            'char_start' => 61,
+            'char_end' => 113,
+            'word_count' => 8,
+        ]);
+
+        $selectedRequirement = $this->createAiRequirement($savedNotice, $document, $selectedChunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+        $suggestedRequirement = $this->createAiRequirement($savedNotice, $document, $suggestedChunk, [
+            'requirement_text' => 'Leverandøren skal beskrive metode for gjennomføring og kvalitetssikring.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+        $pendingRequirement = $this->createAiRequirement($savedNotice, $document, $suggestedChunk, [
+            'requirement_text' => 'Dokumentasjon må vedlegges.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+        ]);
+        $rejectedRequirement = $this->createAiRequirement($savedNotice, $document, $suggestedChunk, [
+            'requirement_text' => 'Leverandøren skal oppgi kontaktperson.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
+        ]);
+
+        $selectedKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Selected evidence knowledge',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
+            'content' => 'Dokumentert erfaring fra tilsvarende prosjekter er vedlagt.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($selectedKnowledge);
+        $selectedKnowledgeChunk = $selectedKnowledge->chunks()->firstOrFail();
+
+        $suggestedKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Suggested evidence knowledge',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_METHOD,
+            'content' => 'Dette er en metode for gjennomføring av leveransen.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($suggestedKnowledge);
+        $suggestedKnowledgeChunk = $suggestedKnowledge->chunks()->firstOrFail();
+
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $selectedRequirement->id,
+            'knowledge_item_id' => $selectedKnowledge->id,
+            'knowledge_item_chunk_id' => $selectedKnowledgeChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 9,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            'is_primary' => true,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $selectedRequirement->id,
+            'knowledge_item_id' => $suggestedKnowledge->id,
+            'knowledge_item_chunk_id' => $suggestedKnowledgeChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 6,
+            'match_rank' => 2,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $suggestedRequirement->id,
+            'knowledge_item_id' => $suggestedKnowledge->id,
+            'knowledge_item_chunk_id' => $suggestedKnowledgeChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 7,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+
+        $capturedRequests = [];
+        $openAiResponses = [
+            $this->openAiAssessmentResponse([
+                'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+                'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+                'requirement_summary' => 'Kravet krever dokumentert erfaring fra tilsvarende prosjekter.',
+                'coverage_rationale' => 'Valgt evidens viser dokumentert erfaring fra tilsvarende prosjekter og støtter kravet tydelig.',
+                'missing_information' => 'Ingen åpenbare mangler identifisert.',
+                'recommended_next_step' => 'Bruk valgt evidens i utkastet og behold samme dokumentasjon som grunnlag.',
+            ]),
+            $this->openAiAssessmentResponse([
+                'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_PARTIAL,
+                'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_MEDIUM,
+                'requirement_summary' => 'Kravet krever en beskrivelse av gjennomføringsmetoden og kvalitetssikringen.',
+                'coverage_rationale' => 'Evidensen beskriver metode, men mangler tydelig støtte for kvalitetssikring og full dekning.',
+                'missing_information' => 'Mangler konkret kvalitetssikringsbeskrivelse og tydeligere dokumentasjon av gjennomføring.',
+                'recommended_next_step' => 'Legg til mer presis metode- og kvalitetssikringsdokumentasjon før utkast genereres.',
+            ]),
+        ];
+
+        Http::fake(function (Request $request) use (&$capturedRequests, $openAiResponses) {
+            $capturedRequests[] = $request;
+            $requestIndex = count($capturedRequests) - 1;
+
+            $fallbackResponse = $openAiResponses[array_key_last($openAiResponses)];
+
+            return Http::response($openAiResponses[$requestIndex] ?? $fallbackResponse, 200);
+        });
+
+        $foreignContext = $this->customerAdminContext('Foreign Assessment AS');
+        $foreignNotice = $this->createSavedNotice($foreignContext['customer']->id, 'AI-4010', 'Foreign assessment target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($foreignNotice, '2026-04-06 14:45:00');
+        $foreignDocument = $this->createAiDocument($foreignNotice, [
+            'uploaded_by_user_id' => $foreignContext['user']->id,
+            'original_filename' => 'foreign-assessment.docx',
+            'stored_path' => 'saved-notices/'.$foreignNotice->id.'/ai-documents/foreign-assessment.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Foreign assessment source text.',
+            'text_extracted_at' => '2026-04-06 14:46:00',
+        ]);
+        $foreignChunk = $foreignDocument->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentert erfaring fra tilsvarende prosjekter er vedlagt.',
+            'char_start' => 0,
+            'char_end' => 60,
+            'word_count' => 7,
+        ]);
+        $foreignRequirement = $this->createAiRequirement($foreignNotice, $foreignDocument, $foreignChunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertSessionHas('success', 'Krav analysert.');
+
+        Http::assertSentCount(2);
+
+        $firstPrompt = (string) data_get($capturedRequests[0]['input'], '1.content.0.text', '');
+        $secondPrompt = (string) data_get($capturedRequests[1]['input'], '1.content.0.text', '');
+
+        $this->assertSame(config('services.openai.model'), $capturedRequests[0]['model']);
+        $this->assertStringContainsString('Dokumentert erfaring fra tilsvarende prosjekter er vedlagt.', $firstPrompt);
+        $this->assertStringNotContainsString('Dette er en metode for gjennomføring av leveransen.', $firstPrompt);
+        $this->assertStringContainsString('Dette er en metode for gjennomføring av leveransen.', $secondPrompt);
+
+        $selectedRequirement->refresh();
+        $suggestedRequirement->refresh();
+        $pendingRequirement->refresh();
+        $rejectedRequirement->refresh();
+        $foreignRequirement->refresh();
+
+        $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $selectedRequirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED,
+            'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+            'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+        ]);
+        $this->assertDatabaseHas('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $suggestedRequirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED,
+            'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_PARTIAL,
+            'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_MEDIUM,
+        ]);
+        $this->assertDatabaseMissing('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $pendingRequirement->id,
+        ]);
+        $this->assertDatabaseMissing('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $rejectedRequirement->id,
+        ]);
+        $this->assertDatabaseMissing('saved_notice_ai_requirement_assessments', [
+            'saved_notice_ai_requirement_id' => $foreignRequirement->id,
+        ]);
+
+        $selectedAssessment = SavedNoticeAiRequirementAssessment::query()
+            ->where('saved_notice_ai_requirement_id', $selectedRequirement->id)
+            ->firstOrFail();
+        $suggestedAssessment = SavedNoticeAiRequirementAssessment::query()
+            ->where('saved_notice_ai_requirement_id', $suggestedRequirement->id)
+            ->firstOrFail();
+
+        $this->assertCount(1, $selectedAssessment->source_evidence_snapshot);
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED, $selectedAssessment->source_evidence_snapshot[0]['selection_status']);
+        $this->assertSame(SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED, $suggestedAssessment->source_evidence_snapshot[0]['selection_status']);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+
+        $this->assertSame(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.assessment_refresh_url'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED, data_get($requirements->get($selectedRequirement->id), 'assessment.assessment_status'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED, data_get($requirements->get($selectedRequirement->id), 'assessment.coverage_status'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW, data_get($requirements->get($selectedRequirement->id), 'assessment.risk_level'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED, data_get($requirements->get($suggestedRequirement->id), 'assessment.assessment_status'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_PARTIAL, data_get($requirements->get($suggestedRequirement->id), 'assessment.coverage_status'));
+        $this->assertSame(SavedNoticeAiRequirementAssessment::RISK_LEVEL_MEDIUM, data_get($requirements->get($suggestedRequirement->id), 'assessment.risk_level'));
+        $this->assertNull(data_get($requirements->get($pendingRequirement->id), 'assessment'));
+        $this->assertNull(data_get($requirements->get($rejectedRequirement->id), 'assessment'));
+        $this->assertCount(4, $requirements);
+        $this->assertFalse($requirements->contains(fn (array $requirement): bool => $requirement['id'] === $foreignRequirement->id));
+    }
+
+    public function test_ai_requirement_assessment_refresh_preserves_completed_rows_when_the_service_fails_and_creates_failed_rows_without_previous_state(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4011', 'Assessment failure target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 15:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'assessment-failure.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/assessment-failure.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Assessment failure source text.',
+            'text_extracted_at' => '2026-04-06 15:01:00',
+        ]);
+        $primaryChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'char_start' => 0,
+            'char_end' => 67,
+            'word_count' => 8,
+        ]);
+        $secondaryChunk = $document->chunks()->create([
+            'chunk_index' => 1,
+            'content' => 'Leverandøren skal beskrive metode for gjennomføring.',
+            'char_start' => 68,
+            'char_end' => 120,
+            'word_count' => 7,
+        ]);
+
+        $completedRequirement = $this->createAiRequirement($savedNotice, $document, $primaryChunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+        $failedRequirement = $this->createAiRequirement($savedNotice, $document, $secondaryChunk, [
+            'requirement_text' => 'Leverandøren skal beskrive metode for gjennomføring.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        SavedNoticeAiRequirementAssessment::query()->create([
+            'saved_notice_ai_requirement_id' => $completedRequirement->id,
+            'assessment_status' => SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED,
+            'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+            'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+            'requirement_summary' => 'Existing completed summary.',
+            'coverage_rationale' => 'Existing completed rationale.',
+            'missing_information' => 'Existing completed missing information.',
+            'recommended_next_step' => 'Existing completed next step.',
+            'source_evidence_snapshot' => [
+                [
+                    'id' => 1,
+                    'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+                ],
+            ],
+            'assessed_at' => '2026-04-06 15:05:00',
+            'assessed_by_user_id' => $context['user']->id,
+        ]);
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response($this->openAiInvalidAssessmentResponse(), 200),
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('warning', 'AI-vurdering feilet for ett eller flere krav.');
+
+        Http::assertSentCount(2);
+
+        $completedAssessment = SavedNoticeAiRequirementAssessment::query()
+            ->where('saved_notice_ai_requirement_id', $completedRequirement->id)
+            ->firstOrFail();
+        $failedAssessment = SavedNoticeAiRequirementAssessment::query()
+            ->where('saved_notice_ai_requirement_id', $failedRequirement->id)
+            ->firstOrFail();
+
+        $this->assertSame(SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_COMPLETED, $completedAssessment->assessment_status);
+        $this->assertSame('Existing completed summary.', $completedAssessment->requirement_summary);
+        $this->assertSame(SavedNoticeAiRequirementAssessment::ASSESSMENT_STATUS_FAILED, $failedAssessment->assessment_status);
+        $this->assertNull($failedAssessment->coverage_status);
+        $this->assertNull($failedAssessment->risk_level);
+        $this->assertNull($failedAssessment->requirement_summary);
+        $this->assertSame([], $failedAssessment->source_evidence_snapshot);
+        $this->assertNull($failedAssessment->assessed_at);
     }
 
     public function test_ai_requirement_work_status_can_be_updated_for_confirmed_requirements_and_assignment_is_persisted(): void
@@ -1467,6 +2162,39 @@ class AiControllerTest extends TestCase
             'customer' => $customer,
             'user' => $user,
         ];
+    }
+
+    /**
+     * Purpose: Bind a deterministic embedding service for controller integration tests.
+     * Inputs: A callback that returns the desired embedding outcome.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindEmbeddingService(callable $handler): void
+    {
+        $service = Mockery::mock(EmbeddingService::class);
+        $service->shouldReceive('tryEmbedText')
+            ->andReturnUsing($handler);
+
+        $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Persist a deterministic timestamp for a knowledge item fixture.
+     * Inputs: The knowledge item and the timestamp to apply.
+     * Returns: The refreshed knowledge item model.
+     * Side effects: Updates the knowledge_items row directly in the test database.
+     */
+    private function touchKnowledgeItem(KnowledgeItem $knowledgeItem, string $timestamp): KnowledgeItem
+    {
+        DB::table('knowledge_items')
+            ->where('id', $knowledgeItem->id)
+            ->update([
+                'updated_at' => $timestamp,
+                'created_at' => $timestamp,
+            ]);
+
+        return $knowledgeItem->refresh();
     }
 
     private function createCustomer(string $name): Customer
@@ -1793,6 +2521,65 @@ class AiControllerTest extends TestCase
             null,
             true,
         );
+    }
+
+    /**
+     * Purpose: Build a deterministic OpenAI Responses API payload for assessment tests.
+     * Inputs: The canonical assessment fields to embed in the assistant output.
+     * Returns: A fake OpenAI response body that mimics a JSON-schema response.
+     * Side effects: None.
+     */
+    private function openAiAssessmentResponse(array $fields): array
+    {
+        $json = json_encode($fields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        if (! is_string($json)) {
+            throw new RuntimeException('Unable to build a fake OpenAI assessment response.');
+        }
+
+        return [
+            'id' => (string) Str::ulid(),
+            'object' => 'response',
+            'status' => 'completed',
+            'output' => [
+                [
+                    'id' => (string) Str::ulid(),
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'status' => 'completed',
+                    'content' => [
+                        [
+                            'type' => 'output_text',
+                            'text' => $json,
+                        ],
+                    ],
+                ],
+            ],
+            'output_text' => $json,
+            'usage' => [
+                'input_tokens' => 100,
+                'output_tokens' => 40,
+                'total_tokens' => 140,
+            ],
+        ];
+    }
+
+    /**
+     * Purpose: Build a deterministic invalid OpenAI assessment payload for failure tests.
+     * Inputs: None.
+     * Returns: A fake OpenAI response body with invalid enum values.
+     * Side effects: None.
+     */
+    private function openAiInvalidAssessmentResponse(): array
+    {
+        return $this->openAiAssessmentResponse([
+            'coverage_status' => 'unknown',
+            'risk_level' => 'extreme',
+            'requirement_summary' => 'Invalid output.',
+            'coverage_rationale' => 'Invalid output.',
+            'missing_information' => 'Invalid output.',
+            'recommended_next_step' => 'Invalid output.',
+        ]);
     }
 
     private function useProjectPostgresConnection(): void

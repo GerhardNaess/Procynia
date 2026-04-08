@@ -134,7 +134,7 @@ class SavedNoticeBidLifecycleTest extends TestCase
         $notice->transitionBidStatus(SavedNotice::BID_STATUS_WON);
     }
 
-    public function test_archived_is_allowed_only_from_terminal_statuses(): void
+    public function test_archived_is_not_a_direct_bid_status_transition(): void
     {
         foreach ([
             SavedNotice::BID_STATUS_WON,
@@ -147,10 +147,18 @@ class SavedNoticeBidLifecycleTest extends TestCase
                 'bid_closed_at' => Carbon::parse('2026-03-31 09:15:00'),
             ]);
 
-            $notice->transitionBidStatus(SavedNotice::BID_STATUS_ARCHIVED);
-
-            $this->assertSame(SavedNotice::BID_STATUS_ARCHIVED, $notice->bid_status);
-            $this->assertNotNull($notice->archived_at);
+            try {
+                $notice->transitionBidStatus(SavedNotice::BID_STATUS_ARCHIVED);
+                $this->fail(sprintf(
+                    'Expected archived transition from [%s] to be rejected.',
+                    $fromStatus,
+                ));
+            } catch (\InvalidArgumentException $exception) {
+                $this->assertSame(
+                    sprintf('Bid status transition from [%s] to [archived] is not allowed.', $fromStatus),
+                    $exception->getMessage(),
+                );
+            }
         }
     }
 
@@ -204,17 +212,21 @@ class SavedNoticeBidLifecycleTest extends TestCase
         }
     }
 
-    public function test_archived_preserves_existing_bid_closed_at(): void
+    public function test_archive_with_history_type_preserves_existing_bid_closed_at(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-03-31 12:00:00'));
+
         $closedAt = Carbon::parse('2026-03-20 11:30:00');
         $notice = new SavedNotice([
             'bid_status' => SavedNotice::BID_STATUS_WON,
             'bid_closed_at' => $closedAt,
         ]);
 
-        $notice->transitionBidStatus(SavedNotice::BID_STATUS_ARCHIVED);
+        $notice->archiveWithHistoryType(SavedNotice::HISTORY_TYPE_WON);
 
-        $this->assertSame(SavedNotice::BID_STATUS_ARCHIVED, $notice->bid_status);
+        $this->assertSame(SavedNotice::BID_STATUS_WON, $notice->bid_status);
         $this->assertTrue($notice->bid_closed_at->equalTo($closedAt));
+        $this->assertTrue($notice->archived_at->equalTo(now()));
+        $this->assertSame(SavedNotice::HISTORY_TYPE_WON, $notice->history_type);
     }
 }

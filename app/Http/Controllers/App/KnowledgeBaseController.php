@@ -4,14 +4,17 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeItemChunk;
 use App\Models\User;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
+use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -101,14 +104,14 @@ class KnowledgeBaseController extends Controller
             $extractedText = $this->documentTextExtractor->extractText($absolutePath);
             $extractionFailed = trim($extractedText) === '';
 
-            DB::transaction(function () use (
+            $result = DB::transaction(function () use (
                 $customerId,
                 $payload,
                 $request,
                 $storedPath,
                 $extractedText,
                 $extractionFailed,
-            ): void {
+            ): array {
                 $knowledgeDocument = KnowledgeItem::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $request->user()?->id,
@@ -132,8 +135,13 @@ class KnowledgeBaseController extends Controller
                     'is_active' => $payload['is_active'],
                 ]);
 
-                $this->syncChunks($knowledgeDocument, $extractedText);
+                return [
+                    'knowledge_document' => $knowledgeDocument,
+                    'chunks' => $this->syncChunks($knowledgeDocument, $extractedText),
+                ];
             });
+
+            $this->syncChunkEmbeddings($result['knowledge_document'], $result['chunks']);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
@@ -387,16 +395,16 @@ class KnowledgeBaseController extends Controller
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, string $extractedText): void
+    private function syncChunks(KnowledgeItem $knowledgeDocument, string $extractedText): Collection
     {
         $knowledgeDocument->chunks()->delete();
         $chunkPayloads = $this->documentChunker->chunkText($extractedText);
 
         if ($chunkPayloads === []) {
-            return;
+            return collect();
         }
 
-        $knowledgeDocument->chunks()->createMany(
+        return collect($knowledgeDocument->chunks()->createMany(
             array_map(
                 static fn (array $chunkPayload, int $chunkIndex): array => [
                     'chunk_index' => $chunkIndex,
@@ -407,7 +415,85 @@ class KnowledgeBaseController extends Controller
                 $chunkPayloads,
                 array_keys($chunkPayloads),
             ),
-        );
+        ));
+    }
+
+    /**
+     * Purpose: Generate and persist embeddings for the freshly created knowledge chunks.
+     * Inputs: The knowledge document and its persisted chunks.
+     * Returns: None.
+     * Side effects: Calls OpenAI, stores embeddings, and records per-chunk failures.
+     */
+    private function syncChunkEmbeddings(KnowledgeItem $knowledgeDocument, Collection $chunks): void
+    {
+        if ($chunks->isEmpty()) {
+            return;
+        }
+
+        foreach ($chunks as $chunk) {
+            if (! $chunk instanceof KnowledgeItemChunk) {
+                continue;
+            }
+
+            $chunkText = trim((string) $chunk->content);
+
+            if ($chunkText === '') {
+                $chunk->forceFill([
+                    'embedding_error' => 'Chunk content was empty and was not embedded.',
+                ])->save();
+
+                continue;
+            }
+
+            $outcome = app(\App\Services\OpenAi\EmbeddingService::class)->tryEmbedText($chunkText);
+
+            if (! ($outcome['ok'] ?? false)) {
+                $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
+
+                $chunk->forceFill([
+                    'embedding_error' => (string) ($outcome['error_message'] ?? 'Knowledge chunk embedding failed.'),
+                ])->save();
+
+                continue;
+            }
+
+            $chunk->forceFill([
+                'embedding_vector' => $outcome['embedding'] ?? null,
+                'embedding_model' => $outcome['model'] ?? null,
+                'embedding_generated_at' => now(),
+                'embedding_error' => null,
+            ])->save();
+        }
+    }
+
+    /**
+     * Purpose: Log a chunk embedding failure with enough context to diagnose the upstream call.
+     * Inputs: The knowledge document, the chunk, and the embedding outcome.
+     * Returns: None.
+     * Side effects: Writes a warning or error log entry.
+     */
+    private function logChunkEmbeddingFailure(KnowledgeItem $knowledgeDocument, KnowledgeItemChunk $chunk, array $outcome): void
+    {
+        $context = [
+            'knowledge_item_id' => $knowledgeDocument->id,
+            'knowledge_item_title' => $knowledgeDocument->title,
+            'knowledge_item_chunk_id' => $chunk->id,
+            'chunk_index' => $chunk->chunk_index,
+            'embedding_model' => $outcome['model'] ?? null,
+            'upstream_status' => $outcome['upstream_status'] ?? null,
+            'request_id' => $outcome['request_id'] ?? null,
+            'error_type' => $outcome['error_type'] ?? null,
+            'error_message' => $outcome['error_message'] ?? null,
+            'response_body_excerpt' => $outcome['response_body_excerpt'] ?? null,
+        ];
+
+        if (in_array($outcome['error_type'] ?? null, ['unexpected_response', 'invalid_request'], true)) {
+            Log::error('Knowledge chunk embedding failed.', $context);
+
+            return;
+        }
+
+        Log::warning('Knowledge chunk embedding failed.', $context);
     }
 
     /**

@@ -3,6 +3,8 @@
 namespace Tests\Unit;
 
 use App\Jobs\Doffin\PrepareDoffinSupplierHarvestRun;
+use App\Models\DoffinNotice;
+use App\Models\DoffinSupplier;
 use App\Models\DoffinSupplierHarvestRun;
 use App\Models\DoffinSupplierHarvestRunNotice;
 use App\Models\User;
@@ -10,7 +12,7 @@ use App\Services\Doffin\DoffinNoticeParser;
 use App\Services\Doffin\DoffinPersistenceService;
 use App\Services\Doffin\DoffinPublicClient;
 use App\Services\Doffin\DoffinSupplierHarvestService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
@@ -19,11 +21,23 @@ use Tests\TestCase;
 
 class DoffinSupplierHarvestServiceTest extends TestCase
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->useTestingPostgresConnection();
+        DB::beginTransaction();
+    }
 
     protected function tearDown(): void
     {
         Mockery::close();
+
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        DB::disconnect(DB::getDefaultConnection());
 
         parent::tearDown();
     }
@@ -139,9 +153,12 @@ class DoffinSupplierHarvestServiceTest extends TestCase
             'supplier_name' => 'Supplier One AS',
             'organization_number' => '987654321',
         ]);
+        $storedNotice = DoffinNotice::query()->where('notice_id', '2026-200001')->firstOrFail();
+        $storedSupplier = DoffinSupplier::query()->where('supplier_name', 'Supplier One AS')->firstOrFail();
+
         $this->assertDatabaseHas('doffin_notice_suppliers', [
-            'doffin_notice_id' => 1,
-            'doffin_supplier_id' => 1,
+            'doffin_notice_id' => $storedNotice->id,
+            'doffin_supplier_id' => $storedSupplier->id,
         ]);
         $this->assertDatabaseHas('doffin_supplier_harvest_run_notices', [
             'doffin_supplier_harvest_run_id' => $run->id,
@@ -310,6 +327,23 @@ class DoffinSupplierHarvestServiceTest extends TestCase
             $noticeParser ?? app(DoffinNoticeParser::class),
             $persistenceService ?? app(DoffinPersistenceService::class),
         );
+    }
+
+    private function useTestingPostgresConnection(): void
+    {
+        config([
+            'database.default' => 'pgsql',
+            'database.connections.pgsql.database' => 'procynia_test',
+            'database.connections.pgsql.host' => '127.0.0.1',
+            'database.connections.pgsql.port' => '5432',
+            'database.connections.pgsql.username' => 'gehard',
+            'database.connections.pgsql.password' => '',
+            'database.connections.pgsql.search_path' => 'public',
+        ]);
+
+        DB::purge('pgsql');
+        DB::setDefaultConnection('pgsql');
+        DB::reconnect('pgsql');
     }
 
     private function successfulNoticeDetail(string $noticeId, string $supplierName): array

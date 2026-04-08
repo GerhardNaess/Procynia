@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Support\CosineSimilarity;
 use Illuminate\Support\Collection;
 
 class RequirementKnowledgeMatcher
 {
     private const MAX_RESULTS = 5;
+
+    private const EMBEDDING_WEIGHT = 0.5;
 
     private const HEURISTIC_BOOST = 2;
 
@@ -42,13 +45,18 @@ class RequirementKnowledgeMatcher
         'you',
     ];
 
+    public function __construct(
+        private readonly CosineSimilarity $cosineSimilarity,
+    ) {
+    }
+
     /**
      * Purpose: Match one requirement text against a scoped set of knowledge chunks.
      * Inputs: The requirement text and a collection of chunk payloads.
      * Returns: The top ranked knowledge matches, limited to a small deterministic set.
      * Side effects: None.
      */
-    public function match(string $requirementText, Collection $knowledgeChunks): Collection
+    public function match(string $requirementText, Collection $knowledgeChunks, ?array $requirementEmbedding = null): Collection
     {
         $normalizedRequirementText = $this->normalizeText($requirementText);
         $requirementTokens = $this->tokenize($normalizedRequirementText);
@@ -59,7 +67,7 @@ class RequirementKnowledgeMatcher
 
         $heuristicBoosts = $this->heuristicBoosts($normalizedRequirementText);
 
-        return $knowledgeChunks
+        $rankedCandidates = $knowledgeChunks
             ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts): ?array {
                 $chunkContent = (string) data_get($chunk, 'content', '');
                 $normalizedChunkContent = $this->normalizeText($chunkContent);
@@ -93,6 +101,10 @@ class RequirementKnowledgeMatcher
                     'chunk_index' => (int) data_get($chunk, 'chunk_index', 0),
                     'chunk_content' => $chunkContent,
                     'score' => $score,
+                    'base_score' => $score,
+                    'embedding_vector' => data_get($chunk, 'embedding_vector'),
+                    'embedding_similarity' => null,
+                    'final_score' => (float) $score,
                     'knowledge_item_updated_at' => (string) data_get($chunk, 'knowledge_item_updated_at', ''),
                 ];
             })
@@ -117,6 +129,72 @@ class RequirementKnowledgeMatcher
                 return $left['chunk_id'] <=> $right['chunk_id'];
             })
             ->take(self::MAX_RESULTS)
+            ->values();
+
+        if (! is_array($requirementEmbedding) || $requirementEmbedding === []) {
+            return $rankedCandidates->map(function (array $candidate): array {
+                $candidate['embedding_similarity'] = null;
+                $candidate['final_score'] = (float) $candidate['base_score'];
+
+                return $candidate;
+            });
+        }
+
+        return $rankedCandidates
+            ->map(function (array $candidate) use ($requirementEmbedding): array {
+                $chunkEmbedding = data_get($candidate, 'embedding_vector');
+
+                if (! is_array($chunkEmbedding) || $chunkEmbedding === []) {
+                    $candidate['embedding_similarity'] = null;
+                    $candidate['final_score'] = (float) $candidate['base_score'];
+
+                    return $candidate;
+                }
+
+                $similarity = $this->cosineSimilarity->calculate($requirementEmbedding, $chunkEmbedding);
+
+                if ($similarity === null) {
+                    $candidate['embedding_similarity'] = null;
+                    $candidate['final_score'] = (float) $candidate['base_score'];
+
+                    return $candidate;
+                }
+
+                $candidate['embedding_similarity'] = $similarity;
+                $candidate['final_score'] = (float) $candidate['base_score'] + ((($similarity + 1.0) / 2.0) * self::EMBEDDING_WEIGHT);
+
+                return $candidate;
+            })
+            ->sort(function (array $left, array $right): int {
+                if (abs($left['final_score'] - $right['final_score']) > 0.000001) {
+                    return $right['final_score'] <=> $left['final_score'];
+                }
+
+                if ($left['base_score'] !== $right['base_score']) {
+                    return $right['base_score'] <=> $left['base_score'];
+                }
+
+                $leftSimilarity = $left['embedding_similarity'] ?? -INF;
+                $rightSimilarity = $right['embedding_similarity'] ?? -INF;
+
+                if (abs($leftSimilarity - $rightSimilarity) > 0.000001) {
+                    return $rightSimilarity <=> $leftSimilarity;
+                }
+
+                if ($left['knowledge_item_updated_at'] !== $right['knowledge_item_updated_at']) {
+                    return strcmp($right['knowledge_item_updated_at'], $left['knowledge_item_updated_at']);
+                }
+
+                if ($left['knowledge_item_id'] !== $right['knowledge_item_id']) {
+                    return $right['knowledge_item_id'] <=> $left['knowledge_item_id'];
+                }
+
+                if ($left['chunk_index'] !== $right['chunk_index']) {
+                    return $left['chunk_index'] <=> $right['chunk_index'];
+                }
+
+                return $left['chunk_id'] <=> $right['chunk_id'];
+            })
             ->values();
     }
 

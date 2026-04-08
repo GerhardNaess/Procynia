@@ -217,9 +217,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $documentService,
             new SavedNoticeAccessService(),
         );
-        $response = $controller->index($request)->toResponse($request);
+        $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
+        $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('App/Notices/Index', $page['component']);
         $this->assertSame('live', $page['props']['mode']);
         $this->assertSame('90910000,72222300', $page['props']['filters']['cpv']);
@@ -293,9 +294,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $documentService,
             new SavedNoticeAccessService(),
         );
-        $response = $controller->index($request)->toResponse($request);
+        $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
+        $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('365', $page['props']['filters']['publication_period']);
         $this->assertSame(now()->subDays(365)->toDateString(), $page['props']['filters']['publication_date_from']);
         $this->assertSame(now()->toDateString(), $page['props']['filters']['publication_date_to']);
@@ -358,9 +360,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $documentService,
             new SavedNoticeAccessService(),
         );
-        $response = $controller->index($request)->toResponse($request);
+        $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
+        $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(151555, $page['props']['notices']['meta']['total']);
         $this->assertSame(151555, $page['props']['notices']['meta']['numHitsTotal']);
         $this->assertSame(1000, $page['props']['notices']['meta']['numHitsAccessible']);
@@ -413,10 +416,247 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $documentService,
             new SavedNoticeAccessService(),
         );
-        $response = $controller->index($request)->toResponse($request);
+        $response = $controller->index($request);
         $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
+        $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(0, $page['props']['monitoring']['new_hits_last_day_count']);
         $this->assertSame('Nattlig Doffin-discovery kjører hver dag kl. 01:15.', $page['props']['monitoring']['next_update_text']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('liveSearchErrorCases')]
+    public function test_index_maps_controlled_live_search_errors_to_http_status_and_safe_message(array $serviceResponse, int $expectedStatus, string $expectedMessage): void
+    {
+        $customerContext = Mockery::mock(CustomerContext::class);
+        $customerContext
+            ->shouldReceive('currentCustomerId')
+            ->once()
+            ->andReturn(1);
+
+        $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
+        $liveSearchService
+            ->shouldReceive('search')
+            ->once()
+            ->andReturn($serviceResponse);
+
+        $controller = $this->makeLiveSearchController($customerContext, $liveSearchService);
+        $request = $this->makeLiveSearchRequest([
+            'q' => 'Renhold',
+        ]);
+        $response = $controller->index($request);
+        $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame($expectedStatus, $response->getStatusCode());
+        $this->assertSame('App/Notices/Index', $page['component']);
+        $this->assertSame('live', $page['props']['mode']);
+        $this->assertSame($expectedMessage, $page['props']['notices']['error']);
+        $this->assertSame($serviceResponse['error_type'], $page['props']['notices']['meta']['error_type']);
+        $this->assertSame($serviceResponse['upstream_status'], $page['props']['notices']['meta']['upstream_status']);
+        $this->assertFalse($page['props']['notices']['meta']['fallback_used']);
+        $this->assertSame([], $page['props']['notices']['data']);
+    }
+
+    public function test_index_exposes_fallback_used_when_live_search_succeeds_without_a_buyer_lookup(): void
+    {
+        $customerContext = Mockery::mock(CustomerContext::class);
+        $customerContext
+            ->shouldReceive('currentCustomerId')
+            ->once()
+            ->andReturn(1);
+
+        $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
+        $liveSearchService
+            ->shouldReceive('search')
+            ->once()
+            ->andReturn([
+                'ok' => true,
+                'items' => [
+                    [
+                        'id' => '2026-105164',
+                        'buyer' => [
+                            [
+                                'id' => 'e7c38cb469460081ad1de749d4670c71',
+                                'organizationId' => '984195796',
+                                'name' => 'Domstoladministrasjonen',
+                            ],
+                        ],
+                        'heading' => 'Renholdstjenester Vestre Finnmark tingrett, rettssted Alta',
+                        'description' => 'Formålet med anskaffelsen er å inngå kontrakt om renholdstjenester.',
+                        'status' => null,
+                        'publicationDate' => '2026-03-16',
+                        'deadline' => null,
+                    ],
+                ],
+                'hits' => [
+                    [
+                        'id' => '2026-105164',
+                        'buyer' => [
+                            [
+                                'id' => 'e7c38cb469460081ad1de749d4670c71',
+                                'organizationId' => '984195796',
+                                'name' => 'Domstoladministrasjonen',
+                            ],
+                        ],
+                        'heading' => 'Renholdstjenester Vestre Finnmark tingrett, rettssted Alta',
+                        'description' => 'Formålet med anskaffelsen er å inngå kontrakt om renholdstjenester.',
+                        'status' => null,
+                        'publicationDate' => '2026-03-16',
+                        'deadline' => null,
+                    ],
+                ],
+                'fallback_used' => true,
+                'page' => 1,
+                'perPage' => 15,
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+                'meta' => [
+                    'fallback_used' => true,
+                ],
+            ]);
+
+        $controller = $this->makeLiveSearchController($customerContext, $liveSearchService);
+        $request = $this->makeLiveSearchRequest([
+            'q' => 'Renhold',
+        ]);
+        $response = $controller->index($request);
+        $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertTrue($page['props']['notices']['meta']['fallback_used']);
+        $this->assertSame('2026-105164', $page['props']['notices']['data'][0]['notice_id']);
+    }
+
+    public static function liveSearchErrorCases(): array
+    {
+        return [
+            'invalid_request' => [
+                [
+                    'ok' => false,
+                    'items' => [],
+                    'hits' => [],
+                    'error_type' => 'invalid_request',
+                    'error_message' => 'Doffin avviste søket.',
+                    'upstream_status' => 400,
+                    'fallback_used' => false,
+                    'page' => 1,
+                    'perPage' => 15,
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'meta' => [
+                        'fallback_used' => false,
+                    ],
+                ],
+                422,
+                'Søket mot Doffin ble avvist. Kontroller filtrene og prøv igjen.',
+            ],
+            'upstream_unavailable' => [
+                [
+                    'ok' => false,
+                    'items' => [],
+                    'hits' => [],
+                    'error_type' => 'upstream_unavailable',
+                    'error_message' => 'Doffin er midlertidig utilgjengelig.',
+                    'upstream_status' => 503,
+                    'fallback_used' => false,
+                    'page' => 1,
+                    'perPage' => 15,
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'meta' => [
+                        'fallback_used' => false,
+                    ],
+                ],
+                503,
+                'Doffin er midlertidig utilgjengelig. Prøv igjen om litt.',
+            ],
+            'timeout' => [
+                [
+                    'ok' => false,
+                    'items' => [],
+                    'hits' => [],
+                    'error_type' => 'timeout',
+                    'error_message' => 'Doffin svarte ikke i tide.',
+                    'upstream_status' => null,
+                    'fallback_used' => false,
+                    'page' => 1,
+                    'perPage' => 15,
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'meta' => [
+                        'fallback_used' => false,
+                    ],
+                ],
+                503,
+                'Doffin svarte ikke i tide. Prøv igjen om litt.',
+            ],
+            'connection_error' => [
+                [
+                    'ok' => false,
+                    'items' => [],
+                    'hits' => [],
+                    'error_type' => 'connection_error',
+                    'error_message' => 'Klarte ikke å koble til Doffin.',
+                    'upstream_status' => null,
+                    'fallback_used' => false,
+                    'page' => 1,
+                    'perPage' => 15,
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'meta' => [
+                        'fallback_used' => false,
+                    ],
+                ],
+                503,
+                'Klarte ikke å koble til Doffin. Prøv igjen om litt.',
+            ],
+            'unexpected_response' => [
+                [
+                    'ok' => false,
+                    'items' => [],
+                    'hits' => [],
+                    'error_type' => 'unexpected_response',
+                    'error_message' => 'Doffin returnerte et uventet svar.',
+                    'upstream_status' => 200,
+                    'fallback_used' => false,
+                    'page' => 1,
+                    'perPage' => 15,
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'meta' => [
+                        'fallback_used' => false,
+                    ],
+                ],
+                502,
+                'Doffin returnerte et uventet svar. Prøv igjen om litt.',
+            ],
+        ];
+    }
+
+    private function makeLiveSearchController(CustomerContext $customerContext, DoffinLiveSearchService $liveSearchService): NoticeController
+    {
+        return new NoticeController(
+            $customerContext,
+            new CustomerNoticeCpvSearchService(),
+            $liveSearchService,
+            Mockery::mock(DoffinNoticeDocumentService::class),
+            new SavedNoticeAccessService(),
+        );
+    }
+
+    private function makeLiveSearchRequest(array $query = []): Request
+    {
+        $request = Request::create('/app/notices', 'GET', $query);
+        $request->headers->set('X-Inertia', 'true');
+        $request->headers->set('X-Requested-With', 'XMLHttpRequest');
+        $request->setUserResolver(fn (): User => new User([
+            'id' => 23,
+            'name' => 'Customer Admin',
+            'email' => 'customer.admin@procynia.local',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'customer_id' => 1,
+            'is_active' => true,
+        ]));
+
+        return $request;
     }
 }

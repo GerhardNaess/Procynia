@@ -8,10 +8,12 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\OpenAi\EmbeddingService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Mockery;
 use RuntimeException;
 use Tests\TestCase;
 use ZipArchive;
@@ -24,6 +26,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
+        $this->bindSuccessfulEmbeddingService();
     }
 
     protected function tearDown(): void
@@ -127,6 +130,76 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));
         $this->assertGreaterThan(0, $chunks->count());
         $this->assertSame(range(0, $chunks->count() - 1), $chunks->pluck('chunk_index')->all());
+    }
+
+    public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Four B AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('embedding-success.docx', 'Embeddings should be persisted for this knowledge chunk.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'embedding-success.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
+        $this->assertNotNull($chunk->embedding_generated_at);
+        $this->assertNull($chunk->embedding_error);
+    }
+
+    public function test_knowledge_document_upload_persists_embedding_error_when_generation_fails(): void
+    {
+        Storage::fake('local');
+
+        $service = Mockery::mock(EmbeddingService::class);
+        $service->shouldReceive('tryEmbedText')
+            ->once()
+            ->andReturn([
+                'ok' => false,
+                'embedding' => null,
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => 'upstream_unavailable',
+                'error_message' => 'OpenAI embedding request failed with HTTP status [503].',
+                'upstream_status' => 503,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => '{"error":"upstream unavailable"}',
+            ]);
+        $this->app->instance(EmbeddingService::class, $service);
+
+        $context = $this->customerContext('Customer Four C AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('embedding-failure.docx', 'Embedding should fail for this knowledge chunk.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'embedding-failure.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $this->assertNull($chunk->embedding_vector);
+        $this->assertNull($chunk->embedding_generated_at);
+        $this->assertNull($chunk->embedding_model);
+        $this->assertSame('OpenAI embedding request failed with HTTP status [503].', $chunk->embedding_error);
     }
 
     public function test_knowledge_document_upload_marks_failed_extraction_when_parsing_fails(): void
@@ -392,6 +465,33 @@ class KnowledgeBaseControllerTest extends TestCase
             null,
             true,
         );
+    }
+
+    /**
+     * Purpose: Bind a deterministic embedding service for knowledge document upload tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulEmbeddingService(): void
+    {
+        $service = Mockery::mock(EmbeddingService::class);
+        $service->shouldReceive('tryEmbedText')
+            ->andReturnUsing(function (string $text): array {
+                return [
+                    'ok' => true,
+                    'embedding' => [0.11, 0.22, 0.33],
+                    'model' => 'text-embedding-3-small',
+                    'usage' => [],
+                    'error_type' => null,
+                    'error_message' => null,
+                    'upstream_status' => 200,
+                    'request_id' => 'test-request-id',
+                    'response_body_excerpt' => null,
+                ];
+            });
+
+        $this->app->instance(EmbeddingService::class, $service);
     }
 
     /**

@@ -113,4 +113,17 @@ class KnowledgeItem extends Model
         return $this->hasMany(KnowledgeItemChunk::class)
             ->orderBy('chunk_index');
     }
+
+    /**
+     * Purpose: Resolve the persisted evidence rows grounded in this knowledge item.
+     * Inputs: None.
+     * Returns: The related evidence collection query.
+     * Side effects: None.
+     */
+    public function evidence(): HasMany
+    {
+        return $this->hasMany(SavedNoticeAiEvidence::class, 'knowledge_item_id')
+            ->orderBy('match_rank')
+            ->orderBy('id');
+    }
 }

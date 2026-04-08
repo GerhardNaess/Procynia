@@ -105,7 +105,7 @@ class DoffinLiveSearchServiceTest extends TestCase
         Http::assertSentCount(2);
         Http::assertSent(function ($request): bool {
             return $request['searchString'] === 'Renhold'
-                && $request['facets']['buyer']['checkedItems'] === [];
+                && ! isset($request['facets']);
         });
     }
 
@@ -429,9 +429,7 @@ class DoffinLiveSearchServiceTest extends TestCase
 
         Http::assertSent(function ($request): bool {
             return $request['searchString'] === 'Domstoladministrasjonen'
-                && $request['facets']['buyer']['checkedItems'] === []
-                && $request['facets']['cpvCodesId']['checkedItems'] === []
-                && $request['facets']['status']['checkedItems'] === [];
+                && ! isset($request['facets']);
         });
 
         Http::assertSent(function ($request): bool {
@@ -514,7 +512,8 @@ class DoffinLiveSearchServiceTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function ($request): bool {
-            return $request['searchString'] === '';
+            return ! isset($request['searchString'])
+                && ! isset($request['facets']);
         });
 
         $filteredIds = array_values(array_map(static fn (array $hit): string => $hit['id'], $result['hits']));
@@ -778,7 +777,8 @@ class DoffinLiveSearchServiceTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function ($request): bool {
-            return $request['searchString'] === '';
+            return ! isset($request['searchString'])
+                && ! isset($request['facets']);
         });
 
         $this->assertSame([], $result['hits']);
@@ -820,7 +820,8 @@ class DoffinLiveSearchServiceTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(function ($request): bool {
-            return $request['searchString'] === '';
+            return ! isset($request['searchString'])
+                && ! isset($request['facets']);
         });
 
         $this->assertSame(['hit-keep'], array_values(array_map(static fn (array $hit): string => $hit['id'], $result['hits'])));
@@ -947,5 +948,206 @@ class DoffinLiveSearchServiceTest extends TestCase
         } finally {
             Carbon::setTestNow();
         }
+    }
+
+    public function test_it_returns_invalid_request_when_doffin_rejects_the_request_with_a_400_response(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'message' => 'Bad request',
+            ], 400),
+        ]);
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('invalid_request', $result['error_type']);
+        $this->assertSame(400, $result['upstream_status']);
+        $this->assertSame([], $result['items']);
+        $this->assertSame([], $result['hits']);
+        $this->assertFalse($result['fallback_used']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_returns_upstream_unavailable_when_doffin_returns_a_5xx_response(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'message' => 'Server error',
+            ], 503),
+        ]);
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('upstream_unavailable', $result['error_type']);
+        $this->assertSame(503, $result['upstream_status']);
+        $this->assertSame([], $result['items']);
+        $this->assertSame([], $result['hits']);
+        $this->assertFalse($result['fallback_used']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_returns_timeout_when_the_http_client_times_out(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::failedConnection(
+                'cURL error 28: Operation timed out after 30000 milliseconds',
+            ),
+        ]);
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('timeout', $result['error_type']);
+        $this->assertNull($result['upstream_status']);
+        $this->assertSame([], $result['items']);
+        $this->assertSame([], $result['hits']);
+        $this->assertFalse($result['fallback_used']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_returns_connection_error_when_the_http_client_cannot_connect(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::failedConnection(
+                'cURL error 6: Could not resolve host: api.doffin.no',
+            ),
+        ]);
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('connection_error', $result['error_type']);
+        $this->assertNull($result['upstream_status']);
+        $this->assertSame([], $result['items']);
+        $this->assertSame([], $result['hits']);
+        $this->assertFalse($result['fallback_used']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_returns_unexpected_response_when_doffin_body_is_missing_hits(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+            ], 200),
+        ]);
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('unexpected_response', $result['error_type']);
+        $this->assertSame(200, $result['upstream_status']);
+        $this->assertSame([], $result['items']);
+        $this->assertSame([], $result['hits']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_sanitizes_empty_request_fields_before_sending_them_to_doffin(): void
+    {
+        Http::fake([
+            'https://api.doffin.no/webclient/api/v2/search-api/search' => Http::response([
+                'numHitsTotal' => 0,
+                'numHitsAccessible' => 0,
+                'hits' => [],
+            ], 200),
+        ]);
+
+        app(DoffinLiveSearchService::class)->search([
+            'q' => '   ',
+            'keywords' => ' , ',
+            'organization_name' => '',
+            'cpv' => '',
+            'publication_date_from' => '',
+            'publication_date_to' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        Http::assertSentCount(1);
+        Http::assertSent(function ($request): bool {
+            return ! isset($request['searchString'])
+                && ! isset($request['facets']);
+        });
+    }
+
+    public function test_it_uses_buyer_lookup_fallback_when_the_buyer_lookup_request_fails_with_a_5xx_response(): void
+    {
+        Http::fake(function ($request) {
+            if (($request['searchString'] ?? null) === 'Domstoladministrasjonen') {
+                return Http::response([
+                    'message' => 'Temporary upstream failure',
+                ], 503);
+            }
+
+            return Http::response([
+                'numHitsTotal' => 1,
+                'numHitsAccessible' => 1,
+                'hits' => [
+                    [
+                        'id' => '2026-105164',
+                        'buyer' => [
+                            [
+                                'id' => 'e7c38cb469460081ad1de749d4670c71',
+                                'organizationId' => '984195796',
+                                'name' => 'Domstoladministrasjonen',
+                            ],
+                        ],
+                        'heading' => 'Renholdstjenester Vestre Finnmark tingrett, rettssted Alta',
+                        'description' => 'Formålet med anskaffelsen er å inngå kontrakt om renholdstjenester.',
+                        'status' => null,
+                        'publicationDate' => '2026-03-16',
+                        'deadline' => null,
+                    ],
+                ],
+            ], 200);
+        });
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => 'Renhold',
+            'organization_name' => 'Domstoladministrasjonen',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['fallback_used']);
+        $this->assertSame('2026-105164', $result['hits'][0]['id']);
+
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request): bool {
+            return ($request['searchString'] ?? null) === 'Domstoladministrasjonen';
+        });
+        Http::assertSent(function ($request): bool {
+            return ($request['searchString'] ?? null) === 'Renhold'
+                && ! isset($request['facets']);
+        });
     }
 }

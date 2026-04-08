@@ -44,7 +44,7 @@ class NoticeController extends Controller
     ) {
     }
 
-    public function index(Request $request): Response
+    public function index(Request $request): HttpResponse
     {
         /** @var User $user */
         $user = $request->user();
@@ -75,7 +75,7 @@ class NoticeController extends Controller
         ];
 
         if ($customerId === null) {
-            return Inertia::render('App/Notices/Index', [
+            return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'source' => $this->discoverySource($mode),
                 'supportMode' => [
@@ -103,7 +103,7 @@ class NoticeController extends Controller
         $worklist = $this->savedNoticeCounts($user, $customerId, $useCockpitScope);
 
         if ($mode !== 'live') {
-            return Inertia::render('App/Notices/Index', [
+            return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
                 'source' => $this->discoverySource($mode),
                 'supportMode' => [
@@ -140,7 +140,59 @@ class NoticeController extends Controller
         $searchResponse = $this->liveSearchService->search($filters, $page, $perPage);
         $page = max(1, (int) ($searchResponse['page'] ?? $page));
         $perPage = max(1, (int) ($searchResponse['perPage'] ?? $perPage));
-        $hits = collect($searchResponse['hits'] ?? [])
+        $fallbackUsed = (bool) ($searchResponse['fallback_used'] ?? false);
+
+        if (! ($searchResponse['ok'] ?? true)) {
+            $errorType = (string) ($searchResponse['error_type'] ?? 'unexpected_response');
+            $status = $this->liveSearchStatusCode($errorType);
+            $errorMessage = $this->liveSearchErrorMessage($errorType);
+            $logLevel = $status >= HttpResponse::HTTP_INTERNAL_SERVER_ERROR ? 'error' : 'warning';
+
+            Log::$logLevel('[DOFFIN][controller] Live notice search returned a controlled error response.', [
+                'error_type' => $errorType,
+                'mapped_status' => $status,
+                'upstream_status' => $searchResponse['upstream_status'] ?? null,
+                'request_id' => $searchResponse['meta']['request_id'] ?? null,
+                'fallback_used' => $fallbackUsed,
+                'customer_id' => $customerId,
+                'page' => $page,
+                'per_page' => $perPage,
+                'live_search' => true,
+            ]);
+
+            return $this->renderNoticeIndexPage($request, [
+                'mode' => $mode,
+                'source' => $this->discoverySource($mode),
+                'supportMode' => [
+                    'active' => false,
+                    'message' => null,
+                ],
+                'filters' => $filters,
+                'cpvSelector' => $this->cpvSelectorPayload($filters['cpv']),
+                'savedSearches' => $this->savedSearchesForUser($user, $customerId),
+                'worklist' => $worklist,
+                'monitoring' => $this->monitoringSummary($user, $customerId),
+                'notices' => [
+                    'data' => [],
+                    'error' => $errorMessage,
+                    'meta' => array_merge(
+                        $this->livePaginationMeta($request, $page, $perPage, 0, 0),
+                        [
+                            'fallback_used' => $fallbackUsed,
+                            'error_type' => $errorType,
+                            'error_message' => $searchResponse['error_message'] ?? $errorMessage,
+                            'upstream_status' => $searchResponse['upstream_status'] ?? null,
+                        ],
+                    ),
+                ],
+                'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
+                    ->map(fn (array $option): array => $option)
+                    ->values()
+                    ->all(),
+            ], $status);
+        }
+
+        $hits = collect($this->liveSearchItems($searchResponse))
             ->filter(fn (mixed $hit): bool => is_array($hit))
             ->values();
         $accessibleTotal = (int) ($searchResponse['numHitsAccessible'] ?? $searchResponse['numHitsTotal'] ?? $hits->count());
@@ -162,7 +214,7 @@ class NoticeController extends Controller
             'first_item' => $items[0] ?? null,
         ]);
 
-        return Inertia::render('App/Notices/Index', [
+        return $this->renderNoticeIndexPage($request, [
             'mode' => $mode,
             'source' => $this->discoverySource($mode),
             'supportMode' => [
@@ -176,7 +228,12 @@ class NoticeController extends Controller
             'monitoring' => $this->monitoringSummary($user, $customerId),
             'notices' => [
                 'data' => $items,
-                'meta' => $this->livePaginationMeta($request, $page, $perPage, $accessibleTotal, count($items), $total),
+                'meta' => array_merge(
+                    $this->livePaginationMeta($request, $page, $perPage, $accessibleTotal, count($items), $total),
+                    [
+                        'fallback_used' => $fallbackUsed,
+                    ],
+                ),
             ],
             'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
                 ->map(fn (array $option): array => $option)
@@ -194,6 +251,13 @@ class NoticeController extends Controller
         return response()->json([
             'data' => $this->cpvSearchService->search($query, $selectedCodes, $limit),
         ]);
+    }
+
+    private function renderNoticeIndexPage(Request $request, array $props, int $status = HttpResponse::HTTP_OK): HttpResponse
+    {
+        return Inertia::render('App/Notices/Index', $props)
+            ->toResponse($request)
+            ->setStatusCode($status);
     }
 
 
@@ -1715,6 +1779,38 @@ class NoticeController extends Controller
             'external_url' => $this->publicNoticeUrl($noticeId),
             'is_saved' => in_array($noticeId, $savedExternalIds, true),
         ];
+    }
+
+    private function liveSearchItems(array $searchResponse): array
+    {
+        return collect($searchResponse['items'] ?? $searchResponse['hits'] ?? [])
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->values()
+            ->all();
+    }
+
+    private function liveSearchStatusCode(string $errorType): int
+    {
+        return match ($errorType) {
+            'invalid_request' => HttpResponse::HTTP_UNPROCESSABLE_ENTITY,
+            'upstream_unavailable' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
+            'timeout' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
+            'connection_error' => HttpResponse::HTTP_SERVICE_UNAVAILABLE,
+            'unexpected_response' => HttpResponse::HTTP_BAD_GATEWAY,
+            default => HttpResponse::HTTP_BAD_GATEWAY,
+        };
+    }
+
+    private function liveSearchErrorMessage(string $errorType): string
+    {
+        return match ($errorType) {
+            'invalid_request' => 'Søket mot Doffin ble avvist. Kontroller filtrene og prøv igjen.',
+            'upstream_unavailable' => 'Doffin er midlertidig utilgjengelig. Prøv igjen om litt.',
+            'timeout' => 'Doffin svarte ikke i tide. Prøv igjen om litt.',
+            'connection_error' => 'Klarte ikke å koble til Doffin. Prøv igjen om litt.',
+            'unexpected_response' => 'Doffin returnerte et uventet svar. Prøv igjen om litt.',
+            default => 'Doffin-søket kunne ikke fullføres. Prøv igjen om litt.',
+        };
     }
 
     private function livePaginationMeta(Request $request, int $page, int $perPage, int $accessibleTotal, int $count, ?int $displayTotal = null): array

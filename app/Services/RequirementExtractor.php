@@ -68,6 +68,7 @@ class RequirementExtractor
     {
         $text = str_replace(["\r\n", "\r"], "\n", $text);
         $text = preg_replace('/[ \t]+/u', ' ', $text);
+        $text = preg_replace('/[ \t]*\n[ \t]*/u', "\n", $text);
         $text = preg_replace('/\n{3,}/u', "\n\n", $text);
 
         return trim((string) $text);
@@ -81,21 +82,126 @@ class RequirementExtractor
      */
     private function splitIntoSegments(string $text): array
     {
-        $lines = preg_split('/\n+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $segments = [];
+        $lines = explode("\n", $text);
+        $blocks = [];
+        $currentBlock = '';
+        $currentBlockType = null;
+        $previousLine = '';
 
         foreach ($lines as $line) {
-            $lineParts = preg_split('/(?<=[\p{Ll}\d])\s+(?=[A-ZÆØÅ])/u', (string) $line, -1, PREG_SPLIT_NO_EMPTY) ?: [(string) $line];
+            $line = trim((string) $line);
 
-            foreach ($lineParts as $linePart) {
-                $parts = preg_split('/(?<=[.!?;])\s+/u', (string) $linePart, -1, PREG_SPLIT_NO_EMPTY) ?: [(string) $linePart];
+            if ($line === '') {
+                if ($currentBlock !== '') {
+                    $blocks[] = [
+                        'type' => $currentBlockType ?? 'prose',
+                        'text' => $currentBlock,
+                    ];
+                }
 
-                foreach ($parts as $part) {
-                    $candidate = $this->normalizeCandidateText((string) $part);
+                $currentBlock = '';
+                $currentBlockType = null;
+                $previousLine = '';
 
-                    if ($candidate !== '') {
-                        $segments[] = $candidate;
-                    }
+                continue;
+            }
+
+            $lineType = $this->isListItemStart($line) ? 'list' : 'prose';
+
+            if ($currentBlock === '') {
+                $currentBlock = $line;
+                $currentBlockType = $lineType;
+                $previousLine = $line;
+
+                continue;
+            }
+
+            if ($currentBlockType === 'list') {
+                if ($lineType === 'list') {
+                    $blocks[] = [
+                        'type' => 'list',
+                        'text' => $currentBlock,
+                    ];
+                    $currentBlock = $line;
+                    $currentBlockType = 'list';
+                    $previousLine = $line;
+
+                    continue;
+                }
+
+                if ($this->shouldJoinContinuationLine($previousLine, $line, true)) {
+                    $currentBlock .= ' '.$line;
+                    $previousLine = $line;
+
+                    continue;
+                }
+
+                $blocks[] = [
+                    'type' => 'list',
+                    'text' => $currentBlock,
+                ];
+                $currentBlock = $line;
+                $currentBlockType = $lineType;
+                $previousLine = $line;
+
+                continue;
+            }
+
+            if ($lineType === 'list') {
+                $blocks[] = [
+                    'type' => 'prose',
+                    'text' => $currentBlock,
+                ];
+                $currentBlock = $line;
+                $currentBlockType = 'list';
+                $previousLine = $line;
+
+                continue;
+            }
+
+            if ($this->shouldJoinContinuationLine($previousLine, $line, false)) {
+                $currentBlock .= ' '.$line;
+                $previousLine = $line;
+
+                continue;
+            }
+
+            $blocks[] = [
+                'type' => 'prose',
+                'text' => $currentBlock,
+            ];
+            $currentBlock = $line;
+            $currentBlockType = 'prose';
+            $previousLine = $line;
+        }
+
+        if ($currentBlock !== '') {
+            $blocks[] = [
+                'type' => $currentBlockType ?? 'prose',
+                'text' => $currentBlock,
+            ];
+        }
+
+        $segments = [];
+
+        foreach ($blocks as $block) {
+            $blockText = (string) ($block['text'] ?? '');
+
+            if (($block['type'] ?? 'prose') === 'list') {
+                $candidate = $this->normalizeCandidateText($blockText);
+
+                if ($candidate !== '') {
+                    $segments[] = $candidate;
+                }
+
+                continue;
+            }
+
+            foreach ($this->splitProseBlockIntoSegments($blockText) as $part) {
+                $candidate = $this->normalizeCandidateText($part);
+
+                if ($candidate !== '') {
+                    $segments[] = $candidate;
                 }
             }
         }
@@ -112,8 +218,9 @@ class RequirementExtractor
     private function normalizeCandidateText(string $text): string
     {
         $text = trim($text);
-        $text = preg_replace('/^[\-\*\•\d\.\)\(\s]+/u', '', $text);
+        $text = preg_replace('/^[\-\*\•\·\–\—\d\.\)\(\s]+/u', '', $text);
         $text = preg_replace('/[ \t]+/u', ' ', $text);
+        $text = preg_replace('/\s+/u', ' ', $text);
         $text = preg_replace('/\s*[\-\–\—]+\s*$/u', '', $text);
 
         return trim((string) $text);
@@ -163,7 +270,7 @@ class RequirementExtractor
         $normalized = mb_strtolower($text, 'UTF-8');
 
         if (
-            preg_match('/\b(?:skal|må|obligatorisk|det kreves|må dokumenteres|skal dokumenteres|dokumenteres)\b/u', $normalized) === 1
+            preg_match('/\b(?:skal|må|er forpliktet til|plikter å|shall|must|obligatorisk|det kreves|må dokumenteres|skal dokumenteres|dokumenteres)\b/u', $normalized) === 1
         ) {
             return false;
         }
@@ -255,11 +362,117 @@ class RequirementExtractor
      */
     private function containsMandatorySignal(string $normalized): bool
     {
-        return preg_match('/\bskal\b/u', $normalized) === 1
-            || preg_match('/\bmå\b/u', $normalized) === 1
+        return preg_match('/\b(?:skal|må|shall|must)\b/u', $normalized) === 1
+            || preg_match('/\ber forpliktet til\b/u', $normalized) === 1
+            || preg_match('/\bplikter å\b/u', $normalized) === 1
             || preg_match('/\bobligatorisk\b/u', $normalized) === 1
             || preg_match('/\bdet kreves\b/u', $normalized) === 1
             || preg_match('/\bkrav til\b/u', $normalized) === 1;
+    }
+
+    /**
+     * Purpose: Determine whether a line starts a bullet or numbered clause.
+     * Inputs: A trimmed line of text.
+     * Returns: True when the line should be treated as a list item.
+     * Side effects: None.
+     */
+    private function isListItemStart(string $line): bool
+    {
+        return preg_match('/^(?:[\-\*\•\·\–\—]|(?:\d+(?:[.,]\d+)*[.)])|(?:[A-Za-zÆØÅæøå][.)]))\s+/u', $line) === 1;
+    }
+
+    /**
+     * Purpose: Determine whether a line should be appended to the current logical block.
+     * Inputs: The previous line, the current line, and whether the block is list-like.
+     * Returns: True when the line is a deterministic continuation of the current block.
+     * Side effects: None.
+     */
+    private function shouldJoinContinuationLine(string $previousLine, string $currentLine, bool $listBlock): bool
+    {
+        if ($previousLine === '' || $currentLine === '') {
+            return false;
+        }
+
+        if ($this->isListItemStart($currentLine)) {
+            return false;
+        }
+
+        if ($this->endsWithTerminalBoundary($previousLine)) {
+            return false;
+        }
+
+        if ($this->startsWithContinuationWord($currentLine)) {
+            return true;
+        }
+
+        if ($this->endsWithContinuationMarker($previousLine)) {
+            return true;
+        }
+
+        if ($listBlock) {
+            return false;
+        }
+
+        if ($this->looksLikeHeading($previousLine) && preg_match('/^[A-ZÆØÅ0-9]/u', $currentLine) === 1) {
+            return false;
+        }
+
+        return preg_match('/^[a-zæøå]/u', $currentLine) === 1;
+    }
+
+    /**
+     * Purpose: Split a prose block into sentence-like segments.
+     * Inputs: A logical prose block with wrapped lines already joined.
+     * Returns: An ordered list of sentence or clause segments.
+     * Side effects: None.
+     */
+    private function splitProseBlockIntoSegments(string $text): array
+    {
+        $parts = preg_split(
+            '/(?<=[.!?;:])\s+(?=(?:[A-ZÆØÅ0-9"(\-]|[\-\*\•\·\–\—]))/u',
+            $text,
+            -1,
+            PREG_SPLIT_NO_EMPTY,
+        );
+
+        if (! is_array($parts) || $parts === []) {
+            return [$text];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Purpose: Determine whether a line ends in a terminal sentence boundary.
+     * Inputs: A trimmed line of text.
+     * Returns: True when the line should not be merged with the following line.
+     * Side effects: None.
+     */
+    private function endsWithTerminalBoundary(string $line): bool
+    {
+        return preg_match('/[.!?]$/u', trim($line)) === 1;
+    }
+
+    /**
+     * Purpose: Determine whether a line clearly continues onto the next line.
+     * Inputs: A trimmed line of text.
+     * Returns: True when the next line is likely a continuation.
+     * Side effects: None.
+     */
+    private function endsWithContinuationMarker(string $line): bool
+    {
+        return preg_match('/[,:;\-\(\/]$/u', trim($line)) === 1;
+    }
+
+    /**
+     * Purpose: Determine whether a line starts with a continuation word.
+     * Inputs: A trimmed line of text.
+     * Returns: True when the line likely continues the previous sentence or clause.
+     * Side effects: None.
+     */
+    private function startsWithContinuationWord(string $line): bool
+    {
+        return preg_match('/^(?:og|eller|samt|men|videre|dessuten|deretter|at|som|hvorav|herunder|inkludert|dermed)\b/ui', $line) === 1;
     }
 
     /**
