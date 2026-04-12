@@ -26,6 +26,14 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'model' => env('OPENAI_MODEL', 'gpt-4.1-mini'),
+        'requirement_relevance_model' => env(
+            'OPENAI_REQUIREMENT_RELEVANCE_MODEL',
+            env('OPENAI_REQUIREMENT_EXTRACTION_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
+        ),
+        'requirement_extraction_model' => env(
+            'OPENAI_REQUIREMENT_EXTRACTION_MODEL',
+            env('OPENAI_MODEL', 'gpt-4.1-mini'),
+        ),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
     ],
 

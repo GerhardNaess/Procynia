@@ -16,13 +16,22 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementRevision;
+use App\Models\RequirementExtractionCall;
+use App\Models\RequirementExtractionRun;
+use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
+use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\OpenAi\EmbeddingService;
+use App\Services\Ai\Requirements\RequirementExtractionPipeline;
+use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
+use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\RequirementExtractor;
 use App\Models\User;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -406,6 +415,7 @@ class AiControllerTest extends TestCase
     public function test_ai_documents_upload_extracts_requirement_candidates_and_exposes_them_in_case_view(): void
     {
         Storage::fake('local');
+        Queue::fake();
 
         $context = $this->customerAdminContext();
         $owner = User::factory()->create([
@@ -423,105 +433,423 @@ class AiControllerTest extends TestCase
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 10:45:00');
 
-        $document = $this->createDocxUpload('requirements-pack.docx', implode("\n\n", [
-            'Dokumentasjon må vedlegges.',
-            'Tilbudet må leveres innen tilbudsfrist.',
-            'Tilbudet må leveres innen tilbudsfrist.',
-            'Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.',
-            'Leverandøren skal beskrive løsningen.',
-        ]));
+        $firstDocumentText = 'Leverandøren skal levere dokumentasjon innen 10 dager.';
+        $secondDocumentText = 'Tilbudet skal leveres innen fristen.';
+        $firstDocument = $this->createDocxUpload('requirements-pack-a.docx', $firstDocumentText);
+        $secondDocument = $this->createDocxUpload('requirements-pack-b.docx', $secondDocumentText);
+
+        $capturedRequests = [];
+        $this->fakeOpenAiFullDocumentRequirementExtractionResponse(function (array $promptContext) use (&$capturedRequests, $firstDocumentText, $secondDocumentText): array {
+            $promptName = (string) data_get($promptContext, 'prompt_name', '');
+            $documentText = (string) data_get($promptContext, 'document_text', '');
+
+            $capturedRequests[] = [
+                'prompt_name' => $promptName,
+                'document_text' => $documentText,
+            ];
+
+            if ($promptName !== FullDocumentRequirementExtractionPrompt::promptName()) {
+                throw new RuntimeException('Unexpected prompt type: '.$promptName);
+            }
+
+            if (str_contains($documentText, $firstDocumentText)) {
+                return [
+                    'body' => $this->openAiStructuredResponse([
+                        'candidates' => [
+                            $this->buildFullDocumentRequirementExtractionCandidate($firstDocumentText, [
+                                'requirement_identifier' => '1.1',
+                                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                                'obligation_type' => 'must',
+                                'interpretation_risk' => 'low',
+                                'source_reference_text' => 'Bilag 1 punkt 2.7',
+                            ]),
+                        ],
+                    ], 120, 42),
+                ];
+            }
+
+            if (str_contains($documentText, $secondDocumentText)) {
+                return [
+                    'body' => $this->openAiStructuredResponse([
+                        'candidates' => [
+                            $this->buildFullDocumentRequirementExtractionCandidate($secondDocumentText, [
+                                'requirement_identifier' => '2.1',
+                                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_ADMINISTRATIVE,
+                                'obligation_type' => 'must',
+                                'interpretation_risk' => 'low',
+                                'source_reference_text' => 'Bilag 2 punkt 4.1',
+                            ]),
+                        ],
+                    ], 120, 42),
+                ];
+            }
+
+            return [
+                'body' => $this->openAiStructuredResponse([
+                    'candidates' => [],
+                ], 120, 42),
+            ];
+        });
 
         $this->actingAs($context['user'])
             ->post(route('app.ai.documents.store', ['savedNotice' => $savedNotice->id]), [
-                'documents' => [$document],
+                'documents' => [$firstDocument, $secondDocument],
             ])
             ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
-        $savedDocument = SavedNoticeAiDocument::query()
-            ->where('saved_notice_id', $savedNotice->id)
-            ->where('original_filename', 'requirements-pack.docx')
-            ->firstOrFail();
+        Queue::assertPushed(ProcessRequirementExtractionRun::class, 2);
 
-        $chunks = SavedNoticeAiDocumentChunk::query()
-            ->where('saved_notice_ai_document_id', $savedDocument->id)
-            ->orderBy('chunk_index')
-            ->get();
-
-        $requirements = SavedNoticeAiRequirement::query()
+        $queuedDocuments = SavedNoticeAiDocument::query()
             ->where('saved_notice_id', $savedNotice->id)
-            ->where('saved_notice_ai_document_id', $savedDocument->id)
+            ->orderBy('id')
+            ->get()
+            ->keyBy('original_filename');
+        $firstSavedDocument = $queuedDocuments->get('requirements-pack-a.docx');
+        $secondSavedDocument = $queuedDocuments->get('requirements-pack-b.docx');
+
+        $this->assertNotNull($firstSavedDocument);
+        $this->assertNotNull($secondSavedDocument);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED, $firstSavedDocument->processing_status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED, $secondSavedDocument->processing_status);
+        $this->assertNotNull($firstSavedDocument->queued_at);
+        $this->assertNotNull($secondSavedDocument->queued_at);
+        $this->assertNull($firstSavedDocument->processing_started_at);
+        $this->assertNull($secondSavedDocument->processing_started_at);
+
+        $queuedRuns = RequirementExtractionRun::query()
+            ->where('saved_notice_id', $savedNotice->id)
             ->orderBy('id')
             ->get();
 
-        $this->assertSame(1, $chunks->count());
-        $this->assertSame(4, $requirements->count());
+        $this->assertCount(2, $queuedRuns);
+        $this->assertTrue($queuedRuns->every(fn (RequirementExtractionRun $run): bool => $run->status === RequirementExtractionRun::STATUS_QUEUED));
+        $this->assertTrue($queuedRuns->every(fn (RequirementExtractionRun $run): bool => $run->strategy === RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION));
+
+        $runService = app(RequirementExtractionRunService::class);
+
+        foreach ($queuedRuns as $queuedRun) {
+            $runService->processRun($queuedRun);
+        }
+
+        $firstSavedDocument->refresh();
+        $secondSavedDocument->refresh();
+
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $firstSavedDocument->processing_status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $secondSavedDocument->processing_status);
+        $this->assertNotNull($firstSavedDocument->processing_started_at);
+        $this->assertNotNull($secondSavedDocument->processing_started_at);
+        $this->assertNotNull($firstSavedDocument->processing_finished_at);
+        $this->assertNotNull($secondSavedDocument->processing_finished_at);
+
+        $requirements = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->whereIn('saved_notice_ai_document_id', [$firstSavedDocument->id, $secondSavedDocument->id])
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->with(['document', 'chunk'])
+            ->orderBy('saved_notice_ai_document_id')
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $capturedRequests);
+        $this->assertSame(2, collect($capturedRequests)->where('prompt_name', FullDocumentRequirementExtractionPrompt::promptName())->count());
+        $this->assertTrue(collect($capturedRequests)->pluck('document_text')->contains(fn (string $documentText): bool => str_contains($documentText, $firstDocumentText)));
+        $this->assertTrue(collect($capturedRequests)->pluck('document_text')->contains(fn (string $documentText): bool => str_contains($documentText, $secondDocumentText)));
+        $this->assertSame(2, $requirements->count(), json_encode([
+            'requirements' => $requirements->map(fn (SavedNoticeAiRequirement $requirement): array => [
+                'id' => $requirement->id,
+                'document_id' => $requirement->saved_notice_ai_document_id,
+                'chunk_id' => $requirement->saved_notice_ai_document_chunk_id,
+                'source_reference' => $requirement->source_reference,
+                'extraction_metadata' => $requirement->extraction_metadata,
+            ])->all(),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         $this->assertSame(
-            [
-                SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
-                SavedNoticeAiRequirement::REQUIREMENT_TYPE_ADMINISTRATIVE,
-                SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
-                SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
-            ],
-            $requirements->pluck('requirement_type')->all(),
-        );
-        $this->assertSame(
-            [
-                'Dokumentasjon må vedlegges.',
-                'Tilbudet må leveres innen tilbudsfrist.',
-                'Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.',
-                'Leverandøren skal beskrive løsningen.',
-            ],
-            $requirements->pluck('requirement_text')->all(),
-        );
-        $this->assertSame(
-            [
-                SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
-                SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
-                SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
-                SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
-            ],
-            $requirements->pluck('review_status')->all(),
-        );
-        $this->assertSame(
-            [
-                SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
-                SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
-                SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
-                SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
-            ],
+            [SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_FULL_DOCUMENT, SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_FULL_DOCUMENT],
             $requirements->pluck('extraction_method')->all(),
         );
-        $this->assertSame([$savedDocument->id, $savedDocument->id, $savedDocument->id, $savedDocument->id], $requirements->pluck('saved_notice_ai_document_id')->all());
-        $this->assertSame([$chunks->first()->id, $chunks->first()->id, $chunks->first()->id, $chunks->first()->id], $requirements->pluck('saved_notice_ai_document_chunk_id')->all());
+        $this->assertSame(
+            [$firstSavedDocument->id, $secondSavedDocument->id],
+            $requirements->pluck('saved_notice_ai_document_id')->sort()->values()->all(),
+        );
+        $this->assertSame(
+            [$firstSavedDocument->original_filename, $secondSavedDocument->original_filename],
+            $requirements->pluck('document.original_filename')->sort()->values()->all(),
+        );
 
-        $response = $this->actingAs($context['user'])
-            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $firstRequirement = $requirements->firstWhere('saved_notice_ai_document_id', $firstSavedDocument->id);
+        $secondRequirement = $requirements->firstWhere('saved_notice_ai_document_id', $secondSavedDocument->id);
 
-        $response->assertOk();
-        $page = $this->inertiaPageFromResponse($response);
-        $requirements = collect(data_get($page, 'props.requirements', []));
-        $requirementsByText = $requirements->keyBy('requirement_text');
+        $this->assertNotNull($firstRequirement);
+        $this->assertNotNull($secondRequirement);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $firstRequirement->requirement_text);
+        $this->assertSame('Tilbudet skal leveres innen fristen.', $secondRequirement->requirement_text);
+        $this->assertSame($firstSavedDocument->id, $firstRequirement->source_reference['saved_notice_ai_document_id']);
+        $this->assertSame($secondSavedDocument->id, $secondRequirement->source_reference['saved_notice_ai_document_id']);
+        $this->assertNull($firstRequirement->saved_notice_ai_document_chunk_id);
+        $this->assertNull($secondRequirement->saved_notice_ai_document_chunk_id);
+        $this->assertTrue(str_starts_with($firstRequirement->source_reference['source_block_id'], sprintf('saved-notice-ai-document-%d-phase-1-', $firstSavedDocument->id)));
+        $this->assertTrue(str_starts_with($secondRequirement->source_reference['source_block_id'], sprintf('saved-notice-ai-document-%d-phase-1-', $secondSavedDocument->id)));
 
-        $this->assertSame('App/AI/Show', data_get($page, 'component'));
-        $this->assertSame(4, data_get($page, 'props.requirements_count'));
-        $this->assertCount(4, $requirements);
-        $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION, $requirementsByText->get('Dokumentasjon må vedlegges.')['requirement_type']);
-        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_PENDING, $requirementsByText->get('Dokumentasjon må vedlegges.')['review_status']);
-        $this->assertSame(route('app.ai.requirements.review-status.update', [
-            'savedNotice' => $savedNotice->id,
-            'requirement' => $requirements->first()['id'],
-        ]), $requirementsByText->get('Dokumentasjon må vedlegges.')['review_status_update_url']);
-        $this->assertSame('requirements-pack.docx', $requirementsByText->get('Dokumentasjon må vedlegges.')['document_filename']);
-        $this->assertSame(0, $requirementsByText->get('Dokumentasjon må vedlegges.')['chunk_index']);
-        $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_ADMINISTRATIVE, $requirementsByText->get('Tilbudet må leveres innen tilbudsfrist.')['requirement_type']);
-        $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY, $requirementsByText->get('Skytjeneste skal avsluttes eller tilbakeføres til Kunden ved opphør av avtalen.')['requirement_type']);
-        $this->assertSame(SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY, $requirementsByText->get('Leverandøren skal beskrive løsningen.')['requirement_type']);
-        $this->assertSame(1, $requirements->filter(fn (array $requirement): bool => $requirement['requirement_text'] === 'Tilbudet må leveres innen tilbudsfrist.')->count());
+        $completedRuns = RequirementExtractionRun::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $completedRuns);
+        $this->assertTrue($completedRuns->every(fn (RequirementExtractionRun $run): bool => $run->status === RequirementExtractionRun::STATUS_COMPLETED));
+        $this->assertTrue($completedRuns->every(fn (RequirementExtractionRun $run): bool => $run->openai_call_count === 1));
+        $this->assertTrue($completedRuns->every(fn (RequirementExtractionRun $run): bool => $run->persisted_requirement_count === 1));
+        $this->assertTrue($completedRuns->every(fn (RequirementExtractionRun $run): bool => $run->candidate_count === 1));
+        $this->assertTrue($completedRuns->every(fn (RequirementExtractionRun $run): bool => $run->strategy === RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION));
+        $this->assertSame(2, RequirementExtractionCall::query()->whereIn('requirement_extraction_run_id', $completedRuns->pluck('id')->all())->count());
+        Http::assertSentCount(2);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertViewHas('page', function (array $page) use ($savedNotice, $firstSavedDocument, $secondSavedDocument): bool {
+                $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('saved_notice_ai_document_id');
+
+                return data_get($page, 'component') === 'App/AI/Show'
+                    && data_get($page, 'props.requirements_count') === 2
+                    && $requirements->get($firstSavedDocument->id)['document_filename'] === $firstSavedDocument->original_filename
+                    && $requirements->get($secondSavedDocument->id)['document_filename'] === $secondSavedDocument->original_filename
+                    && str_starts_with($requirements->get($firstSavedDocument->id)['source_reference']['source_block_id'], sprintf('saved-notice-ai-document-%d-phase-1-', $firstSavedDocument->id))
+                    && str_starts_with($requirements->get($secondSavedDocument->id)['source_reference']['source_block_id'], sprintf('saved-notice-ai-document-%d-phase-1-', $secondSavedDocument->id))
+                    && $requirements->get($firstSavedDocument->id)['extraction_method'] === SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_PHASE_1
+                    && $requirements->get($secondSavedDocument->id)['extraction_method'] === SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_PHASE_1
+                    && $requirements->get($firstSavedDocument->id)['saved_notice_ai_document_chunk_id'] === null
+                    && $requirements->get($secondSavedDocument->id)['saved_notice_ai_document_chunk_id'] === null
+                    && data_get($page, 'props.requirements_store_url') === route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]);
+            });
+
+    }
+
+    public function test_ai_requirement_extraction_pipeline_uses_full_document_extraction_for_every_uploaded_document(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-EXTRACT', 'Extraction service target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:50:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirement-blocks.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirement-blocks.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-06 10:51:00',
+        ]);
+
+        $document->chunks()->createMany([
+            [
+                'chunk_index' => 0,
+                'content' => 'Forside, kontaktinformasjon og generell introduksjon som ikke er et krav. '.str_repeat('Boilerplate uten krav. ', 40),
+                'char_start' => 0,
+                'char_end' => 950,
+                'word_count' => 150,
+            ],
+            [
+                'chunk_index' => 1,
+                'content' => 'Anskaffelsen beskriver bakgrunn og kontekst, men inneholder ikke konkrete krav. '.str_repeat('Bakgrunnstekst uten krav. ', 40),
+                'char_start' => 951,
+                'char_end' => 1900,
+                'word_count' => 150,
+            ],
+        ]);
+
+        $capturedRequests = [];
+        $this->fakeOpenAiFullDocumentRequirementExtractionResponse(function (array $promptContext) use (&$capturedRequests): array {
+            $promptName = (string) data_get($promptContext, 'prompt_name', '');
+            $documentText = (string) data_get($promptContext, 'document_text', '');
+
+            $capturedRequests[] = [
+                'prompt_name' => $promptName,
+                'document_text' => $documentText,
+            ];
+
+            if ($promptName !== FullDocumentRequirementExtractionPrompt::promptName()) {
+                throw new RuntimeException('Unexpected prompt type: '.$promptName);
+            }
+
+            return [
+                'body' => $this->openAiStructuredResponse([
+                    'candidates' => [
+                        $this->buildFullDocumentRequirementExtractionCandidate('Leverandøren skal levere dokumentasjon innen 10 dager.', [
+                            'requirement_identifier' => '1.1',
+                            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                            'obligation_type' => 'must',
+                            'source_reference_text' => 'Bilag 1 punkt 2.7',
+                            'interpretation_risk' => 'low',
+                        ]),
+                    ],
+                ], 120, 42),
+            ];
+        });
+
+        $result = app(RequirementExtractionPipeline::class)->syncDocumentRequirements($document);
+
+        $this->assertTrue($result->ok);
+        $this->assertFalse($result->partial);
+        $this->assertSame(0, $result->segmentCount);
+        $this->assertSame(0, $result->relevantSegmentCount);
+        $this->assertSame(0, $result->relevanceCallCount);
+        $this->assertSame(1, $result->extractionCallCount);
+        $this->assertSame(1, $result->openAiCallCount);
+        $this->assertCount(1, $result->candidates);
+        $this->assertSame('1.1', $result->candidates[0]->requirementIdentifier);
+        $this->assertSame(SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_PHASE_1, $result->candidates[0]->extractionMethod);
+        $this->assertSame('Bilag 1 punkt 2.7', $result->candidates[0]->sourceReference['source_reference_text']);
+        $this->assertSame(1, SavedNoticeAiRequirement::query()->where('saved_notice_ai_document_id', $document->id)->count());
+
+        $requirement = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_ai_document_id', $document->id)
+            ->firstOrFail();
+
+        $this->assertSame(SavedNoticeAiRequirement::EXTRACTION_METHOD_AI_FULL_DOCUMENT, $requirement->extraction_method);
+        $this->assertNull($requirement->saved_notice_ai_document_chunk_id);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $requirement->requirement_text);
+        $this->assertSame('Bilag 1 punkt 2.7', $requirement->source_reference['source_reference_text']);
+        $this->assertSame(1, collect($capturedRequests)->where('prompt_name', FullDocumentRequirementExtractionPrompt::promptName())->count());
+        $this->assertTrue(collect($capturedRequests)->pluck('document_text')->contains(fn (string $documentText): bool => str_contains($documentText, 'Leverandøren skal levere dokumentasjon innen 10 dager.')));
+        Http::assertSentCount(1);
+    }
+
+    public function test_ai_requirement_extraction_pipeline_marks_full_document_failure_explicitly_without_fallback(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-FALLBACK', 'Fallback extraction target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:55:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'fallback-blocks.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/fallback-blocks.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-06 10:56:00',
+        ]);
+
+        $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Leverandøren skal levere dokumentasjon innen 10 dager. '.str_repeat('Relevant kravtekst. ', 50),
+            'char_start' => 0,
+            'char_end' => 1200,
+            'word_count' => 140,
+        ]);
+
+        $capturedRequests = [];
+        $this->fakeOpenAiFullDocumentRequirementExtractionResponse(function (array $promptContext) use (&$capturedRequests): array {
+            $promptName = (string) data_get($promptContext, 'prompt_name', '');
+            $documentText = (string) data_get($promptContext, 'document_text', '');
+
+            $capturedRequests[] = [
+                'prompt_name' => $promptName,
+                'document_text' => $documentText,
+            ];
+
+            if ($promptName !== FullDocumentRequirementExtractionPrompt::promptName()) {
+                throw new RuntimeException('Unexpected prompt type: '.$promptName);
+            }
+
+            return [
+                'body' => $this->openAiStructuredResponse([
+                    'candidates' => [],
+                ], 120, 42),
+                'status' => 503,
+            ];
+        });
+
+        $result = app(RequirementExtractionPipeline::class)->syncDocumentRequirements($document);
+
+        $this->assertFalse($result->ok);
+        $this->assertTrue($result->partial);
+        $this->assertSame(0, $result->segmentCount);
+        $this->assertSame(0, $result->relevantSegmentCount);
+        $this->assertSame(0, $result->relevanceCallCount);
+        $this->assertSame(1, $result->extractionCallCount);
+        $this->assertSame(1, $result->openAiCallCount);
+        $this->assertSame(0, count($result->candidates));
+        $this->assertSame('upstream_error', $result->errorType);
+        $this->assertFalse((bool) ($result->metadata['fallback_used'] ?? true));
+        $this->assertSame(1, collect($capturedRequests)->where('prompt_name', FullDocumentRequirementExtractionPrompt::promptName())->count());
+        $this->assertSame(0, SavedNoticeAiRequirement::query()->where('saved_notice_ai_document_id', $document->id)->count());
+        Http::assertSentCount(1);
+    }
+
+    public function test_ai_documents_show_exposes_backend_failure_state_for_failed_document_runs(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-FAIL-STATE', 'Failure state target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:57:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'failed-document.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/failed-document.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-06 10:58:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_FAILED,
+            'processing_error_type' => 'timeout',
+            'processing_error_message' => 'OpenAI request timed out after 180001 milliseconds.',
+            'queued_at' => '2026-04-06 10:58:05',
+            'processing_started_at' => '2026-04-06 10:58:06',
+            'processing_finished_at' => '2026-04-06 10:58:10',
+        ]);
+
+        RequirementExtractionRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'status' => RequirementExtractionRun::STATUS_FAILED,
+            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+            'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+            'model' => FullDocumentRequirementExtractionPrompt::model(),
+            'failure_stage' => 'openai_timeout',
+            'error_type' => 'timeout',
+            'error_message' => 'OpenAI request timed out after 180001 milliseconds.',
+            'candidate_count' => 0,
+            'persisted_requirement_count' => 0,
+            'openai_call_count' => 1,
+            'input_tokens_total' => 0,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 0,
+            'queued_at' => '2026-04-06 10:58:05',
+            'started_at' => '2026-04-06 10:58:06',
+            'finished_at' => '2026-04-06 10:58:10',
+            'last_heartbeat_at' => '2026-04-06 10:58:10',
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertViewHas('page', function (array $page) use ($savedNotice, $document): bool {
+                $documentRow = collect(data_get($page, 'props.documents', []))
+                    ->firstWhere('id', $document->id);
+
+                return data_get($page, 'component') === 'App/AI/Show'
+                    && $documentRow !== null
+                    && $documentRow['processing_status'] === SavedNoticeAiDocument::PROCESSING_STATUS_FAILED
+                    && $documentRow['processing_error_type'] === 'timeout'
+                    && $documentRow['processing_error_message'] === 'OpenAI request timed out after 180001 milliseconds.'
+                    && $documentRow['processing_failure_stage'] === 'openai_timeout'
+                    && $documentRow['processing_failure_type'] === 'timeout'
+                    && $documentRow['processing_failure_message'] === 'OpenAI request timed out after 180001 milliseconds.'
+                    && data_get($page, 'props.documents_upload_url') === route('app.ai.documents.store', ['savedNotice' => $savedNotice->id]);
+            });
     }
 
     public function test_ai_documents_upload_persists_files_and_redirects_back_to_the_case_view(): void
     {
         Storage::fake('local');
+        Queue::fake();
 
         $context = $this->customerAdminContext();
         $owner = User::factory()->create([
@@ -552,6 +880,7 @@ class AiControllerTest extends TestCase
 
         $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
         $response->assertSessionHas('success', 'Uploaded 2 documents.');
+        Queue::assertPushed(ProcessRequirementExtractionRun::class, 2);
 
         $documents = SavedNoticeAiDocument::query()
             ->where('saved_notice_id', $savedNotice->id)
@@ -573,12 +902,19 @@ class AiControllerTest extends TestCase
         $this->assertSame($context['user']->id, $documents->first()->uploaded_by_user_id);
         $this->assertSame('requirements-list.docx', $documents->first()->original_filename);
         $this->assertSame('scope-note.docx', $documents->last()->original_filename);
-        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_UPLOADED, $documents->first()->processing_status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED, $documents->first()->processing_status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED, $documents->last()->processing_status);
         $this->assertSame('', (string) $requirementsDocument->extracted_text);
         $this->assertNotNull($requirementsDocument->text_extracted_at);
+        $this->assertNotNull($requirementsDocument->queued_at);
+        $this->assertNull($requirementsDocument->processing_started_at);
+        $this->assertNull($requirementsDocument->processing_finished_at);
         $this->assertStringStartsWith('saved-notices/'.$savedNotice->id.'/ai-documents/', $requirementsDocument->stored_path);
         $this->assertSame($longText, $scopeNoteDocument->extracted_text);
         $this->assertNotNull($scopeNoteDocument->text_extracted_at);
+        $this->assertNotNull($scopeNoteDocument->queued_at);
+        $this->assertNull($scopeNoteDocument->processing_started_at);
+        $this->assertNull($scopeNoteDocument->processing_finished_at);
         $this->assertStringStartsWith('saved-notices/'.$savedNotice->id.'/ai-documents/', $scopeNoteDocument->stored_path);
         $this->assertSame(0, $requirementsChunks->count());
         $this->assertGreaterThan(1, $scopeNoteChunks->count());
@@ -595,7 +931,7 @@ class AiControllerTest extends TestCase
                     && $documents->count() === 2
                     && $documents->first()['original_filename'] === 'requirements-list.docx'
                     && $documents->last()['original_filename'] === 'scope-note.docx'
-                    && $documents->first()['processing_status'] === SavedNoticeAiDocument::PROCESSING_STATUS_UPLOADED
+                    && $documents->first()['processing_status'] === SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED
                     && $documentsByFilename->get('requirements-list.docx')['has_extracted_text'] === false
                     && $documentsByFilename->get('scope-note.docx')['has_extracted_text'] === true
                     && $documentsByFilename->get('requirements-list.docx')['chunk_count'] === 0
@@ -610,6 +946,7 @@ class AiControllerTest extends TestCase
     public function test_ai_documents_upload_keeps_empty_extracted_text_when_parsing_fails(): void
     {
         Storage::fake('local');
+        Queue::fake();
 
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3003', 'Extraction fallback target', [
@@ -629,6 +966,7 @@ class AiControllerTest extends TestCase
 
         $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
         $response->assertSessionHas('success', 'Uploaded 1 document.');
+        Queue::assertPushed(ProcessRequirementExtractionRun::class, 1);
 
         $document = SavedNoticeAiDocument::query()
             ->where('saved_notice_id', $savedNotice->id)
@@ -636,6 +974,8 @@ class AiControllerTest extends TestCase
 
         $this->assertSame('', (string) $document->extracted_text);
         $this->assertNotNull($document->text_extracted_at);
+        $this->assertNotNull($document->queued_at);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED, $document->processing_status);
         $this->assertStringStartsWith('saved-notices/'.$savedNotice->id.'/ai-documents/', $document->stored_path);
         $this->assertSame(0, SavedNoticeAiDocumentChunk::query()->where('saved_notice_ai_document_id', $document->id)->count());
 
@@ -646,7 +986,8 @@ class AiControllerTest extends TestCase
 
                 return $documents->count() === 1
                     && $documents->first()['has_extracted_text'] === false
-                    && $documents->first()['chunk_count'] === 0;
+                    && $documents->first()['chunk_count'] === 0
+                    && $documents->first()['processing_status'] === SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED;
             });
     }
 
@@ -1150,13 +1491,184 @@ class AiControllerTest extends TestCase
 
         $this->assertSame(6, data_get($page, 'props.requirements_count'));
         $this->assertSame(4, data_get($requirementsOverview, 'confirmed_total'));
+        $this->assertSame(4, data_get($requirementsOverview, 'approved_total'));
         $this->assertSame(1, data_get($requirementsOverview, 'pending_total'));
+        $this->assertSame(1, data_get($requirementsOverview, 'draft_total'));
         $this->assertSame(1, data_get($requirementsOverview, 'rejected_total'));
         $this->assertSame(1, data_get($requirementsOverview, 'not_started_total'));
         $this->assertSame(1, data_get($requirementsOverview, 'in_progress_total'));
         $this->assertSame(2, data_get($requirementsOverview, 'done_total'));
         $this->assertSame(2, data_get($requirementsOverview, 'unassigned_confirmed_total'));
         $this->assertSame(6, $requirements->count());
+    }
+
+    public function test_ai_requirement_manual_create_edit_and_revisions_are_tracked(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4006-MANUAL', 'Manual requirement target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:51:00');
+
+        $createResponse = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]), [
+                'requirement_identifier' => '3.2',
+                'requirement_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            ]);
+
+        $createResponse->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $requirement = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('requirement_identifier', '3.2')
+            ->with('revisions')
+            ->withCount('revisions')
+            ->firstOrFail();
+
+        $this->assertSame(SavedNoticeAiRequirement::SOURCE_TYPE_MANUAL, $requirement->source_type);
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $requirement->approval_status);
+        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_PENDING, $requirement->review_status);
+        $this->assertSame('3.2', $requirement->requirement_identifier);
+        $this->assertSame('3.2', $requirement->original_requirement_identifier);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $requirement->requirement_text);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $requirement->original_requirement_text);
+        $this->assertSame(1, $requirement->revisions_count);
+        $this->assertSame(SavedNoticeAiRequirementRevision::CHANGE_TYPE_MANUAL_CREATE, $requirement->revisions->first()->change_type);
+
+        $updateResponse = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch(route('app.ai.requirements.update', [
+                'savedNotice' => $savedNotice->id,
+                'requirement' => $requirement->id,
+            ]), [
+                'requirement_identifier' => '3.2a',
+                'requirement_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager og varsle avvik.',
+                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            ]);
+
+        $updateResponse->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $requirement->refresh()->load('revisions')->loadCount('revisions');
+
+        $this->assertSame('3.2a', $requirement->requirement_identifier);
+        $this->assertSame('3.2', $requirement->original_requirement_identifier);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager og varsle avvik.', $requirement->requirement_text);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $requirement->original_requirement_text);
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $requirement->approval_status);
+        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_PENDING, $requirement->review_status);
+        $this->assertSame(2, $requirement->revisions_count);
+        $this->assertSame(
+            SavedNoticeAiRequirementRevision::CHANGE_TYPE_EDIT_METADATA,
+            $requirement->revisions->last()->change_type,
+        );
+        $this->assertContains('requirement_identifier', $requirement->revisions->last()->changed_fields ?? []);
+        $this->assertContains('requirement_text', $requirement->revisions->last()->changed_fields ?? []);
+
+        $approvedRequirements = app(RequirementLoader::class)->loadApprovedForCase($savedNotice->id);
+        $this->assertCount(0, $approvedRequirements);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $payload = $requirements->get($requirement->id);
+
+        $this->assertSame('3.2a', $payload['current_requirement_identifier']);
+        $this->assertSame('3.2', $payload['original_requirement_identifier']);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager og varsle avvik.', $payload['current_requirement_text']);
+        $this->assertSame('Leverandøren skal levere dokumentasjon innen 10 dager.', $payload['original_requirement_text']);
+        $this->assertSame(SavedNoticeAiRequirement::SOURCE_TYPE_MANUAL, $payload['source_type']);
+        $this->assertSame(SavedNoticeAiRequirement::SOURCE_TYPE_LABELS[SavedNoticeAiRequirement::SOURCE_TYPE_MANUAL], $payload['source_type_label']);
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $payload['approval_status']);
+        $this->assertSame('Redigert', $payload['edit_state_label']);
+        $this->assertSame(2, $payload['revision_count']);
+    }
+
+    public function test_ai_requirement_approval_rejection_and_loader_scope_are_explicit(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4006-STATE', 'State target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:52:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'state-pack.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/state-pack.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 13:53:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Leverandøren skal beskrive løsningen.',
+            'char_start' => 0,
+            'char_end' => 37,
+            'word_count' => 4,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+        ]);
+
+        $reviewStatusUrl = route('app.ai.requirements.review-status.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($reviewStatusUrl, [
+                'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $requirement->refresh()->loadCount('revisions');
+
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_APPROVED, $requirement->approval_status);
+        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED, $requirement->review_status);
+        $this->assertNotNull($requirement->approved_at);
+        $this->assertNull($requirement->rejected_at);
+        $this->assertSame(1, $requirement->revisions_count);
+        $this->assertCount(1, app(RequirementLoader::class)->loadApprovedForCase($savedNotice->id));
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($reviewStatusUrl, [
+                'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $requirement->refresh()->loadCount('revisions');
+
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_REJECTED, $requirement->approval_status);
+        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED, $requirement->review_status);
+        $this->assertNull($requirement->approved_at);
+        $this->assertNotNull($requirement->rejected_at);
+        $this->assertSame(2, $requirement->revisions_count);
+        $this->assertCount(0, app(RequirementLoader::class)->loadApprovedForCase($savedNotice->id));
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch($reviewStatusUrl, [
+                'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $requirement->refresh()->loadCount('revisions');
+
+        $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $requirement->approval_status);
+        $this->assertSame(SavedNoticeAiRequirement::REVIEW_STATUS_PENDING, $requirement->review_status);
+        $this->assertNull($requirement->approved_at);
+        $this->assertNull($requirement->rejected_at);
+        $this->assertSame(3, $requirement->revisions_count);
+        $this->assertCount(0, app(RequirementLoader::class)->loadApprovedForCase($savedNotice->id));
     }
 
     public function test_ai_case_view_refreshes_and_displays_persisted_evidence_for_confirmed_requirements_only(): void
@@ -2375,17 +2887,424 @@ class AiControllerTest extends TestCase
         SavedNoticeAiDocumentChunk $chunk,
         array $overrides = [],
     ): SavedNoticeAiRequirement {
+        $requirementText = (string) ($overrides['requirement_text'] ?? 'Dokumentasjon må vedlegges.');
+        $requirementIdentifier = array_key_exists('requirement_identifier', $overrides)
+            ? $overrides['requirement_identifier']
+            : null;
+        $reviewStatus = (string) ($overrides['review_status'] ?? SavedNoticeAiRequirement::REVIEW_STATUS_PENDING);
+        $approvalStatus = (string) ($overrides['approval_status'] ?? SavedNoticeAiRequirement::approvalStatusForReviewStatus($reviewStatus));
+        $publicationStatus = (string) ($overrides['publication_status'] ?? SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED);
+        $publishedAt = array_key_exists('published_at', $overrides)
+            ? $overrides['published_at']
+            : ($publicationStatus === SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED ? now() : null);
+
         return SavedNoticeAiRequirement::query()->create(array_merge([
             'saved_notice_id' => $savedNotice->id,
             'saved_notice_ai_document_id' => $document->id,
             'saved_notice_ai_document_chunk_id' => $chunk->id,
-            'requirement_text' => $overrides['requirement_text'] ?? 'Dokumentasjon må vedlegges.',
+            'extraction_run_id' => $overrides['extraction_run_id'] ?? null,
+            'source_type' => $overrides['source_type'] ?? SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
+            'approval_status' => $approvalStatus,
+            'publication_status' => $publicationStatus,
+            'requirement_identifier' => $requirementIdentifier,
+            'original_requirement_identifier' => array_key_exists('original_requirement_identifier', $overrides)
+                ? $overrides['original_requirement_identifier']
+                : $requirementIdentifier,
+            'requirement_text' => $requirementText,
+            'original_requirement_text' => array_key_exists('original_requirement_text', $overrides)
+                ? $overrides['original_requirement_text']
+                : $requirementText,
             'requirement_type' => $overrides['requirement_type'] ?? SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
             'extraction_method' => $overrides['extraction_method'] ?? SavedNoticeAiRequirement::EXTRACTION_METHOD_RULE_BASED,
-            'review_status' => $overrides['review_status'] ?? SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
+            'review_status' => $reviewStatus,
             'work_status' => $overrides['work_status'] ?? SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
             'assigned_user_id' => $overrides['assigned_user_id'] ?? null,
+            'published_at' => $publishedAt,
+            'superseded_at' => $overrides['superseded_at'] ?? null,
         ], $overrides));
+    }
+
+    /**
+     * Purpose: Fake the OpenAI requirement segment endpoints with structured JSON responses.
+     * Inputs: A callback that builds response payloads from the request prompt payload.
+     * Returns: None.
+     * Side effects: Replaces the HTTP fake for the current test with a deterministic segmented AI response.
+     */
+    private function fakeOpenAiRequirementExtractionResponse(callable $resolver, int $status = 200): void
+    {
+        Http::fake(function (Request $request) use ($resolver, $status) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputText = (string) data_get($requestPayload, 'input.1.content.0.text', '');
+            $decodedInput = json_decode($inputText, true);
+
+            $promptContext = [
+                'prompt_name' => (string) data_get($requestPayload, 'text.format.name', ''),
+                'prompt_text' => (string) data_get($requestPayload, 'input.0.content.0.text', ''),
+                'input_text' => $inputText,
+                'request_payload' => $requestPayload,
+                'document' => is_array($decodedInput) ? data_get($decodedInput, 'document', []) : [],
+                'segment' => is_array($decodedInput) ? data_get($decodedInput, 'segment', []) : [],
+                'model' => data_get($requestPayload, 'model'),
+            ];
+
+            $response = $resolver($promptContext, $request);
+
+            if (! is_array($response) || ! array_key_exists('body', $response) || ! is_array($response['body'])) {
+                throw new RuntimeException('The fake OpenAI resolver must return an array with a body key.');
+            }
+
+            return Http::response(
+                $response['body'],
+                (int) ($response['status'] ?? $status),
+                $response['headers'] ?? [
+                    'x-request-id' => 'req_requirement_extraction',
+                ],
+            );
+        });
+    }
+
+    /**
+     * Purpose: Fake the OpenAI full-document requirement extraction endpoint with a deterministic raw JSON response.
+     * Inputs: A callback that builds response payloads from the request prompt payload.
+     * Returns: None.
+     * Side effects: Replaces the HTTP fake for the current test with a deterministic full-document AI response.
+     */
+    private function fakeOpenAiFullDocumentRequirementExtractionResponse(callable $resolver, int $status = 200): void
+    {
+        Http::fake(function (Request $request) use ($resolver, $status) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $promptText = (string) data_get($requestPayload, 'input.0.content.0.text', '');
+            $documentText = (string) data_get($requestPayload, 'input.1.content.0.text', '');
+
+            $promptContext = [
+                'prompt_name' => (string) data_get($requestPayload, 'text.format.name', ''),
+                'prompt_text' => $promptText,
+                'input_text' => $documentText,
+                'document_text' => $documentText,
+                'request_payload' => $requestPayload,
+                'model' => data_get($requestPayload, 'model'),
+            ];
+
+            $response = $resolver($promptContext, $request);
+
+            if (! is_array($response) || ! array_key_exists('body', $response) || ! is_array($response['body'])) {
+                throw new RuntimeException('The fake OpenAI resolver must return an array with a body key.');
+            }
+
+            return Http::response(
+                $response['body'],
+                (int) ($response['status'] ?? $status),
+                $response['headers'] ?? [
+                    'x-request-id' => 'req_requirement_extraction',
+                ],
+            );
+        });
+    }
+
+    /**
+     * Purpose: Fake the OpenAI structured block extraction endpoint with deterministic responses.
+     * Inputs: A callback that builds response payloads from the decoded block prompt.
+     * Returns: None.
+     * Side effects: Replaces the HTTP fake for the current test with a deterministic block-level AI response.
+     */
+    private function fakeOpenAiStructuredBlockRequirementExtractionResponse(callable $resolver, int $status = 200): void
+    {
+        Http::fake(function (Request $request) use ($resolver, $status) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputText = (string) data_get($requestPayload, 'input.1.content.0.text', '');
+            $decodedInput = json_decode($inputText, true);
+            $blocks = is_array($decodedInput) ? data_get($decodedInput, 'blocks', []) : [];
+            $block = is_array($blocks) ? data_get($blocks, '0', []) : [];
+
+            $promptContext = [
+                'prompt_name' => (string) data_get($requestPayload, 'text.format.name', ''),
+                'prompt_text' => (string) data_get($requestPayload, 'input.0.content.0.text', ''),
+                'input_text' => $inputText,
+                'request_payload' => $requestPayload,
+                'document' => is_array($decodedInput) ? data_get($decodedInput, 'document', []) : [],
+                'blocks' => is_array($decodedInput) ? $blocks : [],
+                'block' => is_array($block) ? $block : [],
+                'model' => data_get($requestPayload, 'model'),
+            ];
+
+            $response = $resolver($promptContext, $request);
+
+            if (! is_array($response) || ! array_key_exists('body', $response) || ! is_array($response['body'])) {
+                throw new RuntimeException('The fake OpenAI resolver must return an array with a body key.');
+            }
+
+            return Http::response(
+                $response['body'],
+                (int) ($response['status'] ?? $status),
+                $response['headers'] ?? [
+                    'x-request-id' => 'req_requirement_extraction',
+                ],
+            );
+        });
+    }
+
+    /**
+     * Purpose: Build one structured requirement extraction row for a segment-level prompt output.
+     * Inputs: The requirement text and optional overrides.
+     * Returns: A fully populated requirement row matching the segment prompt contract.
+     * Side effects: None.
+     */
+    private function buildRequirementExtractionCandidate(string $originalText, array $overrides = []): array
+    {
+        return array_merge([
+            'requirement_identifier' => null,
+            'parent_reference' => null,
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
+            'obligation_type' => 'must',
+            'original_text' => $originalText,
+            'normalized_text' => preg_replace('/\s+/u', ' ', trim($originalText)) ?: $originalText,
+            'comment' => null,
+            'evaluation_notes' => null,
+            'response_expectation' => null,
+            'expected_evidence' => [],
+            'keywords' => [],
+            'domain' => [],
+            'related_references' => [],
+            'source_excerpt' => $originalText,
+            'source_page_start' => null,
+            'source_page_end' => null,
+            'source_section_title' => null,
+            'interpretation_risk' => 'low',
+            'is_requirement' => true,
+            'confidence' => 0.95,
+            'warnings' => [],
+        ], $overrides);
+    }
+
+    /**
+     * Purpose: Build one structured block requirement row for the active structured block prompt.
+     * Inputs: The source block metadata, the requirement text, and optional overrides.
+     * Returns: A fully populated requirement row matching the block prompt contract.
+     * Side effects: None.
+     */
+    private function buildStructuredBlockRequirementExtractionCandidate(array $block, string $originalText, array $overrides = []): array
+    {
+        $sourceReference = array_merge([
+            'saved_notice_ai_document_id' => data_get($block, 'saved_notice_ai_document_id'),
+            'saved_notice_ai_document_chunk_id' => data_get($block, 'saved_notice_ai_document_chunk_id'),
+            'source_block_id' => data_get($block, 'source_block_id'),
+            'source_block_index' => data_get($block, 'source_block_index'),
+            'document_filename' => data_get($block, 'document_filename'),
+            'chunk_index' => data_get($block, 'source_block_index'),
+            'char_start' => data_get($block, 'source_reference.char_start'),
+            'char_end' => data_get($block, 'source_reference.char_end'),
+            'source_chunk_ids' => data_get($block, 'source_chunk_ids', []),
+            'source_reference_text' => $originalText,
+            'source_excerpt' => $originalText,
+        ], (array) ($overrides['source_reference'] ?? []));
+
+        $sourceReferenceText = trim((string) ($sourceReference['source_reference_text'] ?? ''));
+        $sourceExcerpt = trim((string) ($sourceReference['source_excerpt'] ?? ''));
+
+        if ($sourceReferenceText !== '') {
+            $sourceReference['source_excerpt'] = $sourceReferenceText;
+        } elseif ($sourceExcerpt !== '') {
+            $sourceReference['source_reference_text'] = $sourceExcerpt;
+        }
+
+        return array_merge([
+            'source_document_id' => data_get($block, 'saved_notice_ai_document_id'),
+            'source_block_id' => data_get($block, 'source_block_id'),
+            'source_block_index' => data_get($block, 'source_block_index'),
+            'requirement_identifier' => null,
+            'parent_reference' => null,
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
+            'obligation_type' => 'must',
+            'original_text' => $originalText,
+            'normalized_text' => preg_replace('/\s+/u', ' ', trim($originalText)) ?: $originalText,
+            'comment' => null,
+            'evaluation_notes' => null,
+            'response_expectation' => null,
+            'expected_evidence' => [],
+            'keywords' => [],
+            'domain' => [],
+            'related_references' => [],
+            'source_reference' => $sourceReference,
+            'interpretation_risk' => 'low',
+            'is_requirement' => true,
+            'confidence' => 0.95,
+            'warnings' => [],
+        ], $overrides);
+    }
+
+    /**
+     * Purpose: Build one full-document requirement extraction row for the active document-level prompt.
+     * Inputs: The requirement text and optional overrides.
+     * Returns: A fully populated requirement row matching the full-document prompt contract.
+     * Side effects: None.
+     */
+    private function buildFullDocumentRequirementExtractionCandidate(string $originalText, array $overrides = []): array
+    {
+        $candidate = array_merge([
+            'requirement_identifier' => null,
+            'parent_reference' => null,
+            'original_text' => $originalText,
+            'source_reference_text' => $originalText,
+            'is_requirement' => true,
+            'confidence' => 0.95,
+        ], $overrides);
+
+        return array_intersect_key($candidate, array_flip([
+            'requirement_identifier',
+            'parent_reference',
+            'original_text',
+            'source_reference_text',
+            'is_requirement',
+            'confidence',
+        ]));
+    }
+
+    /**
+     * Purpose: Build a deterministic OpenAI structured response payload.
+     * Inputs: The JSON body fields and optional token usage overrides.
+     * Returns: A fake OpenAI response body that mimics a structured Responses API result.
+     * Side effects: None.
+     */
+    private function openAiStructuredResponse(array $fields, int $inputTokens = 40, int $outputTokens = 12): array
+    {
+        $json = json_encode($fields, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        if (! is_string($json)) {
+            throw new RuntimeException('Unable to build a fake OpenAI response.');
+        }
+
+        return [
+            'id' => (string) Str::ulid(),
+            'object' => 'response',
+            'status' => 'completed',
+            'output' => [
+                [
+                    'id' => (string) Str::ulid(),
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'status' => 'completed',
+                    'content' => [
+                        [
+                            'type' => 'output_text',
+                            'text' => $json,
+                        ],
+                    ],
+                ],
+            ],
+            'output_text' => $json,
+            'usage' => [
+                'input_tokens' => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens,
+            ],
+        ];
+    }
+
+    /**
+     * Purpose: Build a deterministic OpenAI response for one segment relevance decision.
+     * Inputs: The relevance boolean, rationale, and confidence score.
+     * Returns: A fake OpenAI response body for the relevance classifier.
+     * Side effects: None.
+     */
+    private function openAiSegmentRelevanceResponse(bool $isRelevant, string $reason, float $confidence = 0.95): array
+    {
+        return $this->openAiStructuredResponse([
+            'is_relevant' => $isRelevant,
+            'confidence' => $confidence,
+            'reason' => $reason,
+        ], 28, 8);
+    }
+
+    /**
+     * Purpose: Build a deterministic OpenAI response for one segment extraction request.
+     * Inputs: The extracted candidate rows for one segment.
+     * Returns: A fake OpenAI response body for the extraction stage.
+     * Side effects: None.
+     */
+    private function openAiSegmentExtractionResponse(array $candidates): array
+    {
+        return $this->openAiStructuredResponse([
+            'candidates' => array_values($candidates),
+        ], 90, 30);
+    }
+
+    /**
+     * Purpose: Render raw extraction rows as a Markdown table for the fake OpenAI response.
+     * Inputs: The structured requirement rows.
+     * Returns: A raw table string that mimics model output.
+     * Side effects: None.
+     */
+    private function buildRequirementExtractionTable(array $rows): string
+    {
+        $columns = [
+            ['label' => 'Krav ID', 'key' => 'requirement_identifier'],
+            ['label' => 'Foreldre-ID / kapittel / tema', 'key' => 'parent_reference'],
+            ['label' => 'Kravtype', 'key' => 'requirement_type'],
+            ['label' => 'Obligatorisk eller evalueringsdrivende', 'key' => 'obligation_type'],
+            ['label' => 'Kravtekst original', 'key' => 'original_text'],
+            ['label' => 'Kravtekst normalisert for semantisk søk', 'key' => 'normalized_text'],
+            ['label' => 'Viktig merknad / kommentar', 'key' => 'comment'],
+            ['label' => 'Evalueringsmomenter', 'key' => 'evaluation_notes'],
+            ['label' => 'Hva må besvares', 'key' => 'response_expectation'],
+            ['label' => 'Forventet dokumentasjon / bevis', 'key' => 'expected_evidence'],
+            ['label' => 'Nøkkelord', 'key' => 'keywords'],
+            ['label' => 'Fagområde', 'key' => 'domain'],
+            ['label' => 'Relaterte krav / avhengigheter', 'key' => 'related_references'],
+            ['label' => 'Kildehenvisning i dokumentet', 'key' => 'source_reference_text'],
+            ['label' => 'Tolkingsrisiko / uklarhet', 'key' => 'interpretation_risk'],
+        ];
+
+        $lines = [
+            '| '.implode(' | ', array_column($columns, 'label')).' |',
+            '| '.implode(' | ', array_fill(0, count($columns), '---')).' |',
+        ];
+
+        foreach ($rows as $row) {
+            $cells = [];
+
+            foreach ($columns as $column) {
+                $cells[] = $this->stringifyExtractionCell($row[$column['key']] ?? null);
+            }
+
+            $lines[] = '| '.implode(' | ', $cells).' |';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function stringifyExtractionCell(mixed $value): string
+    {
+        if (is_array($value)) {
+            $value = implode(', ', array_map(
+                static fn (mixed $item): string => trim((string) $item),
+                array_filter($value, static fn (mixed $item): bool => $item !== null && trim((string) $item) !== ''),
+            ));
+        }
+
+        if (is_bool($value)) {
+            $value = $value ? 'ja' : 'nei';
+        }
+
+        $text = trim((string) $value);
+        $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+        $text = str_replace('|', '\|', $text);
+
+        return $text;
     }
 
     /**

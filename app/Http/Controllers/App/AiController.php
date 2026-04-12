@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Data\Ai\Requirements\RequirementEditData;
+use App\Data\Ai\Requirements\RequirementViewData;
 use App\Http\Controllers\Controller;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\KnowledgeItem;
@@ -14,10 +16,13 @@ use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
+use App\Services\Ai\Requirements\RequirementExtractionPipeline;
+use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Services\Ai\Requirements\RequirementEditorService;
+use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
-use App\Services\RequirementExtractor;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -48,7 +53,10 @@ class AiController extends Controller
         private readonly SavedNoticeAccessService $savedNoticeAccess,
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly DocumentChunker $documentChunker,
-        private readonly RequirementExtractor $requirementExtractor,
+        private readonly RequirementExtractionPipeline $requirementExtractionPipeline,
+        private readonly RequirementExtractionRunService $requirementExtractionRunService,
+        private readonly RequirementLoader $requirementLoader,
+        private readonly RequirementEditorService $requirementEditorService,
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
     ) {
     }
@@ -85,12 +93,7 @@ class AiController extends Controller
             'opportunityOwner',
             'aiDocuments.uploadedBy',
             'aiDocuments.chunks',
-            'aiRequirements.document',
-            'aiRequirements.chunk',
-            'aiRequirements.assignedUser',
-            'aiRequirements.assessment.assessedBy',
-            'aiRequirements.evidence.knowledgeItem',
-            'aiRequirements.evidence.knowledgeItemChunk',
+            'aiDocuments.latestExtractionRun',
         ])->loadCount([
             'infoItems',
             'phaseComments',
@@ -99,8 +102,9 @@ class AiController extends Controller
         ]);
 
         $analysisCase = $this->analysisCasePayload($record);
-        $requirements = $this->aiRequirementsPayload($record);
-        $requirementsOverview = $this->requirementsOverviewPayload($record);
+        $requirements = $this->requirementLoader->loadForCase($record->id);
+        $requirementsPayload = $this->aiRequirementsPayload($requirements);
+        $requirementsOverview = $this->requirementsOverviewPayload($requirements);
 
         return Inertia::render('App/AI/Show', [
             'pageTitle' => sprintf('AI-arbeid · %s', $record->title),
@@ -118,9 +122,10 @@ class AiController extends Controller
             'search_results' => $searchQuery !== ''
                 ? $this->searchAiDocumentChunks($record, $searchQuery)
                 : [],
-            'requirements_count' => count($requirements),
+            'requirements_count' => count($requirementsPayload),
             'requirements_overview' => $requirementsOverview,
-            'requirements' => $requirements,
+            'requirements' => $requirementsPayload,
+            'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
@@ -146,6 +151,18 @@ class AiController extends Controller
 
         $documents = $request->file('documents', []);
         $uploadedCount = 0;
+        $uploadStartedAt = microtime(true);
+        $requestRunId = (string) Str::uuid();
+        $lastDocumentId = null;
+        $lastRunId = null;
+
+        Log::info('[PROCYNIA][AI_HANG] Upload request received.', [
+            'timestamp' => now()->toIso8601String(),
+            'run_id' => $requestRunId,
+            'document_id' => null,
+            'saved_notice_id' => $record->id,
+            'requested_document_count' => count($documents),
+        ]);
 
         foreach ($documents as $document) {
             if (! $document) {
@@ -176,15 +193,47 @@ class AiController extends Controller
                 'text_extracted_at' => now(),
             ]);
 
+            $documentRunId = (string) Str::uuid();
+
+            $documentRecord->forceFill([
+                'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+            ])->save();
+
+            Log::info('[PROCYNIA][AI_HANG] Document extraction request accepted.', [
+                'timestamp' => now()->toIso8601String(),
+                'run_id' => $documentRunId,
+                'document_id' => $documentRecord->id,
+                'saved_notice_ai_document_id' => $documentRecord->id,
+                'saved_notice_id' => $record->id,
+                'document_title' => $originalFilename,
+                'document_filename' => $storedFilename,
+                'document_text_length' => mb_strlen(trim((string) $extractedText), 'UTF-8'),
+                'uploaded_document_index' => $uploadedCount + 1,
+                'requested_document_count' => count($documents),
+            ]);
+
             $this->syncDocumentChunks($documentRecord, $extractedText);
-            $this->syncDocumentRequirements($documentRecord);
+            $queuedRun = $this->requirementExtractionRunService->createQueuedRunForDocument($documentRecord);
+            $documentRunId = $queuedRun->uuid;
 
             $uploadedCount++;
+            $lastDocumentId = $documentRecord->id;
+            $lastRunId = $documentRunId;
         }
 
         $message = $uploadedCount === 1
             ? 'Uploaded 1 document.'
             : sprintf('Uploaded %d documents.', $uploadedCount);
+
+        Log::info('[PROCYNIA][AI_HANG] Controller returning response.', [
+            'timestamp' => now()->toIso8601String(),
+            'run_id' => $requestRunId,
+            'document_id' => $lastDocumentId,
+            'document_run_id' => $lastRunId,
+            'saved_notice_id' => $record->id,
+            'uploaded_document_count' => $uploadedCount,
+            'elapsed_ms' => (int) round((microtime(true) - $uploadStartedAt) * 1000),
+        ]);
 
         return redirect()
             ->route('app.ai.show', ['savedNotice' => $record->id])
@@ -241,11 +290,69 @@ class AiController extends Controller
             'review_status' => ['required', 'string', Rule::in(SavedNoticeAiRequirement::REVIEW_STATUSES)],
         ]);
 
-        $ownedRequirement->forceFill([
-            'review_status' => $validated['review_status'],
-        ])->save();
+        $this->requirementEditorService->transitionRequirementReviewStatus(
+            $ownedRequirement,
+            (string) $validated['review_status'],
+            $request->user(),
+        );
 
-        return back();
+        return back()->with('success', 'Kravstatus oppdatert.');
+    }
+
+    /**
+     * Purpose: Persist a manually created requirement for the visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after creating the requirement row.
+     * Side effects: Creates a new manual requirement row and a revision row.
+     */
+    public function storeRequirement(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $validated = $request->validate([
+            'requirement_identifier' => ['nullable', 'string', 'max:255'],
+            'requirement_text' => ['required', 'string', 'max:20000'],
+            'requirement_type' => ['required', 'string', Rule::in(SavedNoticeAiRequirement::REQUIREMENT_TYPES)],
+        ]);
+
+        $this->requirementEditorService->createManualRequirement(
+            $record,
+            RequirementEditData::fromArray($validated),
+            $request->user(),
+        );
+
+        return back()->with('success', 'Krav lagt til.');
+    }
+
+    /**
+     * Purpose: Persist edits to a single visible requirement.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A redirect back to the AI case view after saving the edits.
+     * Side effects: Updates the canonical requirement row and creates a revision row.
+     */
+    public function updateRequirement(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'requirement_identifier' => ['nullable', 'string', 'max:255'],
+            'requirement_text' => ['required', 'string', 'max:20000'],
+            'requirement_type' => ['required', 'string', Rule::in(SavedNoticeAiRequirement::REQUIREMENT_TYPES)],
+        ]);
+
+        $this->requirementEditorService->updateRequirement(
+            $ownedRequirement,
+            RequirementEditData::fromArray($validated),
+            $request->user(),
+        );
+
+        return back()->with('success', 'Krav oppdatert.');
     }
 
     /**
@@ -270,7 +377,7 @@ class AiController extends Controller
             ->whereKey($requirement->id)
             ->firstOrFail();
 
-        abort_unless($ownedRequirement->review_status === SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED, 422, 'Only confirmed requirements can be assigned work.');
+        abort_unless($ownedRequirement->isApproved(), 422, 'Only approved requirements can be assigned work.');
 
         $validated = $request->validate([
             'work_status' => ['required', 'string', Rule::in(SavedNoticeAiRequirement::WORK_STATUSES)],
@@ -305,15 +412,7 @@ class AiController extends Controller
         $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
         $userId = $request->user()?->id;
 
-        $confirmedRequirements = $record->aiRequirements()
-            ->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED)
-            ->with([
-                'assessment',
-                'evidence.knowledgeItem',
-                'evidence.knowledgeItemChunk',
-            ])
-            ->orderBy('id')
-            ->get();
+        $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
 
         $requirementEmbeddings = $confirmedRequirements->mapWithKeys(function (SavedNoticeAiRequirement $requirement): array {
             return [$requirement->id => $this->requirementEmbeddingFor($requirement)];
@@ -345,10 +444,7 @@ class AiController extends Controller
         $userId = $request->user()?->id;
         $requirementAssessmentService = app(RequirementAssessmentService::class);
 
-        $confirmedRequirements = $record->aiRequirements()
-            ->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED)
-            ->orderBy('id')
-            ->get();
+        $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
 
         $failedCount = 0;
 
@@ -552,6 +648,14 @@ class AiController extends Controller
                     'uploaded_by' => $document->uploadedBy?->name,
                     'mime_type' => $document->mime_type,
                     'text_extracted_at' => optional($document->text_extracted_at)?->toIso8601String(),
+                    'queued_at' => optional($document->queued_at)?->toIso8601String(),
+                    'processing_started_at' => optional($document->processing_started_at)?->toIso8601String(),
+                    'processing_finished_at' => optional($document->processing_finished_at)?->toIso8601String(),
+                    'processing_error_type' => $document->processing_error_type,
+                    'processing_error_message' => $document->processing_error_message,
+                    'processing_failure_stage' => $document->latestExtractionRun?->failure_stage,
+                    'processing_failure_type' => $document->latestExtractionRun?->error_type,
+                    'processing_failure_message' => $document->latestExtractionRun?->error_message,
                     'has_extracted_text' => filled($document->extracted_text),
                     'chunk_count' => $document->chunks->count(),
                     'delete_url' => route('app.ai.documents.destroy', [
@@ -570,46 +674,32 @@ class AiController extends Controller
      * Returns: An ordered array of requirement rows for the AI case view.
      * Side effects: None.
      */
-    private function aiRequirementsPayload(SavedNotice $notice): array
+    private function aiRequirementsPayload(Collection $requirements): array
     {
-        return $notice->aiRequirements
+        return $requirements
             ->map(function (SavedNoticeAiRequirement $requirement): array {
-                return [
-                    'id' => $requirement->id,
-                    'requirement_text' => $requirement->requirement_text,
-                    'requirement_type' => $requirement->requirement_type,
-                    'requirement_type_label' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_LABELS[$requirement->requirement_type]
-                        ?? $requirement->requirement_type,
-                    'review_status' => $requirement->review_status,
-                    'review_status_label' => SavedNoticeAiRequirement::REVIEW_STATUS_LABELS[$requirement->review_status]
-                        ?? $requirement->review_status,
-                    'extraction_method_label' => SavedNoticeAiRequirement::EXTRACTION_METHOD_LABELS[$requirement->extraction_method]
-                        ?? $requirement->extraction_method,
-                    'document_filename' => $requirement->document?->original_filename,
-                    'chunk_index' => $requirement->chunk?->chunk_index,
-                    'document_id' => $requirement->saved_notice_ai_document_id,
-                    'chunk_id' => $requirement->saved_notice_ai_document_chunk_id,
-                    'extraction_method' => $requirement->extraction_method,
+                $viewData = RequirementViewData::fromRequirement($requirement, [
                     'review_status_update_url' => route('app.ai.requirements.review-status.update', [
                         'savedNotice' => $requirement->saved_notice_id,
                         'requirement' => $requirement->id,
                     ]),
-                    'work_status' => in_array($requirement->work_status, SavedNoticeAiRequirement::WORK_STATUSES, true)
-                        ? $requirement->work_status
-                        : SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
-                    'work_status_label' => SavedNoticeAiRequirement::WORK_STATUS_LABELS[$requirement->work_status]
-                        ?? SavedNoticeAiRequirement::WORK_STATUS_LABELS[SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED],
-                    'assigned_user' => $requirement->assignedUser ? [
-                        'id' => $requirement->assignedUser->id,
-                        'name' => $requirement->assignedUser->name,
-                    ] : null,
-                    'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
+                    'edit_url' => route('app.ai.requirements.update', [
+                        'savedNotice' => $requirement->saved_notice_id,
+                        'requirement' => $requirement->id,
+                    ]),
                     'work_update_url' => route('app.ai.requirements.work.update', [
                         'savedNotice' => $requirement->saved_notice_id,
                         'requirement' => $requirement->id,
                     ]),
-                    'evidence' => $this->aiRequirementEvidencePayload($requirement),
-                ];
+                ]);
+
+                return array_merge(
+                    $viewData->toArray(),
+                    [
+                        'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
+                        'evidence' => $this->aiRequirementEvidencePayload($requirement),
+                    ],
+                );
             })
             ->values()
             ->all();
@@ -751,19 +841,23 @@ class AiController extends Controller
      * Returns: A compact case-level overview of review and work counts.
      * Side effects: None.
      */
-    private function requirementsOverviewPayload(SavedNotice $notice): array
+    private function requirementsOverviewPayload(Collection $requirements): array
     {
-        $requirements = $notice->aiRequirements;
-        $confirmedRequirements = $requirements->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED);
+        $confirmedRequirements = $requirements->filter(fn (SavedNoticeAiRequirement $requirement): bool => $requirement->isApproved());
+        $pendingRequirements = $requirements->filter(fn (SavedNoticeAiRequirement $requirement): bool => $requirement->isDraft());
+        $rejectedRequirements = $requirements->filter(fn (SavedNoticeAiRequirement $requirement): bool => $requirement->isRejected());
 
         return [
             'confirmed_total' => $confirmedRequirements->count(),
-            'pending_total' => $requirements->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_PENDING)->count(),
-            'rejected_total' => $requirements->where('review_status', SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED)->count(),
+            'approved_total' => $confirmedRequirements->count(),
+            'pending_total' => $pendingRequirements->count(),
+            'draft_total' => $pendingRequirements->count(),
+            'rejected_total' => $rejectedRequirements->count(),
             'not_started_total' => $confirmedRequirements->where('work_status', SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED)->count(),
             'in_progress_total' => $confirmedRequirements->where('work_status', SavedNoticeAiRequirement::WORK_STATUS_IN_PROGRESS)->count(),
             'done_total' => $confirmedRequirements->where('work_status', SavedNoticeAiRequirement::WORK_STATUS_DONE)->count(),
             'unassigned_confirmed_total' => $confirmedRequirements->whereNull('assigned_user_id')->count(),
+            'unassigned_approved_total' => $confirmedRequirements->whereNull('assigned_user_id')->count(),
         ];
     }
 
@@ -977,41 +1071,9 @@ class AiController extends Controller
      * Returns: None.
      * Side effects: Deletes and recreates requirement rows for the document.
      */
-    private function syncDocumentRequirements(SavedNoticeAiDocument $document): void
+    private function syncDocumentRequirements(SavedNoticeAiDocument $document, ?User $changedBy = null, ?string $runId = null): void
     {
-        $document->requirements()->delete();
-
-        $chunks = $document->chunks()
-            ->orderBy('chunk_index')
-            ->get(['id', 'content']);
-
-        if ($chunks->isEmpty()) {
-            return;
-        }
-
-        $payloads = [];
-
-        foreach ($chunks as $chunk) {
-            foreach ($this->requirementExtractor->extractFromChunk((string) $chunk->content) as $requirement) {
-                $payloads[] = [
-                    'saved_notice_id' => $document->saved_notice_id,
-                    'saved_notice_ai_document_id' => $document->id,
-                    'saved_notice_ai_document_chunk_id' => $chunk->id,
-                    'requirement_text' => $requirement['requirement_text'],
-                    'requirement_type' => $requirement['requirement_type'],
-                    'extraction_method' => $requirement['extraction_method'],
-                    'review_status' => $requirement['review_status'],
-                    'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
-                    'assigned_user_id' => null,
-                ];
-            }
-        }
-
-        if ($payloads === []) {
-            return;
-        }
-
-        $document->requirements()->createMany($payloads);
+        $this->requirementExtractionPipeline->syncDocumentRequirements($document, $changedBy, $runId);
     }
 
     /**

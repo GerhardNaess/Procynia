@@ -24,19 +24,23 @@ class OpenAiClient
         ]);
     }
 
-    public function post(string $endpoint, array $payload): Response
+    public function post(string $endpoint, array $payload, int $timeoutSeconds = 60): Response
     {
-        return $this->pendingRequest()->post(ltrim($endpoint, '/'), $payload);
+        $response = $this->pendingRequest($timeoutSeconds)->post(ltrim($endpoint, '/'), $payload);
+
+        if ($response->failed()) {
+            $this->logFailure($endpoint, $response->status(), $this->requestIdFrom($response), $response->body());
+        }
+
+        return $response;
     }
 
     private function send(string $endpoint, array $payload): array
     {
-        $response = $this->pendingRequest()->post(ltrim($endpoint, '/'), $payload);
+        $response = $this->post($endpoint, $payload);
         $requestId = $this->requestIdFrom($response);
 
         if ($response->failed()) {
-            $this->logFailure($endpoint, $response->status(), $requestId, $response->body());
-
             throw new RuntimeException(sprintf(
                 'OpenAI request to [%s] failed with HTTP status [%d].',
                 $endpoint,
@@ -64,7 +68,7 @@ class OpenAiClient
         return $decoded;
     }
 
-    private function pendingRequest(): PendingRequest
+    private function pendingRequest(int $timeoutSeconds = 60): PendingRequest
     {
         $apiKey = trim((string) config('services.openai.api_key'));
         $baseUrl = trim((string) config('services.openai.base_url', 'https://api.openai.com/v1'));
@@ -81,7 +85,7 @@ class OpenAiClient
             ->withToken($apiKey)
             ->acceptJson()
             ->asJson()
-            ->timeout(60);
+            ->timeout($timeoutSeconds);
     }
 
     private function embeddingModel(): string
@@ -110,11 +114,61 @@ class OpenAiClient
 
     private function logFailure(string $endpoint, int $status, ?string $requestId, string $body): void
     {
+        $body = trim($body);
+        $error = $this->errorDetailsFromBody($body);
+
         Log::warning('OpenAI request failed.', [
             'endpoint' => $endpoint,
             'status' => $status,
             'request_id' => $requestId,
-            'body_excerpt' => Str::limit(trim($body), 1000),
+            'error_message' => $error['message'],
+            'error_type' => $error['type'],
+            'error_code' => $error['code'],
+            'error_param' => $error['param'],
+            'raw_body_length' => mb_strlen($body, 'UTF-8'),
+            'raw_body' => $body,
+            'body_excerpt' => Str::limit($body, 1000),
         ]);
+    }
+
+    private function errorDetailsFromBody(string $body): array
+    {
+        if ($body === '') {
+            return [
+                'message' => null,
+                'type' => null,
+                'code' => null,
+                'param' => null,
+            ];
+        }
+
+        $decoded = json_decode($body, true);
+
+        if (! is_array($decoded)) {
+            return [
+                'message' => null,
+                'type' => null,
+                'code' => null,
+                'param' => null,
+            ];
+        }
+
+        $error = data_get($decoded, 'error');
+
+        if (! is_array($error)) {
+            return [
+                'message' => null,
+                'type' => null,
+                'code' => null,
+                'param' => null,
+            ];
+        }
+
+        return [
+            'message' => is_string(data_get($error, 'message')) ? trim((string) data_get($error, 'message')) : null,
+            'type' => is_string(data_get($error, 'type')) ? trim((string) data_get($error, 'type')) : null,
+            'code' => is_scalar(data_get($error, 'code')) ? trim((string) data_get($error, 'code')) : null,
+            'param' => is_scalar(data_get($error, 'param')) ? trim((string) data_get($error, 'param')) : null,
+        ];
     }
 }

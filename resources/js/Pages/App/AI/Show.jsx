@@ -20,7 +20,31 @@ const AI_STATUS_META = {
 const DOCUMENT_STATUS_META = {
     uploaded: {
         label: 'Lastet opp',
+        className: 'bg-slate-100 text-slate-700 ring-slate-200',
+    },
+    text_extracted: {
+        label: 'Tekst ekstrahert',
         className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    queued: {
+        label: 'I kø',
+        className: 'bg-amber-100 text-amber-700 ring-amber-200',
+    },
+    processing: {
+        label: 'Behandles',
+        className: 'bg-violet-100 text-violet-700 ring-violet-200',
+    },
+    merging: {
+        label: 'Slår sammen',
+        className: 'bg-sky-100 text-sky-700 ring-sky-200',
+    },
+    completed: {
+        label: 'Fullført',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    failed: {
+        label: 'Feilet',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
     },
 };
 
@@ -43,13 +67,24 @@ const REQUIREMENT_TYPE_META = {
     },
 };
 
-const REQUIREMENT_REVIEW_STATUS_META = {
-    pending: {
-        label: 'Til vurdering',
+const REQUIREMENT_SOURCE_TYPE_META = {
+    ai_candidate: {
+        label: 'AI-kandidat',
         className: 'bg-violet-100 text-violet-700 ring-violet-200',
     },
-    confirmed: {
-        label: 'Bekreftet',
+    manual: {
+        label: 'Manuelt',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+};
+
+const REQUIREMENT_APPROVAL_STATUS_META = {
+    draft: {
+        label: 'Utkast',
+        className: 'bg-slate-100 text-slate-700 ring-slate-200',
+    },
+    approved: {
+        label: 'Godkjent',
         className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     },
     rejected: {
@@ -58,29 +93,34 @@ const REQUIREMENT_REVIEW_STATUS_META = {
     },
 };
 
-const REQUIREMENT_REVIEW_ACTIONS = {
-    pending: [
+const REQUIREMENT_APPROVAL_ACTIONS = {
+    draft: [
         {
-            label: 'Bekreft',
+            label: 'Godkjenn',
             value: 'confirmed',
             className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
         },
         {
-            label: 'Avvis',
+            label: 'Avvis / slett',
             value: 'rejected',
             className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
         },
     ],
-    confirmed: [
+    approved: [
         {
-            label: 'Nullstill til vurdering',
+            label: 'Til utkast',
             value: 'pending',
             className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+        },
+        {
+            label: 'Avvis / slett',
+            value: 'rejected',
+            className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
         },
     ],
     rejected: [
         {
-            label: 'Nullstill til vurdering',
+            label: 'Gjenopprett',
             value: 'pending',
             className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
         },
@@ -196,6 +236,36 @@ function formatKnowledgeSnippet(value, maxLength = 200) {
     return `${normalizedValue.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
+function formatDocumentFailureDetails(document) {
+    if (!document || document.processing_status !== 'failed') {
+        return null;
+    }
+
+    const failureStage = document.processing_failure_stage ?? document.processing_error_type ?? null;
+    const failureType = document.processing_failure_type ?? document.processing_error_type ?? null;
+    const failureMessage = document.processing_failure_message ?? document.processing_error_message ?? null;
+
+    return {
+        failureStage,
+        failureType,
+        failureMessage,
+    };
+}
+
+const DOCUMENT_PROCESSING_ACTIVE_STATUSES = new Set([
+    'queued',
+    'processing',
+    'merging',
+]);
+
+function hasActiveDocumentProcessing(documents) {
+    if (!Array.isArray(documents) || documents.length === 0) {
+        return false;
+    }
+
+    return documents.some((document) => DOCUMENT_PROCESSING_ACTIVE_STATUSES.has(document?.processing_status));
+}
+
 /**
  * Purpose: Render the AI case control surface for a single saved notice.
  * Inputs: pageTitle, case, and ai_status props from the AI controller.
@@ -212,6 +282,7 @@ export default function AiShow({
     requirements_count: requirementsCount = 0,
     requirements_overview: requirementsOverviewProp = {},
     requirements = [],
+    requirements_store_url: requirementsStoreUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
@@ -229,8 +300,20 @@ export default function AiShow({
     const [refreshingEvidence, setRefreshingEvidence] = useState(false);
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [deletingDocumentId, setDeletingDocumentId] = useState(null);
+    const [editingRequirementId, setEditingRequirementId] = useState(null);
+    const documentRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
         documents: [],
+    });
+    const manualRequirementForm = useForm({
+        requirement_identifier: '',
+        requirement_text: '',
+        requirement_type: 'unspecified',
+    });
+    const requirementEditForm = useForm({
+        requirement_identifier: '',
+        requirement_text: '',
+        requirement_type: 'unspecified',
     });
     const aiStatusMeta = AI_STATUS_META[aiStatus] ?? AI_STATUS_META.not_started;
     const assignedUserOptions = Array.isArray(assignedUserOptionsProp) ? assignedUserOptionsProp : [];
@@ -240,7 +323,13 @@ export default function AiShow({
     const requirementsOverview = requirementsOverviewProp && typeof requirementsOverviewProp === 'object'
         ? requirementsOverviewProp
         : {};
+    const documentNeedsRefresh = hasActiveDocumentProcessing(documentRows);
+    const editingRequirement = editingRequirementId !== null
+        ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
+        : null;
     const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
+    const manualRequirementError = Object.values(manualRequirementForm.errors).find(Boolean) ?? null;
+    const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
     const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
         ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
         : 'Ingen filer valgt ennå.';
@@ -250,15 +339,20 @@ export default function AiShow({
         || workingRequirementId !== null
         || refreshingAssessments
         || refreshingEvidence
-        || updatingEvidenceId !== null;
-    const confirmedRequirementsTotal = Number(requirementsOverview.confirmed_total ?? 0);
-    const pendingRequirementsTotal = Number(requirementsOverview.pending_total ?? 0);
+        || updatingEvidenceId !== null
+        || manualRequirementForm.processing
+        || requirementEditForm.processing
+        || editingRequirementId !== null;
+    const approvedRequirementsTotal = Number(requirementsOverview.approved_total ?? requirementsOverview.confirmed_total ?? 0);
+    const draftRequirementsTotal = Number(requirementsOverview.draft_total ?? requirementsOverview.pending_total ?? 0);
     const rejectedRequirementsTotal = Number(requirementsOverview.rejected_total ?? 0);
     const notStartedRequirementsTotal = Number(requirementsOverview.not_started_total ?? 0);
     const inProgressRequirementsTotal = Number(requirementsOverview.in_progress_total ?? 0);
     const doneRequirementsTotal = Number(requirementsOverview.done_total ?? 0);
-    const unassignedConfirmedRequirementsTotal = Number(requirementsOverview.unassigned_confirmed_total ?? 0);
-    const assignedConfirmedRequirementsTotal = Math.max(confirmedRequirementsTotal - unassignedConfirmedRequirementsTotal, 0);
+    const unassignedApprovedRequirementsTotal = Number(
+        requirementsOverview.unassigned_approved_total ?? requirementsOverview.unassigned_confirmed_total ?? 0,
+    );
+    const assignedApprovedRequirementsTotal = Math.max(approvedRequirementsTotal - unassignedApprovedRequirementsTotal, 0);
     const updatedAtLabel = caseData?.updated_at
         ? new Intl.DateTimeFormat(locale, {
             day: '2-digit',
@@ -270,6 +364,39 @@ export default function AiShow({
     useEffect(() => {
         setSearchInput(searchQuery);
     }, [searchQuery]);
+
+    useEffect(() => {
+        if (!documentNeedsRefresh) {
+            documentRefreshInFlightRef.current = false;
+            return undefined;
+        }
+
+        const refreshDocumentState = () => {
+            if (documentRefreshInFlightRef.current) {
+                return;
+            }
+
+            documentRefreshInFlightRef.current = true;
+
+            router.reload({
+                only: ['case', 'ai_status', 'documents', 'requirements', 'requirements_count', 'requirements_overview'],
+                preserveScroll: true,
+                preserveState: true,
+                onFinish: () => {
+                    documentRefreshInFlightRef.current = false;
+                },
+            });
+        };
+
+        refreshDocumentState();
+
+        const refreshTimer = window.setInterval(refreshDocumentState, 3000);
+
+        return () => {
+            window.clearInterval(refreshTimer);
+            documentRefreshInFlightRef.current = false;
+        };
+    }, [documentNeedsRefresh]);
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -312,6 +439,57 @@ export default function AiShow({
         );
     };
 
+    const submitManualRequirement = (event) => {
+        event.preventDefault();
+
+        if (!requirementsStoreUrl || manualRequirementForm.processing || requirementUpdatesLocked) {
+            return;
+        }
+
+        manualRequirementForm.post(requirementsStoreUrl, {
+            preserveScroll: true,
+            onSuccess: () => {
+                manualRequirementForm.reset();
+                manualRequirementForm.clearErrors();
+            },
+        });
+    };
+
+    const startEditingRequirement = (requirement) => {
+        if (requirementUpdatesLocked) {
+            return;
+        }
+
+        setEditingRequirementId(requirement.id);
+        requirementEditForm.setData({
+            requirement_identifier: requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '',
+            requirement_text: requirement.current_requirement_text ?? requirement.requirement_text ?? '',
+            requirement_type: requirement.requirement_type ?? 'unspecified',
+        });
+        requirementEditForm.clearErrors();
+    };
+
+    const cancelEditingRequirement = () => {
+        setEditingRequirementId(null);
+        requirementEditForm.reset();
+        requirementEditForm.clearErrors();
+    };
+
+    const submitRequirementEdit = (event) => {
+        event.preventDefault();
+
+        if (!editingRequirement || !editingRequirement.edit_url || requirementEditForm.processing || requirementUpdatesLocked) {
+            return;
+        }
+
+        requirementEditForm.patch(editingRequirement.edit_url, {
+            preserveScroll: true,
+            onSuccess: () => {
+                cancelEditingRequirement();
+            },
+        });
+    };
+
     const updateRequirementReviewStatus = (requirement, reviewStatus) => {
         if (!requirement.review_status_update_url || requirementUpdatesLocked) {
             return;
@@ -337,7 +515,7 @@ export default function AiShow({
      * Side effects: Sends a PATCH request that updates the requirement work state on the server.
      */
     const updateRequirementWork = (requirement, workStatus, assignedUserId) => {
-        if (!requirement.work_update_url || requirement.review_status !== 'confirmed' || requirementUpdatesLocked) {
+        if (!requirement.work_update_url || requirement.approval_status !== 'approved' || requirementUpdatesLocked) {
             return;
         }
 
@@ -579,6 +757,7 @@ export default function AiShow({
                                                 const documentStatusMeta = DOCUMENT_STATUS_META[document.processing_status] ?? DOCUMENT_STATUS_META.uploaded;
                                                 const chunkCount = Number(document.chunk_count ?? 0);
                                                 const isDeleting = deletingDocumentId === document.id;
+                                                const failureDetails = formatDocumentFailureDetails(document);
                                                 const uploadedAtLabel = document.uploaded_at
                                                     ? new Intl.DateTimeFormat(locale, {
                                                         day: '2-digit',
@@ -617,9 +796,29 @@ export default function AiShow({
                                                             {document.file_size_human ?? '—'}
                                                         </td>
                                                         <td className="px-5 py-4">
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${documentStatusMeta.className}`}>
-                                                                {documentStatusMeta.label}
-                                                            </span>
+                                                            <div className="space-y-2">
+                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${documentStatusMeta.className}`}>
+                                                                    {documentStatusMeta.label}
+                                                                </span>
+                                                                {failureDetails ? (
+                                                                    <div className="max-w-sm rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-800">
+                                                                        <div className="font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                            Feilsti
+                                                                        </div>
+                                                                        <div className="mt-1">
+                                                                            Stadium: {failureDetails.failureStage ?? '—'}
+                                                                        </div>
+                                                                        <div>
+                                                                            Type: {failureDetails.failureType ?? '—'}
+                                                                        </div>
+                                                                        {failureDetails.failureMessage ? (
+                                                                            <div className="mt-1 whitespace-pre-wrap">
+                                                                                {failureDetails.failureMessage}
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                ) : null}
+                                                            </div>
                                                         </td>
                                                         <td className="px-5 py-4 text-sm text-slate-600">
                                                             {document.uploaded_by ?? '—'}
@@ -740,7 +939,7 @@ export default function AiShow({
                             Kravkandidater
                         </h2>
                         <p className="text-sm leading-6 text-slate-500">
-                            Mulige krav identifisert i opplastede anbudsdokumenter. Bekreftede krav blir operative arbeidskrav.
+                            Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
                         </p>
                     </div>
                 </section>
@@ -756,7 +955,7 @@ export default function AiShow({
                                     Oppsummering av sakskrav
                                 </h3>
                                 <p className="text-xs leading-5 text-slate-500">
-                                    Bekreftede krav er arbeidslaget. Til vurdering og avviste krav forblir i analyse.
+                                    Godkjente krav er arbeidslaget. Utkast og avviste krav forblir i analyse.
                                 </p>
                             </div>
                             <div className="text-xs text-slate-500">
@@ -767,14 +966,14 @@ export default function AiShow({
                         <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
                             <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                    Bekreftet
-                                </div>
-                                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                                    {confirmedRequirementsTotal}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                    Arbeidskrav
-                                </div>
+                                Godkjent
+                            </div>
+                            <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                                    {approvedRequirementsTotal}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600">
+                                Arbeidskrav
+                            </div>
                             </div>
 
                             <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -785,7 +984,7 @@ export default function AiShow({
                                     {notStartedRequirementsTotal}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                    Bare bekreftede
+                                    Bare godkjente
                                 </div>
                             </div>
 
@@ -797,7 +996,7 @@ export default function AiShow({
                                     {inProgressRequirementsTotal}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                    Bare bekreftede
+                                    Bare godkjente
                                 </div>
                             </div>
 
@@ -809,7 +1008,7 @@ export default function AiShow({
                                     {doneRequirementsTotal}
                                 </div>
                                 <div className="mt-1 text-xs text-slate-500">
-                                    Bare bekreftede
+                                    Bare godkjente
                                 </div>
                             </div>
 
@@ -818,7 +1017,7 @@ export default function AiShow({
                                     Tildelt
                                 </div>
                                 <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                    Tildelt: {assignedConfirmedRequirementsTotal} av {requirementCountLabel} krav
+                                    Tildelt: {assignedApprovedRequirementsTotal} av {requirementCountLabel} krav
                                 </div>
                                 <div className="mt-1 text-xs text-slate-600">
                                     krav
@@ -828,7 +1027,7 @@ export default function AiShow({
 
                         <div className="mt-3 flex flex-wrap gap-2">
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                Til vurdering: {pendingRequirementsTotal}
+                                Utkast: {draftRequirementsTotal}
                             </span>
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
                                 Avvist: {rejectedRequirementsTotal}
@@ -846,7 +1045,7 @@ export default function AiShow({
                                     Kravkandidater
                                 </h2>
                                 <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                    Mulige krav identifisert i opplastede anbudsdokumenter. Bekreftede krav blir operative arbeidskrav.
+                                    Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
                                 </p>
                             </div>
 
@@ -871,6 +1070,90 @@ export default function AiShow({
                             </div>
                         </div>
 
+                        <form onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-violet-600">
+                                        Legg til krav
+                                    </div>
+                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                        Opprett et nytt krav manuelt
+                                    </h3>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Bruk dette når AI ikke foreslår kravet, eller når krav-ID må korrigeres før videre arbeid.
+                                    </p>
+                                </div>
+                                <button
+                                    type="submit"
+                                    disabled={manualRequirementForm.processing || !requirementsStoreUrl || requirementUpdatesLocked}
+                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {manualRequirementForm.processing ? 'Lagrer...' : 'Legg til krav'}
+                                </button>
+                            </div>
+
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <label className="block space-y-1">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Krav-ID
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={manualRequirementForm.data.requirement_identifier}
+                                        onChange={(event) => manualRequirementForm.setData('requirement_identifier', event.target.value)}
+                                        disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        placeholder="For eksempel 3.2"
+                                    />
+                                    {manualRequirementForm.errors.requirement_identifier ? (
+                                        <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_identifier}</p>
+                                    ) : null}
+                                </label>
+
+                                <label className="block space-y-1">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Kravtype
+                                    </span>
+                                    <select
+                                        value={manualRequirementForm.data.requirement_type}
+                                        onChange={(event) => manualRequirementForm.setData('requirement_type', event.target.value)}
+                                        disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
+                                            <option key={value} value={value}>
+                                                {meta.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {manualRequirementForm.errors.requirement_type ? (
+                                        <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_type}</p>
+                                    ) : null}
+                                </label>
+                            </div>
+
+                            <label className="block space-y-1">
+                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    Kravtekst
+                                </span>
+                                <textarea
+                                    value={manualRequirementForm.data.requirement_text}
+                                    onChange={(event) => manualRequirementForm.setData('requirement_text', event.target.value)}
+                                    rows={4}
+                                    disabled={manualRequirementForm.processing || requirementUpdatesLocked}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    placeholder="Skriv kravet slik brukeren skal se det."
+                                />
+                                {manualRequirementForm.errors.requirement_text ? (
+                                    <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_text}</p>
+                                ) : null}
+                            </label>
+
+                            {manualRequirementError ? (
+                                <p className="text-sm text-rose-600">{manualRequirementError}</p>
+                            ) : null}
+                        </form>
+
                         {requirementRows.length === 0 ? (
                             <div className="mt-5 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                 <div className="text-lg font-semibold text-slate-900">
@@ -884,8 +1167,10 @@ export default function AiShow({
                             <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:max-h-[38rem]">
                                 {requirementRows.map((requirement) => {
                                     const requirementTypeMeta = REQUIREMENT_TYPE_META[requirement.requirement_type] ?? REQUIREMENT_TYPE_META.unspecified;
-                                    const reviewStatusMeta = REQUIREMENT_REVIEW_STATUS_META[requirement.review_status] ?? REQUIREMENT_REVIEW_STATUS_META.pending;
-                                    const reviewActions = REQUIREMENT_REVIEW_ACTIONS[requirement.review_status] ?? REQUIREMENT_REVIEW_ACTIONS.pending;
+                                    const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
+                                    const approvalStatus = requirement.approval_status ?? 'draft';
+                                    const approvalStatusMeta = REQUIREMENT_APPROVAL_STATUS_META[approvalStatus] ?? REQUIREMENT_APPROVAL_STATUS_META.draft;
+                                    const approvalActions = REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft;
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
                                     const assignedUserId = requirement.assigned_user?.id ? String(requirement.assigned_user.id) : '';
@@ -893,7 +1178,18 @@ export default function AiShow({
                                     const chunkLabel = typeof requirement.chunk_index === 'number'
                                         ? `Tekstbit ${requirement.chunk_index + 1}`
                                         : 'Tekstbit —';
-                                    const isConfirmedRequirement = requirement.review_status === 'confirmed';
+                                    const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
+                                    const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
+                                    const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
+                                    const originalRequirementText = requirement.original_requirement_text ?? null;
+                                    const hasOriginalDifference = Boolean(
+                                        (originalRequirementIdentifier && originalRequirementIdentifier !== currentRequirementIdentifier)
+                                        || (originalRequirementText && originalRequirementText !== currentRequirementText),
+                                    );
+                                    const revisionCount = Number(requirement.revision_count ?? 0);
+                                    const isApprovedRequirement = approvalStatus === 'approved';
+                                    const isRejectedRequirement = approvalStatus === 'rejected';
+                                    const isEditingThisRequirement = editingRequirementId === requirement.id;
                                     const assessment = requirement.assessment ?? null;
                                     const hasAssessment = assessment !== null;
                                     const assessmentCompleted = assessment?.assessment_status === 'completed';
@@ -908,37 +1204,64 @@ export default function AiShow({
                                             minute: '2-digit',
                                         }).format(new Date(assessment.assessed_at))
                                         : '—';
-                                    const showEvidenceSection = isConfirmedRequirement || evidenceRows.length > 0;
+                                    const showEvidenceSection = isApprovedRequirement || evidenceRows.length > 0;
 
                                     return (
                                         <article
                                             key={requirement.id}
                                             className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] ${
-                                                isConfirmedRequirement
+                                                isApprovedRequirement
                                                     ? 'border-emerald-100 bg-emerald-50/40'
+                                                    : isRejectedRequirement
+                                                        ? 'border-rose-100 bg-rose-50/30'
                                                     : 'border-slate-200 bg-white'
                                             }`}
                                         >
                                             <div className="space-y-3">
-                                                <div className="space-y-1">
-                                                    <div className="text-base font-semibold leading-7 text-slate-950 break-words">
-                                                        {requirement.requirement_text}
+                                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                                    <div className="min-w-0 flex-1 space-y-2">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            {currentRequirementIdentifier !== '—' ? (
+                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                    {currentRequirementIdentifier}
+                                                                </span>
+                                                            ) : null}
+                                                            {originalRequirementIdentifier && originalRequirementIdentifier !== currentRequirementIdentifier ? (
+                                                                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                                    Original: {originalRequirementIdentifier}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="text-base font-semibold leading-7 text-slate-950 break-words">
+                                                            {currentRequirementText}
+                                                        </div>
+                                                        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                            <span>
+                                                                {isApprovedRequirement ? 'Arbeidslag' : 'Analysselag'}
+                                                            </span>
+                                                            <span>
+                                                                Revisjoner: {revisionCount}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                    <div className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${
-                                                        isConfirmedRequirement ? 'text-emerald-700' : 'text-slate-400'
-                                                    }`}>
-                                                        {isConfirmedRequirement ? 'Arbeidslag' : 'Analysselag'}
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
+                                                            {requirement.source_type_label ?? sourceTypeMeta.label}
+                                                        </span>
+                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${approvalStatusMeta.className}`}>
+                                                            {requirement.approval_status_label ?? approvalStatusMeta.label}
+                                                        </span>
+                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${requirementTypeMeta.className}`}>
+                                                            {requirement.requirement_type_label ?? requirementTypeMeta.label}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                                                            {requirement.edit_state_label ?? 'Original'}
+                                                        </span>
                                                     </div>
                                                 </div>
 
                                                 <div className="flex flex-wrap gap-2">
-                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${reviewStatusMeta.className}`}>
-                                                        {requirement.review_status_label ?? reviewStatusMeta.label}
-                                                    </span>
-                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${requirementTypeMeta.className}`}>
-                                                        {requirement.requirement_type_label ?? requirementTypeMeta.label}
-                                                    </span>
-                                                    {isConfirmedRequirement ? (
+                                                    {isApprovedRequirement ? (
                                                         <>
                                                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${workStatusMeta.className}`}>
                                                                 {requirement.work_status_label ?? workStatusMeta.label}
@@ -955,9 +1278,101 @@ export default function AiShow({
                                                         Kilde: {requirement.document_filename ?? '—'}
                                                     </span>
                                                     <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                                                        {chunkLabel}
-                                                    </span>
-                                                </div>
+                                                            {chunkLabel}
+                                                        </span>
+                                                    </div>
+
+                                                {hasOriginalDifference ? (
+                                                    <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3">
+                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                            Opprinnelig forslag
+                                                        </div>
+                                                        <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                            {originalRequirementText ?? '—'}
+                                                        </p>
+                                                    </div>
+                                                ) : null}
+
+                                                {isEditingThisRequirement ? (
+                                                    <form onSubmit={submitRequirementEdit} className="space-y-4 rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+                                                        <div className="grid gap-4 md:grid-cols-2">
+                                                            <label className="block space-y-1">
+                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Krav-ID
+                                                                </span>
+                                                                <input
+                                                                    type="text"
+                                                                    value={requirementEditForm.data.requirement_identifier}
+                                                                    onChange={(event) => requirementEditForm.setData('requirement_identifier', event.target.value)}
+                                                                    disabled={requirementEditForm.processing}
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                />
+                                                                {requirementEditForm.errors.requirement_identifier ? (
+                                                                    <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_identifier}</p>
+                                                                ) : null}
+                                                            </label>
+
+                                                            <label className="block space-y-1">
+                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Kravtype
+                                                                </span>
+                                                                <select
+                                                                    value={requirementEditForm.data.requirement_type}
+                                                                    onChange={(event) => requirementEditForm.setData('requirement_type', event.target.value)}
+                                                                    disabled={requirementEditForm.processing}
+                                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {Object.entries(REQUIREMENT_TYPE_META).map(([value, meta]) => (
+                                                                        <option key={value} value={value}>
+                                                                            {meta.label}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                                {requirementEditForm.errors.requirement_type ? (
+                                                                    <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_type}</p>
+                                                                ) : null}
+                                                            </label>
+                                                        </div>
+
+                                                        <label className="block space-y-1">
+                                                            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                Kravtekst
+                                                            </span>
+                                                            <textarea
+                                                                value={requirementEditForm.data.requirement_text}
+                                                                onChange={(event) => requirementEditForm.setData('requirement_text', event.target.value)}
+                                                                rows={4}
+                                                                disabled={requirementEditForm.processing}
+                                                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            />
+                                                            {requirementEditForm.errors.requirement_text ? (
+                                                                <p className="text-sm text-rose-600">{requirementEditForm.errors.requirement_text}</p>
+                                                            ) : null}
+                                                        </label>
+
+                                                        {requirementEditError ? (
+                                                            <p className="text-sm text-rose-600">{requirementEditError}</p>
+                                                        ) : null}
+
+                                                        <div className="flex flex-wrap gap-2">
+                                                            <button
+                                                                type="submit"
+                                                                disabled={requirementEditForm.processing || requirementUpdatesLocked}
+                                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {requirementEditForm.processing ? 'Lagrer...' : 'Lagre endringer'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelEditingRequirement}
+                                                                disabled={requirementEditForm.processing}
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                Avbryt
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                ) : null}
 
                                                 <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -975,7 +1390,7 @@ export default function AiShow({
                                                         ) : null}
                                                     </div>
 
-                                                    {isConfirmedRequirement ? (
+                                                    {isApprovedRequirement ? (
                                                         hasAssessment ? (
                                                             assessmentCompleted ? (
                                                                 <div className="space-y-3">
@@ -1054,9 +1469,9 @@ export default function AiShow({
                                                         )
                                                     ) : (
                                                         <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                            AI-vurdering genereres når kravet er bekreftet.
-                                                        </div>
-                                                    )}
+                                                                AI-vurdering genereres når kravet er godkjent.
+                                                            </div>
+                                                        )}
                                                 </div>
 
                                                 {showEvidenceSection ? (
@@ -1065,7 +1480,7 @@ export default function AiShow({
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                                 Bevisgrunnlag
                                                             </div>
-                                                            {isConfirmedRequirement ? (
+                                                            {isApprovedRequirement ? (
                                                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
                                                                     Persistert
                                                                 </span>
@@ -1158,7 +1573,7 @@ export default function AiShow({
                                                 ) : null}
 
                                                 <div className="flex flex-wrap gap-2 border-t border-slate-200/80 pt-4">
-                                                    {isConfirmedRequirement ? (
+                                                    {isApprovedRequirement ? (
                                                         <div className="grid w-full gap-3 md:grid-cols-2">
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -1201,7 +1616,16 @@ export default function AiShow({
                                                     ) : null}
 
                                                     <div className="flex flex-wrap gap-2">
-                                                        {reviewActions.map((action) => (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startEditingRequirement(requirement)}
+                                                            disabled={requirementUpdatesLocked || isEditingThisRequirement}
+                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            Rediger
+                                                        </button>
+
+                                                        {approvalActions.map((action) => (
                                                             <button
                                                                 key={action.value}
                                                                 type="button"

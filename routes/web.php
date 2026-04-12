@@ -56,6 +56,10 @@ Route::prefix('app')
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
         Route::post('/ai/{savedNotice}/documents', [AiController::class, 'storeDocuments'])->name('ai.documents.store');
         Route::delete('/ai/{savedNotice}/documents/{document}', [AiController::class, 'destroyDocument'])->name('ai.documents.destroy');
+        Route::post('/ai/{savedNotice}/requirements', [AiController::class, 'storeRequirement'])
+            ->name('ai.requirements.store');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
+            ->name('ai.requirements.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/review-status', [AiController::class, 'updateRequirementReviewStatus'])
             ->name('ai.requirements.review-status.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/work', [AiController::class, 'updateRequirementWork'])
