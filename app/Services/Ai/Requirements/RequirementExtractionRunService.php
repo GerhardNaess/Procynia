@@ -8,6 +8,7 @@ use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
 use App\Models\SavedNoticeAiDocument;
+use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -170,126 +171,59 @@ class RequirementExtractionRunService
             return;
         }
 
-        $startedAt = microtime(true);
-        $documentText = trim((string) $document->extracted_text);
-        $documentTextLength = mb_strlen($documentText, 'UTF-8');
+        $this->markRunProcessing($run, $document);
 
-        Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run started.', [
+        $splitResult = app(DocumentSplitPlanner::class)->plan($document, $run->uuid);
+
+        Log::info('[TT][SPLIT] Async split result received.', [
             'run_id' => $run->uuid,
             'document_id' => $document->id,
             'saved_notice_ai_document_id' => $document->id,
             'saved_notice_id' => $document->saved_notice_id,
-            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-            'status' => $run->status,
-            'document_text_length' => $documentTextLength,
-            'phase_1_requirement_extraction' => true,
+            'ok' => $splitResult['ok'] ?? null,
+            'split_plan_count' => count($splitResult['split_plan'] ?? []),
+            'error_type' => $splitResult['error_type'] ?? null,
+            'error_message' => $splitResult['error_message'] ?? null,
         ]);
 
-        if ($this->hasPublishedRequirementsForRun($run)) {
-            Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun started.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'candidate_count' => (int) $run->candidate_count,
-                'staged_requirement_count' => $this->stagedRequirementCount($run),
-                'phase_1_requirement_extraction' => true,
-                'reason' => 'already_published',
-            ]);
-
-            $publishedRequirementCount = $this->promoteRun($run, $document);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun finished.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'candidate_count' => (int) $run->candidate_count,
-                'published_requirement_count' => $publishedRequirementCount,
-                'phase_1_requirement_extraction' => true,
-                'reason' => 'already_published',
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => null,
-                'input_text_length' => null,
-                'raw_output_length' => 0,
-                'raw_output_preview' => '',
-                'parse_strategy' => null,
-                'raw_requirement_count' => 0,
-                'normalized_requirement_count' => 0,
-                'deduped_requirement_count' => 0,
-                'staged_requirement_count' => 0,
-                'persisted_requirement_count' => $publishedRequirementCount,
-                'openai_call_count' => (int) $run->openai_call_count,
-                'input_tokens_total' => (int) $run->input_tokens_total,
-                'output_tokens_total' => (int) $run->output_tokens_total,
-                'total_tokens_total' => (int) $run->total_tokens_total,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_COMPLETED,
-                'phase_1_requirement_extraction' => true,
-            ]);
+        if (! ($splitResult['ok'] ?? false)) {
+            $this->markRunFailed(
+                $run,
+                $document,
+                'document_split',
+                (string) ($splitResult['error_type'] ?? 'document_split_failed'),
+                (string) ($splitResult['error_message'] ?? 'Document split planning failed.'),
+                [
+                    'candidate_count' => 0,
+                    'persisted_requirement_count' => 0,
+                    'openai_call_count' => 1,
+                    'input_tokens_total' => (int) ($splitResult['input_tokens'] ?? 0),
+                    'output_tokens_total' => (int) ($splitResult['output_tokens'] ?? 0),
+                    'total_tokens_total' => (int) ($splitResult['total_tokens'] ?? 0),
+                ],
+            );
 
             return;
         }
 
-        $promotableStagedCount = $this->promotableStagedRequirementCount($run);
+        $chunkBuildResult = $this->persistDocumentSplitChunks($document, $run, $splitResult);
 
-        if ($promotableStagedCount > 0) {
-            $this->markRunMerging($run, $document);
-            Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun started.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'candidate_count' => (int) $run->candidate_count,
-                'staged_requirement_count' => $promotableStagedCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            $publishedRequirementCount = $this->promoteRun($run, $document);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun finished.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'candidate_count' => (int) $run->candidate_count,
-                'published_requirement_count' => $publishedRequirementCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => null,
-                'input_text_length' => null,
-                'raw_output_length' => 0,
-                'raw_output_preview' => '',
-                'parse_strategy' => null,
-                'raw_requirement_count' => 0,
-                'normalized_requirement_count' => 0,
-                'deduped_requirement_count' => 0,
-                'staged_requirement_count' => $promotableStagedCount,
-                'persisted_requirement_count' => $publishedRequirementCount,
-                'openai_call_count' => (int) $run->openai_call_count,
-                'input_tokens_total' => (int) $run->input_tokens_total,
-                'output_tokens_total' => (int) $run->output_tokens_total,
-                'total_tokens_total' => (int) $run->total_tokens_total,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_COMPLETED,
-                'phase_1_requirement_extraction' => true,
-            ]);
+        if (! $chunkBuildResult['ok']) {
+            $this->markRunFailed(
+                $run,
+                $document,
+                'document_split_persist',
+                (string) ($chunkBuildResult['error_type'] ?? 'document_split_persist_failed'),
+                (string) ($chunkBuildResult['error_message'] ?? 'Document split chunk persistence failed.'),
+                [
+                    'candidate_count' => 0,
+                    'persisted_requirement_count' => (int) ($chunkBuildResult['chunk_count'] ?? 0),
+                    'openai_call_count' => 1,
+                    'input_tokens_total' => (int) ($splitResult['input_tokens'] ?? 0),
+                    'output_tokens_total' => (int) ($splitResult['output_tokens'] ?? 0),
+                    'total_tokens_total' => (int) ($splitResult['total_tokens'] ?? 0),
+                ],
+            );
 
             return;
         }
@@ -298,30 +232,18 @@ class RequirementExtractionRunService
             $this->clearStagedRequirements($run);
         }
 
-        $this->markRunProcessing($run, $document);
+        $chunks = SavedNoticeAiDocumentChunk::query()
+            ->where('saved_notice_ai_document_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
 
-        $documentText = trim((string) $document->extracted_text);
-        $documentTextLength = mb_strlen($documentText, 'UTF-8');
-
-        if ($documentText === '') {
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run failed before OpenAI because extracted text was missing.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'status' => $run->status,
-                'failure_stage' => 'prompt_build',
-                'failure_type' => 'invalid_request',
-                'phase_1_requirement_extraction' => true,
-            ]);
-
+        if ($chunks->isEmpty()) {
             $this->markRunFailed(
                 $run,
                 $document,
-                'prompt_build',
-                'invalid_request',
-                'Document extracted text is missing.',
+                'chunk_load',
+                'invalid_state',
+                'No persisted document chunks were available for extraction.',
                 [
                     'candidate_count' => 0,
                     'persisted_requirement_count' => 0,
@@ -332,259 +254,122 @@ class RequirementExtractionRunService
                 ],
             );
 
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => null,
-                'input_text_length' => null,
-                'raw_output_length' => 0,
-                'raw_output_preview' => '',
-                'parse_strategy' => null,
-                'raw_requirement_count' => 0,
-                'normalized_requirement_count' => 0,
-                'deduped_requirement_count' => 0,
-                'staged_requirement_count' => 0,
-                'persisted_requirement_count' => 0,
-                'openai_call_count' => 0,
-                'input_tokens_total' => 0,
-                'output_tokens_total' => 0,
-                'total_tokens_total' => 0,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_FAILED,
-                'failure_stage' => 'prompt_build',
-                'failure_type' => 'invalid_request',
-                'error_message' => 'Document extracted text is missing.',
-                'phase_1_requirement_extraction' => true,
-            ]);
-
             return;
         }
 
-        $call = $this->startCall($run, $document);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction OpenAI call starting.', [
+        Log::info('[PROCYNIA][REQ_PIPELINE] Chunk-based extraction started.', [
             'run_id' => $run->uuid,
             'document_id' => $document->id,
             'saved_notice_ai_document_id' => $document->id,
             'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'input_text_length' => mb_strlen(FullDocumentRequirementExtractionPrompt::text(), 'UTF-8')
-                + mb_strlen(FullDocumentRequirementExtractionPrompt::inputTextForDocument($documentText), 'UTF-8'),
-            'prompt_text_length' => mb_strlen(FullDocumentRequirementExtractionPrompt::text(), 'UTF-8'),
-            'openai_call_count' => 1,
-            'model' => FullDocumentRequirementExtractionPrompt::model(),
-            'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
-            'max_output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+            'chunk_count' => $chunks->count(),
+            'phase_1_requirement_extraction' => true,
+        ]);
+
+        $allCandidates = [];
+        $inputTokensTotal = 0;
+        $outputTokensTotal = 0;
+        $totalTokensTotal = 0;
+        $openAiCallCount = 0;
+        $lastResultModel = FullDocumentRequirementExtractionPrompt::model();
+
+        foreach ($chunks as $chunk) {
+            $chunkCall = $this->startCall($run, $document, $chunk->id);
+            $chunkDocument = clone $document;
+            $chunkDocument->extracted_text = (string) $chunk->content;
+
+            try {
+                $result = $this->candidateExtractor->extractFullDocument($chunkDocument, $run->uuid . '-chunk-' . $chunk->chunk_index);
+            } catch (Throwable $throwable) {
+                $this->failCall($chunkCall, $document, 'chunk_extraction_failed', $throwable->getMessage());
+
+                $this->markRunFailed(
+                    $run,
+                    $document,
+                    'chunk_extraction',
+                    'chunk_extraction_failed',
+                    $throwable->getMessage(),
+                    [
+                        'candidate_count' => count($allCandidates),
+                        'persisted_requirement_count' => 0,
+                        'openai_call_count' => $openAiCallCount + 1,
+                        'input_tokens_total' => $inputTokensTotal,
+                        'output_tokens_total' => $outputTokensTotal,
+                        'total_tokens_total' => $totalTokensTotal,
+                    ],
+                );
+
+                return;
+            }
+
+            $openAiCallCount += (int) ($result->openAiCallCount ?? 1);
+            $inputTokensTotal += (int) data_get($result->metadata, 'input_tokens_total', 0);
+            $outputTokensTotal += (int) data_get($result->metadata, 'output_tokens_total', 0);
+            $totalTokensTotal += (int) data_get($result->metadata, 'total_tokens_total', 0);
+            $lastResultModel = $result->model ?? $lastResultModel;
+
+            if (! $result->ok) {
+                $this->failCallFromResult($chunkCall, $document, $result);
+
+                $this->markRunFailed(
+                    $run,
+                    $document,
+                    $result->failureStage ?? 'chunk_extraction',
+                    $result->failureType ?? ($result->errorType ?? 'chunk_extraction_failed'),
+                    $result->errorMessage ?? 'Chunk extraction failed.',
+                    [
+                        'candidate_count' => count($allCandidates),
+                        'persisted_requirement_count' => 0,
+                        'openai_call_count' => $openAiCallCount,
+                        'input_tokens_total' => $inputTokensTotal,
+                        'output_tokens_total' => $outputTokensTotal,
+                        'total_tokens_total' => $totalTokensTotal,
+                    ],
+                );
+
+                return;
+            }
+
+            $this->finishCall($chunkCall, $document, $result);
+            foreach ($result->candidates as $candidate) {
+    $allCandidates[] = $candidate;
+}
+
+            Log::info('[PROCYNIA][REQ_PIPELINE] Chunk extraction completed.', [
+                'run_id' => $run->uuid,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_ai_document_chunk_id' => $chunk->id,
+                'saved_notice_id' => $document->saved_notice_id,
+                'chunk_index' => $chunk->chunk_index,
+                'candidate_count' => count($result->candidates),
+                'phase_1_requirement_extraction' => true,
+            ]);
+        }
+
+        $dedupedCandidates = $this->documentDedupeCandidates($allCandidates);
+
+        Log::info('[PROCYNIA][REQ_PIPELINE] Document-level dedupe completed.', [
+            'run_id' => $run->uuid,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'raw_candidate_count' => count($allCandidates),
+            'deduped_candidate_count' => count($dedupedCandidates),
             'phase_1_requirement_extraction' => true,
         ]);
 
         try {
-            $result = $this->candidateExtractor->extractFullDocument($document, $run->uuid);
-        } catch (Throwable $throwable) {
-            $this->failCall($call, $document, 'unknown_error', $throwable->getMessage());
-
-            $this->markRunFailed(
+            $stagedRequirementCount = $this->stageChunkCandidates(
                 $run,
                 $document,
-                'unexpected',
-                'unknown_error',
-                $throwable->getMessage(),
-                [
-                    'candidate_count' => 0,
-                    'persisted_requirement_count' => 0,
-                    'openai_call_count' => 1,
-                    'input_tokens_total' => 0,
-                    'output_tokens_total' => 0,
-                    'total_tokens_total' => 0,
-                ],
+                $dedupedCandidates,
+                $lastResultModel,
+                $openAiCallCount,
+                $inputTokensTotal,
+                $outputTokensTotal,
+                $totalTokensTotal,
             );
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction failed unexpectedly.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => 'unexpected',
-                'failure_type' => 'unknown_error',
-                'error_type' => 'unknown_error',
-                'error_message' => $throwable->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => (int) data_get($result?->metadata ?? [], 'prompt_text_length', 0),
-                'input_text_length' => (int) data_get($result?->metadata ?? [], 'input_text_length', 0),
-                'raw_requirement_count' => 0,
-                'normalized_requirement_count' => 0,
-                'deduped_requirement_count' => 0,
-                'staged_requirement_count' => 0,
-                'persisted_requirement_count' => 0,
-                'openai_call_count' => 1,
-                'input_tokens_total' => 0,
-                'output_tokens_total' => 0,
-                'total_tokens_total' => 0,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_FAILED,
-                'failure_stage' => 'unexpected',
-                'failure_type' => 'unknown_error',
-                'error_message' => $throwable->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            throw $throwable;
-        }
-
-        if (! $result->ok) {
-            $this->failCallFromResult($call, $document, $result);
-            $failureStage = $result->failureStage ?? (string) data_get($result->metadata, 'failure_stage', 'unexpected');
-            $failureType = $result->failureType ?? $result->errorType ?? (string) data_get($result->metadata, 'failure_type', 'unknown_error');
-            $rawOutput = (string) data_get($result->metadata, 'raw_output', '');
-            $rawOutputLength = (int) data_get($result->metadata, 'raw_output_length', mb_strlen($rawOutput, 'UTF-8'));
-            $rawOutputPreview = (string) data_get($result->metadata, 'raw_output_preview', $this->previewText($rawOutput));
-            $rawResponseBody = (string) data_get($result->metadata, 'raw_response_body', '');
-            $rawResponseBodyLength = (int) data_get($result->metadata, 'raw_response_body_length', mb_strlen($rawResponseBody, 'UTF-8'));
-            $parseStrategy = data_get($result->metadata, 'parse_strategy');
-            $upstreamErrorMessage = data_get($result->metadata, 'upstream_error_message');
-            $upstreamErrorType = data_get($result->metadata, 'upstream_error_type');
-            $upstreamErrorCode = data_get($result->metadata, 'upstream_error_code');
-            $upstreamErrorParam = data_get($result->metadata, 'upstream_error_param');
-
-            $this->markRunFailed(
-                $run,
-                $document,
-                $failureStage,
-                $failureType,
-                $result->errorMessage,
-                [
-                    'candidate_count' => (int) data_get($result->metadata, 'deduped_candidate_count', count($result->candidates)),
-                    'persisted_requirement_count' => 0,
-                    'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                    'input_tokens_total' => (int) data_get($result->metadata, 'input_tokens_total', 0),
-                    'output_tokens_total' => (int) data_get($result->metadata, 'output_tokens_total', 0),
-                    'total_tokens_total' => (int) data_get($result->metadata, 'total_tokens_total', 0),
-                ],
-            );
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction failed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_type' => $failureType,
-                'error_message' => $result->errorMessage,
-                'request_id' => data_get($result->metadata, 'request_id'),
-                'response_id' => data_get($result->metadata, 'response_id'),
-                'prompt_text_length' => (int) data_get($result->metadata, 'prompt_text_length', 0),
-                'input_text_length' => (int) data_get($result->metadata, 'input_text_length', 0),
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'raw_response_body_length' => $rawResponseBodyLength,
-                'raw_response_body' => $rawResponseBody,
-                'upstream_error_message' => is_string($upstreamErrorMessage) ? $upstreamErrorMessage : null,
-                'upstream_error_type' => is_string($upstreamErrorType) ? $upstreamErrorType : null,
-                'upstream_error_code' => is_scalar($upstreamErrorCode) ? trim((string) $upstreamErrorCode) : null,
-                'upstream_error_param' => is_scalar($upstreamErrorParam) ? trim((string) $upstreamErrorParam) : null,
-                'parse_strategy' => $parseStrategy,
-                'candidate_count' => (int) data_get($result->metadata, 'deduped_candidate_count', count($result->candidates)),
-                'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                'input_tokens_total' => (int) data_get($result->metadata, 'input_tokens_total', 0),
-                'output_tokens_total' => (int) data_get($result->metadata, 'output_tokens_total', 0),
-                'total_tokens_total' => (int) data_get($result->metadata, 'total_tokens_total', 0),
-                'elapsed_ms' => data_get($result->metadata, 'elapsed_ms'),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => (int) data_get($result->metadata, 'document_text_length', $documentTextLength),
-                'prompt_text_length' => (int) data_get($result->metadata, 'prompt_text_length', 0),
-                'input_text_length' => (int) data_get($result->metadata, 'input_text_length', 0),
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'raw_response_body_length' => $rawResponseBodyLength,
-                'raw_response_body' => $rawResponseBody,
-                'upstream_error_message' => is_string($upstreamErrorMessage) ? $upstreamErrorMessage : null,
-                'upstream_error_type' => is_string($upstreamErrorType) ? $upstreamErrorType : null,
-                'upstream_error_code' => is_scalar($upstreamErrorCode) ? trim((string) $upstreamErrorCode) : null,
-                'upstream_error_param' => is_scalar($upstreamErrorParam) ? trim((string) $upstreamErrorParam) : null,
-                'parse_strategy' => $parseStrategy,
-                'raw_requirement_count' => 0,
-                'normalized_requirement_count' => 0,
-                'deduped_requirement_count' => (int) data_get($result->metadata, 'deduped_candidate_count', 0),
-                'staged_requirement_count' => 0,
-                'persisted_requirement_count' => 0,
-                'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                'input_tokens_total' => (int) data_get($result->metadata, 'input_tokens_total', 0),
-                'output_tokens_total' => (int) data_get($result->metadata, 'output_tokens_total', 0),
-                'total_tokens_total' => (int) data_get($result->metadata, 'total_tokens_total', 0),
-                'elapsed_ms' => (int) data_get($result->metadata, 'elapsed_ms', $this->elapsedMs($startedAt)),
-                'status' => RequirementExtractionRun::STATUS_FAILED,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_message' => $result->errorMessage,
-                'raw_response_body_length' => $rawResponseBodyLength,
-                'raw_response_body' => $rawResponseBody,
-                'upstream_error_message' => is_string($upstreamErrorMessage) ? $upstreamErrorMessage : null,
-                'upstream_error_type' => is_string($upstreamErrorType) ? $upstreamErrorType : null,
-                'upstream_error_code' => is_scalar($upstreamErrorCode) ? trim((string) $upstreamErrorCode) : null,
-                'upstream_error_param' => is_scalar($upstreamErrorParam) ? trim((string) $upstreamErrorParam) : null,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            return;
-        }
-
-        $this->finishCall($call, $document, $result);
-
-        $rawCandidateCount = (int) data_get($result->metadata, 'raw_candidate_count', count($result->candidates));
-        $mappedCandidateCount = (int) data_get($result->metadata, 'mapped_candidate_count', count($result->candidates));
-        $dedupedCandidateCount = (int) data_get($result->metadata, 'deduped_candidate_count', count($result->candidates));
-        $inputTokensTotal = (int) data_get($result->metadata, 'input_tokens_total', 0);
-        $outputTokensTotal = (int) data_get($result->metadata, 'output_tokens_total', 0);
-        $totalTokensTotal = (int) data_get($result->metadata, 'total_tokens_total', 0);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Dedupe completed.', [
-            'run_id' => $run->uuid,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'raw_requirement_count' => $rawCandidateCount,
-            'normalized_requirement_count' => $mappedCandidateCount,
-            'deduped_requirement_count' => $dedupedCandidateCount,
-            'raw_output_length' => (int) data_get($result->metadata, 'raw_output_length', 0),
-            'parse_strategy' => data_get($result->metadata, 'parse_strategy'),
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] stageCandidates started.', [
-            'run_id' => $run->uuid,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'candidate_count' => $dedupedCandidateCount,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        try {
-            $stagedRequirementCount = $this->stageCandidates($run, $document, $result);
         } catch (Throwable $throwable) {
             $this->markRunFailed(
                 $run,
@@ -593,177 +378,434 @@ class RequirementExtractionRunService
                 'persistence_error',
                 $throwable->getMessage(),
                 [
-                    'candidate_count' => $dedupedCandidateCount,
+                    'candidate_count' => count($dedupedCandidates),
                     'persisted_requirement_count' => 0,
-                    'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
+                    'openai_call_count' => $openAiCallCount,
                     'input_tokens_total' => $inputTokensTotal,
                     'output_tokens_total' => $outputTokensTotal,
                     'total_tokens_total' => $totalTokensTotal,
                 ],
             );
 
-            Log::warning('[PROCYNIA][REQ_PIPELINE] stageCandidates failed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => 'staging',
-                'failure_type' => 'persistence_error',
-                'error_message' => $throwable->getMessage(),
-                'candidate_count' => $dedupedCandidateCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => (int) data_get($result->metadata, 'prompt_text_length', 0),
-                'input_text_length' => (int) data_get($result->metadata, 'input_text_length', 0),
-                'raw_requirement_count' => $rawCandidateCount,
-                'normalized_requirement_count' => $mappedCandidateCount,
-                'deduped_requirement_count' => $dedupedCandidateCount,
-                'staged_requirement_count' => 0,
-                'persisted_requirement_count' => 0,
-                'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                'input_tokens_total' => $inputTokensTotal,
-                'output_tokens_total' => $outputTokensTotal,
-                'total_tokens_total' => $totalTokensTotal,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_FAILED,
-                'failure_stage' => 'staging',
-                'failure_type' => 'persistence_error',
-                'error_message' => $throwable->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
             return;
         }
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] stageCandidates finished.', [
-            'run_id' => $run->uuid,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'candidate_count' => $dedupedCandidateCount,
-            'staged_requirement_count' => $stagedRequirementCount,
-            'phase_1_requirement_extraction' => true,
-        ]);
 
         $this->markRunMerging($run, $document);
+        $publishedRequirementCount = $this->promoteRun($run, $document);
 
-        Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun started.', [
+        Log::info('[PROCYNIA][REQ_PIPELINE] Chunk-based extraction completed.', [
             'run_id' => $run->uuid,
             'document_id' => $document->id,
             'saved_notice_ai_document_id' => $document->id,
             'saved_notice_id' => $document->saved_notice_id,
-            'candidate_count' => $dedupedCandidateCount,
+            'chunk_count' => $chunks->count(),
+            'raw_candidate_count' => count($allCandidates),
+            'deduped_candidate_count' => count($dedupedCandidates),
             'staged_requirement_count' => $stagedRequirementCount,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        try {
-            $publishedRequirementCount = $this->promoteRun($run, $document);
-        } catch (Throwable $throwable) {
-            $this->markRunFailed(
-                $run,
-                $document,
-                'promotion',
-                'persistence_error',
-                $throwable->getMessage(),
-                [
-                    'candidate_count' => $dedupedCandidateCount,
-                    'persisted_requirement_count' => 0,
-                    'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                    'input_tokens_total' => $inputTokensTotal,
-                    'output_tokens_total' => $outputTokensTotal,
-                    'total_tokens_total' => $totalTokensTotal,
-                ],
-            );
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] promoteRun failed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => 'promotion',
-                'failure_type' => 'persistence_error',
-                'error_message' => $throwable->getMessage(),
-                'candidate_count' => $dedupedCandidateCount,
-                'staged_requirement_count' => $stagedRequirementCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-                'run_id' => $run->uuid,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => (int) data_get($result->metadata, 'prompt_text_length', 0),
-                'input_text_length' => (int) data_get($result->metadata, 'input_text_length', 0),
-                'raw_requirement_count' => $rawCandidateCount,
-                'normalized_requirement_count' => $mappedCandidateCount,
-                'deduped_requirement_count' => $dedupedCandidateCount,
-                'staged_requirement_count' => $stagedRequirementCount,
-                'persisted_requirement_count' => 0,
-                'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
-                'input_tokens_total' => $inputTokensTotal,
-                'output_tokens_total' => $outputTokensTotal,
-                'total_tokens_total' => $totalTokensTotal,
-                'elapsed_ms' => $this->elapsedMs($startedAt),
-                'status' => RequirementExtractionRun::STATUS_FAILED,
-                'failure_stage' => 'promotion',
-                'failure_type' => 'persistence_error',
-                'error_message' => $throwable->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            return;
-        }
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] promoteRun finished.', [
-            'run_id' => $run->uuid,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'candidate_count' => $dedupedCandidateCount,
             'published_requirement_count' => $publishedRequirementCount,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        $elapsedMs = $this->elapsedMs($startedAt);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Async phase 1 requirement extraction run completed.', [
-            'run_id' => $run->uuid,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
-            'document_text_length' => $documentTextLength,
-            'prompt_text_length' => (int) data_get($result->metadata, 'prompt_text_length', 0),
-            'input_text_length' => (int) data_get($result->metadata, 'input_text_length', 0),
-            'raw_requirement_count' => $rawCandidateCount,
-            'normalized_requirement_count' => $mappedCandidateCount,
-            'deduped_requirement_count' => $dedupedCandidateCount,
-            'staged_requirement_count' => $stagedRequirementCount,
-            'persisted_requirement_count' => $publishedRequirementCount,
-            'openai_call_count' => (int) ($result->openAiCallCount ?? 1),
+            'openai_call_count' => $openAiCallCount,
             'input_tokens_total' => $inputTokensTotal,
             'output_tokens_total' => $outputTokensTotal,
             'total_tokens_total' => $totalTokensTotal,
-            'elapsed_ms' => $elapsedMs,
-            'raw_output_length' => (int) data_get($result->metadata, 'raw_output_length', 0),
-            'raw_output_preview' => $this->previewText((string) data_get($result->metadata, 'raw_output', '')),
-            'parse_strategy' => data_get($result->metadata, 'parse_strategy'),
-            'status' => RequirementExtractionRun::STATUS_COMPLETED,
             'phase_1_requirement_extraction' => true,
         ]);
+
+        return;
     }
+
+    /**
+     * Purpose: Persist validated split-plan groups as deterministic document chunks.
+     * Inputs: The source document, the extraction run, and the split-plan result.
+     * Returns: A structured result with chunk count and validation status.
+     * Side effects: Replaces existing chunks for the document and writes split diagnostics to logs.
+     */
+    private function persistDocumentSplitChunks(
+        SavedNoticeAiDocument $document,
+        RequirementExtractionRun $run,
+        array $splitResult,
+    ): array {
+        $documentText = trim((string) $document->extracted_text);
+        $splitPlan = is_array($splitResult['split_plan'] ?? null) ? $splitResult['split_plan'] : [];
+
+        if ($documentText === '') {
+            Log::warning('[TT][SPLIT] Chunk build failed because extracted text was empty.', [
+                'run_id' => $run->uuid,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $document->saved_notice_id,
+            ]);
+
+            return [
+                'ok' => false,
+                'error_type' => 'invalid_request',
+                'error_message' => 'Document extracted text is missing.',
+                'chunk_count' => 0,
+                'coverage_ok' => false,
+            ];
+        }
+
+        if ($splitPlan === []) {
+            Log::warning('[TT][SPLIT] Chunk build failed because split plan was empty.', [
+                'run_id' => $run->uuid,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $document->saved_notice_id,
+            ]);
+
+            return [
+                'ok' => false,
+                'error_type' => 'invalid_split_plan',
+                'error_message' => 'Document split plan was empty.',
+                'chunk_count' => 0,
+                'coverage_ok' => false,
+            ];
+        }
+
+        $resolvedGroups = [];
+        $documentLength = mb_strlen($documentText, 'UTF-8');
+
+        foreach ($splitPlan as $groupIndex => $group) {
+            $groupId = trim((string) ($group['group_id'] ?? ''));
+            $groupType = trim((string) ($group['group_type'] ?? ''));
+            $title = trim((string) ($group['title'] ?? ''));
+            $reason = trim((string) ($group['reason'] ?? ''));
+            $startPosition = (int) ($group['start_position'] ?? -1);
+            $endPosition = (int) ($group['end_position'] ?? -1);
+
+            if ($startPosition < 0 || $endPosition <= $startPosition || $endPosition > $documentLength) {
+                Log::warning('[TT][SPLIT] Invalid chunk positions detected.', [
+                    'run_id' => $run->uuid,
+                    'document_id' => $document->id,
+                    'saved_notice_ai_document_id' => $document->id,
+                    'saved_notice_id' => $document->saved_notice_id,
+                    'group_index' => $groupIndex,
+                    'group_id' => $groupId,
+                    'start_position' => $startPosition,
+                    'end_position' => $endPosition,
+                    'document_length' => $documentLength,
+                ]);
+
+                return [
+                    'ok' => false,
+                    'error_type' => 'invalid_positions',
+                    'error_message' => 'Split plan contained invalid chunk positions.',
+                    'chunk_count' => count($resolvedGroups),
+                    'coverage_ok' => false,
+                ];
+            }
+
+            if ($resolvedGroups !== []) {
+                $previousEndPosition = (int) $resolvedGroups[count($resolvedGroups) - 1]['end_position'];
+
+                if ($startPosition !== $previousEndPosition) {
+                    Log::warning('[TT][SPLIT] Non-contiguous chunk positions detected.', [
+                        'run_id' => $run->uuid,
+                        'document_id' => $document->id,
+                        'saved_notice_ai_document_id' => $document->id,
+                        'saved_notice_id' => $document->saved_notice_id,
+                        'group_index' => $groupIndex,
+                        'group_id' => $groupId,
+                        'start_position' => $startPosition,
+                        'previous_end_position' => $previousEndPosition,
+                    ]);
+
+                    return [
+                        'ok' => false,
+                        'error_type' => 'non_contiguous_positions',
+                        'error_message' => 'Split plan positions were not contiguous.',
+                        'chunk_count' => count($resolvedGroups),
+                        'coverage_ok' => false,
+                    ];
+                }
+            }
+
+            $content = trim(mb_substr($documentText, $startPosition, $endPosition - $startPosition, 'UTF-8'));
+
+            if ($content === '') {
+                Log::warning('[TT][SPLIT] Empty chunk content detected.', [
+                    'run_id' => $run->uuid,
+                    'document_id' => $document->id,
+                    'saved_notice_ai_document_id' => $document->id,
+                    'saved_notice_id' => $document->saved_notice_id,
+                    'group_index' => $groupIndex,
+                    'group_id' => $groupId,
+                ]);
+
+                return [
+                    'ok' => false,
+                    'error_type' => 'empty_chunk_content',
+                    'error_message' => 'Split plan produced an empty chunk.',
+                    'chunk_count' => count($resolvedGroups),
+                    'coverage_ok' => false,
+                ];
+            }
+
+            $resolvedGroups[] = [
+                'chunk_index' => $groupIndex,
+                'group_id' => $groupId,
+                'group_type' => $groupType,
+                'title' => $title,
+                'reason' => $reason,
+                'start_anchor' => null,
+                'end_anchor' => null,
+                'start_position' => $startPosition,
+                'end_position' => $endPosition,
+                'content' => $content,
+            ];
+
+            Log::info('[TT][SPLIT] Chunk resolved.', [
+                'run_id' => $run->uuid,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $document->saved_notice_id,
+                'chunk_index' => $groupIndex,
+                'group_id' => $groupId,
+                'group_type' => $groupType,
+                'start_found' => true,
+                'end_found' => true,
+                'start_position' => $startPosition,
+                'end_position' => $endPosition,
+                'chunk_length' => mb_strlen($content, 'UTF-8'),
+            ]);
+        }
+
+        $coverageOk = $resolvedGroups !== []
+            && (int) $resolvedGroups[0]['start_position'] === 0
+            && (int) $resolvedGroups[count($resolvedGroups) - 1]['end_position'] === $documentLength;
+
+        DB::transaction(function () use ($document, $resolvedGroups): void {
+            SavedNoticeAiDocumentChunk::query()
+                ->where('saved_notice_ai_document_id', $document->id)
+                ->delete();
+
+            foreach ($resolvedGroups as $group) {
+                SavedNoticeAiDocumentChunk::query()->create([
+                    'saved_notice_ai_document_id' => $document->id,
+                    'chunk_index' => $group['chunk_index'],
+                    'content' => $group['content'],
+                    'char_start' => $group['start_position'],
+                    'char_end' => $group['end_position'],
+                    'word_count' => str_word_count($group['content']),
+                ]);
+            }
+        });
+
+        Log::info('[TT][SPLIT] Chunk persistence completed.', [
+            'run_id' => $run->uuid,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'chunk_count' => count($resolvedGroups),
+            'coverage_ok' => $coverageOk,
+            'document_length' => $documentLength,
+            'covered_until' => $resolvedGroups !== [] ? (int) $resolvedGroups[count($resolvedGroups) - 1]['end_position'] : 0,
+        ]);
+
+        return [
+            'ok' => true,
+            'error_type' => null,
+            'error_message' => null,
+            'chunk_count' => count($resolvedGroups),
+            'coverage_ok' => $coverageOk,
+        ];
+    }
+
+    /**
+     * Purpose: Find the first occurrence of an anchor from a given cursor position.
+     * Inputs: The full document text, the anchor text, and the cursor offset.
+     * Returns: The start position, or null when not found.
+     * Side effects: None.
+     */
+    private function findAnchorPosition(string $documentText, string $anchor, int $offset): ?int
+    {
+        foreach ($this->buildAnchorCandidates($anchor) as $candidate) {
+            $exactPosition = mb_strpos($documentText, $candidate, $offset, 'UTF-8');
+
+            if ($exactPosition !== false) {
+                return $exactPosition;
+            }
+
+            $normalizedPosition = $this->findNormalizedAnchorPosition($documentText, $candidate, $offset);
+
+            if ($normalizedPosition !== null) {
+                return $normalizedPosition;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Find the end position for an anchor starting from a known lower bound.
+     * Inputs: The full document text, the anchor text, and the lower bound offset.
+     * Returns: The end position, or null when not found.
+     * Side effects: None.
+     */
+    private function findAnchorEndPosition(string $documentText, string $anchor, int $offset): ?int
+    {
+        foreach ($this->buildAnchorCandidates($anchor) as $candidate) {
+            $position = mb_strpos($documentText, $candidate, $offset, 'UTF-8');
+
+            if ($position !== false) {
+                return $position + mb_strlen($candidate, 'UTF-8');
+            }
+
+            $normalizedMatch = $this->findNormalizedAnchorMatch($documentText, $candidate, $offset);
+
+            if ($normalizedMatch !== null) {
+                return $normalizedMatch['end'];
+            }
+        }
+
+        return null;
+    }
+
+
+    /**
+     * Purpose: Find an anchor using whitespace-normalized matching when exact matching fails.
+     * Inputs: The full document text, the anchor text, and the cursor offset.
+     * Returns: The start position in the original text, or null when not found.
+     * Side effects: None.
+     */
+    private function findNormalizedAnchorPosition(string $documentText, string $anchor, int $offset): ?int
+    {
+        $match = $this->findNormalizedAnchorMatch($documentText, $anchor, $offset);
+
+        return $match['start'] ?? null;
+    }
+
+    /**
+     * Purpose: Find an anchor using whitespace-normalized matching and map the match back to original text offsets.
+     * Inputs: The full document text, the anchor text, and the cursor offset.
+     * Returns: The original start and end offsets, or null when not found.
+     * Side effects: None.
+     */
+    private function findNormalizedAnchorMatch(string $documentText, string $anchor, int $offset): ?array
+    {
+        $window = mb_substr($documentText, $offset, null, 'UTF-8');
+
+        if ($window === '') {
+            return null;
+        }
+
+        $normalizedAnchorData = $this->normalizeTextForAnchorSearch($anchor);
+        $normalizedWindowData = $this->normalizeTextForAnchorSearch($window);
+
+        $normalizedAnchor = $normalizedAnchorData['text'];
+        $normalizedWindow = $normalizedWindowData['text'];
+
+        if ($normalizedAnchor === '' || $normalizedWindow === '') {
+            return null;
+        }
+
+        $normalizedPosition = mb_strpos($normalizedWindow, $normalizedAnchor, 0, 'UTF-8');
+
+        if ($normalizedPosition === false) {
+            return null;
+        }
+
+        $startMap = $normalizedWindowData['map'] ?? [];
+        $endMap = $normalizedWindowData['end_map'] ?? [];
+        $normalizedLength = mb_strlen($normalizedAnchor, 'UTF-8');
+        $normalizedEndIndex = $normalizedPosition + $normalizedLength - 1;
+
+        if (! array_key_exists($normalizedPosition, $startMap) || ! array_key_exists($normalizedEndIndex, $endMap)) {
+            return null;
+        }
+
+        return [
+            'start' => $offset + (int) $startMap[$normalizedPosition],
+            'end' => $offset + (int) $endMap[$normalizedEndIndex],
+        ];
+    }
+
+    /**
+     * Purpose: Build candidate anchor variants that tolerate trailing TOC page numbers without changing the canonical anchor.
+     * Inputs: One raw anchor string.
+     * Returns: A de-duplicated ordered list of candidate anchors.
+     * Side effects: None.
+     */
+    private function buildAnchorCandidates(string $anchor): array
+    {
+        $baseAnchor = trim($anchor);
+
+        if ($baseAnchor === '') {
+            return [];
+        }
+
+        $candidates = [$baseAnchor];
+        $withoutTrailingPageNumber = trim((string) preg_replace('/\s+\d{1,4}$/u', '', $baseAnchor));
+
+        if ($withoutTrailingPageNumber !== '' && $withoutTrailingPageNumber !== $baseAnchor) {
+            $candidates[] = $withoutTrailingPageNumber;
+        }
+
+        return array_values(array_unique(array_filter($candidates, static fn (string $candidate): bool => $candidate !== '')));
+    }
+
+    /**
+     * Purpose: Normalize text for whitespace-tolerant anchor matching while preserving a map back to original offsets.
+     * Inputs: Raw text.
+     * Returns: A normalized text string and offset maps into the original text.
+     * Side effects: None.
+     */
+    private function normalizeTextForAnchorSearch(string $text): array
+    {
+        $length = mb_strlen($text, 'UTF-8');
+        $normalized = '';
+        $startMap = [];
+        $endMap = [];
+        $lastWasWhitespace = false;
+
+        for ($index = 0; $index < $length; $index++) {
+            $char = mb_substr($text, $index, 1, 'UTF-8');
+
+            if (preg_match('/\s/u', $char) === 1) {
+                if ($normalized === '' || $lastWasWhitespace) {
+                    continue;
+                }
+
+                $startMap[mb_strlen($normalized, 'UTF-8')] = $index;
+                $normalized .= ' ';
+                $endMap[mb_strlen($normalized, 'UTF-8') - 1] = $index + 1;
+                $lastWasWhitespace = true;
+
+                continue;
+            }
+
+            $startMap[mb_strlen($normalized, 'UTF-8')] = $index;
+            $normalized .= $char;
+            $endMap[mb_strlen($normalized, 'UTF-8') - 1] = $index + 1;
+            $lastWasWhitespace = false;
+        }
+
+        $trimmedText = trim($normalized);
+
+        if ($trimmedText === '') {
+            return [
+                'text' => '',
+                'map' => [],
+                'end_map' => [],
+            ];
+        }
+
+        $leadingTrimmedLength = mb_strlen($normalized, 'UTF-8') - mb_strlen(ltrim($normalized), 'UTF-8');
+        $trimmedLength = mb_strlen($trimmedText, 'UTF-8');
+        $trimmedStartMap = [];
+        $trimmedEndMap = [];
+
+        for ($i = 0; $i < $trimmedLength; $i++) {
+            $trimmedStartMap[$i] = $startMap[$i + $leadingTrimmedLength];
+            $trimmedEndMap[$i] = $endMap[$i + $leadingTrimmedLength];
+        }
+
+        return [
+            'text' => $trimmedText,
+            'map' => $trimmedStartMap,
+            'end_map' => $trimmedEndMap,
+        ];
+    }
+
 
     /**
      * Purpose: Persist staged AI requirement rows for a successful full-document extraction result.
@@ -843,6 +885,86 @@ class RequirementExtractionRunService
         });
     }
 
+
+
+    /**
+     * Purpose: Persist chunk-based AI requirement rows after document-level deduplication.
+     * Inputs: The extraction run, the source document, de-duplicated candidates, and aggregate usage metadata.
+     * Returns: The number of staged requirement rows created.
+     * Side effects: Creates staged requirement rows and updates the run counters.
+     */
+    private function stageChunkCandidates(
+        RequirementExtractionRun $run,
+        SavedNoticeAiDocument $document,
+        array $candidates,
+        ?string $model,
+        int $openAiCallCount,
+        int $inputTokensTotal,
+        int $outputTokensTotal,
+        int $totalTokensTotal,
+    ): int {
+        return DB::transaction(function () use (
+            $run,
+            $document,
+            $candidates,
+            $model,
+            $openAiCallCount,
+            $inputTokensTotal,
+            $outputTokensTotal,
+            $totalTokensTotal,
+        ): int {
+            $stagedRequirementCount = 0;
+
+            foreach ($candidates as $candidate) {
+                if (! $candidate instanceof RequirementExtractionCandidateData || ! $candidate->isRequirement) {
+                    continue;
+                }
+
+                $extractionMetadata = array_merge($candidate->jsonSerialize(), [
+                    'run_id' => $run->uuid,
+                    'document_title' => $document->original_filename,
+                    'document_filename' => $document->original_filename,
+                    'phase_1_requirement_extraction' => true,
+                    'chunk_based_extraction' => true,
+                    'extraction_prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                    'extraction_model' => $model,
+                ]);
+
+                $persistenceData = $candidate->toPersistenceData(
+                    $document,
+                    null,
+                    $extractionMetadata,
+                );
+
+                $this->requirementEditorService->createAiCandidate(
+                    $document,
+                    null,
+                    $persistenceData,
+                    null,
+                    [
+                        'extraction_run_id' => $run->id,
+                        'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED,
+                        'published_at' => null,
+                        'superseded_at' => null,
+                    ],
+                );
+
+                $stagedRequirementCount++;
+            }
+
+            $run->forceFill([
+                'candidate_count' => count($candidates),
+                'persisted_requirement_count' => $stagedRequirementCount,
+                'openai_call_count' => $openAiCallCount,
+                'input_tokens_total' => $inputTokensTotal,
+                'output_tokens_total' => $outputTokensTotal,
+                'total_tokens_total' => $totalTokensTotal,
+                'last_heartbeat_at' => now(),
+            ])->save();
+
+            return $stagedRequirementCount;
+        });
+    }
     /**
      * Purpose: Mark a run and its document mirror as failed without touching already published AI requirements.
      * Inputs: The extraction run, the source document, and the failure details.

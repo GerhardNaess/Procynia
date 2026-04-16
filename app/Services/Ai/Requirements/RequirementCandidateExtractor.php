@@ -62,12 +62,6 @@ class RequirementCandidateExtractor
     ) {
     }
 
-    /**
-     * Purpose: Extract structured requirement candidates for one source-preserving document segment.
-     * Inputs: The source AI document, the segment, and an optional run id for tracing.
-     * Returns: A controlled segment extraction result with candidates and trace metadata.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     public function extract(SavedNoticeAiDocument $document, DocumentRequirementSegmentData $segment, ?string $runId = null): RequirementSegmentExtractionResultData
     {
         $runId ??= (string) Str::uuid();
@@ -75,96 +69,19 @@ class RequirementCandidateExtractor
         $payload = $this->segmentRequestPayload($document, $segment);
         $model = (string) ($payload['model'] ?? '');
 
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][PRE_OPENAI] Segment extraction OpenAI call starting.', $this->segmentAiCostContext(
-            $document,
-            $segment,
-            $runId,
-            [
-                'openai_call_count' => 1,
-                'model' => $model,
-                'segment_text_length' => mb_strlen($segment->text, 'UTF-8'),
-                'input_text_length' => mb_strlen($this->segmentInputText($payload), 'UTF-8'),
-                'max_output_tokens' => $payload['max_output_tokens'] ?? null,
-            ],
-        ));
-
         try {
             $response = $this->openAiClient->post('responses', $payload, 180);
         } catch (ConnectionException $exception) {
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Segment extraction OpenAI call failed before a response was returned.', $this->segmentAiCostContext(
-                $document,
-                $segment,
-                $runId,
-                [
-                    'openai_call_count' => 1,
-                    'model' => $model,
-                    'request_id' => null,
-                    'response_id' => null,
-                    'status' => null,
-                    'input_tokens' => null,
-                    'output_tokens' => null,
-                    'total_tokens' => null,
-                    'elapsed_ms' => $this->elapsedMs($startedAt),
-                    'error_type' => str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out')
-                        ? 'timeout'
-                        : 'connection_error',
-                    'error_message' => $exception->getMessage(),
-                ],
-            ));
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Segment extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'stage' => 'openai_connection',
-                'exception_message' => $exception->getMessage(),
-            ]);
-
             return $this->failedSegmentResult(
                 document: $document,
                 segment: $segment,
                 runId: $runId,
                 model: $model,
                 elapsedMs: $this->elapsedMs($startedAt),
-                errorType: str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out')
-                    ? 'timeout'
-                    : 'connection_error',
+                errorType: str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error',
                 errorMessage: $exception->getMessage(),
             );
         } catch (RuntimeException $exception) {
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Segment extraction OpenAI call failed before a response was returned.', $this->segmentAiCostContext(
-                $document,
-                $segment,
-                $runId,
-                [
-                    'openai_call_count' => 1,
-                    'model' => $model,
-                    'request_id' => null,
-                    'response_id' => null,
-                    'status' => null,
-                    'input_tokens' => null,
-                    'output_tokens' => null,
-                    'total_tokens' => null,
-                    'elapsed_ms' => $this->elapsedMs($startedAt),
-                    'error_type' => 'connection_error',
-                    'error_message' => $exception->getMessage(),
-                ],
-            ));
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Segment extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'stage' => 'openai_runtime',
-                'exception_message' => $exception->getMessage(),
-            ]);
-
             return $this->failedSegmentResult(
                 document: $document,
                 segment: $segment,
@@ -175,36 +92,6 @@ class RequirementCandidateExtractor
                 errorMessage: $exception->getMessage(),
             );
         } catch (Throwable $exception) {
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Segment extraction OpenAI call failed before a response was returned.', $this->segmentAiCostContext(
-                $document,
-                $segment,
-                $runId,
-                [
-                    'openai_call_count' => 1,
-                    'model' => $model,
-                    'request_id' => null,
-                    'response_id' => null,
-                    'status' => null,
-                    'input_tokens' => null,
-                    'output_tokens' => null,
-                    'total_tokens' => null,
-                    'elapsed_ms' => $this->elapsedMs($startedAt),
-                    'error_type' => 'openai_error',
-                    'error_message' => $exception->getMessage(),
-                ],
-            ));
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Segment extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'stage' => 'openai_throwable',
-                'exception_message' => $exception->getMessage(),
-            ]);
-
             return $this->failedSegmentResult(
                 document: $document,
                 segment: $segment,
@@ -222,32 +109,7 @@ class RequirementCandidateExtractor
         $rawResponseBody = trim($response->body());
         $tokenUsage = $this->segmentTokenUsageFromResponse($response);
 
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Segment extraction OpenAI call completed.', $this->segmentAiCostContext($document, $segment, $runId, [
-            'openai_call_count' => 1,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'input_tokens' => $tokenUsage['input_tokens'],
-            'output_tokens' => $tokenUsage['output_tokens'],
-            'total_tokens' => $tokenUsage['total_tokens'],
-            'elapsed_ms' => $this->elapsedMs($startedAt),
-        ]));
-
         if (! $response->successful()) {
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Segment extraction returned a non-success HTTP response and will return a failure result.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'stage' => 'openai_http_status',
-                'http_status' => $status,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-            ]);
-
             return $this->failedSegmentResult(
                 document: $document,
                 segment: $segment,
@@ -269,64 +131,9 @@ class RequirementCandidateExtractor
             $parsed = $this->decodeSegmentPayload($rawText);
             $rawCandidates = $parsed['candidates'] ?? [];
             $decodedCandidateCount = count($rawCandidates);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Decoded structured segment candidates.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'decoded_candidate_count' => $decodedCandidateCount,
-                'zero_result' => $decodedCandidateCount === 0,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-            ]);
-
             $candidates = $this->segmentMapCandidates($document, $segment, $runId, $requestId, $responseId, $rawCandidates);
             $mappedCandidateCount = count($candidates);
-
-            Log::info('[PROCYNIA][REQ_PIPELINE] Structured segment candidates mapped into internal candidates.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'decoded_candidate_count' => $decodedCandidateCount,
-                'mapped_candidate_count' => $mappedCandidateCount,
-                'zero_result' => $mappedCandidateCount === 0,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-            ]);
         } catch (Throwable $exception) {
-            Log::warning('[PROCYNIA][AI][EXTRACTION] Segment extraction response parsing failed.', [
-                'run_id' => $runId,
-                'saved_notice_id' => $document->saved_notice_id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_ai_document_chunk_id' => $segment->savedNoticeAiDocumentChunkId,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'error' => $exception->getMessage(),
-                'raw_response' => $rawResponseBody,
-            ]);
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Segment extraction response parsing failed and returned a failure result.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'segment_id' => $segment->segmentId,
-                'segment_index' => $segment->segmentIndex,
-                'stage' => 'response_parsing',
-                'exception_message' => $exception->getMessage(),
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'raw_response_length' => mb_strlen($rawResponseBody, 'UTF-8'),
-            ]);
-
             return $this->failedSegmentResult(
                 document: $document,
                 segment: $segment,
@@ -345,18 +152,6 @@ class RequirementCandidateExtractor
 
         $dedupedCandidates = $this->segmentDedupeCandidates($candidates);
         $dedupedCandidateCount = count($dedupedCandidates);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Normalized segment candidates deduped.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'segment_id' => $segment->segmentId,
-            'segment_index' => $segment->segmentIndex,
-            'normalized_requirement_count' => $mappedCandidateCount,
-            'deduped_requirement_count' => $dedupedCandidateCount,
-            'zero_result' => $dedupedCandidateCount === 0,
-        ]);
 
         return new RequirementSegmentExtractionResultData(
             ok: true,
@@ -397,388 +192,77 @@ class RequirementCandidateExtractor
         );
     }
 
-    /**
-     * Purpose: Execute a single full-document requirement extraction call for temporary verification.
-     * Inputs: The source AI document and an optional run id for tracing.
-     * Returns: A raw full-document extraction result without segment parsing or persistence.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     public function extractFullDocumentRaw(SavedNoticeAiDocument $document, ?string $runId = null): array
     {
         $runId ??= (string) Str::uuid();
-        $result = $this->performFullDocumentExtractionRequest($document, $runId);
 
-        Log::info('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction raw result.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'prompt_version' => $result['prompt_version'],
-            'model' => $result['model'],
-            'request_id' => $result['request_id'],
-            'response_id' => $result['response_id'],
-            'status' => $result['status'],
-            'document_text_length' => $result['document_text_length'],
-            'prompt_text_length' => $result['prompt_text_length'],
-            'input_text_length' => $result['input_text_length'],
-            'raw_output_length' => $result['raw_output_length'],
-            'raw_output_preview' => $this->previewText((string) ($result['raw_output'] ?? '')),
-            'input_tokens' => $result['input_tokens'],
-            'output_tokens' => $result['output_tokens'],
-            'total_tokens' => $result['total_tokens'],
-            'elapsed_ms' => $result['elapsed_ms'],
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        return $result;
+        return $this->performFullDocumentExtractionRequest($document, $runId);
     }
 
-    /**
-     * Purpose: Extract structured requirement candidates from one full-document extraction call.
-     * Inputs: The source AI document and an optional run id for tracing.
-     * Returns: A document-level extraction result with parsed candidates and provenance metadata.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
-        $startedAt = microtime(true);
         $requestResult = $this->performFullDocumentExtractionRequest($document, $runId);
         $documentTitle = (string) $document->original_filename;
         $documentFilename = $documentTitle;
-        $requestId = data_get($requestResult, 'request_id');
-        $responseId = data_get($requestResult, 'response_id');
-        $rawOutput = (string) data_get($requestResult, 'raw_output', '');
-        $rawOutputLength = (int) data_get($requestResult, 'raw_output_length', mb_strlen($rawOutput, 'UTF-8'));
-        $rawOutputPreview = (string) data_get($requestResult, 'raw_output_preview', $this->previewText($rawOutput));
-        $parseStrategy = data_get($requestResult, 'parse_strategy');
 
-        if (! $requestResult['ok']) {
-            $failureStage = (string) data_get($requestResult, 'failure_stage', 'openai_request');
-            $failureType = (string) data_get($requestResult, 'failure_type', data_get($requestResult, 'error_type', 'unknown_error'));
-            $failureMessage = (string) data_get($requestResult, 'error_message', 'Phase 1 extraction failed.');
-            $failureResult = $this->buildFullDocumentFailureResult(
-                $document,
-                $runId,
-                array_merge($requestResult, [
-                    'parse_strategy' => 'failed',
-                ]),
-                $failureStage,
-                $failureType,
-                $failureMessage,
-                [
-                    'raw_candidate_count' => 0,
-                    'mapped_candidate_count' => 0,
-                    'deduped_candidate_count' => 0,
-                ],
-            );
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction failed.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_type' => $failureType,
-                'error_message' => $failureMessage,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'document_text_length' => data_get($requestResult, 'document_text_length'),
-                'prompt_text_length' => data_get($requestResult, 'prompt_text_length'),
-                'input_text_length' => data_get($requestResult, 'input_text_length'),
-                'raw_output_length' => data_get($requestResult, 'raw_output_length'),
-                'raw_output_preview' => data_get($requestResult, 'raw_output_preview'),
-                'parse_strategy' => data_get($requestResult, 'parse_strategy'),
-                'candidate_count' => 0,
-                'openai_call_count' => (int) data_get($requestResult, 'openai_call_count', 1),
-                'input_tokens_total' => data_get($requestResult, 'input_tokens'),
-                'output_tokens_total' => data_get($requestResult, 'output_tokens'),
-                'total_tokens_total' => data_get($requestResult, 'total_tokens'),
-                'elapsed_ms' => data_get($requestResult, 'elapsed_ms'),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            return $failureResult;
-        }
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 parsing started.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $documentTitle,
-            'document_filename' => $documentFilename,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        try {
-            $parsed = $this->parsePhaseOneOutput($rawOutput);
-        } catch (JsonException $exception) {
-            $failureStage = 'response_parsing';
-            $failureType = 'parsing_error';
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction response parsing failed.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'parse_strategy' => 'invalid_json',
-                'phase_1_requirement_extraction' => true,
-            ]);
-
+        if (! ($requestResult['ok'] ?? false)) {
             return $this->buildFullDocumentFailureResult(
-                $document,
-                $runId,
-                array_merge($requestResult, [
-                    'raw_output_length' => $rawOutputLength,
-                    'raw_output' => $rawOutput,
-                    'raw_output_preview' => $rawOutputPreview,
-                    'parse_strategy' => 'invalid_json',
-                ]),
-                $failureStage,
-                $failureType,
-                $exception->getMessage(),
-                [
-                    'raw_candidate_count' => 0,
-                    'mapped_candidate_count' => 0,
-                    'deduped_candidate_count' => 0,
+                document: $document,
+                runId: $runId,
+                requestResult: $requestResult,
+                failureStage: (string) ($requestResult['failure_stage'] ?? 'unexpected'),
+                failureType: (string) ($requestResult['failure_type'] ?? 'unknown_error'),
+                errorMessage: (string) ($requestResult['error_message'] ?? 'Full-document extraction failed.'),
+                extraMetadata: [
+                    'full_document_mode' => true,
+                    'segment_count' => 1,
+                    'relevant_segment_count' => 1,
                 ],
-            );
-        } catch (RuntimeException $exception) {
-            $failureStage = 'response_format';
-            $failureType = 'unexpected_response';
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction returned an unexpected response format.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'parse_strategy' => 'response_format',
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            return $this->buildFullDocumentFailureResult(
-                $document,
-                $runId,
-                array_merge($requestResult, [
-                    'raw_output_length' => $rawOutputLength,
-                    'raw_output' => $rawOutput,
-                    'raw_output_preview' => $rawOutputPreview,
-                    'parse_strategy' => 'response_format',
-                ]),
-                $failureStage,
-                $failureType,
-                $exception->getMessage(),
-                [
-                    'raw_candidate_count' => 0,
-                    'mapped_candidate_count' => 0,
-                    'deduped_candidate_count' => 0,
-                ],
+                partial: false,
             );
         }
 
-        $decodedCandidateCount = (int) ($parsed['row_count'] ?? 0);
-        $parseStrategy = (string) ($parsed['strategy'] ?? 'unknown');
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Decoded phase 1 candidates.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'zero_result' => $decodedCandidateCount === 0,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'parse_strategy' => $parseStrategy,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 parsing finished.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $documentTitle,
-            'document_filename' => $documentFilename,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'parsed_strategy' => $parseStrategy,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 mapping started.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'parse_strategy' => $parseStrategy,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
         try {
+            Log::info('[TT][AI_RAW_OUTPUT]', [
+                'run_id' => $runId,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $document->saved_notice_id,
+                'raw_output' => (string) ($requestResult['raw_output'] ?? ''),
+            ]);
+
+            $parsed = $this->parsePhaseOneOutput((string) ($requestResult['raw_output'] ?? ''));
+
+            Log::info('[TT][AI_PARSED_ROWS]', [
+                'run_id' => $runId,
+                'document_id' => $document->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $document->saved_notice_id,
+                'rows' => $parsed['rows'] ?? [],
+            ]);
+
+            $rawCandidateCount = (int) ($parsed['row_count'] ?? 0);
             $candidates = $this->mapCandidates($document, $parsed['rows'] ?? []);
-        } catch (Throwable $exception) {
-            $failureStage = 'mapping';
-            $failureType = 'mapping_error';
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction mapping failed.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'parse_strategy' => $parseStrategy,
-                'decoded_candidate_count' => $decodedCandidateCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            return $this->buildFullDocumentFailureResult(
-                $document,
-                $runId,
-                array_merge($requestResult, [
-                    'raw_output_length' => $rawOutputLength,
-                    'raw_output' => $rawOutput,
-                    'raw_output_preview' => $rawOutputPreview,
-                    'parse_strategy' => $parseStrategy,
-                ]),
-                $failureStage,
-                $failureType,
-                $exception->getMessage(),
-                [
-                    'raw_candidate_count' => $decodedCandidateCount,
-                    'mapped_candidate_count' => 0,
-                    'deduped_candidate_count' => 0,
-                ],
-            );
-        }
-
-        $mappedCandidateCount = count($candidates);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Phase 1 candidates mapped into internal candidates.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'mapped_candidate_count' => $mappedCandidateCount,
-            'zero_result' => $mappedCandidateCount === 0,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'parse_strategy' => $parseStrategy,
-        ]);
-
-        try {
+            $mappedCandidateCount = count($candidates);
             $dedupedCandidates = $this->dedupeCandidates($candidates);
+            $dedupedCandidateCount = count($dedupedCandidates);
         } catch (Throwable $exception) {
-            $failureStage = 'dedupe';
-            $failureType = 'mapping_error';
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction dedupe failed.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'raw_output_length' => $rawOutputLength,
-                'raw_output_preview' => $rawOutputPreview,
-                'parse_strategy' => $parseStrategy,
-                'decoded_candidate_count' => $decodedCandidateCount,
-                'mapped_candidate_count' => $mappedCandidateCount,
-                'phase_1_requirement_extraction' => true,
-            ]);
-
             return $this->buildFullDocumentFailureResult(
-                $document,
-                $runId,
-                array_merge($requestResult, [
-                    'raw_output_length' => $rawOutputLength,
-                    'raw_output' => $rawOutput,
-                    'raw_output_preview' => $rawOutputPreview,
-                    'parse_strategy' => $parseStrategy,
-                ]),
-                $failureStage,
-                $failureType,
-                $exception->getMessage(),
-                [
-                    'raw_candidate_count' => $decodedCandidateCount,
-                    'mapped_candidate_count' => $mappedCandidateCount,
-                    'deduped_candidate_count' => 0,
+                document: $document,
+                runId: $runId,
+                requestResult: $requestResult,
+                failureStage: 'unexpected_response',
+                failureType: 'unexpected_response',
+                errorMessage: $exception->getMessage(),
+                extraMetadata: [
+                    'full_document_mode' => true,
+                    'segment_count' => 1,
+                    'relevant_segment_count' => 1,
                 ],
+                partial: false,
             );
         }
-
-        $dedupedCandidateCount = count($dedupedCandidates);
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 mapping finished.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'mapped_candidate_count' => $mappedCandidateCount,
-            'deduped_candidate_count' => $dedupedCandidateCount,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'parse_strategy' => $parseStrategy,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Normalized phase 1 candidates deduped.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'normalized_requirement_count' => $mappedCandidateCount,
-            'deduped_requirement_count' => $dedupedCandidateCount,
-            'zero_result' => $dedupedCandidateCount === 0,
-            'raw_output_length' => $rawOutputLength,
-            'raw_output_preview' => $rawOutputPreview,
-            'parse_strategy' => $parseStrategy,
-        ]);
 
         return new RequirementExtractionResultData(
             ok: true,
@@ -788,14 +272,14 @@ class RequirementCandidateExtractor
             runId: $runId,
             documentTitle: $documentTitle,
             documentFilename: $documentFilename,
-            model: $requestResult['model'],
+            model: (string) ($requestResult['model'] ?? FullDocumentRequirementExtractionPrompt::model()),
             relevanceModel: $this->relevanceModel(),
-            extractionModel: $requestResult['model'],
-            segmentCount: 0,
-            relevantSegmentCount: 0,
+            extractionModel: (string) ($requestResult['model'] ?? FullDocumentRequirementExtractionPrompt::model()),
+            segmentCount: 1,
+            relevantSegmentCount: 1,
             relevanceCallCount: 0,
             extractionCallCount: 1,
-            openAiCallCount: 1,
+            openAiCallCount: (int) ($requestResult['openai_call_count'] ?? 1),
             segments: [],
             relevanceResults: [],
             extractionResults: [],
@@ -803,55 +287,55 @@ class RequirementCandidateExtractor
             metadata: [
                 'prompt_versions' => [
                     'relevance' => $this->relevancePromptVersion(),
-                    'extraction' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                    'extraction' => (string) ($requestResult['prompt_version'] ?? FullDocumentRequirementExtractionPrompt::promptVersion()),
                 ],
-                'phase_1_requirement_extraction' => true,
-                'document_text_length' => $requestResult['document_text_length'],
-                'prompt_text_length' => $requestResult['prompt_text_length'],
-                'input_text_length' => $requestResult['input_text_length'],
-                'raw_candidate_count' => $decodedCandidateCount,
-                'mapped_candidate_count' => $mappedCandidateCount,
-                'deduped_candidate_count' => $dedupedCandidateCount,
-                'relevant_segment_count' => 0,
+                'full_document_mode' => true,
+                'segment_count' => 1,
+                'relevant_segment_count' => 1,
                 'relevance_call_count' => 0,
                 'extraction_call_count' => 1,
-                'openai_call_count' => 1,
-                'extraction_input_tokens' => $requestResult['input_tokens'],
-                'extraction_output_tokens' => $requestResult['output_tokens'],
-                'extraction_total_tokens' => $requestResult['total_tokens'],
-                'input_tokens_total' => $requestResult['input_tokens'],
-                'output_tokens_total' => $requestResult['output_tokens'],
-                'total_tokens_total' => $requestResult['total_tokens'],
+                'openai_call_count' => (int) ($requestResult['openai_call_count'] ?? 1),
                 'candidate_count' => $dedupedCandidateCount,
+                'raw_candidate_count' => $rawCandidateCount,
+                'mapped_candidate_count' => $mappedCandidateCount,
+                'deduped_candidate_count' => $dedupedCandidateCount,
                 'failure_count' => 0,
                 'partial' => false,
                 'fallback_used' => false,
-                'elapsed_ms' => $requestResult['elapsed_ms'],
-                'request_id' => $requestResult['request_id'],
-                'response_id' => $requestResult['response_id'],
-                'status' => $requestResult['status'],
-                'raw_output_length' => $requestResult['raw_output_length'],
-                'raw_output' => $requestResult['raw_output'],
-                'parse_strategy' => $parsed['strategy'] ?? 'unknown',
+                'document_text_length' => (int) ($requestResult['document_text_length'] ?? mb_strlen(trim((string) $document->extracted_text), 'UTF-8')),
+                'prompt_text_length' => is_numeric($requestResult['prompt_text_length'] ?? null) ? (int) $requestResult['prompt_text_length'] : null,
+                'input_text_length' => is_numeric($requestResult['input_text_length'] ?? null) ? (int) $requestResult['input_text_length'] : null,
+                'input_tokens_total' => (int) ($requestResult['input_tokens'] ?? 0),
+                'output_tokens_total' => (int) ($requestResult['output_tokens'] ?? 0),
+                'total_tokens_total' => (int) ($requestResult['total_tokens'] ?? 0),
+                'elapsed_ms' => is_numeric($requestResult['elapsed_ms'] ?? null) ? (int) $requestResult['elapsed_ms'] : null,
+                'request_id' => $requestResult['request_id'] ?? null,
+                'response_id' => $requestResult['response_id'] ?? null,
+                'status' => $requestResult['status'] ?? null,
+                'raw_output_length' => (int) ($requestResult['raw_output_length'] ?? 0),
+                'raw_output' => (string) ($requestResult['raw_output'] ?? ''),
+                'raw_output_preview' => (string) ($requestResult['raw_output_preview'] ?? ''),
+                'parse_strategy' => (string) ($parsed['strategy'] ?? 'json_schema'),
+                'failure_stage' => null,
+                'failure_type' => null,
             ],
             errorType: null,
             errorMessage: null,
+            failureStage: null,
+            failureType: null,
         );
     }
 
-    /**
-     * Purpose: Extract structured requirement candidates from one contextual document block.
-     * Inputs: The source AI document, one extraction block, and an optional run id for tracing.
-     * Returns: A block-level extraction result with parsed candidates and provenance metadata.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     public function extractStructuredBlock(SavedNoticeAiDocument $document, RequirementExtractionBlockData $block, ?string $runId = null): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
-        $startedAt = microtime(true);
         $requestResult = $this->performStructuredBlockExtractionRequest($document, $block, $runId);
         $documentTitle = (string) $document->original_filename;
         $documentFilename = $documentTitle;
+        $requestId = data_get($requestResult, 'request_id');
+        $responseId = data_get($requestResult, 'response_id');
+        $rawOutputPreview = $this->previewText((string) data_get($requestResult, 'raw_output', ''));
+        $parseStrategy = 'unparsed';
 
         if (! $requestResult['ok']) {
             return new RequirementExtractionResultData(
@@ -901,129 +385,25 @@ class RequirementCandidateExtractor
                     'partial' => false,
                     'fallback_used' => false,
                     'elapsed_ms' => $requestResult['elapsed_ms'],
-                    'request_id' => $requestResult['request_id'],
-                    'response_id' => $requestResult['response_id'],
+                    'request_id' => $requestId,
+                    'response_id' => $responseId,
                     'status' => $requestResult['status'],
                     'raw_output_length' => $requestResult['raw_output_length'],
                     'raw_output' => $requestResult['raw_output'],
                     'parse_strategy' => 'failed',
-                    'structured_block_mode' => true,
                 ],
                 errorType: $requestResult['error_type'],
                 errorMessage: $requestResult['error_message'],
             );
         }
 
-        Log::info('[PROCYNIA][AI_HANG] Parsing started.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $documentTitle,
-            'document_filename' => $documentFilename,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-            'raw_output_length' => $requestResult['raw_output_length'],
-            'structured_block_mode' => true,
-        ]);
-
         $parsed = $this->parseOutput($requestResult['raw_output']);
         $decodedCandidateCount = (int) ($parsed['row_count'] ?? 0);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Decoded structured block candidates.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'zero_result' => $decodedCandidateCount === 0,
-            'request_id' => $requestResult['request_id'],
-            'response_id' => $requestResult['response_id'],
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Parsing finished.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $documentTitle,
-            'document_filename' => $documentFilename,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'parsed_strategy' => $parsed['strategy'] ?? 'unknown',
-            'structured_block_mode' => true,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Mapping started.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'structured_block_mode' => true,
-        ]);
-
+        $parseStrategy = (string) ($parsed['strategy'] ?? 'unknown');
         $candidates = $this->mapCandidates($document, $parsed['rows'] ?? [], $block);
         $mappedCandidateCount = count($candidates);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Structured block candidates mapped into internal candidates.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'mapped_candidate_count' => $mappedCandidateCount,
-            'zero_result' => $mappedCandidateCount === 0,
-            'request_id' => $requestResult['request_id'],
-            'response_id' => $requestResult['response_id'],
-        ]);
-
         $dedupedCandidates = $this->dedupeCandidates($candidates);
         $dedupedCandidateCount = count($dedupedCandidates);
-
-        Log::info('[PROCYNIA][AI_HANG] Mapping finished.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'decoded_candidate_count' => $decodedCandidateCount,
-            'mapped_candidate_count' => $mappedCandidateCount,
-            'deduped_candidate_count' => $dedupedCandidateCount,
-            'structured_block_mode' => true,
-        ]);
-
-        Log::info('[PROCYNIA][REQ_PIPELINE] Normalized structured block candidates deduped.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'normalized_requirement_count' => $mappedCandidateCount,
-            'deduped_requirement_count' => $dedupedCandidateCount,
-            'zero_result' => $dedupedCandidateCount === 0,
-        ]);
 
         return new RequirementExtractionResultData(
             ok: true,
@@ -1081,7 +461,6 @@ class RequirementCandidateExtractor
                 'parse_strategy' => $parseStrategy,
                 'failure_stage' => null,
                 'failure_type' => null,
-                'structured_block_mode' => true,
             ],
             errorType: null,
             errorMessage: null,
@@ -1090,12 +469,6 @@ class RequirementCandidateExtractor
         );
     }
 
-    /**
-     * Purpose: Execute the full-document OpenAI request and return the raw transport data.
-     * Inputs: The source AI document and an optional run id for tracing.
-     * Returns: A transport payload with response data, token usage, and raw assistant text.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     private function performFullDocumentExtractionRequest(SavedNoticeAiDocument $document, string $runId): array
     {
         $startedAt = microtime(true);
@@ -1108,128 +481,12 @@ class RequirementCandidateExtractor
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
         $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
 
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 prompt built.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'prompt_text_length' => $promptTextLength,
-            'input_text_length' => $inputTextLength,
-            'prompt_version' => $promptVersion,
-            'model' => $model,
-            'max_output_tokens' => $payload['max_output_tokens'],
-            'phase_1_requirement_extraction' => true,
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-        ]);
-
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][PRE_OPENAI] Phase 1 extraction OpenAI call starting.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'prompt_text_length' => $promptTextLength,
-            'openai_call_count' => 1,
-            'model' => $model,
-            'input_text_length' => $inputTextLength,
-            'max_output_tokens' => $payload['max_output_tokens'],
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 OpenAI call starting.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'model' => $model,
-            'max_output_tokens' => $payload['max_output_tokens'],
-            'phase_1_requirement_extraction' => true,
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-        ]);
-
         try {
             $response = $this->openAiClient->post('responses', $payload, 180);
         } catch (ConnectionException $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
-            $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out')
-                ? 'timeout'
-                : 'connection_error';
+            $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
             $failureStage = $errorType === 'timeout' ? 'openai_timeout' : 'openai_connection';
-
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Phase 1 extraction OpenAI call failed before a response was returned.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => $promptTextLength,
-                'input_text_length' => $inputTextLength,
-                'openai_call_count' => 1,
-                'model' => $model,
-                'request_id' => null,
-                'response_id' => null,
-                'status' => null,
-                'input_tokens' => null,
-                'output_tokens' => null,
-                'total_tokens' => null,
-                'elapsed_ms' => $elapsedMs,
-                'bypassed_chunk_input' => true,
-                'bypassed_segment_input' => true,
-                'failure_stage' => $failureStage,
-                'failure_type' => $errorType,
-                'error_type' => $errorType,
-                'error_message' => $exception->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::warning('[PROCYNIA][AI_HANG] Phase 1 OpenAI call failed before a response was returned.', [
-                'timestamp' => now()->toIso8601String(),
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => $promptTextLength,
-                'input_text_length' => $inputTextLength,
-                'model' => $model,
-                'phase_1_requirement_extraction' => true,
-                'failure_stage' => $failureStage,
-                'failure_type' => $errorType,
-                'error_type' => $errorType,
-                'error_message' => $exception->getMessage(),
-            ]);
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'stage' => $failureStage,
-                'failure_stage' => $failureStage,
-                'failure_type' => $errorType,
-                'exception_message' => $exception->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
 
             return [
                 'ok' => false,
@@ -1239,7 +496,7 @@ class RequirementCandidateExtractor
                 'saved_notice_id' => $document->saved_notice_id,
                 'document_title' => $document->original_filename,
                 'document_filename' => $document->original_filename,
-                'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                'prompt_version' => $promptVersion,
                 'model' => $model,
                 'max_output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
                 'request_id' => null,
@@ -1251,7 +508,12 @@ class RequirementCandidateExtractor
                 'raw_output_length' => 0,
                 'raw_output' => '',
                 'raw_output_preview' => '',
-                'parse_strategy' => null,
+                'raw_response_body' => '',
+                'raw_response_body_length' => 0,
+                'upstream_error_message' => null,
+                'upstream_error_type' => null,
+                'upstream_error_code' => null,
+                'upstream_error_param' => null,
                 'input_tokens' => null,
                 'output_tokens' => null,
                 'total_tokens' => null,
@@ -1263,72 +525,10 @@ class RequirementCandidateExtractor
                 'error_type' => $errorType,
                 'error_message' => $exception->getMessage(),
                 'phase_1_requirement_extraction' => true,
+                'openai_call_count' => 1,
             ];
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
-            $failureStage = 'openai_request';
-            $failureType = 'unknown_error';
-
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Phase 1 extraction OpenAI call failed before a response was returned.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => $promptTextLength,
-                'input_text_length' => $inputTextLength,
-                'openai_call_count' => 1,
-                'model' => $model,
-                'request_id' => null,
-                'response_id' => null,
-                'status' => null,
-                'input_tokens' => null,
-                'output_tokens' => null,
-                'total_tokens' => null,
-                'elapsed_ms' => $elapsedMs,
-                'bypassed_chunk_input' => true,
-                'bypassed_segment_input' => true,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
-
-            Log::warning('[PROCYNIA][AI_HANG] Phase 1 OpenAI call failed before a response was returned.', [
-                'timestamp' => now()->toIso8601String(),
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'prompt_text_length' => $promptTextLength,
-                'input_text_length' => $inputTextLength,
-                'model' => $model,
-                'phase_1_requirement_extraction' => true,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_type' => $failureType,
-                'error_message' => $exception->getMessage(),
-            ]);
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'stage' => $failureStage,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'exception_message' => $exception->getMessage(),
-                'phase_1_requirement_extraction' => true,
-            ]);
 
             return [
                 'ok' => false,
@@ -1338,7 +538,7 @@ class RequirementCandidateExtractor
                 'saved_notice_id' => $document->saved_notice_id,
                 'document_title' => $document->original_filename,
                 'document_filename' => $document->original_filename,
-                'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                'prompt_version' => $promptVersion,
                 'model' => $model,
                 'max_output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
                 'request_id' => null,
@@ -1350,18 +550,24 @@ class RequirementCandidateExtractor
                 'raw_output_length' => 0,
                 'raw_output' => '',
                 'raw_output_preview' => '',
-                'parse_strategy' => null,
+                'raw_response_body' => '',
+                'raw_response_body_length' => 0,
+                'upstream_error_message' => null,
+                'upstream_error_type' => null,
+                'upstream_error_code' => null,
+                'upstream_error_param' => null,
                 'input_tokens' => null,
                 'output_tokens' => null,
                 'total_tokens' => null,
                 'elapsed_ms' => $elapsedMs,
                 'bypassed_chunk_input' => true,
                 'bypassed_segment_input' => true,
-                'failure_stage' => $failureStage,
-                'failure_type' => $failureType,
-                'error_type' => $failureType,
+                'failure_stage' => 'openai_request',
+                'failure_type' => 'unknown_error',
+                'error_type' => 'unknown_error',
                 'error_message' => $exception->getMessage(),
                 'phase_1_requirement_extraction' => true,
+                'openai_call_count' => 1,
             ];
         }
 
@@ -1372,57 +578,9 @@ class RequirementCandidateExtractor
         $upstreamError = $this->upstreamErrorDetailsFromRawBody($rawResponseBody);
         $tokenUsage = $this->tokenUsageFromResponse($response);
         $rawOutput = $this->responseTextFromOpenAi($response->json());
+        $rawOutputLength = mb_strlen($rawOutput, 'UTF-8');
+        $rawOutputPreview = $this->previewText($rawOutput);
         $elapsedMs = $this->elapsedMs($startedAt);
-
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Phase 1 extraction OpenAI call completed.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'prompt_text_length' => $promptTextLength,
-            'input_text_length' => $inputTextLength,
-            'openai_call_count' => 1,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'input_tokens' => $tokenUsage['input_tokens'],
-            'output_tokens' => $tokenUsage['output_tokens'],
-            'total_tokens' => $tokenUsage['total_tokens'],
-            'elapsed_ms' => $elapsedMs,
-            'raw_output_length' => mb_strlen($rawOutput, 'UTF-8'),
-            'raw_output_preview' => $this->previewText($rawOutput),
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-            'phase_1_requirement_extraction' => true,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] Phase 1 OpenAI call returned.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'input_tokens' => $tokenUsage['input_tokens'],
-            'output_tokens' => $tokenUsage['output_tokens'],
-            'total_tokens' => $tokenUsage['total_tokens'],
-            'elapsed_ms' => $elapsedMs,
-            'raw_output_length' => mb_strlen($rawOutput, 'UTF-8'),
-            'raw_output_preview' => $this->previewText($rawOutput),
-            'phase_1_requirement_extraction' => true,
-            'bypassed_chunk_input' => true,
-            'bypassed_segment_input' => true,
-        ]);
 
         $errorType = null;
         $errorMessage = null;
@@ -1432,32 +590,6 @@ class RequirementCandidateExtractor
             $errorType = $this->errorTypeForStatus($status);
             $errorMessage = $upstreamError['message'] ?? sprintf('OpenAI phase 1 extraction request failed with HTTP status [%d].', $status);
             $failureStage = 'openai_http_status';
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction returned a non-success HTTP response and will return a failure result.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'stage' => $failureStage,
-                'failure_stage' => $failureStage,
-                'failure_type' => $errorType,
-                'http_status' => $status,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'prompt_text_length' => $promptTextLength,
-                'input_text_length' => $inputTextLength,
-                'raw_output_length' => mb_strlen($rawOutput, 'UTF-8'),
-                'raw_output_preview' => $this->previewText($rawOutput),
-                'raw_response_body_length' => mb_strlen($rawResponseBody, 'UTF-8'),
-                'raw_response_body' => $rawResponseBody,
-                'upstream_error_message' => $upstreamError['message'],
-                'upstream_error_type' => $upstreamError['type'],
-                'upstream_error_code' => $upstreamError['code'],
-                'upstream_error_param' => $upstreamError['param'],
-                'phase_1_requirement_extraction' => true,
-            ]);
         }
 
         return [
@@ -1477,9 +609,9 @@ class RequirementCandidateExtractor
             'document_text_length' => $documentTextLength,
             'prompt_text_length' => $promptTextLength,
             'input_text_length' => $inputTextLength,
-            'raw_output_length' => mb_strlen($rawOutput, 'UTF-8'),
+            'raw_output_length' => $rawOutputLength,
             'raw_output' => $rawOutput,
-            'raw_output_preview' => $this->previewText($rawOutput),
+            'raw_output_preview' => $rawOutputPreview,
             'raw_response_body' => $rawResponseBody,
             'raw_response_body_length' => mb_strlen($rawResponseBody, 'UTF-8'),
             'upstream_error_message' => $upstreamError['message'],
@@ -1497,15 +629,10 @@ class RequirementCandidateExtractor
             'error_type' => $errorType,
             'error_message' => $errorMessage,
             'phase_1_requirement_extraction' => true,
+            'openai_call_count' => 1,
         ];
     }
 
-    /**
-     * Purpose: Execute one structured block OpenAI request and return the raw transport data.
-     * Inputs: The source AI document, one extraction block, and an optional run id for tracing.
-     * Returns: A transport payload with response data, token usage, and raw assistant text.
-     * Side effects: Calls OpenAI once and emits observability logs.
-     */
     private function performStructuredBlockExtractionRequest(SavedNoticeAiDocument $document, RequirementExtractionBlockData $block, string $runId): array
     {
         $startedAt = microtime(true);
@@ -1516,125 +643,11 @@ class RequirementCandidateExtractor
         $inputTextLength = mb_strlen((string) data_get($payload, 'input.1.content.0.text', ''), 'UTF-8');
         $promptVersion = $this->blockPromptBuilder->promptVersion();
 
-        Log::info('[PROCYNIA][AI_HANG] Prompt built.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'input_text_length' => $inputTextLength,
-            'prompt_version' => $promptVersion,
-            'model' => $model,
-            'max_output_tokens' => $payload['max_output_tokens'] ?? null,
-            'structured_block_mode' => true,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-        ]);
-
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][PRE_OPENAI] Structured block extraction OpenAI call starting.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'openai_call_count' => 1,
-            'model' => $model,
-            'input_text_length' => $inputTextLength,
-            'max_output_tokens' => $payload['max_output_tokens'] ?? null,
-            'structured_block_mode' => true,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] OpenAI call starting.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'model' => $model,
-            'max_output_tokens' => $payload['max_output_tokens'] ?? null,
-            'structured_block_mode' => true,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-        ]);
-
         try {
             $response = $this->openAiClient->post('responses', $payload, 180);
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
-            $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out')
-                ? 'timeout'
-                : 'connection_error';
-
-            Log::warning('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Structured block extraction OpenAI call failed before a response was returned.', $this->aiCostContext($document, $runId, [
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'openai_call_count' => 1,
-                'model' => $model,
-                'request_id' => null,
-                'response_id' => null,
-                'status' => null,
-                'input_tokens' => null,
-                'output_tokens' => null,
-                'total_tokens' => null,
-                'elapsed_ms' => $elapsedMs,
-                'structured_block_mode' => true,
-                'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-                'block_id' => $block->sourceBlockId,
-                'block_index' => $block->sourceBlockIndex,
-                'block_type' => $block->blockType,
-                'error_type' => $errorType,
-                'error_message' => $exception->getMessage(),
-            ]));
-
-            Log::warning('[PROCYNIA][AI_HANG] OpenAI call failed before a response was returned.', [
-                'timestamp' => now()->toIso8601String(),
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'document_text_length' => $documentTextLength,
-                'model' => $model,
-                'structured_block_mode' => true,
-                'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-                'block_id' => $block->sourceBlockId,
-                'block_index' => $block->sourceBlockIndex,
-                'block_type' => $block->blockType,
-                'error_type' => $errorType,
-                'error_message' => $exception->getMessage(),
-            ]);
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Structured block extraction failed before OpenAI returned a response.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'stage' => 'openai_connection',
-                'exception_message' => $exception->getMessage(),
-                'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-                'block_id' => $block->sourceBlockId,
-                'block_index' => $block->sourceBlockIndex,
-            ]);
+            $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
 
             return [
                 'ok' => false,
@@ -1676,76 +689,12 @@ class RequirementCandidateExtractor
         $rawOutput = $this->segmentResponseTextFromOpenAi($response->json());
         $elapsedMs = $this->elapsedMs($startedAt);
 
-        Log::info('[PROCYNIA][AI_COST][EXTRACTION][POST_OPENAI] Structured block extraction OpenAI call completed.', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'openai_call_count' => 1,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'input_tokens' => $tokenUsage['input_tokens'],
-            'output_tokens' => $tokenUsage['output_tokens'],
-            'total_tokens' => $tokenUsage['total_tokens'],
-            'elapsed_ms' => $elapsedMs,
-            'structured_block_mode' => true,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-        ]);
-
-        Log::info('[PROCYNIA][AI_HANG] OpenAI call returned.', [
-            'timestamp' => now()->toIso8601String(),
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_filename' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'input_tokens' => $tokenUsage['input_tokens'],
-            'output_tokens' => $tokenUsage['output_tokens'],
-            'total_tokens' => $tokenUsage['total_tokens'],
-            'elapsed_ms' => $elapsedMs,
-            'structured_block_mode' => true,
-            'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-            'block_id' => $block->sourceBlockId,
-            'block_index' => $block->sourceBlockIndex,
-            'block_type' => $block->blockType,
-        ]);
-
         $errorType = null;
         $errorMessage = null;
 
         if (! $response->successful()) {
             $errorType = $this->errorTypeForStatus($status);
             $errorMessage = sprintf('OpenAI structured block extraction request failed with HTTP status [%d].', $status);
-
-            Log::warning('[PROCYNIA][REQ_PIPELINE] Structured block extraction returned a non-success HTTP response and will return a failure result.', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'document_title' => $document->original_filename,
-                'document_filename' => $document->original_filename,
-                'stage' => 'openai_http_status',
-                'http_status' => $status,
-                'request_id' => $requestId,
-                'response_id' => $responseId,
-                'saved_notice_ai_document_chunk_id' => $block->savedNoticeAiDocumentChunkId,
-                'block_id' => $block->sourceBlockId,
-                'block_index' => $block->sourceBlockIndex,
-            ]);
         }
 
         return [
@@ -1781,12 +730,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Resolve the configured model name used for relevance metadata in extraction results.
-     * Inputs: None.
-     * Returns: The configured relevance model name.
-     * Side effects: None.
-     */
     private function relevanceModel(): string
     {
         $model = trim((string) config(
@@ -1797,34 +740,16 @@ class RequirementCandidateExtractor
         return $model !== '' ? $model : 'gpt-4.1-mini';
     }
 
-    /**
-     * Purpose: Return the prompt version used for relevance metadata in extraction results.
-     * Inputs: None.
-     * Returns: The configured prompt version string.
-     * Side effects: None.
-     */
     private function relevancePromptVersion(): string
     {
         return RequirementSegmentRelevancePromptBuilder::PROMPT_VERSION;
     }
 
-    /**
-     * Purpose: Build the OpenAI Responses API payload for a single segment extraction request.
-     * Inputs: The source AI document and the source segment.
-     * Returns: The exact payload sent to OpenAI.
-     * Side effects: None.
-     */
     private function segmentRequestPayload(SavedNoticeAiDocument $document, DocumentRequirementSegmentData $segment): array
     {
         return $this->promptBuilder->buildRequestPayload($document, $segment);
     }
 
-    /**
-     * Purpose: Build a structured failure result for one segment extraction attempt.
-     * Inputs: The source AI document, the segment, tracing metadata, and the error details.
-     * Returns: A deterministic failure result that preserves the segment provenance.
-     * Side effects: Emits a warning log.
-     */
     private function failedSegmentResult(
         SavedNoticeAiDocument $document,
         DocumentRequirementSegmentData $segment,
@@ -1839,22 +764,6 @@ class RequirementCandidateExtractor
         string $errorType = 'unexpected_error',
         string $errorMessage = 'Segment extraction failed.',
     ): RequirementSegmentExtractionResultData {
-        Log::warning('[PROCYNIA][AI][EXTRACTION] Segment extraction failed.', [
-            'run_id' => $runId,
-            'saved_notice_id' => $document->saved_notice_id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_ai_document_chunk_id' => $segment->savedNoticeAiDocumentChunkId,
-            'segment_id' => $segment->segmentId,
-            'segment_index' => $segment->segmentIndex,
-            'model' => $model,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'upstream_status' => $upstreamStatus,
-            'error_type' => $errorType,
-            'error_message' => $errorMessage,
-            'raw_response' => $rawResponseBody,
-        ]);
-
         return new RequirementSegmentExtractionResultData(
             ok: false,
             savedNoticeId: $segment->savedNoticeId,
@@ -1886,12 +795,6 @@ class RequirementCandidateExtractor
         );
     }
 
-    /**
-     * Purpose: Build a consistent log context for segment extraction cost tracing.
-     * Inputs: The AI document, the segment, the extraction run id, and any additional context fields.
-     * Returns: A structured log context with stable document and segment identifiers.
-     * Side effects: None.
-     */
     private function segmentAiCostContext(SavedNoticeAiDocument $document, DocumentRequirementSegmentData $segment, string $runId, array $extra = []): array
     {
         return array_merge([
@@ -1907,12 +810,6 @@ class RequirementCandidateExtractor
         ], $extra);
     }
 
-    /**
-     * Purpose: Extract the assistant text payload from a Responses API result.
-     * Inputs: The raw OpenAI response payload.
-     * Returns: The concatenated response text.
-     * Side effects: None.
-     */
     private function segmentResponseTextFromOpenAi(array $response): string
     {
         $topLevelText = trim((string) data_get($response, 'output_text', ''));
@@ -1959,12 +856,6 @@ class RequirementCandidateExtractor
         return trim(implode('', $segments));
     }
 
-    /**
-     * Purpose: Decode the JSON payload returned by OpenAI for segment extraction.
-     * Inputs: The raw assistant text.
-     * Returns: The decoded structured payload.
-     * Side effects: Throws when the payload cannot be parsed.
-     */
     private function decodeSegmentPayload(string $rawText): array
     {
         $text = $this->segmentStripCodeFences(trim($rawText));
@@ -1994,12 +885,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Remove Markdown code fences if the model wrapped the JSON payload.
-     * Inputs: Raw model text.
-     * Returns: The cleaned text.
-     * Side effects: None.
-     */
     private function segmentStripCodeFences(string $text): string
     {
         $text = trim($text);
@@ -2009,12 +894,6 @@ class RequirementCandidateExtractor
         return trim($text);
     }
 
-    /**
-     * Purpose: Convert parsed extraction rows into canonical candidate DTOs.
-     * Inputs: The source segment and the parsed row list.
-     * Returns: A deterministic list of requirement candidates.
-     * Side effects: None.
-     */
     private function segmentMapCandidates(
         SavedNoticeAiDocument $document,
         DocumentRequirementSegmentData $segment,
@@ -2022,26 +901,11 @@ class RequirementCandidateExtractor
         ?string $requestId,
         ?string $responseId,
         array $rows,
-    ): array
-    {
+    ): array {
         $candidates = [];
 
         foreach ($rows as $index => $row) {
             if (! is_array($row)) {
-                Log::warning('[PROCYNIA][REQ_PIPELINE] Requirement candidate rejected before mapping.', [
-                    'run_id' => $runId,
-                    'document_id' => $document->id,
-                    'saved_notice_ai_document_id' => $document->id,
-                    'saved_notice_id' => $document->saved_notice_id,
-                    'segment_id' => $segment->segmentId,
-                    'segment_index' => $segment->segmentIndex,
-                    'candidate_index' => $index,
-                    'rejection_reason_category' => 'invalid_candidate_type',
-                    'missing_field' => null,
-                    'request_id' => $requestId,
-                    'response_id' => $responseId,
-                ]);
-
                 continue;
             }
 
@@ -2064,40 +928,12 @@ class RequirementCandidateExtractor
             }
 
             if ($missingField !== null) {
-                Log::warning('[PROCYNIA][REQ_PIPELINE] Requirement candidate rejected before mapping.', [
-                    'run_id' => $runId,
-                    'document_id' => $document->id,
-                    'saved_notice_ai_document_id' => $document->id,
-                    'saved_notice_id' => $document->saved_notice_id,
-                    'segment_id' => $segment->segmentId,
-                    'segment_index' => $segment->segmentIndex,
-                    'candidate_index' => $index,
-                    'rejection_reason_category' => 'missing_required_field',
-                    'missing_field' => $missingField,
-                    'request_id' => $requestId,
-                    'response_id' => $responseId,
-                ]);
-
                 continue;
             }
 
             $candidate = RequirementExtractionCandidateData::fromSegmentRow($row, $segment, (int) $index);
 
             if ($candidate->originalText === '' && $candidate->normalizedText === '') {
-                Log::warning('[PROCYNIA][REQ_PIPELINE] Requirement candidate rejected before mapping.', [
-                    'run_id' => $runId,
-                    'document_id' => $document->id,
-                    'saved_notice_ai_document_id' => $document->id,
-                    'saved_notice_id' => $document->saved_notice_id,
-                    'segment_id' => $segment->segmentId,
-                    'segment_index' => $segment->segmentIndex,
-                    'candidate_index' => $index,
-                    'rejection_reason_category' => 'empty_requirement_text',
-                    'missing_field' => 'original_text',
-                    'request_id' => $requestId,
-                    'response_id' => $responseId,
-                ]);
-
                 continue;
             }
 
@@ -2107,12 +943,6 @@ class RequirementCandidateExtractor
         return $candidates;
     }
 
-    /**
-     * Purpose: Deduplicate obvious duplicate candidates inside one segment extraction result.
-     * Inputs: The extracted candidates for one segment.
-     * Returns: A stable list of unique candidates.
-     * Side effects: None.
-     */
     private function segmentDedupeCandidates(array $candidates): array
     {
         $results = [];
@@ -2136,12 +966,6 @@ class RequirementCandidateExtractor
         return $results;
     }
 
-    /**
-     * Purpose: Build a stable fingerprint for one extracted candidate.
-     * Inputs: The canonical AI candidate.
-     * Returns: A deterministic fingerprint string.
-     * Side effects: None.
-     */
     private function segmentFingerprint(RequirementExtractionCandidateData $candidate): string
     {
         return implode('|', [
@@ -2151,12 +975,6 @@ class RequirementCandidateExtractor
         ]);
     }
 
-    /**
-     * Purpose: Extract token usage fields from an OpenAI response payload.
-     * Inputs: The raw HTTP response from the OpenAI API.
-     * Returns: Normalised input, output, and total token counts or null when absent.
-     * Side effects: None.
-     */
     private function segmentTokenUsageFromResponse(Response $response): array
     {
         $decoded = $response->json();
@@ -2172,12 +990,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Return the absence of token usage for error paths.
-     * Inputs: None.
-     * Returns: A token usage structure with null counts.
-     * Side effects: None.
-     */
     private function segmentEmptyTokenUsage(): array
     {
         return [
@@ -2187,12 +999,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Convert a raw usage count into a normalised integer or null.
-     * Inputs: A token count from the OpenAI payload.
-     * Returns: A bounded integer value or null when unusable.
-     * Side effects: None.
-     */
     private function segmentNormalizeTokenCount(mixed $value): ?int
     {
         if (is_int($value)) {
@@ -2208,12 +1014,6 @@ class RequirementCandidateExtractor
         return null;
     }
 
-    /**
-     * Purpose: Extract the request id from a response payload.
-     * Inputs: The raw HTTP response from OpenAI.
-     * Returns: The request id or null when absent.
-     * Side effects: None.
-     */
     private function segmentRequestIdFrom(Response $response): ?string
     {
         foreach (['x-request-id', 'x-openai-request-id', 'openai-request-id'] as $header) {
@@ -2227,12 +1027,6 @@ class RequirementCandidateExtractor
         return null;
     }
 
-    /**
-     * Purpose: Extract the response id from a response payload.
-     * Inputs: The raw HTTP response from OpenAI.
-     * Returns: The response id or null when absent.
-     * Side effects: None.
-     */
     private function segmentResponseIdFrom(Response $response): ?string
     {
         $responseId = trim((string) data_get($response->json(), 'id', ''));
@@ -2240,12 +1034,6 @@ class RequirementCandidateExtractor
         return $responseId !== '' ? $responseId : null;
     }
 
-    /**
-     * Purpose: Convert an HTTP failure status into a stable error type label.
-     * Inputs: The upstream HTTP status code.
-     * Returns: A short machine-readable error type.
-     * Side effects: None.
-     */
     private function segmentErrorTypeForStatus(int $status): string
     {
         return match (true) {
@@ -2257,34 +1045,16 @@ class RequirementCandidateExtractor
         };
     }
 
-    /**
-     * Purpose: Derive the elapsed time in milliseconds from the given start time.
-     * Inputs: The floating-point timestamp captured before the call started.
-     * Returns: The elapsed time rounded to the nearest millisecond.
-     * Side effects: None.
-     */
     private function elapsedMs(float $startedAt): int
     {
         return (int) round((microtime(true) - $startedAt) * 1000);
     }
 
-    /**
-     * Purpose: Extract the exact user prompt text from a payload for logging calculations.
-     * Inputs: The OpenAI request payload.
-     * Returns: The first user text block when present, otherwise an empty string.
-     * Side effects: None.
-     */
     private function segmentInputText(array $payload): string
     {
         return (string) data_get($payload, 'input.1.content.0.text', data_get($payload, 'input.0.content.0.text', ''));
     }
 
-    /**
-     * Purpose: Parse raw assistant output into canonical extraction rows.
-     * Inputs: The raw assistant text.
-     * Returns: A strategy label plus normalized candidate rows.
-     * Side effects: None.
-     */
     private function parseOutput(string $rawText): array
     {
         $text = $this->stripCodeFences(trim($rawText));
@@ -2336,12 +1106,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Parse the strict Phase 1 JSON schema output.
-     * Inputs: The raw assistant text.
-     * Returns: A strict JSON-schema result with normalized candidate rows.
-     * Side effects: Throws on empty output, invalid JSON, or schema mismatches.
-     */
     private function parsePhaseOneOutput(string $rawText): array
     {
         $text = $this->stripCodeFences(trim($rawText));
@@ -2387,12 +1151,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Verify that one Phase 1 candidate row matches the lightweight schema.
-     * Inputs: The decoded candidate row and its index.
-     * Returns: None.
-     * Side effects: Throws on schema mismatches.
-     */
     private function validatePhaseOneCandidateRow(array $row, int $index): void
     {
         $requiredKeys = [
@@ -2443,12 +1201,6 @@ class RequirementCandidateExtractor
         }
     }
 
-    /**
-     * Purpose: Parse a JSON response if the model returned structured objects instead of a table.
-     * Inputs: The cleaned assistant text.
-     * Returns: Normalized rows or null when the payload is not usable JSON.
-     * Side effects: None.
-     */
     private function parseJsonRows(string $text): ?array
     {
         try {
@@ -2486,12 +1238,6 @@ class RequirementCandidateExtractor
         return null;
     }
 
-    /**
-     * Purpose: Parse a pipe- or tab-delimited table into normalized candidate rows.
-     * Inputs: The cleaned assistant text and the table delimiter to use.
-     * Returns: Normalized candidate rows.
-     * Side effects: None.
-     */
     private function parseDelimitedTableRows(string $text, string $delimiter): array
     {
         $lines = preg_split('/\R/u', $text) ?: [];
@@ -2540,12 +1286,6 @@ class RequirementCandidateExtractor
         return $rows;
     }
 
-    /**
-     * Purpose: Parse a plain-text table where columns are separated by repeated whitespace.
-     * Inputs: The cleaned assistant text.
-     * Returns: Normalized candidate rows.
-     * Side effects: None.
-     */
     private function parseSpaceDelimitedTableRows(string $text): array
     {
         $lines = preg_split('/\R/u', $text) ?: [];
@@ -2596,12 +1336,6 @@ class RequirementCandidateExtractor
         return $rows;
     }
 
-    /**
-     * Purpose: Try a positional fallback for a fixed fifteen-column table.
-     * Inputs: The cleaned assistant text.
-     * Returns: Normalized candidate rows.
-     * Side effects: None.
-     */
     private function parseFixedColumnTableRows(string $text): array
     {
         $lines = preg_split('/\R/u', $text) ?: [];
@@ -2630,12 +1364,6 @@ class RequirementCandidateExtractor
         return $rows;
     }
 
-    /**
-     * Purpose: Build a header map from one candidate table header row.
-     * Inputs: The header cells.
-     * Returns: A map of column index to canonical key or null when the row is not recognisable.
-     * Side effects: None.
-     */
     private function buildHeaderMap(array $cells): ?array
     {
         $headerMap = [];
@@ -2654,12 +1382,6 @@ class RequirementCandidateExtractor
         return $recognizedCount >= 3 ? $headerMap : null;
     }
 
-    /**
-     * Purpose: Map parsed cells into a normalized canonical row structure.
-     * Inputs: The header map and row cells.
-     * Returns: The normalized row or null when the row is empty.
-     * Side effects: None.
-     */
     private function mapCellsToCanonicalRow(array $headerMap, array $cells): ?array
     {
         $row = [];
@@ -2675,12 +1397,6 @@ class RequirementCandidateExtractor
         return $this->normalizeCanonicalRow($row);
     }
 
-    /**
-     * Purpose: Map a fixed column list into the canonical extraction structure.
-     * Inputs: A row of fifteen cells in the configured output order.
-     * Returns: The normalized row or null when no requirement text is present.
-     * Side effects: None.
-     */
     private function mapFixedColumnRow(array $cells): ?array
     {
         $row = [
@@ -2704,27 +1420,42 @@ class RequirementCandidateExtractor
         return $this->normalizeCanonicalRow($row);
     }
 
-    /**
-     * Purpose: Normalize a row from either JSON or table output into canonical keys.
-     * Inputs: A raw parsed row.
-     * Returns: A cleaned row or null when the row is not usable.
-     * Side effects: None.
-     */
     private function normalizeCanonicalRow(array $row): ?array
     {
+        Log::info('[TT][BEFORE_NORMALIZE]', [
+            'row' => $row,
+            'original_text' => $row['original_text'] ?? null,
+            'normalized_text' => $row['normalized_text'] ?? null,
+        ]);
+
         $originalText = $this->normalizeScalar($row['original_text'] ?? null);
         $normalizedText = $this->normalizeScalar($row['normalized_text'] ?? null);
+
+        if ($normalizedText === '') {
+            $normalizedText = $originalText;
+        }
+
         $sourceReferenceText = $this->normalizeScalar($row['source_reference_text'] ?? null);
 
         if ($originalText === '' && $normalizedText === '') {
+            Log::info('[TT][AFTER_NORMALIZE_EMPTY]', [
+                'original_text' => $originalText,
+                'normalized_text' => $normalizedText,
+            ]);
+
             return null;
         }
 
         if ($this->looksLikeHeaderRow($row, $originalText, $normalizedText)) {
+            Log::info('[TT][AFTER_NORMALIZE_HEADER_ROW]', [
+                'original_text' => $originalText,
+                'normalized_text' => $normalizedText,
+            ]);
+
             return null;
         }
 
-        $canonical = [
+        $normalizedRow = [
             'requirement_identifier' => $this->normalizeScalar($row['requirement_identifier'] ?? null) ?: null,
             'parent_reference' => $this->normalizeScalar($row['parent_reference'] ?? null) ?: null,
             'requirement_type' => $this->normalizeScalar($row['requirement_type'] ?? null) ?: null,
@@ -2745,7 +1476,13 @@ class RequirementCandidateExtractor
             'warnings' => $this->normalizeListField($row['warnings'] ?? null),
         ];
 
-        return $canonical;
+        Log::info('[TT][AFTER_NORMALIZE]', [
+            'original_text' => $originalText,
+            'normalized_text' => $normalizedText,
+            'normalized_row' => $normalizedRow,
+        ]);
+
+        return $normalizedRow;
     }
 
     private function looksLikeHeaderRow(array $row, string $originalText, string $normalizedText): bool
@@ -2800,7 +1537,7 @@ class RequirementCandidateExtractor
 
         $cells = array_map(function (mixed $value): string {
             $text = trim((string) $value);
-            $text = str_replace('\|', '|', $text);
+            $text = str_replace('\\|', '|', $text);
 
             return $text;
         }, $cells);
@@ -2822,7 +1559,7 @@ class RequirementCandidateExtractor
     {
         $normalized = [];
 
-        foreach ($rows as $rowIndex => $row) {
+        foreach ($rows as $row) {
             if (! is_array($row)) {
                 continue;
             }
@@ -2951,9 +1688,11 @@ class RequirementCandidateExtractor
     private function fingerprint(RequirementExtractionCandidateData $candidate): string
     {
         return implode('|', [
-            $candidate->sourceBlockId,
             mb_strtolower(trim((string) ($candidate->requirementIdentifier ?? '')), 'UTF-8'),
-            mb_strtolower(trim($candidate->originalText), 'UTF-8'),
+            mb_strtolower(trim((string) ($candidate->parentReference ?? '')), 'UTF-8'),
+            mb_strtolower(trim((string) ($candidate->requirementType ?? '')), 'UTF-8'),
+            mb_strtolower(trim((string) ($candidate->obligationType ?? '')), 'UTF-8'),
+            mb_strtolower(trim(preg_replace('/\s+/u', ' ', trim((string) ($candidate->normalizedText !== '' ? $candidate->normalizedText : $candidate->originalText))) ?? ''), 'UTF-8'),
         ]);
     }
 
@@ -2993,23 +1732,6 @@ class RequirementCandidateExtractor
         ?string $rawResponseBody = null,
         array $tokenUsage = [],
     ): RequirementExtractionResultData {
-        Log::warning('[PROC][AI][REQ] OpenAI requirement extraction failed, falling back to the legacy extractor.', [
-            'run_id' => $runId,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'model' => $model,
-            'upstream_status' => $upstreamStatus,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'error_type' => $errorType,
-            'error_message' => $errorMessage,
-            'raw_response' => $rawResponseBody,
-            'openai_call_count' => 1,
-            'input_tokens' => $tokenUsage['input_tokens'] ?? null,
-            'output_tokens' => $tokenUsage['output_tokens'] ?? null,
-            'total_tokens' => $tokenUsage['total_tokens'] ?? null,
-        ]);
-
         $candidates = $this->legacyCandidates($document, $documentText);
 
         return new RequirementExtractionResultData(
@@ -3043,12 +1765,6 @@ class RequirementCandidateExtractor
         );
     }
 
-    /**
-     * Purpose: Build a consistent log context for requirement extraction cost tracing.
-     * Inputs: The AI document, the extraction run id, and any additional context fields.
-     * Returns: A structured log context with stable document and notice identifiers.
-     * Side effects: None.
-     */
     private function aiCostContext(SavedNoticeAiDocument $document, string $runId, array $extra = []): array
     {
         return array_merge([
@@ -3059,12 +1775,6 @@ class RequirementCandidateExtractor
         ], $extra);
     }
 
-    /**
-     * Purpose: Extract token usage fields from an OpenAI response payload.
-     * Inputs: The raw HTTP response from the OpenAI API.
-     * Returns: Normalised input, output, and total token counts or null when absent.
-     * Side effects: None.
-     */
     private function tokenUsageFromResponse(Response $response): array
     {
         $decoded = $response->json();
@@ -3080,12 +1790,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Return the absence of token usage for error paths and empty inputs.
-     * Inputs: None.
-     * Returns: A token usage structure with null counts.
-     * Side effects: None.
-     */
     private function emptyTokenUsage(): array
     {
         return [
@@ -3095,12 +1799,6 @@ class RequirementCandidateExtractor
         ];
     }
 
-    /**
-     * Purpose: Normalise a token count from an OpenAI response payload.
-     * Inputs: A raw token count value from the response body.
-     * Returns: A nullable integer token count.
-     * Side effects: None.
-     */
     private function normalizeTokenCount(mixed $value): ?int
     {
         if (is_int($value)) {
@@ -3130,12 +1828,6 @@ class RequirementCandidateExtractor
         return $this->dedupeCandidates($candidates);
     }
 
-    /**
-     * Purpose: Build a bounded preview of long assistant output for logs.
-     * Inputs: Raw text and an optional length cap.
-     * Returns: A compact single-line preview string.
-     * Side effects: None.
-     */
     private function previewText(string $text, int $limit = 1500): string
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
@@ -3147,12 +1839,6 @@ class RequirementCandidateExtractor
         return Str::limit($normalized, $limit, '...');
     }
 
-    /**
-     * Purpose: Build a consistent failure result payload for the full-document path.
-     * Inputs: The document, run id, transport result, failure classification, and extra metadata.
-     * Returns: A terminal extraction result with failure metadata populated.
-     * Side effects: None.
-     */
     private function buildFullDocumentFailureResult(
         SavedNoticeAiDocument $document,
         string $runId,
@@ -3269,12 +1955,6 @@ class RequirementCandidateExtractor
         };
     }
 
-    /**
-     * Purpose: Extract upstream OpenAI error fields from a raw error response body.
-     * Inputs: The raw HTTP response body returned by OpenAI.
-     * Returns: A normalised error detail map suitable for logs and failure summaries.
-     * Side effects: None.
-     */
     private function upstreamErrorDetailsFromRawBody(string $rawResponseBody): array
     {
         if (trim($rawResponseBody) === '') {

@@ -32,6 +32,19 @@ class RequirementExtractionPipeline
     {
         $runId ??= (string) Str::uuid();
         $startedAt = microtime(true);
+
+        $splitPlanner = app(DocumentSplitPlanner::class);
+
+        $splitResult = $splitPlanner->plan($document, $runId);
+
+        Log::info('[TT][SPLIT] Split executed.', [
+            'run_id' => $runId,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'ok' => $splitResult['ok'] ?? null,
+            'split_plan_count' => count($splitResult['split_plan'] ?? []),
+        ]);
         $document->requirements()->delete();
 
         $documentTitle = (string) $document->original_filename;

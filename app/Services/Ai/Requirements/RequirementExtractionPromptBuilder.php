@@ -84,6 +84,10 @@ class RequirementExtractionPromptBuilder
     {
         return implode("\n", [
             'You extract answerable tender requirements for Procynia.',
+            'A requirement may include a short heading followed by descriptive text.',
+            'You MUST include ALL lines belonging to the same requirement, including headings.',
+            'Do NOT remove short lines or headings even if they appear descriptive.',
+            'Treat the entire block of text as one requirement exactly as written.',
             'The inputs are contextual document blocks, not isolated trigger words.',
             'Return only structured JSON that matches the schema.',
             'Keep original_text as the readable source-language requirement text.',
