@@ -104,19 +104,200 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     }
 
     /**
+     * Purpose: Ensure a full-document chunk with multiple requirement families is split into separate Phase 1 requests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Fakes two OpenAI HTTP responses and inspects the outgoing requests.
+     */
+    public function test_it_splits_a_full_document_chunk_on_requirement_family_headings_and_keeps_both_families(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 208,
+            'saved_notice_id' => 409,
+            'original_filename' => 'full-document-family-split-test.docx',
+            'extracted_text' => "Innledning til dokumentet.\n\nSkal-krav\nID\nKravtekst\n1-1.S1\nLeverandøren skal levere dokumentasjon innen 10 dager.\n\nBør-krav\nID\nKravtekst\n1-1.E1\nLeverandøren bør beskrive løsning og bemanning.\n",
+        ]);
+
+        Http::fake([
+            '*' => Http::sequence()
+                ->push([
+                    'id' => 'resp_full_document_family_split_test_1',
+                    'object' => 'response',
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'candidates' => [[
+                            'requirement_identifier' => '1-1.S1',
+                            'parent_reference' => null,
+                            'original_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+                            'source_reference_text' => 'Skal-krav 1-1.S1',
+                            'is_requirement' => true,
+                            'confidence' => 0.99,
+                        ]],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'usage' => [
+                        'input_tokens' => 120,
+                        'output_tokens' => 36,
+                        'total_tokens' => 156,
+                    ],
+                ], 200)
+                ->push([
+                    'id' => 'resp_full_document_family_split_test_2',
+                    'object' => 'response',
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'candidates' => [[
+                            'requirement_identifier' => '1-1.E1',
+                            'parent_reference' => null,
+                            'original_text' => 'Leverandøren bør beskrive løsning og bemanning.',
+                            'source_reference_text' => 'Bør-krav 1-1.E1',
+                            'is_requirement' => true,
+                            'confidence' => 0.97,
+                        ]],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'usage' => [
+                        'input_tokens' => 118,
+                        'output_tokens' => 34,
+                        'total_tokens' => 152,
+                    ],
+                ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-family-split-test');
+
+        $this->assertTrue($result->ok);
+        $this->assertFalse($result->partial);
+        $this->assertSame(2, $result->openAiCallCount);
+        $this->assertSame(2, $result->extractionCallCount);
+        $this->assertSame(2, $result->metadata['window_count']);
+        $this->assertTrue($result->metadata['windowed_extraction']);
+        $this->assertSame(2, $result->metadata['raw_candidate_count']);
+        $this->assertSame(2, $result->metadata['mapped_candidate_count']);
+        $this->assertSame(2, $result->metadata['deduped_candidate_count']);
+        $this->assertCount(2, $result->candidates);
+        $this->assertSame(['1-1.S1', '1-1.E1'], array_map(static fn ($candidate) => $candidate->requirementIdentifier, $result->candidates));
+
+        Http::assertSentCount(2);
+
+        $recordedRequests = Http::recorded()->values()->all();
+
+        $this->assertCount(2, $recordedRequests);
+
+        $firstRequest = $recordedRequests[0][0];
+        $secondRequest = $recordedRequests[1][0];
+        $firstUserText = data_get($firstRequest->data(), 'input.1.content.0.text');
+        $secondUserText = data_get($secondRequest->data(), 'input.1.content.0.text');
+
+        $this->assertIsString($firstUserText);
+        $this->assertIsString($secondUserText);
+        $this->assertStringContainsString('Skal-krav', $firstUserText);
+        $this->assertStringNotContainsString('Bør-krav', $firstUserText);
+        $this->assertStringContainsString('Bør-krav', $secondUserText);
+    }
+
+    /**
      * Purpose: Ensure Phase 1 document input is lightly normalised before it is sent to OpenAI.
      * Inputs: None.
      * Returns: None.
      * Side effects: None.
      */
-    public function test_it_normalises_control_characters_and_redundant_whitespace_before_sending_phase_one_requests(): void
+    public function test_it_normalises_control_characters_and_ocr_style_requirement_identifier_spacing_before_sending_phase_one_requests(): void
     {
-        $input = "Linje 1\r\n\r\nKrav\tmed" . chr(11) . "kontrolltegn";
+        $input = "Linje 1\r\n\r\nKrav\tmed" . chr(11) . "kontrolltegn og 1 - 2 . 2. E 1 samt 1-2.2.E 3 samt 1 -2.2.S 1 og 2 . 6";
 
         $this->assertSame(
-            "Linje 1\n\nKrav med kontrolltegn",
+            "Linje 1\n\nKrav med kontrolltegn og 1-2.2.E1 samt 1-2.2.E3 samt 1-2.2.S1 og 2.6",
             FullDocumentRequirementExtractionPrompt::inputTextForDocument($input),
         );
+    }
+
+    /**
+     * Purpose: Ensure the Phase 1 prompt explicitly tells the model to extract all requirement families in the same section.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: None.
+     */
+    public function test_it_explicitly_tells_the_model_not_to_stop_after_the_first_requirement_family(): void
+    {
+        $text = FullDocumentRequirementExtractionPrompt::text();
+
+        $this->assertSame(8000, FullDocumentRequirementExtractionPrompt::maxOutputTokens());
+        $this->assertStringContainsString('Et enkelt dokumentavsnitt kan inneholde flere kravfamilier samtidig, og alle må tas med hvis de har egen requirement_identifier.', $text);
+        $this->assertStringContainsString('Ikke stopp etter den første kravfamilien eller den første kravtypen i et avsnitt; hver rad med egen requirement_identifier skal vurderes separat.', $text);
+        $this->assertStringContainsString('Hvis et langt avsnitt eller en lang chunk senere introduserer en ny kravtabell eller en ny kravtype, skal du fortsette å trekke ut også disse radene.', $text);
+        $this->assertStringContainsString('Når et dokumentavsnitt har flere påfølgende kravblokker, for eksempel først skal-krav og deretter bør-krav, skal begge familiene ekstrakteres fullstendig.', $text);
+        $this->assertStringContainsString('En kravblokk som er formulert som et evalueringsspørsmål eller en bør-kravsbetingelse er fortsatt et formelt krav når den har egen requirement_identifier.', $text);
+    }
+
+    /**
+     * Purpose: Ensure Phase 1 output parsing tolerates stray control characters in JSON string values.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Fakes the OpenAI HTTP response and inspects the parsed candidate result.
+     */
+    public function test_it_sanitizes_control_characters_in_full_document_json_output_before_parsing(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 207,
+            'saved_notice_id' => 408,
+            'original_filename' => 'full-document-control-char-test.docx',
+            'extracted_text' => "Første krav: Leverandøren skal levere dokumentasjon innen 10 dager.\n\nAndre krav: Leverandøren skal beskrive løsning og bemanning.",
+        ]);
+
+        $rawOutput = '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren' . chr(11) . 'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_full_document_control_char_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => $rawOutput,
+                'usage' => [
+                    'input_tokens' => 150,
+                    'output_tokens' => 54,
+                    'total_tokens' => 204,
+                ],
+            ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-control-char-test');
+
+        $this->assertTrue($result->ok);
+        $this->assertCount(1, $result->candidates);
+        $this->assertSame('1.1', $result->candidates[0]->requirementIdentifier);
+        $this->assertStringContainsString('Leverandøren skal levere dokumentasjon innen 10 dager.', $result->candidates[0]->originalText);
+        $this->assertSame('Bilag 1 punkt 2.7', $result->candidates[0]->sourceReference['source_reference_text']);
+        $this->assertSame('json_schema', $result->metadata['parse_strategy']);
+
+        Http::assertSentCount(1);
+    }
+
+    /**
+     * Purpose: Ensure byte-wise JSON sanitization survives raw output that contains both control bytes and invalid UTF-8.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Invokes the private Phase 1 parser directly.
+     */
+    public function test_it_sanitizes_control_bytes_and_invalid_utf8_before_parsing_full_document_json_output(): void
+    {
+        $extractor = app(RequirementCandidateExtractor::class);
+        $method = new \ReflectionMethod($extractor, 'parsePhaseOneOutput');
+        $method->setAccessible(true);
+
+        $rawOutput = chr(0xEF) . chr(0xBB) . chr(0xBF) . '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren' . chr(11) . ' ' . chr(0xC3) . chr(0x28) . 'skal levere dokumentasjon innen 10 dager.","source_reference_text":"Bilag 1 punkt 2.7","is_requirement":true,"confidence":0.93}]}';
+
+        $parsed = $method->invoke($extractor, $rawOutput);
+
+        $this->assertSame('json_schema', $parsed['strategy']);
+        $this->assertCount(1, $parsed['rows']);
+        $this->assertSame('1.1', $parsed['rows'][0]['requirement_identifier']);
+        $this->assertStringContainsString('Leverandøren', $parsed['rows'][0]['original_text']);
+        $this->assertStringContainsString('skal levere dokumentasjon innen 10 dager.', $parsed['rows'][0]['original_text']);
     }
 
     /**
@@ -271,11 +452,11 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-unparsed-test');
 
         $this->assertFalse($result->ok);
-        $this->assertSame('response_format', $result->failureStage);
+        $this->assertSame('unexpected_response', $result->failureStage);
         $this->assertSame('unexpected_response', $result->failureType);
         $this->assertSame('unexpected_response', $result->errorType);
         $this->assertSame('OpenAI phase 1 extraction response did not include a candidates array.', $result->errorMessage);
-        $this->assertSame('response_format', $result->metadata['parse_strategy']);
+        $this->assertSame('failed', $result->metadata['parse_strategy']);
         $this->assertGreaterThan(0, $result->metadata['raw_output_length']);
         $this->assertLessThanOrEqual(strlen($rawOutput), strlen($result->metadata['raw_output_preview']));
         $this->assertStringStartsWith('{"rows":[{"original_text":"Dette er ikke et kandidatsvar."', $result->metadata['raw_output_preview']);
@@ -320,11 +501,11 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-invalid-json-test');
 
         $this->assertFalse($result->ok);
-        $this->assertSame('response_parsing', $result->failureStage);
-        $this->assertSame('parsing_error', $result->failureType);
-        $this->assertSame('parsing_error', $result->errorType);
+        $this->assertSame('unexpected_response', $result->failureStage);
+        $this->assertSame('unexpected_response', $result->failureType);
+        $this->assertSame('unexpected_response', $result->errorType);
         $this->assertNotSame('', $result->errorMessage);
-        $this->assertSame('invalid_json', $result->metadata['parse_strategy']);
+        $this->assertSame('failed', $result->metadata['parse_strategy']);
         $this->assertGreaterThan(0, $result->metadata['raw_output_length']);
         $this->assertStringStartsWith('{"candidates":[', $result->metadata['raw_output_preview']);
 

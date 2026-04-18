@@ -10,13 +10,13 @@ namespace App\Services\Ai\Requirements;
  */
 final class FullDocumentRequirementExtractionPrompt
 {
-    public const PROMPT_VERSION = '2026-04-17.phase_1.v3';
+    public const PROMPT_VERSION = '2026-04-18.phase_1.v8';
 
     public const PROMPT_NAME = 'phase_1_requirement_extraction';
 
     public const MODEL = 'gpt-4.1-mini';
 
-    public const MAX_OUTPUT_TOKENS = 4500;
+    public const MAX_OUTPUT_TOKENS = 8000;
 
     public const TEMPERATURE = 0;
 
@@ -67,6 +67,11 @@ final class FullDocumentRequirementExtractionPrompt
             'Et formelt krav er tekst som i dokumentstrukturen fremstår som et krav, for eksempel i kravtabell, kravliste, nummerert kravblokk eller annen tydelig kravkontekst.',
             'Tekst med egen requirement_identifier i tydelig kravkontekst skal behandles som et formelt krav.',
             'Dette inkluderer også evalueringskrav, E-krav, bør-krav, ønskede krav og andre krav som har egen requirement_identifier og står som egne kravblokker.',
+            'Et enkelt dokumentavsnitt kan inneholde flere kravfamilier samtidig, og alle må tas med hvis de har egen requirement_identifier.',
+            'Ikke stopp etter den første kravfamilien eller den første kravtypen i et avsnitt; hver rad med egen requirement_identifier skal vurderes separat.',
+            'Hvis et langt avsnitt eller en lang chunk senere introduserer en ny kravtabell eller en ny kravtype, skal du fortsette å trekke ut også disse radene.',
+            'Når et dokumentavsnitt har flere påfølgende kravblokker, for eksempel først skal-krav og deretter bør-krav, skal begge familiene ekstrakteres fullstendig.',
+            'OCR-støy og ekstra mellomrom rundt bindestreker, punktum og bokstav/siffer-separasjon i requirement_identifier skal ikke hindre gjenkjenning av en formell kravblokk.',
             'Ord som skal, må, bør, kan, kreves, forutsettes eller ønskes er relevante signaler, men slike ord er ikke alene nok dersom teksten bare er bakgrunn, veiledning eller orientering.',
 
             'TEKST SOM IKKE SKAL REGNES SOM FORMELLE KRAV:',
@@ -92,6 +97,7 @@ final class FullDocumentRequirementExtractionPrompt
             'Ved evalueringen legges det særlig vekt på-tekst uten egen requirement_identifier skal ikke returneres som eget kandidatobjekt.',
             'Hvis slik tekst står inne i samme kravblokk som et identifisert krav og er en del av samme blokks innhold, skal den beholdes i samme original_text.',
             'Hvis dokumentet bruker bør-krav eller E-krav som egne nummererte kravblokker, skal disse tas med som egne formelle krav.',
+            'En kravblokk som er formulert som et evalueringsspørsmål eller en bør-kravsbetingelse er fortsatt et formelt krav når den har egen requirement_identifier.',
 
             'KRAVTYPE:',
             'Les kravtype fra dokumentstrukturen når dette er eksplisitt angitt, for eksempel skal-krav, må-krav, bør-krav, kan-krav, evalueringskrav eller tilsvarende.',
@@ -122,6 +128,11 @@ final class FullDocumentRequirementExtractionPrompt
         $normalized = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $normalized) ?? $normalized;
         $normalized = preg_replace('/[ \t]+/u', ' ', $normalized) ?? $normalized;
         $normalized = preg_replace('/\n{3,}/u', "\n\n", $normalized) ?? $normalized;
+        $normalized = preg_replace('/(?<=\d)[ \t]*-[ \t]*(?=\d)/u', '-', $normalized) ?? $normalized;
+        $normalized = preg_replace('/(?<=\d)[ \t]*\.[ \t]*(?=\d)/u', '.', $normalized) ?? $normalized;
+        $normalized = preg_replace('/(?<=\d)[ \t]*\.[ \t]*(?=[\p{Lu}])/u', '.', $normalized) ?? $normalized;
+        $normalized = preg_replace('/(?<=\d\.)[ \t]*(?=\p{L}[ \t]*\d\b)/u', '', $normalized) ?? $normalized;
+        $normalized = preg_replace('/(?<=\b[A-ZÆØÅ])[ \t]+(?=\d\b)/u', '', $normalized) ?? $normalized;
 
         return trim($normalized);
     }

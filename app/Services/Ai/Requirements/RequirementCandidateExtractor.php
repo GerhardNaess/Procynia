@@ -212,13 +212,7 @@ class RequirementCandidateExtractor
         $documentTitle = (string) $document->original_filename;
         $documentFilename = $documentTitle;
         $documentText = trim((string) $document->extracted_text);
-        $windows = [[
-            'text' => $documentText,
-            'start_position' => 0,
-            'end_position' => mb_strlen($documentText, 'UTF-8'),
-            'window_index' => 0,
-            'window_count' => 1,
-        ]];
+        $windows = $this->buildPhaseOneExtractionWindows($documentText);
 
         $windowCount = count($windows);
         $requestResults = [];
@@ -822,10 +816,76 @@ class RequirementCandidateExtractor
         $length = mb_strlen($text, 'UTF-8');
 
         if ($length === 0) {
-            return [];
+            return [[
+                'text' => '',
+                'start_position' => 0,
+                'end_position' => 0,
+                'window_index' => 0,
+                'window_count' => 1,
+            ]];
         }
 
-        return [[
+        $lineRecords = $this->phaseOneLineRecordsWithOffsets($text);
+        $familyHeaderPositions = [];
+
+        foreach ($lineRecords as $lineRecord) {
+            if ($this->isPhaseOneFamilyHeaderLine((string) ($lineRecord['text'] ?? ''))) {
+                $familyHeaderPositions[] = (int) ($lineRecord['start_position'] ?? 0);
+            }
+        }
+
+        $familyHeaderPositions = array_values(array_unique($familyHeaderPositions));
+        sort($familyHeaderPositions);
+
+        if (count($familyHeaderPositions) <= 1) {
+            return [[
+                'text' => $text,
+                'start_position' => 0,
+                'end_position' => $length,
+                'window_index' => 0,
+                'window_count' => 1,
+            ]];
+        }
+
+        $windowStarts = [0];
+
+        foreach (array_slice($familyHeaderPositions, 1) as $familyHeaderPosition) {
+            if ($familyHeaderPosition > 0 && end($windowStarts) !== $familyHeaderPosition) {
+                $windowStarts[] = $familyHeaderPosition;
+            }
+        }
+
+        $windowStarts = array_values(array_unique($windowStarts));
+        sort($windowStarts);
+
+        $windows = [];
+        $windowCount = count($windowStarts);
+
+        foreach ($windowStarts as $windowIndex => $windowStart) {
+            $windowEnd = $windowIndex < $windowCount - 1 ? $windowStarts[$windowIndex + 1] : $length;
+            $windowText = trim((string) mb_substr($text, $windowStart, $windowEnd - $windowStart, 'UTF-8'));
+
+            if ($windowText === '') {
+                continue;
+            }
+
+            $windows[] = [
+                'text' => $windowText,
+                'start_position' => $windowStart,
+                'end_position' => $windowEnd,
+                'window_index' => count($windows),
+                'window_count' => 0,
+            ];
+        }
+
+        $windowCount = count($windows);
+
+        foreach ($windows as $index => $window) {
+            $windows[$index]['window_index'] = $index;
+            $windows[$index]['window_count'] = $windowCount;
+        }
+
+        return $windows !== [] ? $windows : [[
             'text' => $text,
             'start_position' => 0,
             'end_position' => $length,
@@ -836,7 +896,47 @@ class RequirementCandidateExtractor
 
     private function shouldUseWindowedPhaseOneExtraction(string $text): bool
     {
-        return false;
+        return count($this->buildPhaseOneExtractionWindows($text)) > 1;
+    }
+
+    /**
+     * @return array<int, array{text: string, start_position: int, end_position: int}>
+     */
+    private function phaseOneLineRecordsWithOffsets(string $text): array
+    {
+        $lineRecords = [];
+        preg_match_all('/.*?(?:\R|$)/u', $text, $matches, PREG_OFFSET_CAPTURE);
+
+        foreach (($matches[0] ?? []) as $match) {
+            $lineText = (string) ($match[0] ?? '');
+
+            if ($lineText === '') {
+                continue;
+            }
+
+            $byteOffset = (int) ($match[1] ?? 0);
+            $startPosition = mb_strlen(substr($text, 0, $byteOffset), 'UTF-8');
+            $endPosition = $startPosition + mb_strlen($lineText, 'UTF-8');
+
+            $lineRecords[] = [
+                'text' => $lineText,
+                'start_position' => $startPosition,
+                'end_position' => $endPosition,
+            ];
+        }
+
+        return $lineRecords;
+    }
+
+    private function isPhaseOneFamilyHeaderLine(string $lineText): bool
+    {
+        $normalized = preg_replace('/\s+/u', ' ', trim($lineText)) ?? trim($lineText);
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return preg_match('/^(?:Skal|Bør|Må|Kan|S|E|Evalueringskrav)\s*-\s*krav$/iu', $normalized) === 1;
     }
 
     private function choosePhaseOneWindowEnd(string $text, int $start, int $idealEnd, int $length): int
@@ -1127,7 +1227,7 @@ class RequirementCandidateExtractor
 
     private function decodeSegmentPayload(string $rawText): array
     {
-        $text = $this->segmentStripCodeFences(trim($rawText));
+        $text = $this->sanitizeJsonTextForDecoding($this->segmentStripCodeFences(trim($rawText)));
 
         if ($text === '') {
             throw new RuntimeException('OpenAI segment extraction response did not include any text output.');
@@ -1326,7 +1426,7 @@ class RequirementCandidateExtractor
 
     private function parseOutput(string $rawText): array
     {
-        $text = $this->stripCodeFences(trim($rawText));
+        $text = $this->sanitizeJsonTextForDecoding($this->stripCodeFences(trim($rawText)));
 
         if ($text === '') {
             return [
@@ -1377,7 +1477,7 @@ class RequirementCandidateExtractor
 
     private function parsePhaseOneOutput(string $rawText): array
     {
-        $text = $this->stripCodeFences(trim($rawText));
+        $text = $this->sanitizeJsonTextForDecoding($this->stripCodeFences(trim($rawText)));
 
         if ($text === '') {
             throw new RuntimeException('OpenAI phase 1 extraction response did not include any text output.');
@@ -1472,6 +1572,8 @@ class RequirementCandidateExtractor
 
     private function parseJsonRows(string $text): ?array
     {
+        $text = $this->sanitizeJsonTextForDecoding($text);
+
         try {
             $decoded = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
@@ -2371,6 +2473,17 @@ class RequirementCandidateExtractor
         $text = trim($text);
         $text = preg_replace('/^```(?:json)?\s*/i', '', $text) ?? $text;
         $text = preg_replace('/\s*```$/', '', $text) ?? $text;
+
+        return trim($text);
+    }
+
+    private function sanitizeJsonTextForDecoding(string $text): string
+    {
+        $text = str_replace("\xEF\xBB\xBF", '', $text);
+        $text = preg_replace('/[\x00-\x1F\x7F]/', ' ', $text) ?? $text;
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        $text = str_replace("\xEF\xBB\xBF", '', $text);
+        $text = preg_replace('/\p{C}+/u', ' ', $text) ?? $text;
 
         return trim($text);
     }
