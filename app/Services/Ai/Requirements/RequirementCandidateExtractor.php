@@ -212,17 +212,13 @@ class RequirementCandidateExtractor
         $documentTitle = (string) $document->original_filename;
         $documentFilename = $documentTitle;
         $documentText = trim((string) $document->extracted_text);
-        $windows = $this->buildPhaseOneExtractionWindows($documentText);
-
-        if ($windows === []) {
-            $windows = [[
-                'text' => $documentText,
-                'start_position' => 0,
-                'end_position' => mb_strlen($documentText, 'UTF-8'),
-                'window_index' => 0,
-                'window_count' => 1,
-            ]];
-        }
+        $windows = [[
+            'text' => $documentText,
+            'start_position' => 0,
+            'end_position' => mb_strlen($documentText, 'UTF-8'),
+            'window_index' => 0,
+            'window_count' => 1,
+        ]];
 
         $windowCount = count($windows);
         $requestResults = [];
@@ -410,8 +406,8 @@ class RequirementCandidateExtractor
             model: $model,
             relevanceModel: $this->relevanceModel(),
             extractionModel: $model,
-            segmentCount: $windowCount,
-            relevantSegmentCount: $successfulRequestCount,
+            segmentCount: 0,
+            relevantSegmentCount: 0,
             relevanceCallCount: 0,
             extractionCallCount: $windowCount,
             openAiCallCount: max(1, $openAiCallCount),
@@ -425,8 +421,8 @@ class RequirementCandidateExtractor
                     'extraction' => $promptVersion,
                 ],
                 'full_document_mode' => true,
-                'segment_count' => $windowCount,
-                'relevant_segment_count' => $successfulRequestCount,
+                'segment_count' => 0,
+                'relevant_segment_count' => 0,
                 'relevance_call_count' => 0,
                 'extraction_call_count' => $windowCount,
                 'openai_call_count' => max(1, $openAiCallCount),
@@ -829,63 +825,18 @@ class RequirementCandidateExtractor
             return [];
         }
 
-        if (! $this->shouldUseWindowedPhaseOneExtraction($text)) {
-            return [[
-                'text' => $text,
-                'start_position' => 0,
-                'end_position' => $length,
-                'window_index' => 0,
-                'window_count' => 1,
-            ]];
-        }
-
-        $windows = [];
-        $start = 0;
-
-        while ($start < $length) {
-            $idealEnd = min($start + self::PHASE_ONE_WINDOW_TARGET_CHARS, $length);
-            $end = $this->choosePhaseOneWindowEnd($text, $start, $idealEnd, $length);
-
-            if ($end <= $start) {
-                $end = min($length, $start + self::PHASE_ONE_WINDOW_TARGET_CHARS);
-            }
-
-            if ($end <= $start) {
-                $end = $length;
-            }
-
-            $windows[] = [
-                'text' => mb_substr($text, $start, $end - $start, 'UTF-8'),
-                'start_position' => $start,
-                'end_position' => $end,
-            ];
-
-            if ($end >= $length) {
-                break;
-            }
-
-            $nextStart = max(0, $end - self::PHASE_ONE_WINDOW_OVERLAP_CHARS);
-
-            if ($nextStart <= $start) {
-                $nextStart = $end;
-            }
-
-            $start = $nextStart;
-        }
-
-        $windowCount = count($windows);
-
-        foreach ($windows as $index => $window) {
-            $windows[$index]['window_index'] = $index;
-            $windows[$index]['window_count'] = $windowCount;
-        }
-
-        return $windows;
+        return [[
+            'text' => $text,
+            'start_position' => 0,
+            'end_position' => $length,
+            'window_index' => 0,
+            'window_count' => 1,
+        ]];
     }
 
     private function shouldUseWindowedPhaseOneExtraction(string $text): bool
     {
-        return mb_strlen($text, 'UTF-8') > self::PHASE_ONE_WINDOW_TRIGGER_CHARS;
+        return false;
     }
 
     private function choosePhaseOneWindowEnd(string $text, int $start, int $idealEnd, int $length): int
