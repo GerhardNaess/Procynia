@@ -914,24 +914,6 @@ class DocumentSplitPlanner
     }
 
     /**
-     * Purpose: Detect whether a heading-like line ends with a trailing page number.
-     * Inputs: A single trimmed line of text.
-     * Returns: True when the line has outline-style trailing pagination.
-     * Side effects: None.
-     */
-    private function hasTrailingPageNumber(string $line): bool
-    {
-        $trimmedLine = trim($line);
-
-        if ($trimmedLine === '') {
-            return false;
-        }
-
-        return preg_match('/\b\d{1,4}\s*$/u', $trimmedLine) === 1
-            && preg_match('/^\s*(?:Bilag|Vedlegg|Appendix|Appendiks|\d+(?:\.\d+)*\.?)\s+.+?\b\d{1,4}\s*$/ui', $trimmedLine) === 1;
-    }
-
-    /**
      * Purpose: Determine whether one line looks like a table-of-contents or outline entry with a page number.
      * Inputs: A single trimmed line of text.
      * Returns: True when the line is likely front matter rather than a requirement block.
@@ -970,7 +952,11 @@ class DocumentSplitPlanner
             return false;
         }
 
-        if ($this->isContentsHeadingLine($trimmedLine) || $this->isOutlineEntryLine($trimmedLine) || $this->hasTrailingPageNumber($trimmedLine)) {
+        if ($this->isContentsHeadingLine($trimmedLine) || $this->isOutlineEntryLine($trimmedLine)) {
+            return true;
+        }
+
+        if (preg_match('/^\s*(?:Bilag|Vedlegg|Appendix|Appendiks)\s+\d+\b.*\s+\d+\s*$/ui', $trimmedLine) === 1) {
             return true;
         }
 
@@ -1293,13 +1279,80 @@ class DocumentSplitPlanner
             return [];
         }
 
-        return [[
-            'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
-            'group_type' => $groupType,
-            'start_position' => $start,
-            'end_position' => $end,
-            'reason' => 'H1-only mode: one chunk emitted from this H1 heading until the next H1 heading.',
-        ]];
+        $sectionLength = mb_strlen($sectionText, 'UTF-8');
+
+        if ($sectionLength <= 30000) {
+            return [[
+                'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
+                'group_type' => $groupType,
+                'start_position' => $start,
+                'end_position' => $end,
+                'reason' => sprintf(
+                    'Heading-based section kept intact because its length (%d chars) is within the stable section threshold.',
+                    $sectionLength
+                ),
+            ]];
+        }
+
+        $h2Headings = $this->findConservativeBodyH2Headings($documentText, $start, $end);
+
+        if ($h2Headings === []) {
+            return [[
+                'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
+                'group_type' => $groupType,
+                'start_position' => $start,
+                'end_position' => $end,
+                'reason' => 'Heading-based section kept intact between H1 boundaries because no conservative H2 headings were found.',
+            ]];
+        }
+
+        $chunks = [];
+        $headingCount = count($h2Headings);
+
+        for ($index = 0; $index < $headingCount; $index++) {
+            $chunkStart = (int) ($h2Headings[$index]['start_position'] ?? $start);
+            $chunkEnd = $index + 1 < $headingCount
+                ? (int) ($h2Headings[$index + 1]['start_position'] ?? $end)
+                : $end;
+
+            if ($chunkEnd <= $chunkStart) {
+                continue;
+            }
+
+            $chunkText = trim((string) mb_substr($documentText, $chunkStart, $chunkEnd - $chunkStart, 'UTF-8'));
+
+            if ($chunkText === '') {
+                continue;
+            }
+
+            $chunks[] = [
+                'title' => (string) ($h2Headings[$index]['title'] ?? $title),
+                'group_type' => $groupType,
+                'start_position' => $chunkStart,
+                'end_position' => $chunkEnd,
+                'reason' => 'Heading-based section split on conservative H2 boundaries only.',
+            ];
+        }
+
+        if ($chunks === []) {
+            return [[
+                'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
+                'group_type' => $groupType,
+                'start_position' => $start,
+                'end_position' => $end,
+                'reason' => 'Heading-based section kept intact because conservative H2 subdivision produced no usable chunks.',
+            ]];
+        }
+
+        Log::info('[PROCYNIA][DOC_SPLIT] H1 section subdivided on conservative H2 boundaries.', [
+            'section_title' => $title,
+            'section_start_position' => $start,
+            'section_end_position' => $end,
+            'h2_heading_count' => count($h2Headings),
+            'chunk_count' => count($chunks),
+        ]);
+
+        return $chunks;
     }
 
     /**
@@ -1524,12 +1577,12 @@ class DocumentSplitPlanner
 
 
     /**
-     * Purpose: Find likely body H2 headings inside one H1 section using conservative plain-text rules.
-     * Inputs: The full document text and one H1 section range.
-     * Returns: Ordered H2 heading metadata constrained to the H1 range.
+     * Purpose: Find conservative body H2 headings inside one H1-bounded section.
+     * Inputs: The full document text and a bounded H1 section range.
+     * Returns: Ordered H2 heading metadata that are safe to use as chunk boundaries.
      * Side effects: None.
      */
-    private function findBodyH2HeadingsWithinRange(string $documentText, int $start, int $end): array
+    private function findConservativeBodyH2Headings(string $documentText, int $start, int $end): array
     {
         if ($end <= $start) {
             return [];
@@ -1537,44 +1590,56 @@ class DocumentSplitPlanner
 
         $sectionText = mb_substr($documentText, $start, $end - $start, 'UTF-8');
         $lines = $this->splitTextIntoLinesWithOffsets($sectionText);
+
+        if ($lines === []) {
+            return [];
+        }
+
         $headings = [];
+        $lastAcceptedStart = null;
         $lineCount = count($lines);
 
-        for ($lineIndex = 0; $lineIndex < $lineCount; $lineIndex++) {
-            $lineText = trim((string) ($lines[$lineIndex]['text'] ?? ''));
+        for ($index = 0; $index < $lineCount; $index++) {
+            $lineText = trim((string) ($lines[$index]['text'] ?? ''));
 
-            if ($lineText === '' || $this->isOutlineOnlyHeadingLine($lineText)) {
+            if ($lineText === '') {
                 continue;
             }
 
-            if ($this->detectHeadingLevel($lineText) === 1) {
+            if (! $this->isConservativeBodyH2Candidate($lines, $index, $lineText)) {
                 continue;
             }
 
-            if (! $this->isLikelyBodyH2Heading($lines, $lineIndex, $lineText)) {
+            $absoluteStart = $start + (int) ($lines[$index]['start_position'] ?? 0);
+
+            if ($lastAcceptedStart !== null && ($absoluteStart - $lastAcceptedStart) < 1200) {
+                continue;
+            }
+
+            if (($end - $absoluteStart) < 600) {
                 continue;
             }
 
             $headings[] = [
                 'title' => $lineText,
-                'start_position' => $start + (int) ($lines[$lineIndex]['start_position'] ?? 0),
-                'end_position' => $start + (int) ($lines[$lineIndex]['end_position'] ?? 0),
+                'start_position' => $absoluteStart,
+                'end_position' => $start + (int) ($lines[$index]['end_position'] ?? 0),
                 'level' => 2,
             ];
-        }
 
-        usort($headings, static fn (array $left, array $right): int => (int) $left['start_position'] <=> (int) $right['start_position']);
+            $lastAcceptedStart = $absoluteStart;
+        }
 
         return $headings;
     }
 
     /**
-     * Purpose: Decide whether one plain-text line is likely a body H2 heading.
-     * Inputs: Section lines, the current line index, and one trimmed line of text.
-     * Returns: True when the line should act as an H2 boundary inside an H1 section.
+     * Purpose: Determine whether one line is a conservative body H2 heading candidate.
+     * Inputs: The section line list, the candidate index, and one trimmed line.
+     * Returns: True when the line is safe to use as an H2 chunk boundary.
      * Side effects: None.
      */
-    private function isLikelyBodyH2Heading(array $lines, int $lineIndex, string $line): bool
+    private function isConservativeBodyH2Candidate(array $lines, int $index, string $line): bool
     {
         $trimmedLine = trim($line);
 
@@ -1582,105 +1647,127 @@ class DocumentSplitPlanner
             return false;
         }
 
-        if ($this->detectHeadingLevel($trimmedLine) === 2) {
-            return true;
-        }
-
-        if ($this->detectHeadingLevel($trimmedLine) !== null) {
+        if ($this->isOutlineOnlyHeadingLine($trimmedLine)) {
             return false;
         }
 
-        if ($this->isRequirementIdLine($trimmedLine)) {
+        if ($this->detectHeadingLevel($trimmedLine) === 1) {
             return false;
         }
 
-        if ($this->isTableMarkerLine($trimmedLine)) {
+        if ($this->looksLikeRequirementTableMarker($trimmedLine)) {
             return false;
         }
 
-        if (preg_match('/[.!?;:]\s*$/u', $trimmedLine) === 1) {
+        if ($this->looksLikeRequirementIdentifierLine($trimmedLine)) {
             return false;
         }
 
-        if (mb_strlen($trimmedLine, 'UTF-8') > 90) {
+        if (preg_match('/[:;]$/u', $trimmedLine) === 1) {
+            return false;
+        }
+
+        if (preg_match('/[.!?]$/u', $trimmedLine) === 1) {
+            return false;
+        }
+
+        $length = mb_strlen($trimmedLine, 'UTF-8');
+
+        if ($length < 12 || $length > 110) {
             return false;
         }
 
         $wordCount = count(preg_split('/\s+/u', $trimmedLine, -1, PREG_SPLIT_NO_EMPTY) ?: []);
 
-        if ($wordCount === 0 || $wordCount > 10) {
+        if ($wordCount < 2) {
             return false;
         }
 
-        if (preg_match('/^[a-zæøå]/u', $trimmedLine) === 1) {
+        $normalized = $this->normalizeHeadingTitle($trimmedLine);
+        $genericTitles = [
+            'innledning',
+            'bakgrunn',
+            'formål',
+            'omfang',
+            'kravtekst',
+            'leverandørens besvarelse',
+            'skal-krav',
+            'bør-krav',
+            'id',
+            'prioritet',
+        ];
+
+        if (in_array($normalized, $genericTitles, true)) {
             return false;
         }
 
-        $nextNonEmptyLine = $this->nextNonEmptyLineText($lines, $lineIndex);
+        $previousLine = $this->previousNonEmptyLineText($lines, $index);
+        $nextLine = $this->nextNonEmptyLineText($lines, $index);
 
-        if ($nextNonEmptyLine === null) {
+        if ($nextLine === null || $this->isHeadingLikeText($nextLine)) {
             return false;
         }
 
-        if ($this->isOutlineOnlyHeadingLine($nextNonEmptyLine)) {
+        if ($previousLine !== null && ! $this->isHeadingLikeText($previousLine) && mb_strlen(trim($previousLine), 'UTF-8') > 100) {
             return false;
         }
 
-        if ($this->isRequirementIdLine($nextNonEmptyLine)) {
-            return false;
-        }
-
-        if ($this->isTableMarkerLine($nextNonEmptyLine)) {
-            return false;
-        }
-
-        return true;
+        return preg_match('/^[\p{L}\p{N}][\p{L}\p{N}\s()\/-]+$/u', $trimmedLine) === 1;
     }
 
     /**
-     * Purpose: Detect whether one line is a standalone requirement identifier row.
-     * Inputs: One trimmed line of text.
-     * Returns: True when the line is only a requirement id.
+     * Purpose: Find the previous non-empty line before a given index.
+     * Inputs: The full line list and the current line index.
+     * Returns: The previous trimmed non-empty line or null when none exists.
      * Side effects: None.
      */
-    private function isRequirementIdLine(string $line): bool
+    private function previousNonEmptyLineText(array $lines, int $lineIndex): ?string
     {
-        $trimmedLine = trim($line);
+        for ($candidateIndex = $lineIndex - 1; $candidateIndex >= 0; $candidateIndex--) {
+            $candidateText = trim((string) ($lines[$candidateIndex]['text'] ?? ''));
 
-        if ($trimmedLine === '') {
-            return false;
+            if ($candidateText === '') {
+                continue;
+            }
+
+            return $candidateText;
         }
 
-        return preg_match('/^\d+\s*[-.]\s*\d+(?:\s*[-.]\s*\d+)*(?:\s*[-.]\s*[A-Za-zÆØÅæøå])?\s*\d*\s*$/u', $trimmedLine) === 1
-            || preg_match('/^\d+(?:-\d+)+(?:\.[A-Za-z0-9]+)+\s*$/u', $trimmedLine) === 1;
+        return null;
     }
 
     /**
-     * Purpose: Detect whether one line is a table marker rather than a heading.
+     * Purpose: Determine whether a line is a requirement table marker rather than a real heading.
      * Inputs: One trimmed line of text.
-     * Returns: True when the line is a table header or answer placeholder.
+     * Returns: True when the line is a table label or answer placeholder.
      * Side effects: None.
      */
-    private function isTableMarkerLine(string $line): bool
+    private function looksLikeRequirementTableMarker(string $line): bool
     {
-        $normalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $line) ?? $line), 'UTF-8');
+        $normalized = $this->normalizeHeadingTitle($line);
 
-        if ($normalized === '') {
-            return false;
-        }
-
-        $markers = [
+        return in_array($normalized, [
             'skal-krav',
             'bør-krav',
             'id',
             'kravtekst',
             'leverandørens besvarelse',
-            'ved evalueringen legges det særlig vekt på',
-            'herunder',
-            'prioritet',
-        ];
+            'leverandorens besvarelse',
+        ], true);
+    }
 
-        return in_array($normalized, $markers, true);
+    /**
+     * Purpose: Determine whether a line is a requirement identifier rather than a structural heading.
+     * Inputs: One trimmed line of text.
+     * Returns: True when the line looks like a requirement ID.
+     * Side effects: None.
+     */
+    private function looksLikeRequirementIdentifierLine(string $line): bool
+    {
+        $normalized = preg_replace('/\s+/u', '', trim($line)) ?? trim($line);
+
+        return preg_match('/^\d+(?:[-.]\d+)*(?:[. -]?[A-ZÆØÅ]{1,3})\d+$/u', $normalized) === 1
+            || preg_match('/^\d+(?:[-.]\d+)+(?:[A-ZÆØÅ]\d+)?$/u', $normalized) === 1;
     }
 
     /**
