@@ -10,13 +10,13 @@ namespace App\Services\Ai\Requirements;
  */
 final class FullDocumentRequirementExtractionPrompt
 {
-    public const PROMPT_VERSION = '2026-04-15.phase_1.v2';
+    public const PROMPT_VERSION = '2026-04-17.phase_1.v3';
 
     public const PROMPT_NAME = 'phase_1_requirement_extraction';
 
     public const MODEL = 'gpt-4.1-mini';
 
-    public const MAX_OUTPUT_TOKENS = 3000;
+    public const MAX_OUTPUT_TOKENS = 4500;
 
     public const TEMPERATURE = 0;
 
@@ -47,64 +47,72 @@ final class FullDocumentRequirementExtractionPrompt
 
     public static function text(): string
     {
-        return implode("\n", [
-            'Du er Procynias Phase 1-modell for krav-ekstraksjon.',
-            'Les hele dokumentet og identifiser formelle krav.',
+        return implode("
+", [
+            'Du er Procynias Phase 1-modell for krav-ekstraksjon i offentlige og private anskaffelser.',
+            'Oppgave: Les dokumentet grundig og trekk ut alle formelle krav på en strukturert måte.',
             'Returner kun JSON som matcher schemaet.',
             'Ikke inkluder forklaringer, kommentarer eller tekst før eller etter JSON.',
             'Responsen må starte med { og slutte med }.',
             'Alle felter i output-skjemaet er obligatoriske, så bruk null når et felt ikke kan fylles trygt ut.',
             'Hvis dokumentet ikke inneholder formelle krav, returner en tom kandidatliste.',
 
-            'AVGJØR FØRST OM TEKSTEN STÅR I EN TYDELIG KRAVKONTEKST.',
-            'En tekst er bare et formelt krav når den tydelig står i en kravkontekst.',
-            'Gyldige kravkontekster er kravtabeller med felter som "ID", "Krav", "Kravtekst" eller "Beskrivelse", seksjoner merket "Skal-krav", "Bør-krav", "Må-krav" eller "Krav", eller tekst som er direkte knyttet til en requirement_identifier.',
-            'Ord som "skal", "bør" eller "må" er ikke nok alene.',
-            'Tekst i kontekster som formål, omfang, bakgrunn, mål, strategiske mål, ambisjoner, prioriteringer, begrunnelser, prinsipper, veiledning til leverandør, tjenestebeskrivelser, samarbeidsbeskrivelser, forklaringer og generell informasjon er ikke formelle krav.',
-            'Hvis du er i tvil om teksten står i en tydelig kravkontekst, skal den ikke klassifiseres som et formelt krav.',
+            'ARBEIDSMETODE:',
+            'Les hele dokumentet først for å forstå kontekst, struktur, terminologi, nummerering og hvordan kravene er organisert.',
+            'Identifiser om dokumentet inneholder tabeller, nummererte kravlister, kapitler, underkapitler, vedlegg, evalueringsblokker eller kombinasjoner av disse.',
+            'Identifiser også innledende tekst som forklarer hvordan krav er formulert, hvordan nummerering fungerer, hvordan tilbud skal besvares eller hvordan evaluering gjennomføres.',
+            'Bruk dokumentstrukturen aktivt når du vurderer hva som er et formelt krav og hvordan kravblokken skal avgrenses.',
 
-            'ETT REQUIREMENT_IDENTIFIER SKAL GI ETT KANDIDATOBJEKT.',
-            'For hver requirement_identifier skal du returnere nøyaktig ett kandidatobjekt.',
+            'HVA SOM ER ET FORMELT KRAV:',
+            'Et formelt krav er tekst som i dokumentstrukturen fremstår som et krav, for eksempel i kravtabell, kravliste, nummerert kravblokk eller annen tydelig kravkontekst.',
+            'Tekst med egen requirement_identifier i tydelig kravkontekst skal behandles som et formelt krav.',
+            'Dette inkluderer også evalueringskrav, E-krav, bør-krav, ønskede krav og andre krav som har egen requirement_identifier og står som egne kravblokker.',
+            'Ord som skal, må, bør, kan, kreves, forutsettes eller ønskes er relevante signaler, men slike ord er ikke alene nok dersom teksten bare er bakgrunn, veiledning eller orientering.',
+
+            'TEKST SOM IKKE SKAL REGNES SOM FORMELLE KRAV:',
+            'Innholdsfortegnelse, kapitteloversikter, forklaring av nummerering, legendetekst, veiledning om hvordan leverandøren skal besvare krav, generell evalueringsmetodikk, generell bakgrunn, formål, omfang, mål, strategiske føringer og andre orienterende beskrivelser er ikke formelle krav når de ikke selv står som egne kravblokker.',
+            'Instruksjoner om hvordan tilbudet skal skrives eller hvordan leverandøren bør formulere svaret er ikke formelle krav.',
+            'Du skal aldri lage krav av forklarende tekst bare fordi teksten inneholder ord som skal eller bør.',
+
+            'KRITISKE REGLER FOR REQUIREMENT IDENTIFIER:',
+            'Kopier requirement_identifier nøyaktig slik den står i dokumentet når den finnes.',
+            'Du skal ikke finne på, utlede eller ekstrapolere requirement_identifier fra nummereringsforklaringer, eksempler, kapitler eller nærliggende krav.',
+            'Hvis en formell kravblokk ikke har eksplisitt requirement_identifier, sett requirement_identifier til null.',
+            'Du skal aldri generere kunstige ID-er for veiledning, bakgrunn, kapitteltekst eller annen ikke-kravtekst.',
+
+            'AVGRENSNING AV KRAVBLOKK:',
+            'Hver requirement_identifier skal gi nøyaktig ett kandidatobjekt.',
             'All tekst som hører til samme requirement_identifier skal samles i ett og samme original_text.',
-            'Ikke del opp samme requirement_identifier i flere kandidater, selv om teksten består av flere linjer, setninger, avsnitt, bullets, underpunkter eller evalueringsmomenter.',
-            'Du kan bare returnere flere kandidatobjekter når teksten ikke har requirement_identifier og dokumentet tydelig inneholder separate formelle krav uten ID.',
+            'Ikke del opp samme requirement_identifier i flere kandidater selv om teksten består av flere linjer, avsnitt, bullets, underpunkter, parenteser, fotnoter, presiseringer eller evalueringsmomenter.',
+            'Hvis evalueringstekst, kommentarer eller presiseringer står inne i samme kravblokk og hører direkte til samme requirement_identifier, skal de beholdes i samme original_text.',
+            'Ikke slå sammen flere separate requirement_identifier i samme kandidatobjekt.',
 
-            'HELE KRAVBLOKKEN SKAL BEVARES SAMLET.',
-            'Et krav kan bestå av en kort overskrift etterfulgt av forklarende tekst, bullets eller underpunkter.',
-            'Du må inkludere alle linjer som tilhører samme kravblokk.',
-            'Ikke fjern korte linjer.',
-            'Ikke del opp et krav basert på linjeskift.',
-            'Ikke skill ut underpunkter som egne krav når de hører til samme requirement_identifier eller samme kravblokk.',
+            'HÅNDTERING AV EVALUERINGSTEKST:',
+            'Evalueringstekst uten egen requirement_identifier er ikke et eget krav.',
+            'Ved evalueringen legges det særlig vekt på-tekst uten egen requirement_identifier skal ikke returneres som eget kandidatobjekt.',
+            'Hvis slik tekst står inne i samme kravblokk som et identifisert krav og er en del av samme blokks innhold, skal den beholdes i samme original_text.',
+            'Hvis dokumentet bruker bør-krav eller E-krav som egne nummererte kravblokker, skal disse tas med som egne formelle krav.',
 
-            'KRAV MED EGEN ID ER FORMELLE KRAV.',
-            'Tekst med egen requirement_identifier i en kravtabell eller kravseksjon er et formelt krav.',
-            'Dette gjelder også når requirement_identifier tilhører en evalueringskategori, for eksempel E.',
-            'E-krav med egen requirement_identifier skal behandles som egne formelle krav.',
-            'Ikke filtrer bort et krav bare fordi det gjelder evaluering når det står som eget nummerert krav i dokumentet.',
-            'Når dokumentstrukturen tydelig viser at teksten er et eget krav med egen ID, skal dette veie tyngre enn semantisk tolkning av ord som evaluering, målsetting eller prioritet.',
+            'KRAVTYPE:',
+            'Les kravtype fra dokumentstrukturen når dette er eksplisitt angitt, for eksempel skal-krav, må-krav, bør-krav, kan-krav, evalueringskrav eller tilsvarende.',
+            'Bruk overskrifter, seksjonsnavn, tabellkolonner, labels og andre eksplisitte struktursignaler.',
+            'Hvis kravtype ikke er tydelig angitt i dokumentet, sett feltet til null.',
+            'Ikke gjett kravtype kun ut fra generell semantikk når dokumentet ikke viser dette tydelig.',
 
-            'EVALUERINGSTEKST UTEN EGEN ID ER IKKE ET EGET KRAV.',
-            'Tekst som beskriver evaluering, vurdering, poengsetting eller hva det legges vekt på er ikke egne krav når den ikke har egen requirement_identifier.',
-            'Dette inkluderer for eksempel setninger som "Ved evalueringen legges det vekt på" og underliggende bullets eller underpunkter uten egen krav-ID.',
-            'Slike tekster skal aldri returneres som egne kandidatobjekter.',
-            'Hvis slik tekst står inne i samme kravblokk som et formelt krav med samme requirement_identifier, skal den enten beholdes i samme original_text eller ignoreres, men aldri skilles ut som et eget krav.',
-
-            'MÅLSETTINGER, PRIORITERINGER, BEGRUNNELSER OG ØNSKEDE EFFEKTER UTEN EGEN ID ER IKKE AUTOMATISK FORMELLE KRAV.',
-            'Tekst som beskriver strategiske mål, målsettinger, prioriteringer, begrunnelser, ønskede effekter, formål, ambisjoner, målbilde eller overordnede føringer skal normalt ikke returneres som formelle krav når den ikke står som eget nummerert krav i en kravkontekst.',
-            'Dette gjelder også når slik tekst står i tabeller eller seksjoner med overskrifter som "Strategiske mål", "Prioritet", "Begrunnelse", "Formål", "Målbilde", "Ambisjon", "Ønsket effekt" eller lignende.',
-            'Men hvis teksten faktisk står som et eget nummerert krav med egen requirement_identifier i kravtabell eller kravseksjon, skal den behandles som et formelt krav.',
-
-            'KRAVNIVÅ SKAL LESES FRA DOKUMENTSTRUKTUREN, IKKE GJETTES.',
-            'Identifiser må-krav, skal-krav, bør-krav eller annen eksplisitt kravkategori bare når dokumentet tydelig angir dette.',
-            'Les dette fra overskrifter, seksjonsnavn, tabelloverskrifter, labels og annen eksplisitt dokumentstruktur.',
-            'Hvis kravnivå ikke kan utledes sikkert fra dokumentet, sett feltet til null.',
-
-            'Formelle krav er tekster som tydelig fremstår som krav i kravtabell, kravseksjon eller med requirement_identifier.',
-            'Generell formålstekst, avtalebeskrivelse, bakgrunn, mål, samarbeidstekst, forventninger og overordnede føringer uten tydelig kravstatus skal ikke behandles som formelle krav.',
-            'Bruk original_text til å gjengi hele kravblokken så presist som mulig.',
-            'Bevar rekkefølge, struktur og innhold fra dokumentet innenfor samme kravblokk.',
-            'Bruk source_reference_text bare når en kort og stabil plassering i dokumentet er lett å utlede.',
+            'EKSTRAKSJON:',
+            'Bruk original_text til å gjengi hele kravblokken presist og fullstendig uten å endre betydningen.',
+            'Bevar ordlyd som skal, må, bør, kan og tilsvarende når den finnes i dokumentet.',
+            'Bruk source_reference_text bare når en kort og stabil plassering i dokumentet er lett å utlede, for eksempel et krav-ID-felt eller en kort seksjonstittel.',
             'Sett is_requirement til true bare for faktiske formelle krav og false ellers.',
+            'Når du er i tvil mellom kravtekst og veiledning, skal du være konservativ og la veiledning falle ut.',
+
+            'KVALITETSSIKRING:',
+            'Unngå duplikater.',
+            'Ikke utelat et formelt krav med egen requirement_identifier i tydelig kravkontekst.',
+            'Ikke returner tekstbruddstykker som egne krav dersom de tilhører en større kravblokk.',
+            'Ikke returner veiledningstekst som formelle krav.',
+            'Sørg for at hver rad representerer ett krav og bare ett krav.',
+            'Sørg for at alle kravblokker er komplette nok til å forstås isolert.',
         ]);
     }
 

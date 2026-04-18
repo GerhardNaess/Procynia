@@ -54,6 +54,12 @@ class RequirementCandidateExtractor
         'interpretation_risk',
     ];
 
+    private const PHASE_ONE_WINDOW_TRIGGER_CHARS = 8000;
+    private const PHASE_ONE_WINDOW_TARGET_CHARS = 5500;
+    private const PHASE_ONE_WINDOW_MIN_CHARS = 3500;
+    private const PHASE_ONE_WINDOW_OVERLAP_CHARS = 1200;
+    private const PHASE_ONE_WINDOW_BOUNDARY_SCAN_CHARS = 500;
+
     public function __construct(
         private readonly OpenAiClient $openAiClient,
         private readonly RequirementExtractor $legacyRequirementExtractor,
@@ -202,84 +208,213 @@ class RequirementCandidateExtractor
     public function extractFullDocument(SavedNoticeAiDocument $document, ?string $runId = null): RequirementExtractionResultData
     {
         $runId ??= (string) Str::uuid();
-        $requestResult = $this->performFullDocumentExtractionRequest($document, $runId);
+        $startedAt = microtime(true);
         $documentTitle = (string) $document->original_filename;
         $documentFilename = $documentTitle;
+        $documentText = trim((string) $document->extracted_text);
+        $windows = $this->buildPhaseOneExtractionWindows($documentText);
 
-        if (! ($requestResult['ok'] ?? false)) {
+        if ($windows === []) {
+            $windows = [[
+                'text' => $documentText,
+                'start_position' => 0,
+                'end_position' => mb_strlen($documentText, 'UTF-8'),
+                'window_index' => 0,
+                'window_count' => 1,
+            ]];
+        }
+
+        $windowCount = count($windows);
+        $requestResults = [];
+        $windowSummaries = [];
+        $windowFailures = [];
+        $rawCandidateCount = 0;
+        $filteredCandidateCount = 0;
+        $mappedCandidates = [];
+        $successfulRequestCount = 0;
+        $parsedWindowCount = 0;
+        $openAiCallCount = 0;
+        $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
+        $model = FullDocumentRequirementExtractionPrompt::model();
+
+        foreach ($windows as $windowIndex => $window) {
+            $windowRunId = $windowCount > 1
+                ? sprintf('%s-window-%d', $runId, $windowIndex + 1)
+                : $runId;
+
+            $windowMeta = [
+                'window_index' => (int) ($window['window_index'] ?? $windowIndex),
+                'window_count' => $windowCount,
+                'window_start_position' => (int) ($window['start_position'] ?? 0),
+                'window_end_position' => (int) ($window['end_position'] ?? 0),
+                'windowed_extraction' => $windowCount > 1,
+            ];
+
+            $requestResult = $this->performFullDocumentExtractionRequestForText(
+                document: $document,
+                documentText: (string) ($window['text'] ?? ''),
+                runId: $windowRunId,
+                windowMeta: $windowMeta,
+            );
+
+            $requestResults[] = $requestResult;
+            $openAiCallCount += (int) ($requestResult['openai_call_count'] ?? 1);
+            $promptVersion = (string) ($requestResult['prompt_version'] ?? $promptVersion);
+            $model = (string) ($requestResult['model'] ?? $model);
+
+            $windowSummary = [
+                'window_index' => $windowMeta['window_index'],
+                'window_count' => $windowMeta['window_count'],
+                'start_position' => $windowMeta['window_start_position'],
+                'end_position' => $windowMeta['window_end_position'],
+                'document_text_length' => (int) ($requestResult['document_text_length'] ?? 0),
+                'input_text_length' => is_numeric($requestResult['input_text_length'] ?? null) ? (int) $requestResult['input_text_length'] : null,
+                'request_id' => $requestResult['request_id'] ?? null,
+                'response_id' => $requestResult['response_id'] ?? null,
+                'status' => $requestResult['status'] ?? null,
+                'ok' => (bool) ($requestResult['ok'] ?? false),
+                'error_type' => $requestResult['error_type'] ?? null,
+                'error_message' => $requestResult['error_message'] ?? null,
+            ];
+
+            if (! ($requestResult['ok'] ?? false)) {
+                $windowFailures[] = [
+                    'window_index' => $windowMeta['window_index'],
+                    'stage' => (string) ($requestResult['failure_stage'] ?? 'openai_request'),
+                    'type' => (string) ($requestResult['failure_type'] ?? $requestResult['error_type'] ?? 'openai_request_failed'),
+                    'message' => (string) ($requestResult['error_message'] ?? 'Extraction window request failed.'),
+                ];
+                $windowSummaries[] = $windowSummary;
+
+                continue;
+            }
+
+            $successfulRequestCount++;
+
+            try {
+                $parsed = $this->parsePhaseOneOutput((string) ($requestResult['raw_output'] ?? ''));
+                $rows = $parsed['rows'] ?? [];
+                $windowRawCandidateCount = count($rows);
+                $filteredRows = $this->filterPhaseOneRows($rows);
+                $windowFilteredCandidateCount = count($filteredRows);
+                $windowFilteredOutCount = $windowRawCandidateCount - $windowFilteredCandidateCount;
+                $windowCandidates = $this->mapCandidates($document, $filteredRows);
+
+                $rawCandidateCount += $windowRawCandidateCount;
+                $filteredCandidateCount += $windowFilteredCandidateCount;
+                $mappedCandidates = [...$mappedCandidates, ...$windowCandidates];
+                $parsedWindowCount++;
+
+                $windowSummary['parse_strategy'] = (string) ($parsed['strategy'] ?? 'json_schema');
+                $windowSummary['raw_candidate_count'] = $windowRawCandidateCount;
+                $windowSummary['filtered_candidate_count'] = $windowFilteredCandidateCount;
+                $windowSummary['filtered_out_count'] = $windowFilteredOutCount;
+                $windowSummary['mapped_candidate_count'] = count($windowCandidates);
+            } catch (Throwable $exception) {
+                $windowFailures[] = [
+                    'window_index' => $windowMeta['window_index'],
+                    'stage' => 'unexpected_response',
+                    'type' => 'unexpected_response',
+                    'message' => $exception->getMessage(),
+                ];
+                $windowSummary['ok'] = false;
+                $windowSummary['error_type'] = 'unexpected_response';
+                $windowSummary['error_message'] = $exception->getMessage();
+            }
+
+            $windowSummaries[] = $windowSummary;
+        }
+
+        $mappedCandidateCount = count($mappedCandidates);
+        $dedupedCandidates = $this->dedupeCandidates($mappedCandidates);
+        $dedupedCandidateCount = count($dedupedCandidates);
+        $partial = $windowFailures !== [];
+        $elapsedMs = $this->elapsedMs($startedAt);
+
+        Log::info('[TT][AI][PARSED]', [
+            'run_id' => $runId,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'windowed_extraction' => $windowCount > 1,
+            'window_count' => $windowCount,
+            'successful_request_count' => $successfulRequestCount,
+            'parsed_window_count' => $parsedWindowCount,
+            'failed_window_count' => count($windowFailures),
+            'raw_candidate_count' => $rawCandidateCount,
+            'filtered_candidate_count' => $filteredCandidateCount,
+            'mapped_candidate_count' => $mappedCandidateCount,
+            'deduped_candidate_count' => $dedupedCandidateCount,
+            'deduped_identifiers' => array_map(
+                fn (RequirementExtractionCandidateData $candidate) => $candidate->requirementIdentifier,
+                $dedupedCandidates
+            ),
+        ]);
+
+        if ($parsedWindowCount === 0) {
+            $primaryFailure = $windowFailures[0] ?? [
+                'stage' => 'windowed_extraction',
+                'type' => 'windowed_extraction_failed',
+                'message' => 'Phase 1 extraction failed for all extraction windows.',
+            ];
+
             return $this->buildFullDocumentFailureResult(
                 document: $document,
                 runId: $runId,
-                requestResult: $requestResult,
-                failureStage: (string) ($requestResult['failure_stage'] ?? 'unexpected'),
-                failureType: (string) ($requestResult['failure_type'] ?? 'unknown_error'),
-                errorMessage: (string) ($requestResult['error_message'] ?? 'Full-document extraction failed.'),
+                requestResult: $requestResults[0] ?? [],
+                failureStage: (string) ($primaryFailure['stage'] ?? 'windowed_extraction'),
+                failureType: (string) ($primaryFailure['type'] ?? 'windowed_extraction_failed'),
+                errorMessage: (string) ($primaryFailure['message'] ?? 'Phase 1 extraction failed for all extraction windows.'),
                 extraMetadata: [
                     'full_document_mode' => true,
-                    'segment_count' => 1,
-                    'relevant_segment_count' => 1,
+                    'segment_count' => $windowCount,
+                    'relevant_segment_count' => $successfulRequestCount,
+                    'extraction_call_count' => $windowCount,
+                    'openai_call_count' => max(1, $openAiCallCount),
+                    'windowed_extraction' => $windowCount > 1,
+                    'window_count' => $windowCount,
+                    'successful_request_count' => $successfulRequestCount,
+                    'parsed_window_count' => $parsedWindowCount,
+                    'failed_window_count' => count($windowFailures),
+                    'window_target_characters' => self::PHASE_ONE_WINDOW_TARGET_CHARS,
+                    'window_overlap_characters' => self::PHASE_ONE_WINDOW_OVERLAP_CHARS,
+                    'window_results' => $windowSummaries,
                 ],
                 partial: false,
             );
         }
 
-        try {
-            Log::info('[TT][AI_RAW_OUTPUT]', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'raw_output' => (string) ($requestResult['raw_output'] ?? ''),
-            ]);
+        $inputTokensTotal = (int) array_sum(array_map(
+            static fn (array $result): int => is_numeric($result['input_tokens'] ?? null) ? (int) $result['input_tokens'] : 0,
+            $requestResults
+        ));
+        $outputTokensTotal = (int) array_sum(array_map(
+            static fn (array $result): int => is_numeric($result['output_tokens'] ?? null) ? (int) $result['output_tokens'] : 0,
+            $requestResults
+        ));
+        $totalTokensTotal = (int) array_sum(array_map(
+            static fn (array $result): int => is_numeric($result['total_tokens'] ?? null) ? (int) $result['total_tokens'] : 0,
+            $requestResults
+        ));
 
-            $parsed = $this->parsePhaseOneOutput((string) ($requestResult['raw_output'] ?? ''));
-
-            Log::info('[TT][AI_PARSED_ROWS]', [
-                'run_id' => $runId,
-                'document_id' => $document->id,
-                'saved_notice_ai_document_id' => $document->id,
-                'saved_notice_id' => $document->saved_notice_id,
-                'rows' => $parsed['rows'] ?? [],
-            ]);
-
-            $rawCandidateCount = (int) ($parsed['row_count'] ?? 0);
-            $candidates = $this->mapCandidates($document, $parsed['rows'] ?? []);
-            $mappedCandidateCount = count($candidates);
-            $dedupedCandidates = $this->dedupeCandidates($candidates);
-            $dedupedCandidateCount = count($dedupedCandidates);
-        } catch (Throwable $exception) {
-            return $this->buildFullDocumentFailureResult(
-                document: $document,
-                runId: $runId,
-                requestResult: $requestResult,
-                failureStage: 'unexpected_response',
-                failureType: 'unexpected_response',
-                errorMessage: $exception->getMessage(),
-                extraMetadata: [
-                    'full_document_mode' => true,
-                    'segment_count' => 1,
-                    'relevant_segment_count' => 1,
-                ],
-                partial: false,
-            );
-        }
+        $singleRequestResult = $windowCount === 1 ? ($requestResults[0] ?? []) : [];
 
         return new RequirementExtractionResultData(
             ok: true,
-            partial: false,
+            partial: $partial,
             savedNoticeId: (int) $document->saved_notice_id,
             savedNoticeAiDocumentId: $document->id,
             runId: $runId,
             documentTitle: $documentTitle,
             documentFilename: $documentFilename,
-            model: (string) ($requestResult['model'] ?? FullDocumentRequirementExtractionPrompt::model()),
+            model: $model,
             relevanceModel: $this->relevanceModel(),
-            extractionModel: (string) ($requestResult['model'] ?? FullDocumentRequirementExtractionPrompt::model()),
-            segmentCount: 1,
-            relevantSegmentCount: 1,
+            extractionModel: $model,
+            segmentCount: $windowCount,
+            relevantSegmentCount: $successfulRequestCount,
             relevanceCallCount: 0,
-            extractionCallCount: 1,
-            openAiCallCount: (int) ($requestResult['openai_call_count'] ?? 1),
+            extractionCallCount: $windowCount,
+            openAiCallCount: max(1, $openAiCallCount),
             segments: [],
             relevanceResults: [],
             extractionResults: [],
@@ -287,35 +422,47 @@ class RequirementCandidateExtractor
             metadata: [
                 'prompt_versions' => [
                     'relevance' => $this->relevancePromptVersion(),
-                    'extraction' => (string) ($requestResult['prompt_version'] ?? FullDocumentRequirementExtractionPrompt::promptVersion()),
+                    'extraction' => $promptVersion,
                 ],
                 'full_document_mode' => true,
-                'segment_count' => 1,
-                'relevant_segment_count' => 1,
+                'segment_count' => $windowCount,
+                'relevant_segment_count' => $successfulRequestCount,
                 'relevance_call_count' => 0,
-                'extraction_call_count' => 1,
-                'openai_call_count' => (int) ($requestResult['openai_call_count'] ?? 1),
+                'extraction_call_count' => $windowCount,
+                'openai_call_count' => max(1, $openAiCallCount),
                 'candidate_count' => $dedupedCandidateCount,
                 'raw_candidate_count' => $rawCandidateCount,
+                'filtered_candidate_count' => $filteredCandidateCount,
                 'mapped_candidate_count' => $mappedCandidateCount,
                 'deduped_candidate_count' => $dedupedCandidateCount,
-                'failure_count' => 0,
-                'partial' => false,
+                'failure_count' => count($windowFailures),
+                'partial' => $partial,
                 'fallback_used' => false,
-                'document_text_length' => (int) ($requestResult['document_text_length'] ?? mb_strlen(trim((string) $document->extracted_text), 'UTF-8')),
-                'prompt_text_length' => is_numeric($requestResult['prompt_text_length'] ?? null) ? (int) $requestResult['prompt_text_length'] : null,
-                'input_text_length' => is_numeric($requestResult['input_text_length'] ?? null) ? (int) $requestResult['input_text_length'] : null,
-                'input_tokens_total' => (int) ($requestResult['input_tokens'] ?? 0),
-                'output_tokens_total' => (int) ($requestResult['output_tokens'] ?? 0),
-                'total_tokens_total' => (int) ($requestResult['total_tokens'] ?? 0),
-                'elapsed_ms' => is_numeric($requestResult['elapsed_ms'] ?? null) ? (int) $requestResult['elapsed_ms'] : null,
-                'request_id' => $requestResult['request_id'] ?? null,
-                'response_id' => $requestResult['response_id'] ?? null,
-                'status' => $requestResult['status'] ?? null,
-                'raw_output_length' => (int) ($requestResult['raw_output_length'] ?? 0),
-                'raw_output' => (string) ($requestResult['raw_output'] ?? ''),
-                'raw_output_preview' => (string) ($requestResult['raw_output_preview'] ?? ''),
-                'parse_strategy' => (string) ($parsed['strategy'] ?? 'json_schema'),
+                'document_text_length' => mb_strlen($documentText, 'UTF-8'),
+                'prompt_text_length' => $windowCount === 1 && is_numeric($singleRequestResult['prompt_text_length'] ?? null)
+                    ? (int) $singleRequestResult['prompt_text_length']
+                    : null,
+                'input_text_length' => $windowCount === 1 && is_numeric($singleRequestResult['input_text_length'] ?? null)
+                    ? (int) $singleRequestResult['input_text_length']
+                    : null,
+                'input_tokens_total' => $inputTokensTotal,
+                'output_tokens_total' => $outputTokensTotal,
+                'total_tokens_total' => $totalTokensTotal,
+                'elapsed_ms' => $elapsedMs,
+                'request_id' => $windowCount === 1 ? ($singleRequestResult['request_id'] ?? null) : null,
+                'response_id' => $windowCount === 1 ? ($singleRequestResult['response_id'] ?? null) : null,
+                'status' => $windowCount === 1 ? ($singleRequestResult['status'] ?? null) : null,
+                'raw_output_length' => $windowCount === 1 ? (int) ($singleRequestResult['raw_output_length'] ?? 0) : 0,
+                'raw_output' => $windowCount === 1 ? (string) ($singleRequestResult['raw_output'] ?? '') : '',
+                'raw_output_preview' => $windowCount === 1 ? (string) ($singleRequestResult['raw_output_preview'] ?? '') : '',
+                'parse_strategy' => $windowCount === 1
+                    ? (string) (($windowSummaries[0]['parse_strategy'] ?? 'json_schema'))
+                    : 'windowed_json_schema',
+                'windowed_extraction' => $windowCount > 1,
+                'window_count' => $windowCount,
+                'window_target_characters' => self::PHASE_ONE_WINDOW_TARGET_CHARS,
+                'window_overlap_characters' => self::PHASE_ONE_WINDOW_OVERLAP_CHARS,
+                'window_results' => $windowSummaries,
                 'failure_stage' => null,
                 'failure_type' => null,
             ],
@@ -325,6 +472,7 @@ class RequirementCandidateExtractor
             failureType: null,
         );
     }
+
 
     public function extractStructuredBlock(SavedNoticeAiDocument $document, RequirementExtractionBlockData $block, ?string $runId = null): RequirementExtractionResultData
     {
@@ -471,8 +619,21 @@ class RequirementCandidateExtractor
 
     private function performFullDocumentExtractionRequest(SavedNoticeAiDocument $document, string $runId): array
     {
+        return $this->performFullDocumentExtractionRequestForText(
+            document: $document,
+            documentText: trim((string) $document->extracted_text),
+            runId: $runId,
+        );
+    }
+
+    private function performFullDocumentExtractionRequestForText(
+        SavedNoticeAiDocument $document,
+        string $documentText,
+        string $runId,
+        array $windowMeta = [],
+    ): array {
         $startedAt = microtime(true);
-        $documentText = trim((string) $document->extracted_text);
+        $documentText = trim($documentText);
         $documentTextLength = mb_strlen($documentText, 'UTF-8');
         $promptTextLength = mb_strlen(FullDocumentRequirementExtractionPrompt::text(), 'UTF-8');
         $payload = FullDocumentRequirementExtractionPrompt::requestPayload($documentText);
@@ -481,6 +642,20 @@ class RequirementCandidateExtractor
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
         $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
 
+        Log::info('[TT][AI][INPUT]', array_merge([
+            'run_id' => $runId,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'document_title' => $document->original_filename,
+            'document_text_length' => $documentTextLength,
+            'document_text_preview' => mb_substr($documentText, 0, 2000, 'UTF-8'),
+            'input_text_length' => $inputTextLength,
+            'input_text_preview' => mb_substr($userInputText, 0, 2000, 'UTF-8'),
+            'prompt_version' => $promptVersion,
+            'model' => $model,
+        ], $windowMeta));
+
         try {
             $response = $this->openAiClient->post('responses', $payload, 180);
         } catch (ConnectionException $exception) {
@@ -488,7 +663,7 @@ class RequirementCandidateExtractor
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out') ? 'timeout' : 'connection_error';
             $failureStage = $errorType === 'timeout' ? 'openai_timeout' : 'openai_connection';
 
-            return [
+            return array_merge([
                 'ok' => false,
                 'run_id' => $runId,
                 'document_id' => $document->id,
@@ -526,11 +701,11 @@ class RequirementCandidateExtractor
                 'error_message' => $exception->getMessage(),
                 'phase_1_requirement_extraction' => true,
                 'openai_call_count' => 1,
-            ];
+            ], $windowMeta);
         } catch (Throwable $exception) {
             $elapsedMs = $this->elapsedMs($startedAt);
 
-            return [
+            return array_merge([
                 'ok' => false,
                 'run_id' => $runId,
                 'document_id' => $document->id,
@@ -568,7 +743,7 @@ class RequirementCandidateExtractor
                 'error_message' => $exception->getMessage(),
                 'phase_1_requirement_extraction' => true,
                 'openai_call_count' => 1,
-            ];
+            ], $windowMeta);
         }
 
         $requestId = $this->requestIdFrom($response);
@@ -582,6 +757,18 @@ class RequirementCandidateExtractor
         $rawOutputPreview = $this->previewText($rawOutput);
         $elapsedMs = $this->elapsedMs($startedAt);
 
+        Log::info('[TT][AI][RAW_RESPONSE]', array_merge([
+            'run_id' => $runId,
+            'document_id' => $document->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'saved_notice_id' => $document->saved_notice_id,
+            'request_id' => $requestId,
+            'response_id' => $responseId,
+            'status' => $status,
+            'response_length' => $rawOutputLength,
+            'response_preview' => mb_substr($rawOutput, 0, 2000, 'UTF-8'),
+        ], $windowMeta));
+
         $errorType = null;
         $errorMessage = null;
         $failureStage = null;
@@ -592,7 +779,7 @@ class RequirementCandidateExtractor
             $failureStage = 'openai_http_status';
         }
 
-        return [
+        return array_merge([
             'ok' => $response->successful(),
             'run_id' => $runId,
             'document_id' => $document->id,
@@ -630,7 +817,138 @@ class RequirementCandidateExtractor
             'error_message' => $errorMessage,
             'phase_1_requirement_extraction' => true,
             'openai_call_count' => 1,
-        ];
+        ], $windowMeta);
+    }
+
+    private function buildPhaseOneExtractionWindows(string $text): array
+    {
+        $text = trim($text);
+        $length = mb_strlen($text, 'UTF-8');
+
+        if ($length === 0) {
+            return [];
+        }
+
+        if (! $this->shouldUseWindowedPhaseOneExtraction($text)) {
+            return [[
+                'text' => $text,
+                'start_position' => 0,
+                'end_position' => $length,
+                'window_index' => 0,
+                'window_count' => 1,
+            ]];
+        }
+
+        $windows = [];
+        $start = 0;
+
+        while ($start < $length) {
+            $idealEnd = min($start + self::PHASE_ONE_WINDOW_TARGET_CHARS, $length);
+            $end = $this->choosePhaseOneWindowEnd($text, $start, $idealEnd, $length);
+
+            if ($end <= $start) {
+                $end = min($length, $start + self::PHASE_ONE_WINDOW_TARGET_CHARS);
+            }
+
+            if ($end <= $start) {
+                $end = $length;
+            }
+
+            $windows[] = [
+                'text' => mb_substr($text, $start, $end - $start, 'UTF-8'),
+                'start_position' => $start,
+                'end_position' => $end,
+            ];
+
+            if ($end >= $length) {
+                break;
+            }
+
+            $nextStart = max(0, $end - self::PHASE_ONE_WINDOW_OVERLAP_CHARS);
+
+            if ($nextStart <= $start) {
+                $nextStart = $end;
+            }
+
+            $start = $nextStart;
+        }
+
+        $windowCount = count($windows);
+
+        foreach ($windows as $index => $window) {
+            $windows[$index]['window_index'] = $index;
+            $windows[$index]['window_count'] = $windowCount;
+        }
+
+        return $windows;
+    }
+
+    private function shouldUseWindowedPhaseOneExtraction(string $text): bool
+    {
+        return mb_strlen($text, 'UTF-8') > self::PHASE_ONE_WINDOW_TRIGGER_CHARS;
+    }
+
+    private function choosePhaseOneWindowEnd(string $text, int $start, int $idealEnd, int $length): int
+    {
+        if ($idealEnd >= $length) {
+            return $length;
+        }
+
+        $minEnd = min($length, $start + self::PHASE_ONE_WINDOW_MIN_CHARS);
+        $searchStart = max($minEnd, $idealEnd - self::PHASE_ONE_WINDOW_BOUNDARY_SCAN_CHARS);
+        $searchEnd = min($length, $idealEnd + self::PHASE_ONE_WINDOW_BOUNDARY_SCAN_CHARS);
+
+        $boundary = $this->findNearestBoundaryPosition($text, $searchStart, $searchEnd, $idealEnd, '/\R\R+/u')
+            ?? $this->findNearestBoundaryPosition($text, $searchStart, $searchEnd, $idealEnd, '/\R/u')
+            ?? $this->findNearestBoundaryPosition($text, $searchStart, $searchEnd, $idealEnd, '/[.!?;:]\s+/u');
+
+        if ($boundary !== null && $boundary >= $minEnd) {
+            return $boundary;
+        }
+
+        return $idealEnd;
+    }
+
+    private function findNearestBoundaryPosition(
+        string $text,
+        int $searchStart,
+        int $searchEnd,
+        int $preferredPosition,
+        string $pattern,
+    ): ?int {
+        if ($searchEnd <= $searchStart) {
+            return null;
+        }
+
+        $segment = mb_substr($text, $searchStart, $searchEnd - $searchStart, 'UTF-8');
+
+        if ($segment === '') {
+            return null;
+        }
+
+        preg_match_all($pattern, $segment, $matches, PREG_OFFSET_CAPTURE);
+
+        if (($matches[0] ?? []) === []) {
+            return null;
+        }
+
+        $bestPosition = null;
+        $bestDistance = null;
+
+        foreach ($matches[0] as $match) {
+            $matchedText = (string) ($match[0] ?? '');
+            $byteOffset = (int) ($match[1] ?? 0);
+            $localStart = mb_strlen(substr($segment, 0, $byteOffset), 'UTF-8');
+            $candidatePosition = $searchStart + $localStart + mb_strlen($matchedText, 'UTF-8');
+            $distance = abs($candidatePosition - $preferredPosition);
+
+            if ($bestDistance === null || $distance < $bestDistance) {
+                $bestDistance = $distance;
+                $bestPosition = $candidatePosition;
+            }
+        }
+
+        return $bestPosition;
     }
 
     private function performStructuredBlockExtractionRequest(SavedNoticeAiDocument $document, RequirementExtractionBlockData $block, string $runId): array
@@ -1660,6 +1978,61 @@ class RequirementCandidateExtractor
         }
 
         return 1.0;
+    }
+
+
+    private function filterPhaseOneRows(array $rows): array
+    {
+        $filtered = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+
+            if ($this->shouldRejectPhaseOneRow($row)) {
+                continue;
+            }
+
+            $filtered[] = $row;
+        }
+
+        return $filtered;
+    }
+
+    private function shouldRejectPhaseOneRow(array $row): bool
+    {
+        $sourceReferenceText = mb_strtolower($this->normalizeScalar($row['source_reference_text'] ?? null), 'UTF-8');
+        $parentReference = mb_strtolower($this->normalizeScalar($row['parent_reference'] ?? null), 'UTF-8');
+        $referenceContext = trim($sourceReferenceText . ' ' . $parentReference);
+
+        if ($referenceContext === '') {
+            return false;
+        }
+
+        foreach ($this->nonRequirementContextMarkers() as $marker) {
+            if (str_contains($referenceContext, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function nonRequirementContextMarkers(): array
+    {
+        return [
+            'veiledning om',
+            'guidance on',
+            'innholdsfortegnelse',
+            'table of contents',
+            'forklaring av nummerering',
+            'nummerering av',
+            'kravnummer =',
+            'legend',
+            'how to answer',
+            'besvarelse av krav',
+        ];
     }
 
     private function dedupeCandidates(array $candidates): array

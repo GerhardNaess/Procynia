@@ -175,7 +175,7 @@ class RequirementExtractionRunService
 
         $splitResult = app(DocumentSplitPlanner::class)->plan($document, $run->uuid);
 
-        Log::info('[TT][SPLIT] Async split result received.', [
+        Log::info('[PROCYNIA][DOC_SPLIT] Split planning result received.', [
             'run_id' => $run->uuid,
             'document_id' => $document->id,
             'saved_notice_ai_document_id' => $document->id,
@@ -428,7 +428,7 @@ class RequirementExtractionRunService
         $splitPlan = is_array($splitResult['split_plan'] ?? null) ? $splitResult['split_plan'] : [];
 
         if ($documentText === '') {
-            Log::warning('[TT][SPLIT] Chunk build failed because extracted text was empty.', [
+            Log::warning('[PROCYNIA][DOC_SPLIT] Chunk build failed because extracted text was empty.', [
                 'run_id' => $run->uuid,
                 'document_id' => $document->id,
                 'saved_notice_ai_document_id' => $document->id,
@@ -445,7 +445,7 @@ class RequirementExtractionRunService
         }
 
         if ($splitPlan === []) {
-            Log::warning('[TT][SPLIT] Chunk build failed because split plan was empty.', [
+            Log::warning('[PROCYNIA][DOC_SPLIT] Chunk build failed because split plan was empty.', [
                 'run_id' => $run->uuid,
                 'document_id' => $document->id,
                 'saved_notice_ai_document_id' => $document->id,
@@ -473,7 +473,7 @@ class RequirementExtractionRunService
             $endPosition = (int) ($group['end_position'] ?? -1);
 
             if ($startPosition < 0 || $endPosition <= $startPosition || $endPosition > $documentLength) {
-                Log::warning('[TT][SPLIT] Invalid chunk positions detected.', [
+                Log::warning('[PROCYNIA][DOC_SPLIT] Invalid chunk positions detected.', [
                     'run_id' => $run->uuid,
                     'document_id' => $document->id,
                     'saved_notice_ai_document_id' => $document->id,
@@ -497,8 +497,8 @@ class RequirementExtractionRunService
             if ($resolvedGroups !== []) {
                 $previousEndPosition = (int) $resolvedGroups[count($resolvedGroups) - 1]['end_position'];
 
-                if ($startPosition !== $previousEndPosition) {
-                    Log::warning('[TT][SPLIT] Non-contiguous chunk positions detected.', [
+                if ($startPosition < $previousEndPosition) {
+                    Log::warning('[PROCYNIA][DOC_SPLIT] Overlapping chunk positions detected.', [
                         'run_id' => $run->uuid,
                         'document_id' => $document->id,
                         'saved_notice_ai_document_id' => $document->id,
@@ -511,18 +511,32 @@ class RequirementExtractionRunService
 
                     return [
                         'ok' => false,
-                        'error_type' => 'non_contiguous_positions',
-                        'error_message' => 'Split plan positions were not contiguous.',
+                        'error_type' => 'overlapping_positions',
+                        'error_message' => 'Split plan positions overlapped.',
                         'chunk_count' => count($resolvedGroups),
                         'coverage_ok' => false,
                     ];
+                }
+
+                if ($startPosition > $previousEndPosition) {
+                    Log::info('[PROCYNIA][DOC_SPLIT] Non-requirement text was filtered between emitted chunks.', [
+                        'run_id' => $run->uuid,
+                        'document_id' => $document->id,
+                        'saved_notice_ai_document_id' => $document->id,
+                        'saved_notice_id' => $document->saved_notice_id,
+                        'group_index' => $groupIndex,
+                        'group_id' => $groupId,
+                        'gap_length' => $startPosition - $previousEndPosition,
+                        'previous_end_position' => $previousEndPosition,
+                        'start_position' => $startPosition,
+                    ]);
                 }
             }
 
             $content = trim(mb_substr($documentText, $startPosition, $endPosition - $startPosition, 'UTF-8'));
 
             if ($content === '') {
-                Log::warning('[TT][SPLIT] Empty chunk content detected.', [
+                Log::warning('[PROCYNIA][DOC_SPLIT] Empty chunk content detected.', [
                     'run_id' => $run->uuid,
                     'document_id' => $document->id,
                     'saved_notice_ai_document_id' => $document->id,
@@ -553,7 +567,7 @@ class RequirementExtractionRunService
                 'content' => $content,
             ];
 
-            Log::info('[TT][SPLIT] Chunk resolved.', [
+            Log::info('[PROCYNIA][DOC_SPLIT] Chunk resolved.', [
                 'run_id' => $run->uuid,
                 'document_id' => $document->id,
                 'saved_notice_ai_document_id' => $document->id,
@@ -566,6 +580,7 @@ class RequirementExtractionRunService
                 'start_position' => $startPosition,
                 'end_position' => $endPosition,
                 'chunk_length' => mb_strlen($content, 'UTF-8'),
+                'chunk_preview' => $this->previewText($content, 160),
             ]);
         }
 
@@ -590,7 +605,7 @@ class RequirementExtractionRunService
             }
         });
 
-        Log::info('[TT][SPLIT] Chunk persistence completed.', [
+        Log::info('[PROCYNIA][DOC_SPLIT] Chunk persistence completed.', [
             'run_id' => $run->uuid,
             'document_id' => $document->id,
             'saved_notice_ai_document_id' => $document->id,
@@ -599,6 +614,7 @@ class RequirementExtractionRunService
             'coverage_ok' => $coverageOk,
             'document_length' => $documentLength,
             'covered_until' => $resolvedGroups !== [] ? (int) $resolvedGroups[count($resolvedGroups) - 1]['end_position'] : 0,
+            'leading_excluded_characters' => $resolvedGroups !== [] ? (int) $resolvedGroups[0]['start_position'] : 0,
         ]);
 
         return [

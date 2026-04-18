@@ -136,6 +136,67 @@ class RequirementExtractionRunServiceTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_it_skips_front_matter_and_persists_only_requirement_chunks(): void
+    {
+        Queue::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-1001A', 'Split planning target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 09:30:00');
+
+        $documentText = implode("\n\n", [
+            'Innholdsfortegnelse',
+            '1. Kravområde 1 .... 2',
+            '2. Veiledning om leverandørens besvarelse .... 3',
+            '3. Kravområde 2 .... 4',
+            '1. Kravområde 1' . "\n" . '1-1.S.1 Leverandøren skal levere dokumentasjon innen 10 dager.',
+            '2. Veiledning om leverandørens besvarelse' . "\n" . 'Leverandøren skal skrive tydelig og kort.',
+            '3. Kravområde 2' . "\n" . '1-1.S.2 Leverandøren skal beskrive løsning og bemanning.',
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'split-front-matter.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/split-front-matter.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => $documentText,
+            'text_extracted_at' => '2026-04-06 09:31:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+
+        $this->fakeOpenAiFullDocumentResponse([
+            $this->buildFullDocumentCandidate('Leverandøren skal levere dokumentasjon innen 10 dager.', [
+                'requirement_identifier' => '1-1.S.1',
+                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                'obligation_type' => 'must',
+                'interpretation_risk' => 'low',
+                'source_reference_text' => '1-1.S.1',
+            ]),
+        ]);
+
+        $runService = app(RequirementExtractionRunService::class);
+        $run = $runService->createQueuedRunForDocument($document);
+        $runService->processRun($run);
+
+        $chunks = SavedNoticeAiDocumentChunk::query()
+            ->where('saved_notice_ai_document_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertCount(2, $chunks);
+        $this->assertStringStartsWith('1-1.S.1', trim((string) $chunks[0]->content));
+        $this->assertStringContainsString('Leverandøren skal levere dokumentasjon innen 10 dager.', $chunks[0]->content);
+        $this->assertStringNotContainsString('Innholdsfortegnelse', $chunks[0]->content);
+        $this->assertStringNotContainsString('Veiledning om leverandørens besvarelse', $chunks[0]->content);
+        $this->assertStringStartsWith('1-1.S.2', trim((string) $chunks[1]->content));
+        $this->assertStringContainsString('Leverandøren skal beskrive løsning og bemanning.', $chunks[1]->content);
+        $this->assertGreaterThan(0, $chunks[0]->char_start);
+        Http::assertSentCount(2);
+    }
+
     public function test_it_preserves_existing_published_rows_when_the_run_fails(): void
     {
         Queue::fake();
