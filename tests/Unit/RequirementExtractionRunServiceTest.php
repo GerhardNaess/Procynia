@@ -14,6 +14,7 @@ use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\Ai\Requirements\RequirementEditorService;
+use App\Services\Ai\Requirements\DocumentSplitPlanner;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementLoader;
 use Illuminate\Http\Client\ConnectionException;
@@ -195,6 +196,47 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertStringContainsString('Leverandøren skal beskrive løsning og bemanning.', $chunks[1]->content);
         $this->assertGreaterThan(0, $chunks[0]->char_start);
         Http::assertSentCount(2);
+    }
+
+    public function test_it_anchors_spaced_e_requirement_ids_after_front_matter_and_keeps_evaluation_text_with_the_requirement(): void
+    {
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-1001C', 'Split planner anchor target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 09:50:00');
+
+        $documentText = implode("\n\n", [
+            '1. Veiledning om leverandørens besvarelse 1',
+            'Dette er generell besvarelsesveiledning og skal ikke bli egen ekstraksjonschunk.',
+            '1- 2.2.E1 Ytelsesstyring basert på sanntidsdata. Leverandøren bør bruke sanntidsdata og beste praksis til å overvåke, analysere og forbedre applikasjoners ytelse. Ved evalueringen legges det særlig vekt på at leverandøren tilbyr en strukturert metode for ytelsesovervåking og proaktiv justering.',
+            'Ved evalueringen legges det særlig vekt på',
+            '- I hvilken grad Leverandøren tilbyr en strukturert metode for ytelsesovervåking og proaktiv justering, inkludert bruk av relevante verktøy (dashboard, alarmer, analyser).',
+            '- I hvilken grad rotårsaksanalyse og tiltak er integrert i tjenesten, slik at problemer forebygges og ikke bare håndteres reaktivt.',
+            '- I hvilken grad tilnærmingen understøtter stabil drift og gode brukeropplevelser for Kundens applikasjoner.',
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'spaced-e-requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/spaced-e-requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => $documentText,
+            'text_extracted_at' => '2026-04-06 09:51:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+
+        $result = app(DocumentSplitPlanner::class)->plan($document, 'run-document-split-spaced-e');
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(1, $result['split_plan']);
+
+        $chunk = $result['split_plan'][0];
+        $this->assertSame('chunk_001', $chunk['group_id']);
+        $this->assertStringStartsWith('1- 2.2.E1', trim((string) $chunk['start_anchor']));
+        $this->assertStringNotContainsString('Veiledning om leverandørens besvarelse', (string) $chunk['start_anchor']);
+        $this->assertStringContainsString('Ytelsesstyring basert på sanntidsdata', (string) $chunk['start_anchor']);
     }
 
     public function test_it_preserves_existing_published_rows_when_the_run_fails(): void

@@ -451,7 +451,9 @@ class DocumentSplitPlanner
         ];
         $hasFrontMatterSignals = $hasTocLayout || $hasOutlineEntry || $this->containsAnyKeyword($normalizedText, $frontMatterKeywords);
         $hasAppendixSignals = preg_match('/\b(?:bilag|vedlegg|appendix|appendiks)\b/ui', $normalizedText) === 1;
-        $hasRequirementId = preg_match('/\b\d+(?:[-.]\d+)+(?:[A-Za-z])?\b/u', $trimmedText) === 1;
+        $normalizedIdentifierText = preg_replace('/\s*([.-])\s*/u', '$1', $trimmedText) ?? $trimmedText;
+        $hasRequirementId = preg_match('/\b\d+\s*[-.]\s*\d+\b/u', $normalizedIdentifierText) === 1
+            || preg_match('/\b\d+(?:[-.][A-Za-z0-9]+){2,}\b/u', $normalizedIdentifierText) === 1;
         $hasNumberedRequirement = preg_match('/^\s*(?:[-*•]\s*)?\d+[.)]\s+.*\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui', $trimmedText) === 1
             || preg_match('/^\s*(?:[-*•]\s*)?\d+(?:[-.]\d+)+\s+.*\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui', $trimmedText) === 1;
         $hasTableSignals = str_contains($trimmedText, '|')
@@ -583,10 +585,10 @@ class DocumentSplitPlanner
     private function findFirstRequirementAnchorInText(string $text): ?array
     {
         $patterns = [
-            '/\b\d+(?:[-.]\d+)+(?:[A-Za-z])?\b/u',
+            '/\b\d+\s*[-.]\s*\d+\b/u',
+            '/\b\d+(?:\s*[-.]\s*[A-Za-z0-9]+){2,}\b/u',
             '/^\s*(?:[-*•]\s*)?\d+[.)]\s+.*\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui',
-            '/^\s*(?:[-*•]\s*)?\d+(?:[-.]\d+)+\s+.*\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui',
-            '/\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui',
+            '/^\s*(?:[-*•]\s*)?\d+(?:\s*[-.]\s*[A-Za-z0-9]+){1,}\s+.*\b(?:skal kunne|skal levere|skal beskrive|skal sørge for|skal være|skal dokumentere|må|bør|skal)\b/ui',
         ];
 
         $bestMatch = null;
