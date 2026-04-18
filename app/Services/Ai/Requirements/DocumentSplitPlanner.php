@@ -1298,7 +1298,7 @@ class DocumentSplitPlanner
             'group_type' => $groupType,
             'start_position' => $start,
             'end_position' => $end,
-            'reason' => 'Heading-based section kept intact between H1 boundaries.',
+            'reason' => 'H1-only mode: one chunk emitted from this H1 heading until the next H1 heading.',
         ]];
     }
 
@@ -1520,6 +1520,167 @@ class DocumentSplitPlanner
         usort($headings, static fn (array $left, array $right): int => (int) $left['start_position'] <=> (int) $right['start_position']);
 
         return $headings;
+    }
+
+
+    /**
+     * Purpose: Find likely body H2 headings inside one H1 section using conservative plain-text rules.
+     * Inputs: The full document text and one H1 section range.
+     * Returns: Ordered H2 heading metadata constrained to the H1 range.
+     * Side effects: None.
+     */
+    private function findBodyH2HeadingsWithinRange(string $documentText, int $start, int $end): array
+    {
+        if ($end <= $start) {
+            return [];
+        }
+
+        $sectionText = mb_substr($documentText, $start, $end - $start, 'UTF-8');
+        $lines = $this->splitTextIntoLinesWithOffsets($sectionText);
+        $headings = [];
+        $lineCount = count($lines);
+
+        for ($lineIndex = 0; $lineIndex < $lineCount; $lineIndex++) {
+            $lineText = trim((string) ($lines[$lineIndex]['text'] ?? ''));
+
+            if ($lineText === '' || $this->isOutlineOnlyHeadingLine($lineText)) {
+                continue;
+            }
+
+            if ($this->detectHeadingLevel($lineText) === 1) {
+                continue;
+            }
+
+            if (! $this->isLikelyBodyH2Heading($lines, $lineIndex, $lineText)) {
+                continue;
+            }
+
+            $headings[] = [
+                'title' => $lineText,
+                'start_position' => $start + (int) ($lines[$lineIndex]['start_position'] ?? 0),
+                'end_position' => $start + (int) ($lines[$lineIndex]['end_position'] ?? 0),
+                'level' => 2,
+            ];
+        }
+
+        usort($headings, static fn (array $left, array $right): int => (int) $left['start_position'] <=> (int) $right['start_position']);
+
+        return $headings;
+    }
+
+    /**
+     * Purpose: Decide whether one plain-text line is likely a body H2 heading.
+     * Inputs: Section lines, the current line index, and one trimmed line of text.
+     * Returns: True when the line should act as an H2 boundary inside an H1 section.
+     * Side effects: None.
+     */
+    private function isLikelyBodyH2Heading(array $lines, int $lineIndex, string $line): bool
+    {
+        $trimmedLine = trim($line);
+
+        if ($trimmedLine === '') {
+            return false;
+        }
+
+        if ($this->detectHeadingLevel($trimmedLine) === 2) {
+            return true;
+        }
+
+        if ($this->detectHeadingLevel($trimmedLine) !== null) {
+            return false;
+        }
+
+        if ($this->isRequirementIdLine($trimmedLine)) {
+            return false;
+        }
+
+        if ($this->isTableMarkerLine($trimmedLine)) {
+            return false;
+        }
+
+        if (preg_match('/[.!?;:]\s*$/u', $trimmedLine) === 1) {
+            return false;
+        }
+
+        if (mb_strlen($trimmedLine, 'UTF-8') > 90) {
+            return false;
+        }
+
+        $wordCount = count(preg_split('/\s+/u', $trimmedLine, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
+        if ($wordCount === 0 || $wordCount > 10) {
+            return false;
+        }
+
+        if (preg_match('/^[a-zæøå]/u', $trimmedLine) === 1) {
+            return false;
+        }
+
+        $nextNonEmptyLine = $this->nextNonEmptyLineText($lines, $lineIndex);
+
+        if ($nextNonEmptyLine === null) {
+            return false;
+        }
+
+        if ($this->isOutlineOnlyHeadingLine($nextNonEmptyLine)) {
+            return false;
+        }
+
+        if ($this->isRequirementIdLine($nextNonEmptyLine)) {
+            return false;
+        }
+
+        if ($this->isTableMarkerLine($nextNonEmptyLine)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Purpose: Detect whether one line is a standalone requirement identifier row.
+     * Inputs: One trimmed line of text.
+     * Returns: True when the line is only a requirement id.
+     * Side effects: None.
+     */
+    private function isRequirementIdLine(string $line): bool
+    {
+        $trimmedLine = trim($line);
+
+        if ($trimmedLine === '') {
+            return false;
+        }
+
+        return preg_match('/^\d+\s*[-.]\s*\d+(?:\s*[-.]\s*\d+)*(?:\s*[-.]\s*[A-Za-zÆØÅæøå])?\s*\d*\s*$/u', $trimmedLine) === 1
+            || preg_match('/^\d+(?:-\d+)+(?:\.[A-Za-z0-9]+)+\s*$/u', $trimmedLine) === 1;
+    }
+
+    /**
+     * Purpose: Detect whether one line is a table marker rather than a heading.
+     * Inputs: One trimmed line of text.
+     * Returns: True when the line is a table header or answer placeholder.
+     * Side effects: None.
+     */
+    private function isTableMarkerLine(string $line): bool
+    {
+        $normalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $line) ?? $line), 'UTF-8');
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        $markers = [
+            'skal-krav',
+            'bør-krav',
+            'id',
+            'kravtekst',
+            'leverandørens besvarelse',
+            'ved evalueringen legges det særlig vekt på',
+            'herunder',
+            'prioritet',
+        ];
+
+        return in_array($normalized, $markers, true);
     }
 
     /**
