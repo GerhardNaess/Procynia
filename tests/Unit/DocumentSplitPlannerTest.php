@@ -77,6 +77,63 @@ class DocumentSplitPlannerTest extends TestCase
         $this->assertStringContainsString('skal forbli i samme H1-chunk', $this->chunkText($documentText, $chunk));
     }
 
+    public function test_it_rejects_prose_like_lines_as_h2_candidates_and_keeps_the_h1_intact(): void
+    {
+        $documentText = implode("\n\n", [
+            '1. Hovedkapittel' . "\n"
+                . str_repeat('Dette er fylltekst som gjør dokumentet stort nok til å aktivere konservativ H2-splitting. ', 220)
+                . "\n"
+                . 'bidra aktivt til felles verdiskaping'
+                . "\n"
+                . str_repeat('Mer fylltekst som fortsatt hører til samme H1-seksjon og ikke skal splitte dokumentet. ', 120)
+                . "\n"
+                . 'På hvilken måte lærling vil benyttes'
+                . "\n"
+                . str_repeat('Enda mer fylltekst som bevarer samme H1-seksjon. ', 120),
+        ]);
+
+        $result = $this->planDocument($documentText, 'split-prose-h2-rejection.docx', 203);
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(1, $result['split_plan']);
+
+        $chunk = $result['split_plan'][0];
+        $chunkText = $this->chunkText($documentText, $chunk);
+
+        $this->assertStringStartsWith('1. Hovedkapittel', $this->chunkFirstLine($documentText, $chunk));
+        $this->assertStringContainsString('bidra aktivt til felles verdiskaping', $chunkText);
+        $this->assertStringContainsString('På hvilken måte lærling vil benyttes', $chunkText);
+    }
+
+    public function test_it_still_splits_on_clear_h2_headings_inside_an_oversized_h1_section(): void
+    {
+        $documentText = implode("\n\n", [
+            '1. Hovedkapittel' . "\n"
+                . str_repeat('Innledende avsnitt som gjør seksjonen stor nok til å aktivere H2-splitting. ', 220)
+                . "\n"
+                . '1.1 Klar underoverskrift'
+                . "\n"
+                . str_repeat('Innhold under første underoverskrift som fortsatt hører til samme H2-chunk. ', 120)
+                . "\n"
+                . '1.2 Neste underoverskrift'
+                . "\n"
+                . str_repeat('Innhold under andre underoverskrift som fortsatt hører til samme H2-chunk. ', 120),
+        ]);
+
+        $result = $this->planDocument($documentText, 'split-clear-h2-headings.docx', 204);
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(2, $result['split_plan']);
+
+        $firstChunkText = $this->chunkText($documentText, $result['split_plan'][0]);
+        $secondChunkText = $this->chunkText($documentText, $result['split_plan'][1]);
+
+        $this->assertStringStartsWith('1. Hovedkapittel', $this->chunkFirstLine($documentText, $result['split_plan'][0]));
+        $this->assertStringContainsString('1.1 Klar underoverskrift', $firstChunkText);
+        $this->assertStringStartsWith('1.2 Neste underoverskrift', $this->chunkFirstLine($documentText, $result['split_plan'][1]));
+        $this->assertStringContainsString('Innhold under andre underoverskrift', $secondChunkText);
+    }
+
     public function test_it_does_not_use_h2_or_h3_headings_as_chunk_boundaries(): void
     {
         $documentText = implode("\n\n", [

@@ -302,6 +302,7 @@ export default function AiShow({
     const [deletingDocumentId, setDeletingDocumentId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
     const documentRefreshInFlightRef = useRef(false);
+    const finalRequirementsRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
         documents: [],
     });
@@ -397,6 +398,30 @@ export default function AiShow({
             documentRefreshInFlightRef.current = false;
         };
     }, [documentNeedsRefresh]);
+
+    useEffect(() => {
+        if (documentNeedsRefresh) {
+            finalRequirementsRefreshInFlightRef.current = false;
+            return undefined;
+        }
+
+        const hasCompletedDocument = documentRows.some((document) => document?.processing_status === 'completed');
+        const shouldForceFinalRequirementsRefresh = hasCompletedDocument && requirementRows.length === 0;
+
+        if (!shouldForceFinalRequirementsRefresh || finalRequirementsRefreshInFlightRef.current) {
+            return undefined;
+        }
+
+        finalRequirementsRefreshInFlightRef.current = true;
+
+        router.reload({
+            only: ['case', 'ai_status', 'documents', 'requirements', 'requirements_count', 'requirements_overview'],
+            preserveScroll: true,
+            preserveState: true,
+        });
+
+        return undefined;
+    }, [documentNeedsRefresh, documentRows, requirementRows.length]);
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));

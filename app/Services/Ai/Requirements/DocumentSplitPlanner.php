@@ -9,6 +9,11 @@ use Illuminate\Support\Str;
 
 class DocumentSplitPlanner
 {
+
+    private const IDEAL_CHUNK_SIZE = 30000;
+    private const MAX_CHUNK_SIZE = 36000;
+    private const MIN_CHUNK_SIZE = 12000;
+
     public function __construct(
         private readonly OpenAiClient $openAiClient,
     ) {
@@ -1281,14 +1286,14 @@ class DocumentSplitPlanner
 
         $sectionLength = mb_strlen($sectionText, 'UTF-8');
 
-        if ($sectionLength <= 30000) {
+        if ($sectionLength <= self::IDEAL_CHUNK_SIZE) {
             return [[
                 'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
                 'group_type' => $groupType,
                 'start_position' => $start,
                 'end_position' => $end,
                 'reason' => sprintf(
-                    'Heading-based section kept intact because its length (%d chars) is within the stable section threshold.',
+                    'Heading-based section kept intact because its length (%d chars) is within the ideal chunk size.',
                     $sectionLength
                 ),
             ]];
@@ -1302,57 +1307,85 @@ class DocumentSplitPlanner
                 'group_type' => $groupType,
                 'start_position' => $start,
                 'end_position' => $end,
-                'reason' => 'Heading-based section kept intact between H1 boundaries because no conservative H2 headings were found.',
+                'reason' => 'Oversized H1 section kept intact because no valid H2 boundaries were found.',
             ]];
         }
 
-        $chunks = [];
-        $headingCount = count($h2Headings);
+        $boundaryStarts = [$start];
 
-        for ($index = 0; $index < $headingCount; $index++) {
-            $chunkStart = (int) ($h2Headings[$index]['start_position'] ?? $start);
-            $chunkEnd = $index + 1 < $headingCount
-                ? (int) ($h2Headings[$index + 1]['start_position'] ?? $end)
-                : $end;
+        foreach ($h2Headings as $heading) {
+            $headingStart = (int) ($heading['start_position'] ?? 0);
 
-            if ($chunkEnd <= $chunkStart) {
+            if ($headingStart <= $start || $headingStart >= $end) {
                 continue;
             }
 
-            $chunkText = trim((string) mb_substr($documentText, $chunkStart, $chunkEnd - $chunkStart, 'UTF-8'));
+            $boundaryStarts[] = $headingStart;
+        }
 
-            if ($chunkText === '') {
-                continue;
+        $boundaryStarts[] = $end;
+        $boundaryStarts = array_values(array_unique($boundaryStarts));
+        sort($boundaryStarts);
+
+        $chunks = [];
+        $chunkStart = $start;
+
+        while ($chunkStart < $end) {
+            $remainingLength = $end - $chunkStart;
+
+            if ($remainingLength <= self::IDEAL_CHUNK_SIZE) {
+                $chunks[] = [
+                    'title' => $this->resolveChunkTitle($title, $h2Headings, $chunkStart),
+                    'group_type' => $groupType,
+                    'start_position' => $chunkStart,
+                    'end_position' => $end,
+                    'reason' => 'Final heading-based chunk kept intact because the remaining section is within the ideal chunk size.',
+                ];
+
+                break;
+            }
+
+            $splitPoint = $this->findBestH2SplitPoint($boundaryStarts, $chunkStart, $end);
+
+            if ($splitPoint === null || $splitPoint <= $chunkStart) {
+                $chunks[] = [
+                    'title' => $this->resolveChunkTitle($title, $h2Headings, $chunkStart),
+                    'group_type' => $groupType,
+                    'start_position' => $chunkStart,
+                    'end_position' => $end,
+                    'reason' => 'Oversized H1 section kept intact because no safe H2 split point could produce a stable chunk near the ideal size.',
+                ];
+
+                break;
             }
 
             $chunks[] = [
-                'title' => (string) ($h2Headings[$index]['title'] ?? $title),
+                'title' => $this->resolveChunkTitle($title, $h2Headings, $chunkStart),
                 'group_type' => $groupType,
                 'start_position' => $chunkStart,
-                'end_position' => $chunkEnd,
-                'reason' => 'Heading-based section split on conservative H2 boundaries only.',
+                'end_position' => $splitPoint,
+                'reason' => 'Heading-based section split on a valid H2 boundary chosen to keep the chunk close to the ideal size.',
             ];
+
+            $chunkStart = $splitPoint;
         }
 
-        if ($chunks === []) {
-            return [[
-                'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
-                'group_type' => $groupType,
-                'start_position' => $start,
-                'end_position' => $end,
-                'reason' => 'Heading-based section kept intact because conservative H2 subdivision produced no usable chunks.',
-            ]];
-        }
-
-        Log::info('[PROCYNIA][DOC_SPLIT] H1 section subdivided on conservative H2 boundaries.', [
+        Log::info('[PROCYNIA][DOC_SPLIT] H1 section evaluated for H2 subdivision near ideal chunk size.', [
             'section_title' => $title,
             'section_start_position' => $start,
             'section_end_position' => $end,
+            'section_length' => $sectionLength,
             'h2_heading_count' => count($h2Headings),
             'chunk_count' => count($chunks),
         ]);
 
-        return $chunks;
+        return $chunks !== [] ? $chunks : [[
+            'title' => $this->previewText($title !== '' ? $title : $sectionText, 80),
+            'group_type' => $groupType,
+            'start_position' => $start,
+            'end_position' => $end,
+            'reason' => 'Oversized H1 section kept intact because no usable chunk plan could be built from valid H2 boundaries.',
+        ]];
     }
 
     /**
@@ -1582,6 +1615,79 @@ class DocumentSplitPlanner
      * Returns: Ordered H2 heading metadata that are safe to use as chunk boundaries.
      * Side effects: None.
      */
+
+    /**
+     * Purpose: Choose the safest H2 split point that keeps one chunk as close as possible to the ideal size.
+     * Inputs: Ordered boundary start positions, the current chunk start, and the enclosing section end.
+     * Returns: One H2 boundary or null when no safe split point exists.
+     * Side effects: None.
+     */
+    private function findBestH2SplitPoint(array $boundaryStarts, int $chunkStart, int $sectionEnd): ?int
+    {
+        $candidates = [];
+
+        foreach ($boundaryStarts as $boundaryStart) {
+            $boundaryStart = (int) $boundaryStart;
+
+            if ($boundaryStart <= $chunkStart || $boundaryStart >= $sectionEnd) {
+                continue;
+            }
+
+            $chunkLength = $boundaryStart - $chunkStart;
+
+            if ($chunkLength <= 0) {
+                continue;
+            }
+
+            if ($chunkLength > self::MAX_CHUNK_SIZE) {
+                continue;
+            }
+
+            $remainingLength = $sectionEnd - $boundaryStart;
+
+            if ($remainingLength <= 0) {
+                continue;
+            }
+
+            $candidates[] = [
+                'boundary' => $boundaryStart,
+                'distance_to_ideal' => abs(self::IDEAL_CHUNK_SIZE - $chunkLength),
+                'chunk_length' => $chunkLength,
+            ];
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, static function (array $left, array $right): int {
+            if ($left['distance_to_ideal'] !== $right['distance_to_ideal']) {
+                return $left['distance_to_ideal'] <=> $right['distance_to_ideal'];
+            }
+
+            return $right['chunk_length'] <=> $left['chunk_length'];
+        });
+
+        return (int) $candidates[0]['boundary'];
+    }
+
+    /**
+     * Purpose: Resolve the visible chunk title from the nearest valid H2 or the parent H1 title.
+     * Inputs: The parent H1 title, detected H2 headings, and the chunk start position.
+     * Returns: A stable chunk title.
+     * Side effects: None.
+     */
+    private function resolveChunkTitle(string $fallbackTitle, array $h2Headings, int $chunkStart): string
+    {
+        foreach ($h2Headings as $heading) {
+            if ((int) ($heading['start_position'] ?? -1) === $chunkStart) {
+                return (string) ($heading['title'] ?? $fallbackTitle);
+            }
+        }
+
+        return $this->previewText($fallbackTitle, 80);
+    }
+
     private function findConservativeBodyH2Headings(string $documentText, int $start, int $end): array
     {
         if ($end <= $start) {
@@ -1651,7 +1757,9 @@ class DocumentSplitPlanner
             return false;
         }
 
-        if ($this->detectHeadingLevel($trimmedLine) === 1) {
+        $headingLevel = $this->detectHeadingLevel($trimmedLine);
+
+        if ($headingLevel === 1 || $headingLevel === 3) {
             return false;
         }
 
@@ -1671,15 +1779,27 @@ class DocumentSplitPlanner
             return false;
         }
 
+        if (preg_match('/^\s*Punkt\s+\d+(?:\s*[\.-]\s*\d+)*\b/ui', $trimmedLine) === 1) {
+            return false;
+        }
+
+        if (preg_match('/(?:\b\p{L}\b\s+){2,}\b\p{L}\b/u', $trimmedLine) === 1) {
+            return false;
+        }
+
+        if (preg_match('/^\s*[a-zæøå]/u', $trimmedLine) === 1) {
+            return false;
+        }
+
         $length = mb_strlen($trimmedLine, 'UTF-8');
 
-        if ($length < 12 || $length > 110) {
+        if ($length < 8 || $length > 90) {
             return false;
         }
 
         $wordCount = count(preg_split('/\s+/u', $trimmedLine, -1, PREG_SPLIT_NO_EMPTY) ?: []);
 
-        if ($wordCount < 2) {
+        if ($wordCount < 1 || $wordCount > 8) {
             return false;
         }
 
@@ -1687,32 +1807,48 @@ class DocumentSplitPlanner
         $genericTitles = [
             'innledning',
             'bakgrunn',
-            'formål',
-            'omfang',
             'kravtekst',
             'leverandørens besvarelse',
             'skal-krav',
             'bør-krav',
             'id',
             'prioritet',
+            'begrunnelse',
+            'strategiske mål',
         ];
 
         if (in_array($normalized, $genericTitles, true)) {
             return false;
         }
 
+        if ($this->containsProseLikeHeadingLanguage($normalized)) {
+            return false;
+        }
+
         $previousLine = $this->previousNonEmptyLineText($lines, $index);
         $nextLine = $this->nextNonEmptyLineText($lines, $index);
 
-        if ($nextLine === null || $this->isHeadingLikeText($nextLine)) {
+        if ($nextLine === null) {
             return false;
         }
 
-        if ($previousLine !== null && ! $this->isHeadingLikeText($previousLine) && mb_strlen(trim($previousLine), 'UTF-8') > 100) {
+        if ($this->isHeadingLikeText($nextLine)) {
             return false;
         }
 
-        return preg_match('/^[\p{L}\p{N}][\p{L}\p{N}\s()\/-]+$/u', $trimmedLine) === 1;
+        if ($this->looksLikeRequirementTableMarker($nextLine) || $this->looksLikeRequirementIdentifierLine($nextLine)) {
+            return false;
+        }
+
+        if ($previousLine !== null && $this->looksLikeRequirementIdentifierLine($previousLine)) {
+            return false;
+        }
+
+        if ($previousLine !== null && $this->looksLikeRequirementTableMarker($previousLine)) {
+            return false;
+        }
+
+        return preg_match('/^(?:\d+(?:\.\d+)*\s+)?[\p{Lu}\p{N}ÆØÅ][\p{L}\p{N}\s()\/&,-]*$/u', $trimmedLine) === 1;
     }
 
     /**
@@ -1734,6 +1870,56 @@ class DocumentSplitPlanner
         }
 
         return null;
+    }
+
+    /**
+     * Purpose: Determine whether a heading-like line is really prose, evaluation language, or an instruction line.
+     * Inputs: One normalized heading candidate.
+     * Returns: True when the candidate should be rejected as a heading.
+     * Side effects: None.
+     */
+    private function containsProseLikeHeadingLanguage(string $normalizedLine): bool
+    {
+        $phrases = [
+            'på hvilken måte',
+            'i hvilken grad',
+            'hvorvidt',
+            'hvordan leverandøren',
+            'bidra aktivt',
+            'bidra til',
+            'legges det',
+            'legges særlig vekt',
+            'vil benyttes',
+            'vil bli benyttet',
+            'skal kunne',
+            'skal levere',
+            'skal beskrive',
+            'skal sørge for',
+            'skal være',
+            'skal dokumentere',
+            'skal benyttes',
+            'skal bidra',
+            'må være',
+            'bør være',
+            'kan være',
+            'oppfordres',
+            'evaluering',
+            'evaluerings',
+            'besvare',
+            'beskrivelse',
+            'dokumentere',
+            'redegjøre',
+            'vurdere',
+            'vurderes',
+        ];
+
+        foreach ($phrases as $phrase) {
+            if ($phrase !== '' && str_contains($normalizedLine, $phrase)) {
+                return true;
+            }
+        }
+
+        return preg_match('/\b(?:skal|bør|må|kan|vil|bidra|sikre|legges|benyttes|benytte|beskrive|dokumentere|redegjøre|vurdere|vurderes)\b/ui', $normalizedLine) === 1;
     }
 
     /**
