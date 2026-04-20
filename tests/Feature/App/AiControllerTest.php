@@ -13,6 +13,7 @@ use App\Models\Nationality;
 use App\Models\KnowledgeItemChunk;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
+use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
@@ -70,7 +71,7 @@ class AiControllerTest extends TestCase
         $response->assertOk();
         $response->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/Index'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid'
+                && data_get($page, 'props.pageTitle') === 'Oversikt'
                 && data_get($page, 'props.analysisCases') === []
                 && ! array_key_exists('tabs', data_get($page, 'props', []))
                 && ! array_key_exists('activeTab', data_get($page, 'props', []));
@@ -85,7 +86,7 @@ class AiControllerTest extends TestCase
         $requirementsResponse->assertOk();
         $requirementsResponse->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/Index'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid'
+                && data_get($page, 'props.pageTitle') === 'Oversikt'
                 && data_get($page, 'props.analysisCases') === []
                 && ! array_key_exists('tabs', data_get($page, 'props', []))
                 && ! array_key_exists('activeTab', data_get($page, 'props', []));
@@ -95,7 +96,7 @@ class AiControllerTest extends TestCase
         $documentsResponse->assertOk();
         $documentsResponse->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/Index'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid'
+                && data_get($page, 'props.pageTitle') === 'Oversikt'
                 && data_get($page, 'props.analysisCases') === []
                 && ! array_key_exists('tabs', data_get($page, 'props', []))
                 && ! array_key_exists('activeTab', data_get($page, 'props', []));
@@ -105,7 +106,7 @@ class AiControllerTest extends TestCase
         $fallbackResponse->assertOk();
         $fallbackResponse->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/Index'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid'
+                && data_get($page, 'props.pageTitle') === 'Oversikt'
                 && data_get($page, 'props.analysisCases') === []
                 && ! array_key_exists('tabs', data_get($page, 'props', []))
                 && ! array_key_exists('activeTab', data_get($page, 'props', []));
@@ -166,7 +167,7 @@ class AiControllerTest extends TestCase
             $analysisById = $analysisCases->keyBy('id');
 
             return data_get($page, 'component') === 'App/AI/Index'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid'
+                && data_get($page, 'props.pageTitle') === 'Oversikt'
                 && $analysisCases->count() === 3
                 && $analysisCases->pluck('id')->all() === [$inReviewNotice->id, $readyNotice->id, $notStartedNotice->id]
                 && $analysisById->get($notStartedNotice->id)['ai_status'] === 'not_started'
@@ -208,6 +209,9 @@ class AiControllerTest extends TestCase
             'reference_number' => 'REF-2001',
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 09:30:00');
+        Storage::fake('local');
+        Storage::disk('local')->put('saved-notices/'.$savedNotice->id.'/ai-documents/analysis-pack.pdf', 'analysis-pack-contents');
+        Storage::disk('local')->put('saved-notices/'.$savedNotice->id.'/ai-documents/scope-notes.docx', 'scope-notes-contents');
         $this->createAiDocument($savedNotice, [
             'uploaded_by_user_id' => $context['user']->id,
             'original_filename' => 'analysis-pack.pdf',
@@ -234,11 +238,8 @@ class AiControllerTest extends TestCase
             $documentsByFilename = $documents->keyBy('original_filename');
 
             return data_get($page, 'component') === 'App/AI/Show'
-                && data_get($page, 'props.pageTitle') === 'AI-arbeid · Case view target'
+                && data_get($page, 'props.pageTitle') === 'I arbeid · Case view target'
                 && data_get($page, 'props.ai_status') === 'ready'
-                && data_get($page, 'props.search_query') === ''
-                && data_get($page, 'props.search_results') === []
-                && data_get($page, 'props.search_url') === route('app.ai.show', ['savedNotice' => $savedNotice->id])
                 && data_get($page, 'props.requirements_count') === 0
                 && data_get($page, 'props.requirements') === []
                 && data_get($page, 'props.assessment_refresh_url') === route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id])
@@ -258,6 +259,24 @@ class AiControllerTest extends TestCase
                 && $documentsByFilename->get('analysis-pack.pdf')['text_extracted_at'] === null
                 && $documentsByFilename->get('scope-notes.docx')['chunk_count'] === 0
                 && $documentsByFilename->get('analysis-pack.pdf')['chunk_count'] === 0
+                && $documentsByFilename->get('scope-notes.docx')['preview_mode'] === 'pdf'
+                && $documentsByFilename->get('analysis-pack.pdf')['preview_mode'] === 'pdf'
+                && $documentsByFilename->get('scope-notes.docx')['preview_url'] === route('app.ai.documents.preview', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $documentsByFilename->get('scope-notes.docx')['id'],
+                ])
+                && $documentsByFilename->get('analysis-pack.pdf')['preview_url'] === route('app.ai.documents.preview', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $documentsByFilename->get('analysis-pack.pdf')['id'],
+                ])
+                && $documentsByFilename->get('scope-notes.docx')['download_url'] === route('app.ai.documents.download', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $documentsByFilename->get('scope-notes.docx')['id'],
+                ])
+                && $documentsByFilename->get('analysis-pack.pdf')['download_url'] === route('app.ai.documents.download', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $documentsByFilename->get('analysis-pack.pdf')['id'],
+                ])
                 && $documentsByFilename->get('scope-notes.docx')['delete_url'] === route('app.ai.documents.destroy', [
                     'savedNotice' => $savedNotice->id,
                     'document' => $documentsByFilename->get('scope-notes.docx')['id'],
@@ -273,92 +292,701 @@ class AiControllerTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_ai_case_view_searches_document_chunks_within_the_visible_saved_notice_only(): void
+    public function test_ai_case_view_includes_answer_draft_payload_and_action_urls_for_requirements(): void
     {
         $context = $this->customerAdminContext();
-        $owner = User::factory()->create([
-            'name' => 'Search Owner',
-            'email' => 'search.owner@example.test',
-            'role' => User::ROLE_USER,
-            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
-            'customer_id' => $context['customer']->id,
-            'is_active' => true,
-        ]);
-
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2002', 'Search target', [
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-DRAFT', 'Draft payload target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-            'opportunity_owner_user_id' => $owner->id,
-            'reference_number' => 'REF-2002',
         ]);
-        $this->touchSavedNotice($savedNotice, '2026-04-06 10:15:00');
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:30:00');
 
-        $targetDocument = $this->createAiDocument($savedNotice, [
+        Storage::fake('local');
+
+        $document = $this->createAiDocument($savedNotice, [
             'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'target-pack.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/target-pack.docx',
+            'original_filename' => 'scope-notes.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/scope-notes.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 4096,
-            'extracted_text' => 'Procynia tender workspace needs review. The PROCYNIA team confirms the tender scope.',
-            'text_extracted_at' => '2026-04-06 10:20:00',
+            'extracted_text' => 'Scope notes for AI analysis.',
+            'text_extracted_at' => '2026-04-06 10:05:00',
         ]);
-        $targetDocument->chunks()->createMany([
-            [
-                'chunk_index' => 0,
-                'content' => 'Procynia tender workspace needs review.',
-                'char_start' => 0,
-                'char_end' => 39,
-                'word_count' => 5,
-            ],
-            [
-                'chunk_index' => 1,
-                'content' => 'The PROCYNIA team confirms the tender scope.',
-                'char_start' => 40,
-                'char_end' => 85,
-                'word_count' => 7,
-            ],
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => 'Leverandøren skal beskrive løsningen og hvordan den oppfyller kravet.',
+            'answer_draft_generated_at' => '2026-04-06 11:15:00',
         ]);
 
-        $otherSavedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2003', 'Other search case', [
-            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
-            'opportunity_owner_user_id' => $owner->id,
-        ]);
-        $this->touchSavedNotice($otherSavedNotice, '2026-04-06 10:05:00');
-        $otherDocument = $this->createAiDocument($otherSavedNotice, [
-            'uploaded_by_user_id' => $owner->id,
-            'original_filename' => 'other-pack.docx',
-            'stored_path' => 'saved-notices/'.$otherSavedNotice->id.'/ai-documents/other-pack.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 4096,
-            'extracted_text' => 'Procynia tender workspace appears in another case too.',
-            'text_extracted_at' => '2026-04-06 10:21:00',
-        ]);
-        $otherDocument->chunks()->create([
-            'chunk_index' => 0,
-            'content' => 'Procynia tender workspace appears in another case too.',
-            'char_start' => 0,
-            'char_end' => 54,
-            'word_count' => 8,
-        ]);
-
-        $response = $this->actingAs($context['user'])->get(route('app.ai.show', [
-            'savedNotice' => $savedNotice->id,
-            'search' => '  PROCYNIA  ',
-        ]));
+        $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($savedNotice): bool {
-            $searchResults = collect(data_get($page, 'props.search_results', []));
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+        $requirementRow = $requirements->firstWhere('id', $requirement->id);
+
+        $this->assertSame('App/AI/Show', data_get($page, 'component'));
+        $this->assertSame(1, data_get($page, 'props.requirements_count'));
+        $this->assertSame(route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_store_url'));
+        $this->assertCount(1, $requirements);
+        $this->assertNotNull($requirementRow);
+        $this->assertSame([], data_get($requirementRow, 'answer_basis_item_ids'));
+        $this->assertSame(
+            route('app.ai.requirements.answer-basis.sync', [
+                'savedNotice' => $savedNotice->id,
+                'requirement' => $requirement->id,
+            ]),
+            data_get($requirementRow, 'answer_basis_selection_sync_url'),
+        );
+        $this->assertSame(
+            'Leverandøren skal beskrive løsningen og hvordan den oppfyller kravet.',
+            data_get($requirementRow, 'answer_draft.text'),
+        );
+        $this->assertSame(
+            route('app.ai.requirements.answer-draft.generate', [
+                'savedNotice' => $savedNotice->id,
+                'requirement' => $requirement->id,
+            ]),
+            data_get($requirementRow, 'answer_draft_generate_url'),
+        );
+        $this->assertSame(
+            route('app.ai.requirements.answer-draft.update', [
+                'savedNotice' => $savedNotice->id,
+                'requirement' => $requirement->id,
+            ]),
+            data_get($requirementRow, 'answer_draft_save_url'),
+        );
+        $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.generated_at'));
+    }
+
+    public function test_ai_case_instructions_page_includes_ai_instructions_payload_and_update_url(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS', 'Instructions target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.',
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:35:00');
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.instructions.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+
+        $this->assertSame('App/AI/Instructions', data_get($page, 'component'));
+        $this->assertSame('AI instrukser', data_get($page, 'props.pageTitle'));
+        $this->assertSame('Skriv formelt og bruk Kunde med stor K.', data_get($page, 'props.ai_instructions'));
+        $this->assertSame(route('app.ai.instructions.update', [
+            'savedNotice' => $savedNotice->id,
+        ]), data_get($page, 'props.ai_instructions_update_url'));
+        $this->assertSame($savedNotice->id, data_get($page, 'props.case.id'));
+        $this->assertSame($savedNotice->title, data_get($page, 'props.case.title'));
+    }
+
+    public function test_ai_case_ai_instructions_update_endpoint_persists_instructions(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-INSTRUCTIONS-UPDATE', 'Instructions update target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'ai_instructions' => 'Opprinnelig instruksjon.',
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:36:00');
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->patch(route('app.ai.instructions.update', ['savedNotice' => $savedNotice->id]), [
+                'ai_instructions' => "Skriv formelt.\nBruk Kunde med stor K.",
+            ]);
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('success', 'AI-instruks lagret.');
+
+        $savedNotice->refresh();
+        $this->assertSame("Skriv formelt.\nBruk Kunde med stor K.", $savedNotice->ai_instructions);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_endpoint_generates_and_persists_a_draft(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-GENERATE', 'Generate target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.',
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        Http::fake(function (Request $request) use ($requirement) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+            $this->assertSame('Skriv formelt og bruk Kunde med stor K.', data_get($inputPayload, 'case_instructions'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive løsningen og dokumentere metoden.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive løsningen og dokumentere metoden.');
+        $response->assertJsonStructure([
+            'requirement_id',
+            'answer_draft' => [
+                'text',
+                'generated_at',
+            ],
+        ]);
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive løsningen og dokumentere metoden.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_endpoint_reuses_existing_drafts_without_calling_openai(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-REUSE', 'Reuse target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:31:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => 'Eksisterende svarutkast.',
+            'answer_draft_generated_at' => '2026-04-06 11:45:00',
+        ]);
+
+        Http::fake(function (): void {
+            throw new RuntimeException('OpenAI should not be called when an answer draft already exists.');
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', 'Eksisterende svarutkast.');
+        $response->assertJsonStructure([
+            'requirement_id',
+            'answer_draft' => [
+                'text',
+                'generated_at',
+            ],
+        ]);
+        $this->assertSame('Eksisterende svarutkast.', $requirement->refresh()->answer_draft_text);
+    }
+
+    public function test_ai_requirement_answer_draft_update_endpoint_persists_user_edits(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-UPDATE', 'Update target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 12:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => 'Opprinnelig svarutkast.',
+            'answer_draft_generated_at' => '2026-04-06 12:15:00',
+        ]);
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.requirements.answer-draft.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_draft_text' => "Revidert svarutkast.\nMed ny linje.",
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', "Revidert svarutkast.\nMed ny linje.");
+        $response->assertJsonStructure([
+            'requirement_id',
+            'answer_draft' => [
+                'text',
+                'generated_at',
+            ],
+        ]);
+
+        $requirement->refresh();
+        $this->assertSame("Revidert svarutkast.\nMed ny linje.", $requirement->answer_draft_text);
+        $this->assertSame('2026-04-06 12:15:00', $requirement->answer_draft_generated_at?->toDateTimeString());
+    }
+
+    public function test_ai_case_view_includes_answer_basis_payload_and_requirement_selection_urls(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BASIS', 'Basis target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:20:00');
+
+        Storage::fake('local');
+
+        $documentBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_DOCUMENT,
+            'title' => 'Metodebibliotek',
+            'original_filename' => 'metode.docx',
+            'body_text' => 'Leverandøren beskriver metodikken i detaljer.',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-answer-basis-items/metode.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $textBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT,
+            'title' => 'Standard svartekst',
+            'original_filename' => null,
+            'body_text' => 'Leverandøren forplikter seg til å levere i henhold til avtalt metode.',
+            'stored_path' => null,
+            'mime_type' => null,
+            'file_size_bytes' => null,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 12:21:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $requirement->answerBasisItems()->attach([
+            $documentBasisItem->id,
+            $textBasisItem->id,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($savedNotice, $documentBasisItem, $textBasisItem, $requirement): bool {
+            $answerBasisItems = collect(data_get($page, 'props.answer_basis_items', []));
+            $answerBasisById = $answerBasisItems->keyBy('id');
+            $requirements = collect(data_get($page, 'props.requirements', []));
+            $requirementRow = $requirements->firstWhere('id', $requirement->id);
 
             return data_get($page, 'component') === 'App/AI/Show'
-                && data_get($page, 'props.search_query') === 'PROCYNIA'
-                && data_get($page, 'props.search_url') === route('app.ai.show', ['savedNotice' => $savedNotice->id])
-                && $searchResults->count() === 2
-                && $searchResults->pluck('document_filename')->all() === ['target-pack.docx', 'target-pack.docx']
-                && $searchResults->pluck('chunk_index')->all() === [0, 1]
-                && filled($searchResults->first()['snippet'])
-                && str_contains($searchResults->first()['snippet'], 'Procynia tender workspace')
-                && ! $searchResults->contains(fn (array $result): bool => $result['document_filename'] === 'other-pack.docx');
+                && data_get($page, 'props.answer_basis_documents_upload_url') === route('app.ai.answer-basis.documents.store', ['savedNotice' => $savedNotice->id])
+                && data_get($page, 'props.answer_basis_text_store_url') === route('app.ai.answer-basis.texts.store', ['savedNotice' => $savedNotice->id])
+                && $answerBasisItems->count() === 2
+                && $answerBasisById->get($documentBasisItem->id)['title'] === 'Metodebibliotek'
+                && $answerBasisById->get($documentBasisItem->id)['answer_basis_type'] === SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_DOCUMENT
+                && $answerBasisById->get($textBasisItem->id)['answer_basis_type'] === SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT
+                && $answerBasisById->get($documentBasisItem->id)['delete_url'] === route('app.ai.answer-basis.destroy', [
+                    'savedNotice' => $savedNotice->id,
+                    'answerBasisItem' => $documentBasisItem->id,
+                ])
+                && $answerBasisById->get($textBasisItem->id)['delete_url'] === route('app.ai.answer-basis.destroy', [
+                    'savedNotice' => $savedNotice->id,
+                    'answerBasisItem' => $textBasisItem->id,
+                ])
+                && $requirementRow['answer_basis_item_ids'] === [$documentBasisItem->id, $textBasisItem->id]
+                && $requirementRow['answer_basis_selection_sync_url'] === route('app.ai.requirements.answer-basis.sync', [
+                    'savedNotice' => $savedNotice->id,
+                    'requirement' => $requirement->id,
+                ]);
         });
+    }
+
+    public function test_ai_answer_basis_upload_and_text_endpoints_persist_case_level_items(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BASIS-UPLOAD', 'Basis upload target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:25:00');
+
+        $upload = $this->createDocxUpload('svargrunnlag.docx', 'Leverandøren skal forklare metode og bemanning.');
+
+        $this->actingAs($context['user'])
+            ->post(route('app.ai.answer-basis.documents.store', ['savedNotice' => $savedNotice->id]), [
+                'documents' => [$upload],
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->actingAs($context['user'])
+            ->post(route('app.ai.answer-basis.texts.store', ['savedNotice' => $savedNotice->id]), [
+                'title' => 'Metodetekst',
+                'body_text' => 'Leverandøren forplikter seg til å beskrive metode, bemanning og kvalitetsstyring.',
+            ])
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $items = SavedNoticeAiAnswerBasisItem::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $items);
+        $documentItem = $items->firstWhere('answer_basis_type', SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_DOCUMENT);
+        $textItem = $items->firstWhere('answer_basis_type', SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT);
+
+        $this->assertNotNull($documentItem);
+        $this->assertNotNull($textItem);
+        $this->assertSame('svargrunnlag.docx', $documentItem->original_filename);
+        $this->assertNotEmpty($documentItem->body_text);
+        $this->assertSame('Metodetekst', $textItem->title);
+        $this->assertSame('Leverandøren forplikter seg til å beskrive metode, bemanning og kvalitetsstyring.', $textItem->body_text);
+    }
+
+    public function test_ai_requirement_answer_basis_selection_sync_endpoint_persists_selected_ids(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BASIS-SYNC', 'Basis sync target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 12:31:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $firstBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT,
+            'title' => 'Metode 1',
+            'body_text' => 'Leverandøren bruker en strukturert leveransemetode.',
+        ]);
+        $secondBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT,
+            'title' => 'Metode 2',
+            'body_text' => 'Leverandøren har erfaring fra tilsvarende leveranser.',
+        ]);
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.requirements.answer-basis.sync', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [$firstBasisItem->id, $secondBasisItem->id, $firstBasisItem->id],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_basis_item_ids', [$firstBasisItem->id, $secondBasisItem->id]);
+        $this->assertDatabaseHas('saved_notice_ai_requirement_answer_basis_selections', [
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'saved_notice_ai_answer_basis_item_id' => $firstBasisItem->id,
+        ]);
+        $this->assertDatabaseHas('saved_notice_ai_requirement_answer_basis_selections', [
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'saved_notice_ai_answer_basis_item_id' => $secondBasisItem->id,
+        ]);
+        $this->assertSame(
+            [$firstBasisItem->id, $secondBasisItem->id],
+            $requirement->refresh()->answerBasisItems()->pluck('id')->values()->all(),
+        );
+    }
+
+    public function test_ai_requirement_answer_draft_generation_uses_selected_answer_basis_items(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BASIS-GENERATE', 'Basis generate target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:35:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 12:36:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $documentBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_DOCUMENT,
+            'title' => 'Metodebibliotek',
+            'original_filename' => 'metode.docx',
+            'body_text' => 'Leverandøren beskriver metodikken i detaljer.',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-answer-basis-items/metode.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $textBasisItem = $this->createAnswerBasisItem($savedNotice, [
+            'created_by_user_id' => $context['user']->id,
+            'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT,
+            'title' => 'Standard svartekst',
+            'body_text' => 'Leverandøren forplikter seg til å levere i henhold til avtalt metode.',
+        ]);
+
+        Http::fake(function (Request $request) use ($requirement, $documentBasisItem, $textBasisItem) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+            $this->assertSame(
+                [$documentBasisItem->id, $textBasisItem->id],
+                collect(data_get($inputPayload, 'answer_basis_items', []))->pluck('id')->all(),
+            );
+            $this->assertSame(
+                ['document', 'text'],
+                collect(data_get($inputPayload, 'answer_basis_items', []))->pluck('type')->all(),
+            );
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive løsningen med utgangspunkt i valgt svargrunnlag.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [$documentBasisItem->id, $textBasisItem->id],
+            'force' => true,
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_basis_item_ids', [$documentBasisItem->id, $textBasisItem->id]);
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive løsningen med utgangspunkt i valgt svargrunnlag.');
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive løsningen med utgangspunkt i valgt svargrunnlag.', $requirement->answer_draft_text);
+        $this->assertSame(
+            [$documentBasisItem->id, $textBasisItem->id],
+            $requirement->answerBasisItems()->pluck('id')->values()->all(),
+        );
+    }
+
+    public function test_ai_documents_download_returns_the_uploaded_file_for_visible_cases(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-DOWNLOAD', 'Download target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:00:00');
+        $documentPath = 'saved-notices/'.$savedNotice->id.'/ai-documents/source-notes.docx';
+
+        Storage::fake('local');
+        Storage::disk('local')->put($documentPath, 'source document contents');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'source-notes.docx',
+            'stored_path' => $documentPath,
+            'mime_type' => 'application/octet-stream',
+            'file_size_bytes' => 24,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.documents.download', [
+                'savedNotice' => $savedNotice->id,
+                'document' => $document->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'inline; filename=source-notes.docx')
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    }
+
+    public function test_ai_documents_preview_returns_pdf_preview_pages_for_visible_cases(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-PREVIEW', 'Preview target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 10:00:00');
+
+        Storage::fake('local');
+        $docxPreviewSource = $this->createDocxUpload('source-notes.docx', 'Preview text for the DOCX source.');
+        Storage::disk('local')->put('saved-notices/'.$savedNotice->id.'/ai-documents/source-notes.docx', file_get_contents($docxPreviewSource->getPathname()));
+        Storage::disk('local')->put('saved-notices/'.$savedNotice->id.'/ai-documents/reference-pack.pdf', '%PDF-1.4 source document contents');
+
+        $docxDocument = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'source-notes.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/source-notes.docx',
+            'mime_type' => 'application/octet-stream',
+            'file_size_bytes' => 24,
+            'extracted_text' => 'Preview text for the DOCX source.',
+            'text_extracted_at' => '2026-04-06 10:05:00',
+        ]);
+
+        $pdfDocument = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'reference-pack.pdf',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/reference-pack.pdf',
+            'mime_type' => 'application/octet-stream',
+            'file_size_bytes' => 32,
+            'extracted_text' => '',
+            'text_extracted_at' => '2026-04-06 10:06:00',
+        ]);
+
+        $docxResponse = $this->actingAs($context['user'])->get(route('app.ai.documents.preview', [
+            'savedNotice' => $savedNotice->id,
+            'document' => $docxDocument->id,
+        ]));
+
+        $docxResponse->assertOk();
+        $docxResponse->assertViewHas('page', function (array $page) use ($savedNotice, $docxDocument): bool {
+            $document = data_get($page, 'props.document', []);
+
+            return data_get($page, 'component') === 'App/AI/DocumentPreview'
+                && data_get($page, 'props.pageTitle') === 'Kilde · source-notes.docx'
+                && data_get($page, 'props.back_url') === route('app.ai.show', ['savedNotice' => $savedNotice->id])
+                && data_get($document, 'preview_mode') === 'pdf'
+                && data_get($document, 'preview_file_url') === route('app.ai.documents.preview-file', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $docxDocument->id,
+                ])
+                && data_get($document, 'download_url') === route('app.ai.documents.download', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $docxDocument->id,
+                ]);
+        });
+
+        $docxPreviewPath = 'saved-notices/'.$savedNotice->id.'/ai-document-previews/'.$docxDocument->id.'.pdf';
+        $this->assertTrue(Storage::disk('local')->exists($docxPreviewPath));
+        $this->assertStringStartsWith('%PDF', Storage::disk('local')->get($docxPreviewPath));
+
+        $docxPreviewFileResponse = $this->actingAs($context['user'])->get(route('app.ai.documents.preview-file', [
+            'savedNotice' => $savedNotice->id,
+            'document' => $docxDocument->id,
+        ]));
+
+        $docxPreviewFileResponse->assertOk();
+        $docxPreviewFileResponse->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringContainsString('inline', (string) $docxPreviewFileResponse->headers->get('Content-Disposition'));
+
+        $pdfResponse = $this->actingAs($context['user'])->get(route('app.ai.documents.preview', [
+            'savedNotice' => $savedNotice->id,
+            'document' => $pdfDocument->id,
+        ]));
+
+        $pdfResponse->assertOk();
+        $pdfResponse->assertViewHas('page', function (array $page) use ($savedNotice, $pdfDocument): bool {
+            $document = data_get($page, 'props.document', []);
+
+            return data_get($page, 'component') === 'App/AI/DocumentPreview'
+                && data_get($page, 'props.pageTitle') === 'Kilde · reference-pack.pdf'
+                && data_get($page, 'props.back_url') === route('app.ai.show', ['savedNotice' => $savedNotice->id])
+                && data_get($document, 'preview_mode') === 'pdf'
+                && data_get($document, 'preview_file_url') === route('app.ai.documents.preview-file', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $pdfDocument->id,
+                ])
+                && data_get($document, 'download_url') === route('app.ai.documents.download', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $pdfDocument->id,
+                ]);
+        });
+
+        $pdfPreviewFileResponse = $this->actingAs($context['user'])->get(route('app.ai.documents.preview-file', [
+            'savedNotice' => $savedNotice->id,
+            'document' => $pdfDocument->id,
+        ]));
+
+        $pdfPreviewFileResponse->assertOk();
+        $pdfPreviewFileResponse->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringContainsString('inline', (string) $pdfPreviewFileResponse->headers->get('Content-Disposition'));
     }
 
     public function test_requirement_extractor_filters_heading_like_noise_and_deduplicates_near_identical_lines(): void
@@ -2168,6 +2796,7 @@ class AiControllerTest extends TestCase
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4009', 'Assessment target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.',
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 14:40:00');
 
@@ -2289,6 +2918,12 @@ class AiControllerTest extends TestCase
         Http::fake(function (Request $request) use (&$capturedRequests, $openAiResponses) {
             $capturedRequests[] = $request;
             $requestIndex = count($capturedRequests) - 1;
+
+            $requestPayload = json_decode((string) $request->body(), true);
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertIsArray($inputPayload);
+            $this->assertSame('Skriv formelt og bruk Kunde med stor K.', data_get($inputPayload, 'case_instructions'));
 
             $fallbackResponse = $openAiResponses[array_key_last($openAiResponses)];
 
@@ -2765,6 +3400,10 @@ class AiControllerTest extends TestCase
             $attributes['history_type'] = $overrides['history_type'] ?? null;
         }
 
+        if (Schema::hasColumn('saved_notices', 'ai_instructions') && array_key_exists('ai_instructions', $overrides)) {
+            $attributes['ai_instructions'] = $overrides['ai_instructions'];
+        }
+
         return SavedNotice::query()->create($attributes);
     }
 
@@ -2873,6 +3512,45 @@ class AiControllerTest extends TestCase
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'processing_status' => $overrides['processing_status'] ?? SavedNoticeAiDocument::PROCESSING_STATUS_UPLOADED,
         ], $overrides));
+    }
+
+    /**
+     * Purpose: Create a deterministic answer basis fixture for AI case view tests.
+     * Inputs: The saved notice and optional field overrides.
+     * Returns: The persisted answer basis item model.
+     * Side effects: Writes a saved_notice_ai_answer_basis_items row to the test database.
+     */
+    private function createAnswerBasisItem(SavedNotice $savedNotice, array $overrides = []): SavedNoticeAiAnswerBasisItem
+    {
+        return SavedNoticeAiAnswerBasisItem::query()->create(array_merge([
+            'saved_notice_id' => $savedNotice->id,
+            'created_by_user_id' => $overrides['created_by_user_id'] ?? null,
+            'answer_basis_type' => $overrides['answer_basis_type'] ?? SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_TEXT,
+            'title' => $overrides['title'] ?? 'Svargrunnlag',
+            'original_filename' => $overrides['original_filename'] ?? null,
+            'body_text' => $overrides['body_text'] ?? 'Leverandøren beskriver løsningen.',
+            'stored_path' => $overrides['stored_path'] ?? null,
+            'mime_type' => $overrides['mime_type'] ?? null,
+            'file_size_bytes' => $overrides['file_size_bytes'] ?? null,
+        ], $overrides));
+    }
+
+    /**
+     * Purpose: Create a deterministic AI document chunk fixture for AI review tests.
+     * Inputs: The saved notice AI document, chunk text, and optional chunk index.
+     * Returns: The persisted SavedNotice AI document chunk model.
+     * Side effects: Writes a saved_notice_ai_document_chunks row to the test database.
+     */
+    private function createAiDocumentChunk(SavedNoticeAiDocument $document, string $content, int $chunkIndex = 0): SavedNoticeAiDocumentChunk
+    {
+        return SavedNoticeAiDocumentChunk::query()->create([
+            'saved_notice_ai_document_id' => $document->id,
+            'chunk_index' => $chunkIndex,
+            'content' => $content,
+            'char_start' => 0,
+            'char_end' => mb_strlen($content, 'UTF-8'),
+            'word_count' => count(preg_split('/\s+/u', trim($content)) ?: []),
+        ]);
     }
 
     /**

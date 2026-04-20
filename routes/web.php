@@ -54,8 +54,20 @@ Route::prefix('app')
             Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
         });
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
+        Route::get('/ai/{savedNotice}/instructions', [AiController::class, 'instructions'])->name('ai.instructions.show');
+        Route::patch('/ai/{savedNotice}/instructions', [AiController::class, 'updateAiInstructions'])
+            ->name('ai.instructions.update');
         Route::post('/ai/{savedNotice}/documents', [AiController::class, 'storeDocuments'])->name('ai.documents.store');
+        Route::get('/ai/{savedNotice}/documents/{document}/preview', [AiController::class, 'previewDocument'])->name('ai.documents.preview');
+        Route::get('/ai/{savedNotice}/documents/{document}/preview-file', [AiController::class, 'previewPdfDocument'])->name('ai.documents.preview-file');
+        Route::get('/ai/{savedNotice}/documents/{document}/download', [AiController::class, 'downloadDocument'])->name('ai.documents.download');
         Route::delete('/ai/{savedNotice}/documents/{document}', [AiController::class, 'destroyDocument'])->name('ai.documents.destroy');
+        Route::post('/ai/{savedNotice}/answer-basis/documents', [AiController::class, 'storeAnswerBasisDocuments'])
+            ->name('ai.answer-basis.documents.store');
+        Route::post('/ai/{savedNotice}/answer-basis/texts', [AiController::class, 'storeAnswerBasisText'])
+            ->name('ai.answer-basis.texts.store');
+        Route::delete('/ai/{savedNotice}/answer-basis/{answerBasisItem}', [AiController::class, 'destroyAnswerBasisItem'])
+            ->name('ai.answer-basis.destroy');
         Route::post('/ai/{savedNotice}/requirements', [AiController::class, 'storeRequirement'])
             ->name('ai.requirements.store');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
@@ -64,6 +76,12 @@ Route::prefix('app')
             ->name('ai.requirements.review-status.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/work', [AiController::class, 'updateRequirementWork'])
             ->name('ai.requirements.work.update');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/answer-basis', [AiController::class, 'syncRequirementAnswerBasisSelection'])
+            ->name('ai.requirements.answer-basis.sync');
+        Route::post('/ai/{savedNotice}/requirements/{requirement}/answer-draft', [AiController::class, 'generateRequirementAnswerDraft'])
+            ->name('ai.requirements.answer-draft.generate');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/answer-draft', [AiController::class, 'updateRequirementAnswerDraft'])
+            ->name('ai.requirements.answer-draft.update');
         Route::post('/ai/{savedNotice}/evidence/refresh', [AiController::class, 'refreshEvidence'])
             ->name('ai.evidence.refresh');
         Route::post('/ai/{savedNotice}/assessments/refresh', [AiController::class, 'refreshAssessments'])
@@ -80,6 +98,8 @@ Route::prefix('app')
         Route::get('/suppliers/{supplier}', [SupplierController::class, 'show'])->name('suppliers.show');
         Route::get('/notices/cpv-suggestions', [NoticeController::class, 'cpvSuggestions'])->name('notices.cpv-suggestions');
         Route::post('/notices/save', [NoticeController::class, 'storeSavedNotice'])->name('notices.save');
+        Route::delete('/notices/watch-alerts/{watchProfileInboxRecord}', [NoticeController::class, 'destroyWatchAlertRecord'])
+            ->name('notices.watch-alerts.destroy');
         Route::get('/notices/saved/{savedNotice}', [NoticeController::class, 'showSavedNotice'])->name('notices.saved.show');
         Route::post('/notices/saved/{savedNotice}/case-access', [NoticeController::class, 'storeSavedNoticeCaseAccess'])->name('notices.saved.case-access.store');
         Route::delete('/notices/saved/{savedNotice}/case-access/{caseAccess}', [NoticeController::class, 'destroySavedNoticeCaseAccess'])->name('notices.saved.case-access.destroy');

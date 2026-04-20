@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -151,6 +152,8 @@ class SavedNoticeAiRequirement extends Model
         'original_requirement_text',
         'original_candidate_snapshot',
         'current_requirement_snapshot',
+        'answer_draft_text',
+        'answer_draft_generated_at',
         'requirement_type',
         'extraction_method',
         'source_reference',
@@ -181,6 +184,7 @@ class SavedNoticeAiRequirement extends Model
             'superseded_at' => 'datetime',
             'original_candidate_snapshot' => 'array',
             'current_requirement_snapshot' => 'array',
+            'answer_draft_generated_at' => 'datetime',
             'source_reference' => 'array',
             'extraction_metadata' => 'array',
         ];
@@ -242,6 +246,26 @@ class SavedNoticeAiRequirement extends Model
             ->orderByDesc('is_primary')
             ->orderBy('match_rank')
             ->orderBy('id');
+    }
+
+    /**
+     * Purpose: Resolve the selected answer basis items for this requirement candidate.
+     * Inputs: None.
+     * Returns: The selected answer basis item relation.
+     * Side effects: None.
+     */
+    public function answerBasisItems(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            SavedNoticeAiAnswerBasisItem::class,
+            'saved_notice_ai_requirement_answer_basis_selections',
+            'saved_notice_ai_requirement_id',
+            'saved_notice_ai_answer_basis_item_id',
+        )
+            ->select('saved_notice_ai_answer_basis_items.*')
+            ->withTimestamps()
+            ->orderBy('saved_notice_ai_requirement_answer_basis_selections.created_at')
+            ->orderBy('saved_notice_ai_requirement_answer_basis_selections.id');
     }
 
     public function revisions(): HasMany

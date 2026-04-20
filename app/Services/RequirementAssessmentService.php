@@ -30,7 +30,11 @@ class RequirementAssessmentService
      * Returns: The persisted assessment row with a completed status.
      * Side effects: Calls OpenAI, validates the structured output, and upserts the assessment row.
      */
-    public function assessRequirement(SavedNoticeAiRequirement $requirement, ?int $assessedByUserId = null): SavedNoticeAiRequirementAssessment
+    public function assessRequirement(
+        SavedNoticeAiRequirement $requirement,
+        ?int $assessedByUserId = null,
+        ?string $caseInstructions = null,
+    ): SavedNoticeAiRequirementAssessment
     {
         $requirement->loadMissing([
             'evidence.knowledgeItem',
@@ -39,7 +43,7 @@ class RequirementAssessmentService
         ]);
 
         $evidenceRows = $this->assessmentEvidenceRows($requirement);
-        $assessmentPayload = $this->requestAssessment($requirement, $evidenceRows);
+        $assessmentPayload = $this->requestAssessment($requirement, $evidenceRows, $caseInstructions);
 
         return DB::transaction(function () use ($requirement, $assessmentPayload, $evidenceRows, $assessedByUserId): SavedNoticeAiRequirementAssessment {
             return SavedNoticeAiRequirementAssessment::query()->updateOrCreate(
@@ -154,9 +158,13 @@ class RequirementAssessmentService
      * Returns: A validated associative array matching the persisted assessment contract.
      * Side effects: Calls the OpenAI Responses API.
      */
-    private function requestAssessment(SavedNoticeAiRequirement $requirement, Collection $evidenceRows): array
+    private function requestAssessment(
+        SavedNoticeAiRequirement $requirement,
+        Collection $evidenceRows,
+        ?string $caseInstructions,
+    ): array
     {
-        $response = $this->openAiClient->createResponse($this->openAiRequestPayload($requirement, $evidenceRows));
+        $response = $this->openAiClient->createResponse($this->openAiRequestPayload($requirement, $evidenceRows, $caseInstructions));
 
         try {
             return $this->validateAssessmentPayload(
@@ -181,7 +189,11 @@ class RequirementAssessmentService
      * Returns: The exact request payload sent to OpenAI.
      * Side effects: None.
      */
-    private function openAiRequestPayload(SavedNoticeAiRequirement $requirement, Collection $evidenceRows): array
+    private function openAiRequestPayload(
+        SavedNoticeAiRequirement $requirement,
+        Collection $evidenceRows,
+        ?string $caseInstructions,
+    ): array
     {
         return [
             'model' => $this->openAiModel(),
@@ -200,7 +212,7 @@ class RequirementAssessmentService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($requirement, $evidenceRows),
+                            'text' => $this->userPrompt($requirement, $evidenceRows, $caseInstructions),
                         ],
                     ],
                 ],
@@ -230,6 +242,8 @@ class RequirementAssessmentService
         return implode("\n", [
             'You analyse one confirmed tender requirement for a bid case.',
             'Use only the provided requirement text and evidence.',
+            'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization when phrasing the summary and rationale.',
+            'If the case-specific instructions conflict with factual evidence or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
             'Do not generate proposal text, marketing language, or draft wording.',
@@ -245,7 +259,11 @@ class RequirementAssessmentService
      * Returns: A JSON string that is easy for the model to inspect.
      * Side effects: None.
      */
-    private function userPrompt(SavedNoticeAiRequirement $requirement, Collection $evidenceRows): string
+    private function userPrompt(
+        SavedNoticeAiRequirement $requirement,
+        Collection $evidenceRows,
+        ?string $caseInstructions,
+    ): string
     {
         $payload = [
             'instruction' => 'Assess coverage of the requirement based only on the supplied evidence.',
@@ -260,6 +278,12 @@ class RequirementAssessmentService
                 : 'Use the supplied evidence only. Selected evidence has priority over suggested evidence.',
             'evidence' => $this->promptEvidenceRows($evidenceRows),
         ];
+
+        $normalizedCaseInstructions = $this->normalizeCaseInstructions($caseInstructions);
+
+        if ($normalizedCaseInstructions !== null) {
+            $payload['case_instructions'] = $normalizedCaseInstructions;
+        }
 
         try {
             return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -323,6 +347,19 @@ class RequirementAssessmentService
         }
 
         return $model;
+    }
+
+    /**
+     * Purpose: Normalize optional case-level instructions before they are added to the prompt.
+     * Inputs: Raw instructions text.
+     * Returns: A trimmed string or null when no instructions are set.
+     * Side effects: None.
+     */
+    private function normalizeCaseInstructions(?string $value): ?string
+    {
+        $normalized = trim(str_replace(["\r\n", "\r"], "\n", (string) $value));
+
+        return $normalized !== '' ? $normalized : null;
     }
 
     /**

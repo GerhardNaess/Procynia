@@ -321,26 +321,6 @@ class RequirementCandidateExtractor
         $partial = $windowFailures !== [];
         $elapsedMs = $this->elapsedMs($startedAt);
 
-        Log::info('[TT][AI][PARSED]', [
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'windowed_extraction' => $windowCount > 1,
-            'window_count' => $windowCount,
-            'successful_request_count' => $successfulRequestCount,
-            'parsed_window_count' => $parsedWindowCount,
-            'failed_window_count' => count($windowFailures),
-            'raw_candidate_count' => $rawCandidateCount,
-            'filtered_candidate_count' => $filteredCandidateCount,
-            'mapped_candidate_count' => $mappedCandidateCount,
-            'deduped_candidate_count' => $dedupedCandidateCount,
-            'deduped_identifiers' => array_map(
-                fn (RequirementExtractionCandidateData $candidate) => $candidate->requirementIdentifier,
-                $dedupedCandidates
-            ),
-        ]);
-
         if ($parsedWindowCount === 0) {
             $primaryFailure = $windowFailures[0] ?? [
                 'stage' => 'windowed_extraction',
@@ -632,20 +612,6 @@ class RequirementCandidateExtractor
         $inputTextLength = $promptTextLength + mb_strlen($userInputText, 'UTF-8');
         $promptVersion = FullDocumentRequirementExtractionPrompt::promptVersion();
 
-        Log::info('[TT][AI][INPUT]', array_merge([
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'document_title' => $document->original_filename,
-            'document_text_length' => $documentTextLength,
-            'document_text_preview' => mb_substr($documentText, 0, 2000, 'UTF-8'),
-            'input_text_length' => $inputTextLength,
-            'input_text_preview' => mb_substr($userInputText, 0, 2000, 'UTF-8'),
-            'prompt_version' => $promptVersion,
-            'model' => $model,
-        ], $windowMeta));
-
         try {
             $response = $this->openAiClient->post('responses', $payload, 180);
         } catch (ConnectionException $exception) {
@@ -746,18 +712,6 @@ class RequirementCandidateExtractor
         $rawOutputLength = mb_strlen($rawOutput, 'UTF-8');
         $rawOutputPreview = $this->previewText($rawOutput);
         $elapsedMs = $this->elapsedMs($startedAt);
-
-        Log::info('[TT][AI][RAW_RESPONSE]', array_merge([
-            'run_id' => $runId,
-            'document_id' => $document->id,
-            'saved_notice_ai_document_id' => $document->id,
-            'saved_notice_id' => $document->saved_notice_id,
-            'request_id' => $requestId,
-            'response_id' => $responseId,
-            'status' => $status,
-            'response_length' => $rawOutputLength,
-            'response_preview' => mb_substr($rawOutput, 0, 2000, 'UTF-8'),
-        ], $windowMeta));
 
         $errorType = null;
         $errorMessage = null;
@@ -1793,12 +1747,6 @@ class RequirementCandidateExtractor
 
     private function normalizeCanonicalRow(array $row): ?array
     {
-        Log::info('[TT][BEFORE_NORMALIZE]', [
-            'row' => $row,
-            'original_text' => $row['original_text'] ?? null,
-            'normalized_text' => $row['normalized_text'] ?? null,
-        ]);
-
         $originalText = $this->normalizeScalar($row['original_text'] ?? null);
         $normalizedText = $this->normalizeScalar($row['normalized_text'] ?? null);
 
@@ -1809,20 +1757,10 @@ class RequirementCandidateExtractor
         $sourceReferenceText = $this->normalizeScalar($row['source_reference_text'] ?? null);
 
         if ($originalText === '' && $normalizedText === '') {
-            Log::info('[TT][AFTER_NORMALIZE_EMPTY]', [
-                'original_text' => $originalText,
-                'normalized_text' => $normalizedText,
-            ]);
-
             return null;
         }
 
         if ($this->looksLikeHeaderRow($row, $originalText, $normalizedText)) {
-            Log::info('[TT][AFTER_NORMALIZE_HEADER_ROW]', [
-                'original_text' => $originalText,
-                'normalized_text' => $normalizedText,
-            ]);
-
             return null;
         }
 
@@ -1846,12 +1784,6 @@ class RequirementCandidateExtractor
             'confidence' => $this->normalizeConfidence($row['confidence'] ?? 1.0),
             'warnings' => $this->normalizeListField($row['warnings'] ?? null),
         ];
-
-        Log::info('[TT][AFTER_NORMALIZE]', [
-            'original_text' => $originalText,
-            'normalized_text' => $normalizedText,
-            'normalized_row' => $normalizedRow,
-        ]);
 
         return $normalizedRow;
     }

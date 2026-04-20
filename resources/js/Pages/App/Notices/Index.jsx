@@ -125,19 +125,6 @@ function BookmarkIcon(props) {
     );
 }
 
-function BellIcon(props) {
-    return (
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
-            <path d="M10 17a2 2 0 0 0 1.9-1.4" strokeLinecap="round" />
-            <path
-                d="M5.5 8.2a4.5 4.5 0 1 1 9 0v2.2c0 .9.3 1.7.9 2.4l.3.4a.8.8 0 0 1-.6 1.3H4a.8.8 0 0 1-.6-1.3l.3-.4c.6-.7.9-1.5.9-2.4V8.2Z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-        </svg>
-    );
-}
-
 function BuildingIcon(props) {
     return (
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" {...props}>
@@ -610,10 +597,11 @@ export default function NoticeIndex({
     cpvSelector,
     historyTypeOptions = [],
     mode = 'live',
+    tab = '',
     worklist = {},
-    monitoring = {},
+    watchAlerts = {},
 }) {
-    const { auth, locale, translations } = usePage().props;
+    const { locale, translations } = usePage().props;
     const [selectedWatchListId, setSelectedWatchListId] = useState('');
     const [searchQuery, setSearchQuery] = useState(filters.q ?? '');
     const [organizationName, setOrganizationName] = useState(filters.organization_name ?? '');
@@ -670,6 +658,7 @@ export default function NoticeIndex({
     const isLiveMode = mode === 'live';
     const isSavedMode = mode === 'saved';
     const isHistoryMode = mode === 'history';
+    const isAlertsTab = isLiveMode && tab === 'alerts';
     const isSavedOrHistoryMode = mode === 'saved' || mode === 'history';
     const worklistFilterOptions = isHistoryMode
         ? [{ value: '', label: 'Alle typer' }, ...historyTypeOptions]
@@ -692,10 +681,6 @@ export default function NoticeIndex({
     ].some(
         (value) => (value ?? '').trim() !== '',
     );
-    const canManageWatchProfiles = Boolean(auth?.user?.can_manage_watch_profiles);
-    const monitoringHitsCount = Number(monitoring?.new_hits_last_day_count ?? 0);
-    const monitoringHitsLabel = monitoringHitsCount === 1 ? '1 nytt treff siste døgn' : `${monitoringHitsCount} nye treff siste døgn`;
-    const monitoringNextUpdateText = monitoring?.next_update_text ?? 'Automatisk oppdatering er ikke aktiv ennå.';
     const liveSearchError = isLiveMode && typeof notices?.error === 'string' ? notices.error : '';
     const liveSearchFallbackUsed = isLiveMode && Boolean(notices?.meta?.fallback_used);
     const watchListOptions = savedSearches.map((item) => ({
@@ -717,6 +702,7 @@ export default function NoticeIndex({
         ? 'Doffin-søket feilet'
         : `${formatInteger(notices?.meta?.total ?? 0, locale)} treff fra Doffin`;
     const showLiveSearchFallbackBanner = liveSearchFallbackUsed && liveSearchError === '';
+    const watchAlertRows = Array.isArray(watchAlerts?.data) ? watchAlerts.data : [];
 
     useEffect(() => {
         setSearchQuery(filters.q ?? '');
@@ -1153,6 +1139,62 @@ export default function NoticeIndex({
     const pageSubtitle = isLiveMode
         ? translations.frontend.procurements_subtitle
         : 'Oversikt over kunngjøringer du følger opp og jobber aktivt med.';
+
+    if (isAlertsTab) {
+        return (
+            <CustomerAppLayout title="Varsler" showPageTitle={false}>
+                <div className="space-y-7">
+                    <section className="space-y-1.5">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Varsler</h1>
+                    </section>
+
+                    <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <div className="max-h-[calc(100vh-180px)] space-y-3.5 overflow-y-auto pr-1">
+                            {watchAlertRows.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                                    Ingen nye varsler siste døgn.
+                                </div>
+                            ) : (
+                                watchAlertRows.map((notice) => (
+                                    <DiscoveryNoticeCard
+                                        key={notice.id}
+                                        notice={notice}
+                                        locale={locale}
+                                        canSaveToWorklist
+                                        saveButtonLabel={translations.frontend.save_button}
+                                        deleteAction={{
+                                            href: notice.delete_url,
+                                            label: 'Slett',
+                                            confirmMessage: 'Slette dette varselet?',
+                                        }}
+                                        actions={
+                                            notice.external_url ? (
+                                                <a
+                                                    href={notice.external_url}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                >
+                                                    Åpne i Doffin
+                                                </a>
+                                            ) : null
+                                        }
+                                        provenanceBadges={notice.watch_profile_name ? [
+                                            {
+                                                key: `${notice.id}-watch-profile`,
+                                                label: notice.watch_profile_name,
+                                                className: 'bg-violet-50 text-violet-700 ring-violet-200',
+                                            },
+                                        ] : []}
+                                    />
+                                ))
+                            )}
+                        </div>
+                    </section>
+                </div>
+            </CustomerAppLayout>
+        );
+    }
 
 
     return (
@@ -2551,6 +2593,7 @@ export default function NoticeIndex({
                                 </button>
                             </div>
                         </div>
+
                     </div>
 
                     {!isHistoryMode ? (
@@ -2594,43 +2637,6 @@ export default function NoticeIndex({
                                         ))
                                     )}
                                 </div>
-                            </section>
-
-                            <section id="alerts-monitoring" className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]">
-                                <div className="mb-5 flex items-center gap-3">
-                                    <BellIcon className="h-5 w-5 text-slate-500" />
-                                    <h2 className="text-xl font-semibold text-slate-950">{translations.frontend.alerts_monitoring_title}</h2>
-                                </div>
-
-                                <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 text-sm leading-6 text-violet-900">
-                                    Her ser du status for overvåkning basert på dine aktive watch profiles.
-                                </div>
-
-                                <div className="mt-5 space-y-3 text-sm text-slate-600">
-                                    <div className="flex items-center gap-3">
-                                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                                        {monitoringHitsLabel}
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
-                                        {monitoringNextUpdateText}
-                                    </div>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    onClick={canManageWatchProfiles ? () => router.get('/app/watch-profiles') : undefined}
-                                    disabled={!canManageWatchProfiles}
-                                    title={!canManageWatchProfiles ? 'Kun tilgjengelig for kundeadministrator.' : undefined}
-                                    className={classNames(
-                                        'mt-5 inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition',
-                                        canManageWatchProfiles
-                                            ? 'hover:border-slate-300 hover:text-slate-950'
-                                            : 'cursor-not-allowed opacity-60',
-                                    )}
-                                >
-                                    {translations.frontend.alert_settings}
-                                </button>
                             </section>
                         </aside>
                     ) : null}

@@ -1236,7 +1236,32 @@ class DocumentSplitPlanner
         ]);
 
         if ($headings === []) {
-            return [];
+            $bodyStartPosition = $tocRange['end_position'] ?? 0;
+            $fallbackTitle = 'Document text';
+
+            foreach ($lines as $line) {
+                $lineText = trim((string) ($line['text'] ?? ''));
+
+                if ($lineText === '') {
+                    continue;
+                }
+
+                if ((int) ($line['start_position'] ?? 0) < (int) $bodyStartPosition) {
+                    continue;
+                }
+
+                $fallbackTitle = $lineText;
+                break;
+            }
+
+            return [[
+                'title' => $fallbackTitle,
+                'start_position' => (int) $bodyStartPosition,
+                'end_position' => $documentLength,
+                'group_type' => 'requirements_section',
+                'heading_level' => 1,
+                'child_headings' => [],
+            ]];
         }
 
         $sections = [];

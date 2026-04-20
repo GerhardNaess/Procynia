@@ -294,6 +294,7 @@ class SavedNotice extends Model
         'follow_up_mode',
         'follow_up_offset_months',
         'next_process_date_at',
+        'ai_instructions',
     ];
 
     protected $attributes = [
@@ -389,6 +390,13 @@ class SavedNotice extends Model
     public function aiDocuments(): HasMany
     {
         return $this->hasMany(SavedNoticeAiDocument::class)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
+    public function answerBasisItems(): HasMany
+    {
+        return $this->hasMany(SavedNoticeAiAnswerBasisItem::class)
             ->orderByDesc('created_at')
             ->orderByDesc('id');
     }

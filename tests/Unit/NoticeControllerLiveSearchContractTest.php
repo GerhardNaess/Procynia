@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Http\Controllers\App\NoticeController;
+use App\Models\WatchProfileInboxRecord;
 use App\Models\User;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
@@ -43,6 +44,9 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('customer_id');
             $table->unsignedBigInteger('saved_by_user_id')->nullable();
+            $table->unsignedBigInteger('opportunity_owner_user_id')->nullable();
+            $table->unsignedBigInteger('bid_manager_user_id')->nullable();
+            $table->unsignedBigInteger('organizational_department_id')->nullable();
             $table->string('external_id');
             $table->string('title');
             $table->string('buyer_name')->nullable();
@@ -69,6 +73,42 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             $table->timestamps();
 
             $table->unique(['customer_id', 'external_id']);
+        });
+
+        Schema::dropIfExists('saved_notice_user_access');
+        Schema::create('saved_notice_user_access', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('saved_notice_id');
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('granted_by_user_id')->nullable();
+            $table->string('access_role');
+            $table->timestamp('expires_at')->nullable();
+            $table->timestamp('revoked_at')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::dropIfExists('users');
+        Schema::create('users', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('email')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::dropIfExists('departments');
+        Schema::create('departments', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->timestamps();
+        });
+
+        Schema::dropIfExists('watch_profile_cpv_codes');
+        Schema::create('watch_profile_cpv_codes', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('watch_profile_id');
+            $table->string('cpv_code');
+            $table->unsignedInteger('weight')->nullable();
+            $table->timestamps();
         });
 
         Schema::dropIfExists('watch_profiles');
@@ -109,6 +149,10 @@ class NoticeControllerLiveSearchContractTest extends TestCase
     {
         Schema::dropIfExists('watch_profile_inbox_records');
         Schema::dropIfExists('watch_profiles');
+        Schema::dropIfExists('saved_notice_user_access');
+        Schema::dropIfExists('watch_profile_cpv_codes');
+        Schema::dropIfExists('departments');
+        Schema::dropIfExists('users');
         Schema::dropIfExists('saved_notices');
         Mockery::close();
 
@@ -166,6 +210,84 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 ],
             ]);
 
+        DB::table('watch_profiles')->insert([
+            [
+                'id' => 1,
+                'customer_id' => 1,
+                'user_id' => 23,
+                'department_id' => null,
+                'name' => 'Kunde - drift',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'id' => 2,
+                'customer_id' => 1,
+                'user_id' => null,
+                'department_id' => 8,
+                'name' => 'Avdeling - bygg',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('users')->insert([
+            [
+                'id' => 23,
+                'name' => 'Customer Admin',
+                'email' => 'customer.admin@procynia.local',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('departments')->insert([
+            [
+                'id' => 8,
+                'name' => 'Avdeling bygg',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('watch_profile_cpv_codes')->insert([
+            [
+                'watch_profile_id' => 1,
+                'cpv_code' => '12345678',
+                'weight' => 10,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'watch_profile_id' => 2,
+                'cpv_code' => '87654321',
+                'weight' => 5,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('saved_notices')->insert([
+            [
+                'customer_id' => 1,
+                'saved_by_user_id' => 23,
+                'opportunity_owner_user_id' => null,
+                'bid_manager_user_id' => null,
+                'organizational_department_id' => null,
+                'external_id' => '2026-100002',
+                'title' => 'Test 2',
+                'buyer_name' => 'Oppdragsgiver 2',
+                'external_url' => 'https://doffin.no/notices/2026-100002',
+                'summary' => 'Lagret varsel',
+                'publication_date' => now()->subDay(),
+                'deadline' => now()->addDays(7),
+                'status' => 'ACTIVE',
+                'cpv_code' => '12345678',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
         DB::table('watch_profile_inbox_records')->insert([
             [
                 'watch_profile_id' => 1,
@@ -174,7 +296,21 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'department_id' => null,
                 'doffin_notice_id' => '2026-100001',
                 'title' => 'Test 1',
+                'buyer_name' => 'Oppdragsgiver 1',
+                'publication_date' => now()->subHours(6)->toDateTimeString(),
+                'deadline' => now()->addDays(10)->toDateTimeString(),
+                'external_url' => 'https://doffin.no/notices/2026-100001',
+                'relevance_score' => 7,
                 'discovered_at' => now()->subHours(6),
+                'raw_payload' => json_encode([
+                    'heading' => 'Test 1',
+                    'description' => 'Beskrivelse for varsel 1.',
+                    'status' => 'ACTIVE',
+                    'publicationDate' => now()->subDays(1)->toDateString(),
+                    'deadline' => now()->addDays(10)->toDateString(),
+                    'mainCpvCode' => '12345678',
+                    'cpvCodes' => ['12345678'],
+                ], JSON_THROW_ON_ERROR),
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
@@ -185,7 +321,21 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'department_id' => 8,
                 'doffin_notice_id' => '2026-100002',
                 'title' => 'Test 2',
+                'buyer_name' => 'Oppdragsgiver 2',
+                'publication_date' => now()->subHours(4)->toDateTimeString(),
+                'deadline' => now()->addDays(7)->toDateTimeString(),
+                'external_url' => 'https://doffin.no/notices/2026-100002',
+                'relevance_score' => 9,
                 'discovered_at' => now()->subHours(4),
+                'raw_payload' => json_encode([
+                    'heading' => 'Test 2',
+                    'description' => 'Beskrivelse for varsel 2.',
+                    'status' => 'ACTIVE',
+                    'publicationDate' => now()->subDays(1)->toDateString(),
+                    'deadline' => now()->addDays(7)->toDateString(),
+                    'mainCpvCode' => '87654321',
+                    'cpvCodes' => ['87654321'],
+                ], JSON_THROW_ON_ERROR),
                 'created_at' => now(),
                 'updated_at' => now(),
             ],
@@ -226,10 +376,18 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $this->assertSame('90910000,72222300', $page['props']['filters']['cpv']);
         $this->assertSame('renhold, tingrett', $page['props']['filters']['keywords']);
         $this->assertSame('ACTIVE', $page['props']['filters']['status']);
-        $this->assertSame(0, $page['props']['worklist']['saved_count']);
+        $this->assertSame(1, $page['props']['worklist']['saved_count']);
         $this->assertSame(0, $page['props']['worklist']['history_count']);
         $this->assertSame(2, $page['props']['monitoring']['new_hits_last_day_count']);
         $this->assertSame('Nattlig Doffin-discovery kjører hver dag kl. 01:15.', $page['props']['monitoring']['next_update_text']);
+        $this->assertSame(2, $page['props']['watchAlerts']['meta']['total']);
+        $this->assertSame('2026-100002', $page['props']['watchAlerts']['data'][0]['notice_id']);
+        $this->assertSame('Avdeling - bygg', $page['props']['watchAlerts']['data'][0]['watch_profile_name']);
+        $this->assertTrue($page['props']['watchAlerts']['data'][0]['is_saved']);
+        $this->assertSame(route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => 2]), $page['props']['watchAlerts']['data'][0]['delete_url']);
+        $this->assertSame('2026-100001', $page['props']['watchAlerts']['data'][1]['notice_id']);
+        $this->assertSame('Kunde - drift', $page['props']['watchAlerts']['data'][1]['watch_profile_name']);
+        $this->assertFalse($page['props']['watchAlerts']['data'][1]['is_saved']);
         $this->assertSame('Rengjøring', $page['props']['cpvSelector']['selected'][0]['label']);
         $this->assertSame('IT-tjenester', $page['props']['cpvSelector']['selected'][1]['label']);
         $this->assertSame(1, $page['props']['notices']['meta']['total']);
@@ -422,6 +580,156 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(0, $page['props']['monitoring']['new_hits_last_day_count']);
         $this->assertSame('Nattlig Doffin-discovery kjører hver dag kl. 01:15.', $page['props']['monitoring']['next_update_text']);
+    }
+
+    public function test_alerts_tab_returns_alerts_only_payload_without_running_live_search(): void
+    {
+        $customerContext = Mockery::mock(CustomerContext::class);
+        $cpvSearchService = new CustomerNoticeCpvSearchService();
+        $liveSearchService = Mockery::mock(DoffinLiveSearchService::class);
+        $documentService = Mockery::mock(DoffinNoticeDocumentService::class);
+
+        $customerContext
+            ->shouldReceive('currentCustomerId')
+            ->once()
+            ->andReturn(1);
+
+        $liveSearchService
+            ->shouldReceive('search')
+            ->never();
+
+        DB::table('watch_profiles')->insert([
+            [
+                'id' => 1,
+                'customer_id' => 1,
+                'user_id' => 23,
+                'department_id' => null,
+                'name' => 'Kunde - drift',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('watch_profile_inbox_records')->insert([
+            [
+                'id' => 1,
+                'watch_profile_id' => 1,
+                'customer_id' => 1,
+                'user_id' => 23,
+                'department_id' => null,
+                'doffin_notice_id' => '2026-100001',
+                'title' => 'Test 1',
+                'buyer_name' => 'Oppdragsgiver 1',
+                'publication_date' => now()->subHours(6),
+                'deadline' => now()->addDays(10),
+                'external_url' => 'https://doffin.no/notices/2026-100001',
+                'relevance_score' => 7,
+                'discovered_at' => now()->subHours(6),
+                'raw_payload' => json_encode([
+                    'heading' => 'Test 1',
+                    'description' => 'Beskrivelse for varsel 1.',
+                    'status' => 'ACTIVE',
+                    'publicationDate' => now()->subDays(1)->toDateString(),
+                    'deadline' => now()->addDays(10)->toDateString(),
+                    'mainCpvCode' => '12345678',
+                    'cpvCodes' => ['12345678'],
+                ], JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $request = Request::create('/app/notices', 'GET', [
+            'tab' => 'alerts',
+        ]);
+        $request->headers->set('X-Inertia', 'true');
+        $request->headers->set('X-Requested-With', 'XMLHttpRequest');
+        $request->setUserResolver(fn (): User => new User([
+            'id' => 23,
+            'name' => 'Customer Admin',
+            'email' => 'customer.admin@procynia.local',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'customer_id' => 1,
+            'is_active' => true,
+        ]));
+
+        $controller = new NoticeController(
+            $customerContext,
+            $cpvSearchService,
+            $liveSearchService,
+            $documentService,
+            new SavedNoticeAccessService(),
+        );
+        $response = $controller->index($request);
+        $page = json_decode($response->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('alerts', $page['props']['tab']);
+        $this->assertSame([], $page['props']['notices']['data']);
+        $this->assertSame(1, $page['props']['watchAlerts']['meta']['total']);
+        $this->assertSame('2026-100001', $page['props']['watchAlerts']['data'][0]['notice_id']);
+    }
+
+    public function test_destroy_watch_alert_record_deletes_accessible_record(): void
+    {
+        DB::table('watch_profiles')->insert([
+            [
+                'id' => 1,
+                'customer_id' => 1,
+                'user_id' => 23,
+                'department_id' => null,
+                'name' => 'Kunde - drift',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        DB::table('watch_profile_inbox_records')->insert([
+            [
+                'id' => 1,
+                'watch_profile_id' => 1,
+                'customer_id' => 1,
+                'user_id' => 23,
+                'department_id' => null,
+                'doffin_notice_id' => '2026-100001',
+                'title' => 'Test 1',
+                'discovered_at' => now()->subHours(6),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
+
+        $customerContext = Mockery::mock(CustomerContext::class);
+        $customerContext
+            ->shouldReceive('currentCustomerId')
+            ->never();
+
+        $controller = new NoticeController(
+            $customerContext,
+            new CustomerNoticeCpvSearchService(),
+            Mockery::mock(DoffinLiveSearchService::class),
+            Mockery::mock(DoffinNoticeDocumentService::class),
+            new SavedNoticeAccessService(),
+        );
+
+        $request = Request::create('/app/notices/watch-alerts/1', 'DELETE');
+        $request->headers->set('X-Inertia', 'true');
+        $request->headers->set('X-Requested-With', 'XMLHttpRequest');
+        $request->setUserResolver(fn (): User => new User([
+            'id' => 23,
+            'name' => 'Customer Admin',
+            'email' => 'customer.admin@procynia.local',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'customer_id' => 1,
+            'is_active' => true,
+        ]));
+
+        $response = $controller->destroyWatchAlertRecord($request, WatchProfileInboxRecord::query()->firstOrFail());
+
+        $this->assertSame(302, $response->getStatusCode());
+        $this->assertDatabaseMissing('watch_profile_inbox_records', [
+            'id' => 1,
+        ]);
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('liveSearchErrorCases')]

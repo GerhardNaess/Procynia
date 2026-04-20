@@ -6,18 +6,21 @@ use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
 use App\Http\Controllers\Controller;
 use App\Models\SavedNoticeAiEvidence;
+use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
-use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\User;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
+use App\Services\Ai\DocumentPreviewService;
 use App\Services\Ai\Requirements\RequirementExtractionPipeline;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Services\Ai\Requirements\RequirementAnswerBasisService;
+use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\OpenAi\EmbeddingService;
@@ -27,6 +30,7 @@ use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -36,6 +40,8 @@ use Illuminate\Support\Collection;
 use Throwable;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class AiController extends Controller
 {
@@ -56,8 +62,11 @@ class AiController extends Controller
         private readonly RequirementExtractionPipeline $requirementExtractionPipeline,
         private readonly RequirementExtractionRunService $requirementExtractionRunService,
         private readonly RequirementLoader $requirementLoader,
+        private readonly RequirementAnswerBasisService $requirementAnswerBasisService,
+        private readonly RequirementAnswerDraftService $requirementAnswerDraftService,
         private readonly RequirementEditorService $requirementEditorService,
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
+        private readonly DocumentPreviewService $documentPreviewService,
     ) {
     }
 
@@ -73,7 +82,7 @@ class AiController extends Controller
         $analysisCases = $this->analysisCases($user, $customerId);
 
         return Inertia::render('App/AI/Index', [
-            'pageTitle' => 'AI-arbeid',
+            'pageTitle' => 'Oversikt',
             'analysisCases' => $analysisCases,
         ]);
     }
@@ -87,13 +96,13 @@ class AiController extends Controller
     public function show(Request $request, SavedNotice $savedNotice): Response
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
-        $searchQuery = trim((string) $request->query('search', ''));
         $record->loadMissing([
             'bidManager',
             'opportunityOwner',
             'aiDocuments.uploadedBy',
             'aiDocuments.chunks',
             'aiDocuments.latestExtractionRun',
+            'answerBasisItems.createdBy',
         ])->loadCount([
             'infoItems',
             'phaseComments',
@@ -107,7 +116,7 @@ class AiController extends Controller
         $requirementsOverview = $this->requirementsOverviewPayload($requirements);
 
         return Inertia::render('App/AI/Show', [
-            'pageTitle' => sprintf('AI-arbeid · %s', $record->title),
+            'pageTitle' => sprintf('I arbeid · %s', $record->title),
             'case' => [
                 'id' => $analysisCase['id'],
                 'title' => $analysisCase['title'],
@@ -117,11 +126,6 @@ class AiController extends Controller
                 'updated_at' => $analysisCase['updated_at'],
             ],
             'ai_status' => $analysisCase['ai_status'],
-            'search_url' => route('app.ai.show', ['savedNotice' => $record->id]),
-            'search_query' => $searchQuery,
-            'search_results' => $searchQuery !== ''
-                ? $this->searchAiDocumentChunks($record, $searchQuery)
-                : [],
             'requirements_count' => count($requirementsPayload),
             'requirements_overview' => $requirementsOverview,
             'requirements' => $requirementsPayload,
@@ -131,7 +135,137 @@ class AiController extends Controller
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
             'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
             'documents' => $this->aiDocumentsPayload($record),
+            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems),
+            'answer_basis_documents_upload_url' => route('app.ai.answer-basis.documents.store', ['savedNotice' => $record->id]),
+            'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
         ]);
+    }
+
+    /**
+     * Purpose: Render the dedicated AI instruction page for a visible saved notice.
+     * Inputs: The current request and the route-bound saved notice model.
+     * Returns: Inertia\Response for the AI instruction page.
+     * Side effects: None.
+     */
+    public function instructions(Request $request, SavedNotice $savedNotice): Response
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $analysisCase = $this->analysisCasePayload($record);
+
+        return Inertia::render('App/AI/Instructions', [
+            'pageTitle' => 'AI instrukser',
+            'case' => [
+                'id' => $analysisCase['id'],
+                'title' => $analysisCase['title'],
+                'reference' => $analysisCase['reference'],
+                'owner' => $analysisCase['owner_name'],
+                'stage' => $analysisCase['stage_label'],
+                'updated_at' => $analysisCase['updated_at'],
+            ],
+            'ai_instructions' => (string) ($record->ai_instructions ?? ''),
+            'ai_instructions_update_url' => route('app.ai.instructions.update', ['savedNotice' => $record->id]),
+        ]);
+    }
+
+    /**
+     * Purpose: Persist the case-level AI instructions for a visible saved notice.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after saving the instructions.
+     * Side effects: Updates the saved notice row.
+     */
+    public function updateAiInstructions(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $validated = $request->validate([
+            'ai_instructions' => ['nullable', 'string', 'max:20000'],
+        ]);
+
+        $normalizedInstructions = trim(str_replace(["\r\n", "\r"], "\n", (string) ($validated['ai_instructions'] ?? '')));
+
+        $record->forceFill([
+            'ai_instructions' => $normalizedInstructions !== '' ? $normalizedInstructions : null,
+        ])->save();
+
+        return back()->with('success', 'AI-instruks lagret.');
+    }
+
+    /**
+     * Purpose: Render a deterministic in-app preview for one uploaded AI document.
+     * Inputs: The current request, route-bound saved notice, and route-bound document.
+     * Returns: An Inertia response for the source document preview page.
+     * Side effects: None.
+     */
+    public function previewDocument(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiDocument $document,
+    ): Response {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedDocument = $record->aiDocuments()
+            ->with('uploadedBy')
+            ->whereKey($document->id)
+            ->firstOrFail();
+
+        $analysisCase = $this->analysisCasePayload($record);
+        $previewFilePath = $this->documentPreviewService->resolvePreviewFilePath($ownedDocument);
+        $previewMode = is_string($previewFilePath) && $previewFilePath !== ''
+            ? 'pdf'
+            : 'unavailable';
+        $previewFileUrl = $previewMode === 'pdf'
+            ? route('app.ai.documents.preview-file', [
+                'savedNotice' => $record->id,
+                'document' => $ownedDocument->id,
+            ])
+            : null;
+
+        return Inertia::render('App/AI/DocumentPreview', [
+            'pageTitle' => sprintf('Kilde · %s', $ownedDocument->original_filename ?: basename((string) $ownedDocument->stored_path)),
+            'case' => [
+                'id' => $analysisCase['id'],
+                'title' => $analysisCase['title'],
+                'reference' => $analysisCase['reference'],
+                'owner' => $analysisCase['owner_name'],
+                'stage' => $analysisCase['stage_label'],
+                'updated_at' => $analysisCase['updated_at'],
+            ],
+            'document' => $this->aiDocumentPreviewPayload($ownedDocument, $previewMode, $previewFileUrl),
+            'back_url' => route('app.ai.show', ['savedNotice' => $record->id]),
+        ]);
+    }
+
+    /**
+     * Purpose: Stream the canonical PDF preview for one visible AI source document.
+     * Inputs: The current request, route-bound saved notice, and route-bound document.
+     * Returns: An inline PDF file response that the preview page can embed.
+     * Side effects: May lazily generate and persist a PDF preview for DOCX sources.
+     */
+    public function previewPdfDocument(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiDocument $document,
+    ): BinaryFileResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedDocument = $record->aiDocuments()
+            ->with('uploadedBy')
+            ->whereKey($document->id)
+            ->firstOrFail();
+
+        $previewPath = $this->documentPreviewService->resolvePreviewFilePath($ownedDocument);
+
+        abort_unless(is_string($previewPath) && $previewPath !== '' && Storage::disk('local')->exists($previewPath), 404);
+
+        $previewName = sprintf(
+            '%s.pdf',
+            pathinfo((string) ($ownedDocument->original_filename ?: basename((string) $ownedDocument->stored_path)), PATHINFO_FILENAME),
+        );
+
+        $response = response()->file(Storage::disk('local')->path($previewPath), [
+            'Content-Type' => 'application/pdf',
+        ]);
+        $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $previewName);
+
+        return $response;
     }
 
     /**
@@ -271,6 +405,116 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Persist one or more supplier-owned answer basis documents on a visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after saving the uploads.
+     * Side effects: Stores files on disk and creates answer basis rows.
+     */
+    public function storeAnswerBasisDocuments(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $request->validate([
+            'documents' => ['required', 'array', 'min:1'],
+            'documents.*' => ['file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
+        ]);
+
+        $createdItems = $this->requirementAnswerBasisService->createDocumentItems(
+            $record,
+            $request->file('documents', []),
+            $request->user(),
+        );
+
+        return redirect()
+            ->route('app.ai.show', ['savedNotice' => $record->id])
+            ->with('success', sprintf('%d svargrunnlagsdokumenter lagt til.', $createdItems->count()));
+    }
+
+    /**
+     * Purpose: Persist one supplier-owned answer basis text item on a visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after saving the text item.
+     * Side effects: Creates an answer basis row in the database.
+     */
+    public function storeAnswerBasisText(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $validated = $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'body_text' => ['required', 'string', 'max:20000'],
+        ]);
+
+        $this->requirementAnswerBasisService->createTextItem(
+            $record,
+            (string) $validated['title'],
+            (string) $validated['body_text'],
+            $request->user(),
+        );
+
+        return redirect()
+            ->route('app.ai.show', ['savedNotice' => $record->id])
+            ->with('success', 'Svargrunnlag lagt til.');
+    }
+
+    /**
+     * Purpose: Delete one answer basis item from a visible AI case.
+     * Inputs: The current request, route-bound saved notice, and route-bound answer basis item.
+     * Returns: A redirect back to the AI case view after removing the item.
+     * Side effects: Deletes the stored file and cascades related selections.
+     */
+    public function destroyAnswerBasisItem(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiAnswerBasisItem $answerBasisItem,
+    ): RedirectResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedItem = $record->answerBasisItems()
+            ->whereKey($answerBasisItem->id)
+            ->firstOrFail();
+
+        $this->requirementAnswerBasisService->deleteItem($ownedItem);
+
+        return redirect()
+            ->route('app.ai.show', ['savedNotice' => $record->id])
+            ->with('success', 'Svargrunnlag slettet.');
+    }
+
+    /**
+     * Purpose: Download one uploaded AI document from a visible saved notice.
+     * Inputs: The current request, route-bound saved notice, and route-bound document.
+     * Returns: A file response that streams the stored AI document back to the browser.
+     * Side effects: None.
+     */
+    public function downloadDocument(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiDocument $document,
+    ): BinaryFileResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedDocument = $record->aiDocuments()
+            ->whereKey($document->id)
+            ->firstOrFail();
+        $storedPath = $ownedDocument->stored_path;
+
+        abort_unless(is_string($storedPath) && $storedPath !== '', 404);
+        abort_unless(Storage::disk('local')->exists($storedPath), 404);
+
+        $downloadName = (string) ($ownedDocument->original_filename ?: basename($storedPath));
+        $headers = [];
+        $contentType = $this->aiDocumentMimeTypeForResponse($ownedDocument, $storedPath);
+
+        if (is_string($contentType) && $contentType !== '') {
+            $headers['Content-Type'] = $contentType;
+        }
+
+        $response = response()->file(Storage::disk('local')->path($storedPath), $headers);
+        $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $downloadName);
+
+        return $response;
+    }
+
+    /**
      * Purpose: Update the canonical review status for a single AI requirement candidate.
      * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
      * Returns: A redirect back to the AI case view after persisting the review status.
@@ -401,6 +645,144 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Generate and persist one answer draft for a visible requirement candidate.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted answer draft payload.
+     * Side effects: May call OpenAI and updates the requirement row.
+     */
+    public function generateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'answer_basis_item_ids' => ['present', 'array'],
+            'answer_basis_item_ids.*' => ['integer'],
+            'force' => ['sometimes', 'boolean'],
+        ]);
+
+        $selectedAnswerBasisItems = $this->syncRequirementAnswerBasisSelectionItems(
+            $record,
+            $ownedRequirement,
+            $validated['answer_basis_item_ids'],
+        );
+
+        $persistedRequirement = $this->requirementAnswerDraftService->ensureAnswerDraft(
+            $ownedRequirement,
+            $selectedAnswerBasisItems,
+            (bool) ($validated['force'] ?? false),
+            $record->ai_instructions,
+        );
+
+        $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
+
+        return response()->json(array_merge(
+            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement),
+            [
+                'answer_basis_item_ids' => $selectedAnswerBasisItems
+                    ->pluck('id')
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->values()
+                    ->all(),
+                'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+            ],
+        ));
+    }
+
+    /**
+     * Purpose: Persist edits to one visible requirement answer draft.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted answer draft payload.
+     * Side effects: Updates the requirement row.
+     */
+    public function updateRequirementAnswerDraft(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'answer_draft_text' => ['required', 'string', 'max:20000'],
+        ]);
+
+        $persistedRequirement = $this->requirementAnswerDraftService->updateAnswerDraft(
+            $ownedRequirement,
+            (string) $validated['answer_draft_text'],
+        );
+
+        return response()->json($this->aiRequirementAnswerDraftResponsePayload($persistedRequirement));
+    }
+
+    /**
+     * Purpose: Synchronize the selected answer basis items for one visible requirement candidate.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the persisted selection payload.
+     * Side effects: Updates the selection pivot rows for the requirement.
+     */
+    public function syncRequirementAnswerBasisSelection(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'answer_basis_item_ids' => ['present', 'array'],
+            'answer_basis_item_ids.*' => ['integer'],
+        ]);
+
+        $selectedAnswerBasisItems = $this->syncRequirementAnswerBasisSelectionItems(
+            $record,
+            $ownedRequirement,
+            $validated['answer_basis_item_ids'],
+        );
+
+        $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
+
+        return response()->json([
+            'requirement_id' => $ownedRequirement->id,
+            'answer_basis_item_ids' => $selectedAnswerBasisItems
+                ->pluck('id')
+                ->map(static fn (mixed $value): int => (int) $value)
+                ->values()
+                ->all(),
+            'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+        ]);
+    }
+
+    /**
+     * Purpose: Synchronize selected answer basis items for a requirement within the visible case.
+     * Inputs: The visible saved notice, the owned requirement, and raw answer basis item ids.
+     * Returns: The canonical selected answer basis item collection.
+     * Side effects: Updates the selection pivot rows for the requirement.
+     */
+    private function syncRequirementAnswerBasisSelectionItems(
+        SavedNotice $record,
+        SavedNoticeAiRequirement $requirement,
+        array $answerBasisItemIds,
+    ): Collection {
+        $selectedItems = $this->requirementAnswerBasisService->syncRequirementSelection(
+            $requirement,
+            $answerBasisItemIds,
+        );
+
+        return $selectedItems->filter(static fn (SavedNoticeAiAnswerBasisItem $item): bool => (int) $item->saved_notice_id === (int) $record->id)
+            ->values();
+    }
+
+    /**
      * Purpose: Rebuild persisted evidence rows for every confirmed requirement in the visible AI case.
      * Inputs: The current request and the route-bound saved notice.
      * Returns: A redirect back to the AI case view after refreshing the evidence rows.
@@ -450,7 +832,7 @@ class AiController extends Controller
 
         foreach ($confirmedRequirements as $requirement) {
             try {
-                $requirementAssessmentService->assessRequirement($requirement, $userId);
+                $requirementAssessmentService->assessRequirement($requirement, $userId, $record->ai_instructions);
             } catch (Throwable) {
                 $this->persistFailedRequirementAssessment($requirement, $userId);
                 $failedCount++;
@@ -635,37 +1017,173 @@ class AiController extends Controller
     private function aiDocumentsPayload(SavedNotice $notice): array
     {
         return $notice->aiDocuments
-            ->map(function (SavedNoticeAiDocument $document): array {
-                return [
-                    'id' => $document->id,
-                    'original_filename' => $document->original_filename,
-                    'uploaded_at' => optional($document->created_at)?->toIso8601String(),
-                    'file_size_bytes' => $document->file_size_bytes,
-                    'file_size_human' => $this->humanFileSize($document->file_size_bytes),
-                    'processing_status' => $document->processing_status,
-                    'processing_status_label' => SavedNoticeAiDocument::PROCESSING_STATUS_LABELS[$document->processing_status]
-                        ?? $document->processing_status,
-                    'uploaded_by' => $document->uploadedBy?->name,
-                    'mime_type' => $document->mime_type,
-                    'text_extracted_at' => optional($document->text_extracted_at)?->toIso8601String(),
-                    'queued_at' => optional($document->queued_at)?->toIso8601String(),
-                    'processing_started_at' => optional($document->processing_started_at)?->toIso8601String(),
-                    'processing_finished_at' => optional($document->processing_finished_at)?->toIso8601String(),
-                    'processing_error_type' => $document->processing_error_type,
-                    'processing_error_message' => $document->processing_error_message,
-                    'processing_failure_stage' => $document->latestExtractionRun?->failure_stage,
-                    'processing_failure_type' => $document->latestExtractionRun?->error_type,
-                    'processing_failure_message' => $document->latestExtractionRun?->error_message,
-                    'has_extracted_text' => filled($document->extracted_text),
-                    'chunk_count' => $document->chunks->count(),
-                    'delete_url' => route('app.ai.documents.destroy', [
-                        'savedNotice' => $document->saved_notice_id,
-                        'document' => $document->id,
-                    ]),
-                ];
-            })
+            ->map(fn (SavedNoticeAiDocument $document): array => $this->aiDocumentPayload($document))
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Convert supplier-owned answer basis items into a compact frontend payload.
+     * Inputs: A visible saved notice or a selected answer basis item collection.
+     * Returns: An ordered array of answer basis rows for the AI case view.
+     * Side effects: None.
+     */
+    private function aiAnswerBasisItemsPayload(Collection $answerBasisItems): array
+    {
+        if (method_exists($answerBasisItems, 'loadMissing')) {
+            $answerBasisItems->loadMissing('createdBy');
+        }
+
+        return $answerBasisItems
+            ->map(fn (SavedNoticeAiAnswerBasisItem $answerBasisItem): array => $this->aiAnswerBasisItemPayload($answerBasisItem))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Purpose: Convert one supplier-owned answer basis item into the canonical frontend payload.
+     * Inputs: A visible answer basis item row with its creator relation loaded.
+     * Returns: A frontend-ready array for one answer basis row.
+     * Side effects: None.
+     */
+    private function aiAnswerBasisItemPayload(SavedNoticeAiAnswerBasisItem $answerBasisItem): array
+    {
+        return [
+            'id' => $answerBasisItem->id,
+            'saved_notice_id' => $answerBasisItem->saved_notice_id,
+            'answer_basis_type' => $answerBasisItem->answer_basis_type,
+            'answer_basis_type_label' => $answerBasisItem->answer_basis_type_label,
+            'title' => $answerBasisItem->title,
+            'original_filename' => $answerBasisItem->original_filename,
+            'body_text' => $answerBasisItem->body_text,
+            'stored_path' => $answerBasisItem->stored_path,
+            'mime_type' => $answerBasisItem->mime_type,
+            'file_size_bytes' => $answerBasisItem->file_size_bytes,
+            'file_size_human' => $this->humanFileSize($answerBasisItem->file_size_bytes),
+            'created_by_user_id' => $answerBasisItem->created_by_user_id,
+            'created_by' => $answerBasisItem->createdBy?->name,
+            'created_at' => optional($answerBasisItem->created_at)?->toIso8601String(),
+            'updated_at' => optional($answerBasisItem->updated_at)?->toIso8601String(),
+            'delete_url' => route('app.ai.answer-basis.destroy', [
+                'savedNotice' => $answerBasisItem->saved_notice_id,
+                'answerBasisItem' => $answerBasisItem->id,
+            ]),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one AI document into the canonical frontend payload.
+     * Inputs: A visible AI document row with its related extraction data loaded.
+     * Returns: A frontend-ready array for one AI document row.
+     * Side effects: None.
+     */
+    private function aiDocumentPayload(SavedNoticeAiDocument $document): array
+    {
+        $storedPath = (string) $document->stored_path;
+        $previewMode = $this->documentPreviewService->previewMode($document);
+
+        return [
+            'id' => $document->id,
+            'original_filename' => $document->original_filename,
+            'uploaded_at' => optional($document->created_at)?->toIso8601String(),
+            'file_size_bytes' => $document->file_size_bytes,
+            'file_size_human' => $this->humanFileSize($document->file_size_bytes),
+            'processing_status' => $document->processing_status,
+            'processing_status_label' => SavedNoticeAiDocument::PROCESSING_STATUS_LABELS[$document->processing_status]
+                ?? $document->processing_status,
+            'uploaded_by' => $document->uploadedBy?->name,
+            'mime_type' => $document->mime_type,
+            'text_extracted_at' => optional($document->text_extracted_at)?->toIso8601String(),
+            'queued_at' => optional($document->queued_at)?->toIso8601String(),
+            'processing_started_at' => optional($document->processing_started_at)?->toIso8601String(),
+            'processing_finished_at' => optional($document->processing_finished_at)?->toIso8601String(),
+            'processing_error_type' => $document->processing_error_type,
+            'processing_error_message' => $document->processing_error_message,
+            'processing_failure_stage' => $document->latestExtractionRun?->failure_stage,
+            'processing_failure_type' => $document->latestExtractionRun?->error_type,
+            'processing_failure_message' => $document->latestExtractionRun?->error_message,
+            'has_extracted_text' => filled($document->extracted_text),
+            'chunk_count' => $document->chunks->count(),
+            'preview_mode' => $previewMode,
+            'preview_url' => $previewMode !== 'unavailable'
+                ? route('app.ai.documents.preview', [
+                    'savedNotice' => $document->saved_notice_id,
+                    'document' => $document->id,
+                ])
+                : null,
+            'download_url' => filled($storedPath) && Storage::disk('local')->exists($storedPath)
+                ? route('app.ai.documents.download', [
+                    'savedNotice' => $document->saved_notice_id,
+                    'document' => $document->id,
+                ])
+                : null,
+            'delete_url' => route('app.ai.documents.destroy', [
+                'savedNotice' => $document->saved_notice_id,
+                'document' => $document->id,
+            ]),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one AI document into a detailed preview payload.
+     * Inputs: A visible AI document row with its related extraction data loaded.
+     * Returns: A frontend-ready array for the preview page.
+     * Side effects: None.
+     */
+    private function aiDocumentPreviewPayload(
+        SavedNoticeAiDocument $document,
+        ?string $previewMode = null,
+        ?string $previewFileUrl = null,
+    ): array
+    {
+        $storedPath = (string) $document->stored_path;
+        $resolvedPreviewMode = $previewMode ?? $this->documentPreviewService->previewMode($document);
+        $resolvedPreviewFileUrl = $previewFileUrl ?? $this->documentPreviewService->previewFileUrl($document);
+
+        return [
+            'id' => $document->id,
+            'original_filename' => $document->original_filename,
+            'file_size_bytes' => $document->file_size_bytes,
+            'file_size_human' => $this->humanFileSize($document->file_size_bytes),
+            'mime_type' => $this->aiDocumentMimeTypeForResponse($document, $storedPath) ?? $document->mime_type,
+            'uploaded_at' => optional($document->created_at)?->toIso8601String(),
+            'has_extracted_text' => filled($document->extracted_text),
+            'extracted_text' => (string) $document->extracted_text,
+            'preview_mode' => $resolvedPreviewMode,
+            'preview_file_url' => $resolvedPreviewFileUrl,
+            'download_url' => filled($storedPath) && Storage::disk('local')->exists($storedPath)
+                ? route('app.ai.documents.download', [
+                    'savedNotice' => $document->saved_notice_id,
+                    'document' => $document->id,
+                ])
+                : null,
+        ];
+    }
+
+    /**
+     * Purpose: Resolve the canonical MIME type to expose for an AI document file response.
+     * Inputs: A saved notice AI document and its stored path.
+     * Returns: A MIME type string for the file response, or null when no reliable type is available.
+     * Side effects: None.
+     */
+    private function aiDocumentMimeTypeForResponse(SavedNoticeAiDocument $document, string $storedPath): ?string
+    {
+        $filename = (string) ($document->original_filename ?: basename($storedPath));
+        $extension = Str::lower(pathinfo($filename, PATHINFO_EXTENSION));
+
+        if ($extension === 'docx') {
+            return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        }
+
+        if (is_string($document->mime_type) && $document->mime_type !== '') {
+            return $document->mime_type;
+        }
+
+        $storageMimeType = Storage::disk('local')->mimeType($storedPath);
+
+        return is_string($storageMimeType) && $storageMimeType !== ''
+            ? $storageMimeType
+            : null;
     }
 
     /**
@@ -678,6 +1196,8 @@ class AiController extends Controller
     {
         return $requirements
             ->map(function (SavedNoticeAiRequirement $requirement): array {
+                $selectedAnswerBasisItems = collect($requirement->answerBasisItems->all());
+
                 $viewData = RequirementViewData::fromRequirement($requirement, [
                     'review_status_update_url' => route('app.ai.requirements.review-status.update', [
                         'savedNotice' => $requirement->saved_notice_id,
@@ -696,6 +1216,24 @@ class AiController extends Controller
                 return array_merge(
                     $viewData->toArray(),
                     [
+                        'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
+                        'answer_basis_item_ids' => $selectedAnswerBasisItems
+                            ->pluck('id')
+                            ->map(static fn (mixed $value): int => (int) $value)
+                            ->values()
+                            ->all(),
+                        'answer_basis_selection_sync_url' => route('app.ai.requirements.answer-basis.sync', [
+                            'savedNotice' => $requirement->saved_notice_id,
+                            'requirement' => $requirement->id,
+                        ]),
+                        'answer_draft_generate_url' => route('app.ai.requirements.answer-draft.generate', [
+                            'savedNotice' => $requirement->saved_notice_id,
+                            'requirement' => $requirement->id,
+                        ]),
+                        'answer_draft_save_url' => route('app.ai.requirements.answer-draft.update', [
+                            'savedNotice' => $requirement->saved_notice_id,
+                            'requirement' => $requirement->id,
+                        ]),
                         'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
                         'evidence' => $this->aiRequirementEvidencePayload($requirement),
                     ],
@@ -739,6 +1277,34 @@ class AiController extends Controller
             'missing_information' => $assessment->missing_information,
             'recommended_next_step' => $assessment->recommended_next_step,
             'assessed_at' => optional($assessment->assessed_at)?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one persisted answer draft into a compact frontend payload.
+     * Inputs: A requirement row with optional answer draft fields.
+     * Returns: A frontend-ready answer draft array.
+     * Side effects: None.
+     */
+    private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement): array
+    {
+        return [
+            'text' => (string) ($requirement->answer_draft_text ?? ''),
+            'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Purpose: Convert one persisted requirement row into a compact answer draft API payload.
+     * Inputs: A saved notice AI requirement row.
+     * Returns: A JSON response payload for the answer draft endpoints.
+     * Side effects: None.
+     */
+    private function aiRequirementAnswerDraftResponsePayload(SavedNoticeAiRequirement $requirement): array
+    {
+        return [
+            'requirement_id' => $requirement->id,
+            'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
         ];
     }
 
@@ -883,100 +1449,6 @@ class AiController extends Controller
             ])
             ->values()
             ->all();
-    }
-
-    /**
-     * Purpose: Search chunked AI document content for a visible saved notice.
-     * Inputs: The saved notice context and the trimmed search query string.
-     * Returns: An ordered list of chunk-level search hits for the AI case view.
-     * Side effects: None.
-     */
-    private function searchAiDocumentChunks(SavedNotice $notice, string $searchQuery): array
-    {
-        $searchQuery = trim($searchQuery);
-
-        if ($searchQuery === '') {
-            return [];
-        }
-
-        $normalizedNeedle = mb_strtolower($searchQuery, 'UTF-8');
-        $escapedNeedle = addcslashes($normalizedNeedle, "\\%_");
-
-        return SavedNoticeAiDocumentChunk::query()
-            ->join('saved_notice_ai_documents', 'saved_notice_ai_documents.id', '=', 'saved_notice_ai_document_chunks.saved_notice_ai_document_id')
-            ->where('saved_notice_ai_documents.saved_notice_id', $notice->id)
-            ->whereRaw("LOWER(saved_notice_ai_document_chunks.content) LIKE ? ESCAPE '\\'", [
-                '%'.$escapedNeedle.'%',
-            ])
-            ->orderByDesc('saved_notice_ai_documents.created_at')
-            ->orderByDesc('saved_notice_ai_documents.id')
-            ->orderBy('saved_notice_ai_document_chunks.chunk_index')
-            ->get([
-                'saved_notice_ai_document_chunks.id as chunk_id',
-                'saved_notice_ai_document_chunks.saved_notice_ai_document_id as document_id',
-                'saved_notice_ai_document_chunks.chunk_index',
-                'saved_notice_ai_document_chunks.content',
-                'saved_notice_ai_documents.original_filename as document_filename',
-            ])
-            ->map(function ($chunk) use ($searchQuery): array {
-                $content = (string) $chunk->content;
-
-                return [
-                    'document_id' => (int) $chunk->document_id,
-                    'document_filename' => (string) $chunk->document_filename,
-                    'chunk_id' => (int) $chunk->chunk_id,
-                    'chunk_index' => (int) $chunk->chunk_index,
-                    'snippet' => $this->buildSearchSnippet($content, $searchQuery),
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Purpose: Build a short, readable snippet around a query match in chunk text.
-     * Inputs: The chunk content and the case-insensitive search query.
-     * Returns: A compact snippet suitable for list rendering.
-     * Side effects: None.
-     */
-    private function buildSearchSnippet(string $content, string $searchQuery): string
-    {
-        $normalizedContent = preg_replace('/\s+/u', ' ', trim($content));
-
-        if (! is_string($normalizedContent) || $normalizedContent === '') {
-            return '';
-        }
-
-        $searchQuery = trim($searchQuery);
-
-        if ($searchQuery === '') {
-            return mb_strlen($normalizedContent, 'UTF-8') <= 220
-                ? $normalizedContent
-                : mb_substr($normalizedContent, 0, 217, 'UTF-8').'...';
-        }
-
-        $matchPosition = mb_stripos($normalizedContent, $searchQuery, 0, 'UTF-8');
-
-        if ($matchPosition === false) {
-            return mb_strlen($normalizedContent, 'UTF-8') <= 220
-                ? $normalizedContent
-                : mb_substr($normalizedContent, 0, 217, 'UTF-8').'...';
-        }
-
-        $contentLength = mb_strlen($normalizedContent, 'UTF-8');
-        $windowSize = 220;
-        $start = max(0, $matchPosition - 90);
-        $snippet = mb_substr($normalizedContent, $start, $windowSize, 'UTF-8');
-
-        if ($start > 0) {
-            $snippet = '...'.ltrim($snippet);
-        }
-
-        if ($start + $windowSize < $contentLength) {
-            $snippet = rtrim($snippet).'...';
-        }
-
-        return $snippet;
     }
 
     /**

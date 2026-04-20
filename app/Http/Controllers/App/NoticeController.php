@@ -50,6 +50,8 @@ class NoticeController extends Controller
         $user = $request->user();
         $customerId = $this->customerContext->currentCustomerId($user);
         $mode = $this->noticeMode((string) $request->string('mode'));
+        $noticeTab = trim((string) $request->string('tab'));
+        $isAlertsTab = $mode === 'live' && $noticeTab === 'alerts';
         $useCockpitScope = $request->boolean('cockpit_scope');
         $publicationPeriod = trim((string) $request->string('publication_period'));
         $publicationDateFrom = trim((string) $request->string('publication_date_from'));
@@ -89,7 +91,9 @@ class NoticeController extends Controller
                     'saved_count' => 0,
                     'history_count' => 0,
                 ],
+                'tab' => $noticeTab,
                 'monitoring' => $this->monitoringSummary(null, null),
+                'watchAlerts' => $this->emptyWatchAlertsPayload(),
                 'notices' => $this->emptySearchResult(),
                 'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
                     ->map(fn (array $option): array => $option)
@@ -101,10 +105,38 @@ class NoticeController extends Controller
         $page = max(1, (int) $request->integer('page', 1));
         $perPage = 15;
         $worklist = $this->savedNoticeCounts($user, $customerId, $useCockpitScope);
+        $watchAlerts = $this->watchAlertsPayload($user, $customerId);
+
+        if ($isAlertsTab) {
+            return $this->renderNoticeIndexPage($request, [
+                'mode' => $mode,
+                'tab' => $noticeTab,
+                'source' => $this->discoverySource($mode),
+                'supportMode' => [
+                    'active' => false,
+                    'message' => null,
+                ],
+                'filters' => $filters,
+                'cpvSelector' => $this->cpvSelectorPayload($filters['cpv']),
+                'savedSearches' => [],
+                'worklist' => [
+                    'saved_count' => 0,
+                    'history_count' => 0,
+                ],
+                'monitoring' => $this->monitoringSummary($user, $customerId),
+                'watchAlerts' => $watchAlerts,
+                'notices' => $this->emptySearchResult(),
+                'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
+                    ->map(fn (array $option): array => $option)
+                    ->values()
+                    ->all(),
+            ]);
+        }
 
         if ($mode !== 'live') {
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
+                'tab' => $noticeTab,
                 'source' => $this->discoverySource($mode),
                 'supportMode' => [
                     'active' => false,
@@ -115,6 +147,7 @@ class NoticeController extends Controller
                 'savedSearches' => $this->savedSearchesForUser($user, $customerId),
                 'worklist' => $worklist,
                 'monitoring' => $this->monitoringSummary($user, $customerId),
+                'watchAlerts' => $watchAlerts,
                 'notices' => $this->savedNoticeResult($request, $user, $mode, $page, $perPage, $customerId, $useCockpitScope),
                 'historyTypeOptions' => collect(SavedNotice::historyTypeOptions())
                     ->map(fn (array $option): array => $option)
@@ -162,6 +195,7 @@ class NoticeController extends Controller
 
             return $this->renderNoticeIndexPage($request, [
                 'mode' => $mode,
+                'tab' => $noticeTab,
                 'source' => $this->discoverySource($mode),
                 'supportMode' => [
                     'active' => false,
@@ -172,6 +206,7 @@ class NoticeController extends Controller
                 'savedSearches' => $this->savedSearchesForUser($user, $customerId),
                 'worklist' => $worklist,
                 'monitoring' => $this->monitoringSummary($user, $customerId),
+                'watchAlerts' => $watchAlerts,
                 'notices' => [
                     'data' => [],
                     'error' => $errorMessage,
@@ -216,6 +251,7 @@ class NoticeController extends Controller
 
         return $this->renderNoticeIndexPage($request, [
             'mode' => $mode,
+            'tab' => $noticeTab,
             'source' => $this->discoverySource($mode),
             'supportMode' => [
                 'active' => false,
@@ -226,6 +262,7 @@ class NoticeController extends Controller
             'savedSearches' => $this->savedSearchesForUser($user, $customerId),
             'worklist' => $worklist,
             'monitoring' => $this->monitoringSummary($user, $customerId),
+            'watchAlerts' => $watchAlerts,
             'notices' => [
                 'data' => $items,
                 'meta' => array_merge(
@@ -258,6 +295,23 @@ class NoticeController extends Controller
         return Inertia::render('App/Notices/Index', $props)
             ->toResponse($request)
             ->setStatusCode($status);
+    }
+
+    public function destroyWatchAlertRecord(Request $request, WatchProfileInboxRecord $watchProfileInboxRecord): RedirectResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $record = WatchProfileInboxRecord::query()
+            ->accessibleTo($user)
+            ->whereKey($watchProfileInboxRecord->getKey())
+            ->firstOrFail();
+
+        $record->delete();
+
+        return redirect()
+            ->back()
+            ->with('success', 'Varsel slettet.');
     }
 
 
@@ -1175,6 +1229,93 @@ class NoticeController extends Controller
         return [
             'saved_count' => $this->activeSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)->count(),
             'history_count' => $this->archivedSavedNoticeVisibleQuery($user, $customerId, $useCockpitScope)->count(),
+        ];
+    }
+
+    private function watchAlertsPayload(?User $user, ?int $customerId): array
+    {
+        if ($customerId === null || ! ($user instanceof User)) {
+            return $this->emptyWatchAlertsPayload();
+        }
+
+        $records = WatchProfileInboxRecord::query()
+            ->accessibleTo($user)
+            ->where('customer_id', $customerId)
+            ->where('discovered_at', '>=', now()->subDay())
+            ->with(['watchProfile:id,name'])
+            ->orderByDesc('discovered_at')
+            ->orderByDesc('id')
+            ->get();
+
+        if ($records->isEmpty()) {
+            return $this->emptyWatchAlertsPayload();
+        }
+
+        $savedExternalIds = $this->activeSavedNoticeVisibleQuery($user, $customerId)
+            ->whereIn('external_id', $records->pluck('doffin_notice_id')->filter()->map(fn (mixed $value): string => (string) $value)->all())
+            ->pluck('external_id')
+            ->map(fn (mixed $value): string => (string) $value)
+            ->all();
+
+        return [
+            'data' => $records
+                ->map(fn (WatchProfileInboxRecord $record): array => $this->watchAlertListItem($record, $savedExternalIds))
+                ->all(),
+            'meta' => [
+                'total' => $records->count(),
+            ],
+        ];
+    }
+
+    private function watchAlertListItem(WatchProfileInboxRecord $record, array $savedExternalIds = []): array
+    {
+        $rawPayload = is_array($record->raw_payload) ? $record->raw_payload : [];
+        $cpvCodes = collect(data_get($rawPayload, 'cpvCodes', []))
+            ->filter(fn (mixed $cpv): bool => is_string($cpv) && trim($cpv) !== '')
+            ->map(fn (string $cpv): string => trim($cpv))
+            ->values();
+        $summary = trim((string) data_get($rawPayload, 'description', ''));
+        $status = strtoupper(trim((string) data_get($rawPayload, 'status', '')));
+        $cpvCode = trim((string) data_get($rawPayload, 'mainCpvCode', ''));
+
+        if ($cpvCode === '') {
+            $cpvCode = (string) $cpvCodes->first();
+        }
+
+        if ($status === 'ACTIVE') {
+            $status = '';
+        }
+
+        return [
+            'id' => $record->id,
+            'notice_id' => $record->doffin_notice_id,
+            'title' => trim((string) $record->title) !== '' ? trim((string) $record->title) : $record->doffin_notice_id,
+            'buyer_name' => $record->buyer_name,
+            'summary' => $summary !== '' ? Str::squish($summary) : null,
+            'publication_date' => optional($record->publication_date)?->toIso8601String(),
+            'deadline' => optional($record->deadline)?->toIso8601String(),
+            'status' => $status !== '' ? $status : null,
+            'relevance_level' => null,
+            'score' => null,
+            'department' => null,
+            'saved_search_name' => null,
+            'cpv_code' => $cpvCode !== '' ? $cpvCode : null,
+            'is_new' => false,
+            'external_url' => $record->external_url ?: $this->publicNoticeUrl($record->doffin_notice_id),
+            'is_saved' => in_array($record->doffin_notice_id, $savedExternalIds, true),
+            'watch_profile_name' => $record->watchProfile?->name,
+            'discovered_at' => optional($record->discovered_at)?->toIso8601String(),
+            'delete_url' => route('app.notices.watch-alerts.destroy', ['watchProfileInboxRecord' => $record->id]),
+        ];
+    }
+
+    private function emptyWatchAlertsPayload(): array
+    {
+        return [
+            'data' => [],
+            'meta' => [
+                'total' => 0,
+            ],
         ];
     }
 

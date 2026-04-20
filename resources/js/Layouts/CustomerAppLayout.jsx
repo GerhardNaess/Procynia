@@ -1,6 +1,7 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import NotificationBell from '../Components/App/NotificationBell';
+import { readLastAiCaseId, writeLastAiCaseId } from '../Support/aiWorkspaceState';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -74,6 +75,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const { pathname, searchParams } = splitUrl(currentUrl);
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
+    const currentAiCaseId = page.props.case?.id ?? null;
+    const rememberedAiCaseId = currentAiCaseId !== null && currentAiCaseId !== undefined
+        ? String(currentAiCaseId)
+        : readLastAiCaseId();
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
 
@@ -138,8 +143,21 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
     const secondaryNavigation = (() => {
         if (activeMainArea === 'ai') {
+            const aiWorkHref = currentAiCaseId !== null && currentAiCaseId !== undefined
+                ? `/app/ai/${currentAiCaseId}`
+                : rememberedAiCaseId !== null
+                    ? `/app/ai/${rememberedAiCaseId}`
+                    : null;
+            const aiInstructionsHref = currentAiCaseId !== null && currentAiCaseId !== undefined
+                ? `/app/ai/${currentAiCaseId}/instructions`
+                : rememberedAiCaseId !== null
+                    ? `/app/ai/${rememberedAiCaseId}/instructions`
+                    : null;
+
             return [
-                { key: 'ai-work', label: 'AI-arbeid', href: '/app/ai' },
+                { key: 'ai-overview', label: 'Oversikt', href: '/app/ai' },
+                { key: 'ai-work', label: 'I arbeid', href: aiWorkHref },
+                { key: 'ai-instructions', label: 'AI instrukser', href: aiInstructionsHref },
                 { key: 'knowledge-docs', label: 'Kunnskapsdokumenter', href: '/app/ai/knowledge-base' },
             ];
         }
@@ -148,7 +166,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return [
                 { key: 'live', label: 'Live søk', href: '/app/notices' },
                 { key: 'saved-searches', label: translations.frontend.saved_searches_nav, href: `${buildHref('/app/notices', { tab: 'saved-searches' })}#saved-searches`, isAnchor: true },
-                { key: 'alerts', label: translations.frontend.alerts_nav, href: `${buildHref('/app/notices', { tab: 'alerts' })}#alerts-monitoring`, isAnchor: true },
+                { key: 'alerts', label: translations.frontend.alerts_nav, href: buildHref('/app/notices', { tab: 'alerts' }) },
             ];
         }
 
@@ -172,7 +190,19 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
     const activeSecondaryKey = (() => {
         if (activeMainArea === 'ai') {
-            return pathname.startsWith('/app/ai/knowledge-base') ? 'knowledge-docs' : 'ai-work';
+            if (/^\/app\/ai\/[^/]+\/instructions$/.test(pathname)) {
+                return 'ai-instructions';
+            }
+
+            if (pathname === '/app/ai') {
+                return 'ai-overview';
+            }
+
+            if (pathname.startsWith('/app/ai/knowledge-base')) {
+                return 'knowledge-docs';
+            }
+
+            return 'ai-work';
         }
 
         if (activeMainArea === 'procurements') {
@@ -216,6 +246,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     useEffect(() => {
         setNotificationState(page.props.notifications ?? emptyNotificationsState());
     }, [page.props.notifications]);
+
+    useEffect(() => {
+        if (currentAiCaseId === null || currentAiCaseId === undefined) {
+            return;
+        }
+
+        writeLastAiCaseId(currentAiCaseId);
+    }, [currentAiCaseId]);
 
     useEffect(() => {
         if (!isUserMenuOpen && !isNotificationsOpen) {
@@ -462,6 +500,18 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                 ? 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200'
                                                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
                                         );
+
+                                        if (!item.href) {
+                                            return (
+                                                <span
+                                                    key={item.key}
+                                                    className={classes}
+                                                    aria-current={isActive ? 'page' : undefined}
+                                                >
+                                                    {item.label}
+                                                </span>
+                                            );
+                                        }
 
                                         if (item.isAnchor) {
                                             return (

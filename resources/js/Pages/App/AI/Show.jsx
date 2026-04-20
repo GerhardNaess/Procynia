@@ -1,6 +1,10 @@
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import {
+    readRememberedAiRequirementId,
+    writeRememberedAiRequirementId,
+} from '../../../Support/aiWorkspaceState';
 
 const AI_STATUS_META = {
     not_started: {
@@ -252,6 +256,62 @@ function formatDocumentFailureDetails(document) {
     };
 }
 
+function normalizeAnswerDraftPayload(answerDraft) {
+    return {
+        text: normalizeAnswerDraftText(answerDraft?.text ?? ''),
+        generated_at: answerDraft?.generated_at ?? null,
+    };
+}
+
+function normalizeAnswerDraftText(value) {
+    return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+function buildRequirementAnswerDraftState(requirement) {
+    const normalizedDraft = normalizeAnswerDraftPayload(requirement?.answer_draft ?? null);
+    const normalizedText = normalizeAnswerDraftText(normalizedDraft.text);
+
+    return {
+        text: normalizedText,
+        persistedText: normalizedText,
+        generatedAt: normalizedDraft.generated_at,
+        isDirty: false,
+    };
+}
+
+function normalizeAnswerBasisItemIds(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const normalizedIds = [];
+
+    value.forEach((itemId) => {
+        const normalizedItemId = Number(itemId);
+
+        if (!Number.isInteger(normalizedItemId) || normalizedItemId <= 0) {
+            return;
+        }
+
+        if (!normalizedIds.includes(normalizedItemId)) {
+            normalizedIds.push(normalizedItemId);
+        }
+    });
+
+    return normalizedIds;
+}
+
+function buildRequirementAnswerBasisSelectionState(requirement) {
+    return normalizeAnswerBasisItemIds(requirement?.answer_basis_item_ids ?? []);
+}
+
+function extractAxiosErrorMessage(error, fallbackMessage) {
+    return error?.response?.data?.message
+        ?? error?.response?.data?.error
+        ?? error?.message
+        ?? fallbackMessage;
+}
+
 const DOCUMENT_PROCESSING_ACTIVE_STATUSES = new Set([
     'queued',
     'processing',
@@ -273,12 +333,9 @@ function hasActiveDocumentProcessing(documents) {
  * Side effects: None.
  */
 export default function AiShow({
-    pageTitle = 'AI-arbeid',
+    pageTitle = 'I arbeid',
     case: caseData = null,
     ai_status: aiStatus = 'not_started',
-    search_query: searchQuery = '',
-    search_results: searchResults = [],
-    search_url: searchUrl = '',
     requirements_count: requirementsCount = 0,
     requirements_overview: requirementsOverviewProp = {},
     requirements = [],
@@ -287,13 +344,17 @@ export default function AiShow({
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
+    answer_basis_items: answerBasisItemsProp = [],
+    answer_basis_documents_upload_url: answerBasisDocumentsUploadUrl = '',
+    answer_basis_text_store_url: answerBasisTextStoreUrl = '',
 }) {
+    const currentCaseId = caseData?.id ?? null;
     const {
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
     } = usePage().props;
     const fileInputRef = useRef(null);
-    const [searchInput, setSearchInput] = useState(searchQuery);
+    const answerBasisDocumentFileInputRef = useRef(null);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
@@ -301,10 +362,43 @@ export default function AiShow({
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [deletingDocumentId, setDeletingDocumentId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
+    const [activeRequirementId, setActiveRequirementId] = useState(() => {
+        if (currentCaseId === null || currentCaseId === undefined) {
+            return null;
+        }
+
+        const rememberedRequirementId = readRememberedAiRequirementId(currentCaseId);
+
+        if (rememberedRequirementId === null) {
+            return null;
+        }
+
+        const currentRequirements = Array.isArray(requirements) ? requirements : [];
+
+        return currentRequirements.some((requirement) => String(requirement.id) === rememberedRequirementId)
+            ? rememberedRequirementId
+            : null;
+    });
+    const [answerDraftsByRequirementId, setAnswerDraftsByRequirementId] = useState({});
+    const [answerBasisSelectionsByRequirementId, setAnswerBasisSelectionsByRequirementId] = useState({});
+    const [answerDraftGeneratingRequirementId, setAnswerDraftGeneratingRequirementId] = useState(null);
+    const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
+    const [answerDraftError, setAnswerDraftError] = useState(null);
+    const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
+    const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
+    const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
+    const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
         documents: [],
+    });
+    const answerBasisDocumentUploadForm = useForm({
+        documents: [],
+    });
+    const answerBasisTextForm = useForm({
+        title: '',
+        body_text: '',
     });
     const manualRequirementForm = useForm({
         requirement_identifier: '',
@@ -319,8 +413,13 @@ export default function AiShow({
     const aiStatusMeta = AI_STATUS_META[aiStatus] ?? AI_STATUS_META.not_started;
     const assignedUserOptions = Array.isArray(assignedUserOptionsProp) ? assignedUserOptionsProp : [];
     const documentRows = Array.isArray(documents) ? documents : [];
-    const searchRows = Array.isArray(searchResults) ? searchResults : [];
+    const answerBasisItems = Array.isArray(answerBasisItemsProp) ? answerBasisItemsProp : [];
     const requirementRows = Array.isArray(requirements) ? requirements : [];
+    const answerBasisItemsById = answerBasisItems.reduce((accumulator, item) => {
+        accumulator[String(item.id)] = item;
+
+        return accumulator;
+    }, {});
     const requirementsOverview = requirementsOverviewProp && typeof requirementsOverviewProp === 'object'
         ? requirementsOverviewProp
         : {};
@@ -329,17 +428,21 @@ export default function AiShow({
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
         : null;
     const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
+    const answerBasisDocumentError = Object.values(answerBasisDocumentUploadForm.errors).find(Boolean) ?? null;
+    const answerBasisTextError = Object.values(answerBasisTextForm.errors).find(Boolean) ?? null;
     const manualRequirementError = Object.values(manualRequirementForm.errors).find(Boolean) ?? null;
     const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
     const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
         ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
         : 'Ingen filer valgt ennå.';
-    const hasSearchQuery = searchQuery.trim() !== '';
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
         || refreshingAssessments
         || refreshingEvidence
+        || answerDraftGeneratingRequirementId !== null
+        || answerDraftSavingRequirementId !== null
+        || answerBasisSelectionSavingRequirementId !== null
         || updatingEvidenceId !== null
         || manualRequirementForm.processing
         || requirementEditForm.processing
@@ -363,8 +466,65 @@ export default function AiShow({
         : '—';
 
     useEffect(() => {
-        setSearchInput(searchQuery);
-    }, [searchQuery]);
+        setAnswerDraftsByRequirementId((currentState) => {
+            const nextState = { ...currentState };
+
+            requirementRows.forEach((requirement) => {
+                const requirementKey = String(requirement.id);
+                const serverDraftState = buildRequirementAnswerDraftState(requirement);
+                const currentDraftState = nextState[requirementKey];
+
+                if (currentDraftState === undefined) {
+                    nextState[requirementKey] = serverDraftState;
+                    return;
+                }
+
+                if (!currentDraftState.isDirty) {
+                    nextState[requirementKey] = {
+                        ...currentDraftState,
+                        text: serverDraftState.text,
+                        persistedText: serverDraftState.persistedText,
+                        generatedAt: serverDraftState.generatedAt,
+                        isDirty: false,
+                    };
+                }
+            });
+
+            return nextState;
+        });
+    }, [requirementRows]);
+
+    useEffect(() => {
+        const nextSelections = {};
+
+        requirementRows.forEach((requirement) => {
+            nextSelections[String(requirement.id)] = buildRequirementAnswerBasisSelectionState(requirement);
+        });
+
+        setAnswerBasisSelectionsByRequirementId(nextSelections);
+    }, [requirementRows]);
+
+    useEffect(() => {
+        if (currentCaseId === null || currentCaseId === undefined) {
+            return;
+        }
+
+        if (activeRequirementId === null) {
+            writeRememberedAiRequirementId(currentCaseId, null);
+            return;
+        }
+
+        const normalizedActiveRequirementId = String(activeRequirementId);
+        const activeRequirementExists = requirementRows.some((requirement) => String(requirement.id) === normalizedActiveRequirementId);
+
+        if (!activeRequirementExists) {
+            setActiveRequirementId(null);
+            writeRememberedAiRequirementId(currentCaseId, null);
+            return;
+        }
+
+        writeRememberedAiRequirementId(currentCaseId, normalizedActiveRequirementId);
+    }, [activeRequirementId, currentCaseId, requirementRows]);
 
     useEffect(() => {
         if (!documentNeedsRefresh) {
@@ -423,8 +583,41 @@ export default function AiShow({
         return undefined;
     }, [documentNeedsRefresh, documentRows, requirementRows.length]);
 
+    const activeRequirement = activeRequirementId !== null
+        ? requirementRows.find((requirement) => String(requirement.id) === String(activeRequirementId)) ?? null
+        : null;
+    const activeRequirementKey = activeRequirement !== null ? String(activeRequirement.id) : null;
+    const activeRequirementDraft = activeRequirementKey !== null
+        ? answerDraftsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement)
+        : null;
+    const activeRequirementHasDraft = activeRequirementDraft !== null
+        && (
+            activeRequirementDraft.generatedAt !== null
+            || normalizeAnswerDraftText(activeRequirementDraft.persistedText).trim() !== ''
+        );
+    const activeRequirementAnswerBasisItemIds = activeRequirementKey !== null
+        ? answerBasisSelectionsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerBasisSelectionState(activeRequirement)
+        : [];
+    const activeRequirementSelectedAnswerBasisItems = activeRequirementAnswerBasisItemIds
+        .map((answerBasisItemId) => answerBasisItemsById[String(answerBasisItemId)])
+        .filter(Boolean);
+
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
+    };
+
+    const handleAnswerBasisDocumentChange = (event) => {
+        answerBasisDocumentUploadForm.setData('documents', Array.from(event.target.files ?? []));
+    };
+
+    const resolveRequirementSourceDocument = (requirement) => {
+        const requirementDocumentId = requirement?.saved_notice_ai_document_id ?? null;
+
+        if (requirementDocumentId === null) {
+            return null;
+        }
+
+        return documentRows.find((document) => String(document?.id ?? '') === String(requirementDocumentId)) ?? null;
     };
 
     const submitDocuments = (event) => {
@@ -447,21 +640,41 @@ export default function AiShow({
         });
     };
 
-    const submitSearch = (event) => {
+    const submitAnswerBasisDocuments = (event) => {
         event.preventDefault();
 
-        const trimmedSearch = searchInput.trim();
-        const targetUrl = searchUrl || (caseData?.id ? `/app/ai/${caseData.id}` : '/app/ai');
+        if (!answerBasisDocumentsUploadUrl || answerBasisDocumentUploadForm.processing) {
+            return;
+        }
 
-        router.get(
-            targetUrl,
-            trimmedSearch === '' ? {} : { search: trimmedSearch },
-            {
-                preserveScroll: true,
-                preserveState: true,
-                replace: true,
+        answerBasisDocumentUploadForm.post(answerBasisDocumentsUploadUrl, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                answerBasisDocumentUploadForm.reset('documents');
+                answerBasisDocumentUploadForm.clearErrors();
+
+                if (answerBasisDocumentFileInputRef.current) {
+                    answerBasisDocumentFileInputRef.current.value = '';
+                }
             },
-        );
+        });
+    };
+
+    const submitAnswerBasisText = (event) => {
+        event.preventDefault();
+
+        if (!answerBasisTextStoreUrl || answerBasisTextForm.processing) {
+            return;
+        }
+
+        answerBasisTextForm.post(answerBasisTextStoreUrl, {
+            preserveScroll: true,
+            onSuccess: () => {
+                answerBasisTextForm.reset();
+                answerBasisTextForm.clearErrors();
+            },
+        });
     };
 
     const submitManualRequirement = (event) => {
@@ -513,6 +726,201 @@ export default function AiShow({
                 cancelEditingRequirement();
             },
         });
+    };
+
+    const requestAnswerDraftGeneration = async (requirement, { force = false } = {}) => {
+        if (!requirement || requirement.source_type !== 'ai_candidate') {
+            return;
+        }
+
+        const requirementKey = String(requirement.id);
+        const selectedAnswerBasisItemIds = answerBasisSelectionsByRequirementId[requirementKey]
+            ?? buildRequirementAnswerBasisSelectionState(requirement);
+        const existingDraft = answerDraftsByRequirementId[requirementKey] ?? buildRequirementAnswerDraftState(requirement);
+        const hasDraftText = normalizeAnswerDraftText(existingDraft.text).trim() !== '';
+
+        setActiveRequirementId(String(requirement.id));
+        setAnswerDraftError(null);
+        setAnswerBasisSelectionError(null);
+
+        if (!requirement.answer_draft_generate_url) {
+            setAnswerDraftError('Svarutkast kan ikke genereres for dette kravet.');
+            return;
+        }
+
+        if (!force && hasDraftText) {
+            return;
+        }
+
+        if (
+            answerDraftGeneratingRequirementId !== null
+            || answerDraftSavingRequirementId !== null
+            || answerBasisSelectionSavingRequirementId !== null
+        ) {
+            return;
+        }
+
+        setAnswerDraftGeneratingRequirementId(requirement.id);
+
+        try {
+            const response = await window.axios.post(requirement.answer_draft_generate_url, {
+                answer_basis_item_ids: selectedAnswerBasisItemIds,
+                force,
+            });
+            const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
+            const normalizedText = normalizeAnswerDraftText(answerDraft.text);
+            const responseAnswerBasisItemIds = normalizeAnswerBasisItemIds(
+                response?.data?.answer_basis_item_ids ?? selectedAnswerBasisItemIds,
+            );
+
+            setAnswerBasisSelectionsByRequirementId((currentState) => ({
+                ...currentState,
+                [requirementKey]: responseAnswerBasisItemIds,
+            }));
+
+            setAnswerDraftsByRequirementId((currentState) => ({
+                ...currentState,
+                [requirementKey]: {
+                    text: normalizedText,
+                    persistedText: normalizedText,
+                    generatedAt: answerDraft.generated_at,
+                    isDirty: false,
+                },
+            }));
+        } catch (error) {
+            setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke generere svarutkast.'));
+        } finally {
+            setAnswerDraftGeneratingRequirementId(null);
+        }
+    };
+
+    const openRequirementAnswerWorkspace = (requirement) => {
+        if (!requirement || requirement.source_type !== 'ai_candidate') {
+            return;
+        }
+
+        setActiveRequirementId(String(requirement.id));
+        setAnswerDraftError(null);
+        setAnswerBasisSelectionError(null);
+    };
+
+    const syncRequirementAnswerBasisSelection = async (requirement, nextAnswerBasisItemIds) => {
+        if (!requirement || requirement.source_type !== 'ai_candidate' || !requirement.answer_basis_selection_sync_url) {
+            return;
+        }
+
+        if (
+            answerDraftGeneratingRequirementId !== null
+            || answerDraftSavingRequirementId !== null
+            || answerBasisSelectionSavingRequirementId !== null
+        ) {
+            return;
+        }
+
+        const requirementKey = String(requirement.id);
+        const normalizedItemIds = normalizeAnswerBasisItemIds(nextAnswerBasisItemIds);
+
+        setAnswerBasisSelectionSavingRequirementId(requirement.id);
+        setAnswerBasisSelectionError(null);
+
+        try {
+            const response = await window.axios.patch(requirement.answer_basis_selection_sync_url, {
+                answer_basis_item_ids: normalizedItemIds,
+            });
+            const responseItemIds = normalizeAnswerBasisItemIds(
+                response?.data?.answer_basis_item_ids ?? normalizedItemIds,
+            );
+
+            setAnswerBasisSelectionsByRequirementId((currentState) => ({
+                ...currentState,
+                [requirementKey]: responseItemIds,
+            }));
+        } catch (error) {
+            setAnswerBasisSelectionError(extractAxiosErrorMessage(error, 'Kunne ikke lagre kilder.'));
+        } finally {
+            setAnswerBasisSelectionSavingRequirementId(null);
+        }
+    };
+
+    const toggleActiveRequirementAnswerBasisItem = (answerBasisItemId) => {
+        if (activeRequirement === null) {
+            return;
+        }
+
+        const currentSelectedIds = activeRequirementAnswerBasisItemIds;
+        const nextSelectedIds = currentSelectedIds.includes(answerBasisItemId)
+            ? currentSelectedIds.filter((currentId) => currentId !== answerBasisItemId)
+            : [...currentSelectedIds, answerBasisItemId];
+
+        void syncRequirementAnswerBasisSelection(activeRequirement, nextSelectedIds);
+    };
+
+    const updateActiveAnswerDraftText = (text) => {
+        if (activeRequirementKey === null) {
+            return;
+        }
+
+        const normalizedText = normalizeAnswerDraftText(text);
+
+        setAnswerDraftsByRequirementId((currentState) => {
+            const existingDraft = currentState[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement);
+
+            return {
+                ...currentState,
+                [activeRequirementKey]: {
+                    ...existingDraft,
+                    text: normalizedText,
+                    isDirty: normalizedText !== existingDraft.persistedText,
+                },
+            };
+        });
+    };
+
+    const saveActiveAnswerDraft = async () => {
+        if (activeRequirement === null || activeRequirementDraft === null) {
+            return;
+        }
+
+        if (!activeRequirement.answer_draft_save_url) {
+            setAnswerDraftError('Svarutkast kan ikke lagres for dette kravet.');
+            return;
+        }
+
+        if (answerDraftGeneratingRequirementId !== null || answerDraftSavingRequirementId !== null) {
+            return;
+        }
+
+        const normalizedText = normalizeAnswerDraftText(activeRequirementDraft.text).trim();
+
+        if (normalizedText === '') {
+            setAnswerDraftError('Svarutkastet kan ikke være tomt.');
+            return;
+        }
+
+        setAnswerDraftSavingRequirementId(activeRequirement.id);
+        setAnswerDraftError(null);
+
+        try {
+            const response = await window.axios.patch(activeRequirement.answer_draft_save_url, {
+                answer_draft_text: normalizedText,
+            });
+            const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
+            const savedText = normalizeAnswerDraftText(answerDraft.text);
+
+            setAnswerDraftsByRequirementId((currentState) => ({
+                ...currentState,
+                [activeRequirementKey]: {
+                    text: savedText,
+                    persistedText: savedText,
+                    generatedAt: answerDraft.generated_at,
+                    isDirty: false,
+                },
+            }));
+        } catch (error) {
+            setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke lagre svarutkast.'));
+        } finally {
+            setAnswerDraftSavingRequirementId(null);
+        }
     };
 
     const updateRequirementReviewStatus = (requirement, reviewStatus) => {
@@ -794,7 +1202,11 @@ export default function AiShow({
                                                     : '—';
 
                                                 return (
-                                                    <tr key={document.id} className="align-top">
+                                                    <tr
+                                                        key={document.id}
+                                                        id={`ai-document-row-${document.id}`}
+                                                        className="align-top transition-colors"
+                                                    >
                                                         <td className="px-5 py-4">
                                                             <div className="space-y-1.5">
                                                                 <div className="font-medium text-slate-950">
@@ -873,78 +1285,217 @@ export default function AiShow({
                     <div className="space-y-5">
                         <div className="space-y-2">
                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Søk
+                                Kilder
                             </div>
                             <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                Søk
+                                Kilder
                             </h2>
                             <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Søk i anbudsdokumentene for denne saken.
+                                Legg inn dokumenter og tekst som AI kan bruke når svarutkast genereres eller forbedres.
                             </p>
                         </div>
 
-                        <form onSubmit={submitSearch} className="space-y-4">
-                            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                        <div className="grid gap-4 lg:grid-cols-2">
+                            <form onSubmit={submitAnswerBasisDocuments} className="space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
+                                <div className="space-y-1">
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-violet-600">
+                                        Legg til dokument
+                                    </div>
+                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                        Last opp kildedokumenter
+                                    </h3>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Disse dokumentene kan brukes av AI ved generering av svar.
+                                    </p>
+                                </div>
+
                                 <div className="space-y-2">
-                                    <label htmlFor="ai-document-search" className="text-sm font-medium text-slate-700">
-                                        Søk i dokumenter
+                                    <label htmlFor="ai-answer-basis-documents" className="text-sm font-medium text-slate-700">
+                                        Velg filer
                                     </label>
-                                    <input
-                                        id="ai-document-search"
-                                        type="search"
-                                        value={searchInput}
-                                        onChange={(event) => setSearchInput(event.target.value)}
-                                        placeholder="Søk i ekstrahert dokumenttekst for denne saken."
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-                                    />
+                                    <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                        <label
+                                            htmlFor="ai-answer-basis-documents"
+                                            className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                        >
+                                            Velg filer
+                                        </label>
+                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                            {answerBasisDocumentUploadForm.data.documents.length > 0
+                                                ? answerBasisDocumentUploadForm.data.documents.map((document) => document.name).join(', ')
+                                                : 'Ingen filer valgt ennå.'}
+                                        </span>
+                                        <input
+                                            id="ai-answer-basis-documents"
+                                            ref={answerBasisDocumentFileInputRef}
+                                            type="file"
+                                            multiple
+                                            accept=".pdf,.doc,.docx,.xls,.xlsx"
+                                            onChange={handleAnswerBasisDocumentChange}
+                                            className="sr-only"
+                                        />
+                                    </div>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
+                                    </p>
+                                    {answerBasisDocumentError ? (
+                                        <p className="text-sm text-rose-600">{answerBasisDocumentError}</p>
+                                    ) : null}
                                 </div>
 
                                 <button
                                     type="submit"
+                                    disabled={
+                                        answerBasisDocumentUploadForm.processing
+                                        || !answerBasisDocumentsUploadUrl
+                                        || answerBasisDocumentUploadForm.data.documents.length === 0
+                                    }
                                     className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    Søk
+                                    {answerBasisDocumentUploadForm.processing ? 'Laster opp...' : 'Legg til dokument'}
                                 </button>
-                            </div>
-                        </form>
+                            </form>
 
-                        {hasSearchQuery ? (
-                            searchRows.length === 0 ? (
-                                <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
-                                    <div className="text-lg font-semibold text-slate-900">
-                                        Ingen treff funnet i denne saken.
+                            <form onSubmit={submitAnswerBasisText} className="space-y-4 rounded-[22px] border border-slate-200 bg-slate-50/70 p-4">
+                                <div className="space-y-1">
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        Legg til tekst
                                     </div>
-                                    <p className="mt-2 text-sm text-slate-500">
-                                        Prøv et annet søkeord eller en annen frase.
+                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                        Lim inn eller skriv tekst
+                                    </h3>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Bruk dette for metodikk, standardtekster, referansebeskrivelser og andre gjenbrukbare tekstblokker.
                                     </p>
                                 </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {searchRows.map((result) => (
-                                        <article key={result.chunk_id} className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <div className="font-medium text-slate-950">
-                                                    {result.document_filename}
-                                                </div>
-                                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                    Tekstbit {Number(result.chunk_index ?? 0) + 1}
-                                                </span>
-                                            </div>
-                                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                {result.snippet}
-                                            </p>
-                                        </article>
-                                    ))}
-                                </div>
-                            )
-                        ) : (
+
+                                <label className="block space-y-1">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Tittel
+                                    </span>
+                                    <input
+                                        type="text"
+                                        value={answerBasisTextForm.data.title}
+                                        onChange={(event) => answerBasisTextForm.setData('title', event.target.value)}
+                                        disabled={answerBasisTextForm.processing}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        placeholder="For eksempel Metodebeskrivelse"
+                                    />
+                                    {answerBasisTextForm.errors.title ? (
+                                        <p className="text-sm text-rose-600">{answerBasisTextForm.errors.title}</p>
+                                    ) : null}
+                                </label>
+
+                                <label className="block space-y-1">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        Tekst
+                                    </span>
+                                    <textarea
+                                        value={answerBasisTextForm.data.body_text}
+                                        onChange={(event) => answerBasisTextForm.setData('body_text', event.target.value)}
+                                        rows={6}
+                                        disabled={answerBasisTextForm.processing}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        placeholder="Skriv eller lim inn gjenbrukbar tekst som AI kan bruke."
+                                    />
+                                    {answerBasisTextForm.errors.body_text ? (
+                                        <p className="text-sm text-rose-600">{answerBasisTextForm.errors.body_text}</p>
+                                    ) : null}
+                                </label>
+
+                                {answerBasisTextError ? (
+                                    <p className="text-sm text-rose-600">{answerBasisTextError}</p>
+                                ) : null}
+
+                                <button
+                                    type="submit"
+                                    disabled={answerBasisTextForm.processing || !answerBasisTextStoreUrl}
+                                    className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {answerBasisTextForm.processing ? 'Lagrer...' : 'Legg til tekst'}
+                                </button>
+                            </form>
+                        </div>
+
+                        {answerBasisItems.length === 0 ? (
                             <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                 <div className="text-lg font-semibold text-slate-900">
-                                    Søk i ekstrahert dokumenttekst for denne saken.
+                                    Ingen kilder er lagt til ennå.
                                 </div>
                                 <p className="mt-2 text-sm text-slate-500">
-                                    Bruk et ord eller en frase for å finne treff i opplastede dokumenter.
+                                    Legg til dokumenter eller tekstblokker som AI kan bruke når du genererer svarutkast.
                                 </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {answerBasisItems.map((answerBasisItem) => {
+                                    const isDeleting = deletingAnswerBasisItemId === answerBasisItem.id;
+                                    const bodySnippet = formatKnowledgeSnippet(answerBasisItem.body_text, 220);
+
+                                    return (
+                                        <div
+                                            key={answerBasisItem.id}
+                                            className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm"
+                                        >
+                                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                                <div className="space-y-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <div className="font-medium text-slate-950">
+                                                            {answerBasisItem.title}
+                                                        </div>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                            {answerBasisItem.answer_basis_type_label}
+                                                        </span>
+                                                    </div>
+                                                    {answerBasisItem.original_filename ? (
+                                                        <div className="text-sm text-slate-500">
+                                                            {answerBasisItem.original_filename}
+                                                        </div>
+                                                    ) : null}
+                                                    <p className="max-w-4xl text-sm leading-6 text-slate-600">
+                                                        {bodySnippet}
+                                                    </p>
+                                                    <div className="text-xs text-slate-500">
+                                                        {answerBasisItem.created_by ? `Opprettet av ${answerBasisItem.created_by}` : '—'}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (answerBasisItem.delete_url) {
+                                                                if (deletingAnswerBasisItemId !== null) {
+                                                                    return;
+                                                                }
+
+                                                                const confirmed = window.confirm('Slette denne kilden?');
+
+                                                                if (!confirmed) {
+                                                                    return;
+                                                                }
+
+                                                                setDeletingAnswerBasisItemId(answerBasisItem.id);
+
+                                                                router.delete(answerBasisItem.delete_url, {
+                                                                    preserveScroll: true,
+                                                                    preserveState: true,
+                                                                    onFinish: () => {
+                                                                        setDeletingAnswerBasisItemId(null);
+                                                                    },
+                                                                });
+                                                            }
+                                                        }}
+                                                        disabled={isDeleting || deletingAnswerBasisItemId !== null}
+                                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {isDeleting ? 'Sletter...' : 'Slett'}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
@@ -1064,34 +1615,46 @@ export default function AiShow({
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Kravkandidater
+                                    Krav
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                    Kravkandidater
+                                    Krav
                                 </h2>
                                 <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                    Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
+                                    Velg et krav og lag svar. Kilder, scoring og vurderinger ligger i avansert visning.
                                 </p>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
                                 <button
                                     type="button"
-                                    onClick={refreshEvidence}
-                                    disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
-                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    onClick={() => setShowAdvancedAI((value) => !value)}
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
-                                    {refreshingEvidence ? 'Oppdaterer...' : 'Oppdater bevisgrunnlag'}
+                                    {showAdvancedAI ? 'Skjul avansert' : 'Avansert'}
                                 </button>
 
-                                <button
-                                    type="button"
-                                    onClick={refreshAssessments}
-                                    disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
-                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {refreshingAssessments ? 'Analyserer...' : 'Analyser krav'}
-                                </button>
+                                {showAdvancedAI ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={refreshEvidence}
+                                            disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
+                                            className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {refreshingEvidence ? 'Oppdaterer...' : 'Oppdater kilder'}
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={refreshAssessments}
+                                            disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
+                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {refreshingAssessments ? 'Analyserer...' : 'Analyser krav'}
+                                        </button>
+                                    </>
+                                ) : null}
                             </div>
                         </div>
 
@@ -1191,7 +1754,6 @@ export default function AiShow({
                         ) : (
                             <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:max-h-[38rem]">
                                 {requirementRows.map((requirement) => {
-                                    const requirementTypeMeta = REQUIREMENT_TYPE_META[requirement.requirement_type] ?? REQUIREMENT_TYPE_META.unspecified;
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
                                     const approvalStatusMeta = REQUIREMENT_APPROVAL_STATUS_META[approvalStatus] ?? REQUIREMENT_APPROVAL_STATUS_META.draft;
@@ -1200,9 +1762,6 @@ export default function AiShow({
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
                                     const assignedUserId = requirement.assigned_user?.id ? String(requirement.assigned_user.id) : '';
                                     const assignedUserLabel = requirement.assigned_user?.name ?? 'Ikke tildelt';
-                                    const chunkLabel = typeof requirement.chunk_index === 'number'
-                                        ? `Tekstbit ${requirement.chunk_index + 1}`
-                                        : 'Tekstbit —';
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
@@ -1229,17 +1788,48 @@ export default function AiShow({
                                             minute: '2-digit',
                                         }).format(new Date(assessment.assessed_at))
                                         : '—';
-                                    const showEvidenceSection = isApprovedRequirement || evidenceRows.length > 0;
+                                    const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
+                                    const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
+                                    const canOpenAnswerWorkspace = requirement.source_type === 'ai_candidate';
 
                                     return (
                                         <article
                                             key={requirement.id}
-                                            className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] ${
+                                            role={canOpenAnswerWorkspace ? 'button' : undefined}
+                                            tabIndex={canOpenAnswerWorkspace ? 0 : undefined}
+                                            onClick={(event) => {
+                                                if (!canOpenAnswerWorkspace) {
+                                                    return;
+                                                }
+
+                                                if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea,label')) {
+                                                    return;
+                                                }
+
+                                                void openRequirementAnswerWorkspace(requirement);
+                                            }}
+                                            onKeyDown={(event) => {
+                                                if (!canOpenAnswerWorkspace) {
+                                                    return;
+                                                }
+
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    void openRequirementAnswerWorkspace(requirement);
+                                                }
+                                            }}
+                                            className={`rounded-[22px] border p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)] transition ${
                                                 isApprovedRequirement
                                                     ? 'border-emerald-100 bg-emerald-50/40'
                                                     : isRejectedRequirement
                                                         ? 'border-rose-100 bg-rose-50/30'
                                                     : 'border-slate-200 bg-white'
+                                            } ${
+                                                canOpenAnswerWorkspace ? 'cursor-pointer hover:border-violet-300' : ''
+                                            } ${
+                                                isActiveRequirement
+                                                    ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white'
+                                                    : ''
                                             }`}
                                         >
                                             <div className="space-y-3">
@@ -1249,11 +1839,6 @@ export default function AiShow({
                                                             {currentRequirementIdentifier !== '—' ? (
                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                     {currentRequirementIdentifier}
-                                                                </span>
-                                                            ) : null}
-                                                            {originalRequirementIdentifier && originalRequirementIdentifier !== currentRequirementIdentifier ? (
-                                                                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                                    Original: {originalRequirementIdentifier}
                                                                 </span>
                                                             ) : null}
                                                         </div>
@@ -1270,17 +1855,28 @@ export default function AiShow({
                                                         </div>
                                                     </div>
                                                     <div className="flex flex-wrap gap-2">
-                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
-                                                            {requirement.source_type_label ?? sourceTypeMeta.label}
-                                                        </span>
+                                                        {canOpenAnswerWorkspace ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    void requestAnswerDraftGeneration(requirement);
+                                                                }}
+                                                                disabled={requirementUpdatesLocked || answerDraftGeneratingRequirementId === requirement.id}
+                                                                aria-pressed={isActiveRequirement}
+                                                                title="Generer svarutkast for dette kravet"
+                                                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-60 ${sourceTypeMeta.className} ${
+                                                                    isActiveRequirement ? 'ring-violet-300' : ''
+                                                                }`}
+                                                            >
+                                                                Lag svar
+                                                            </button>
+                                                        ) : (
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
+                                                                {requirement.source_type_label ?? sourceTypeMeta.label}
+                                                            </span>
+                                                        )}
                                                         <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${approvalStatusMeta.className}`}>
                                                             {requirement.approval_status_label ?? approvalStatusMeta.label}
-                                                        </span>
-                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${requirementTypeMeta.className}`}>
-                                                            {requirement.requirement_type_label ?? requirementTypeMeta.label}
-                                                        </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                                            {requirement.edit_state_label ?? 'Original'}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -1299,13 +1895,183 @@ export default function AiShow({
                                                 </div>
 
                                                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                                                        Kilde: {requirement.document_filename ?? '—'}
-                                                    </span>
-                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                                                            {chunkLabel}
-                                                        </span>
-                                                    </div>
+                                                    {(() => {
+                                                        const sourceDocument = resolveRequirementSourceDocument(requirement);
+                                                        const sourceDocumentUrl = sourceDocument?.preview_url ?? null;
+                                                        const sourceDocumentPreviewMode = sourceDocument?.preview_mode ?? 'unavailable';
+                                                        const sourceDocumentLabel = sourceDocument?.original_filename ?? requirement.document_filename ?? '—';
+                                                        const canPreviewSourceDocument = Boolean(sourceDocumentUrl) && sourceDocumentPreviewMode !== 'unavailable';
+
+                                                        if (canPreviewSourceDocument) {
+                                                            return (
+                                                                <a
+                                                                    href={sourceDocumentUrl}
+                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                                >
+                                                                    Forhåndsvis kilde: {sourceDocumentLabel}
+                                                                </a>
+                                                            );
+                                                        }
+
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                disabled
+                                                                className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-400 opacity-60"
+                                                            >
+                                                                Forhåndsvis kilde: {sourceDocumentLabel}
+                                                            </button>
+                                                        );
+                                                    })()}
+                                                </div>
+
+                                                {activeRequirement ? (
+                                                    showAdvancedAI ? (
+                                                        <div className="space-y-4 border-t border-slate-200/80 pt-4">
+                                                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Kilder
+                                                                </div>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        void requestAnswerDraftGeneration(activeRequirement, { force: true });
+                                                                    }}
+                                                                    disabled={
+                                                                        !activeRequirement.answer_draft_generate_url
+                                                                        || answerDraftGeneratingRequirementId === activeRequirement.id
+                                                                        || answerDraftSavingRequirementId === activeRequirement.id
+                                                                        || answerBasisSelectionSavingRequirementId === activeRequirement.id
+                                                                    }
+                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? 'Genererer...' : 'Generer på nytt'}
+                                                                </button>
+                                                            </div>
+
+                                                            {answerBasisSelectionError ? (
+                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                                    {answerBasisSelectionError}
+                                                                </div>
+                                                            ) : null}
+
+                                                            {activeRequirementSelectedAnswerBasisItems.length > 0 ? (
+                                                                <div className="space-y-2">
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                        Valgte kilder
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        {activeRequirementSelectedAnswerBasisItems.map((answerBasisItem) => {
+                                                                            const isSelected = activeRequirementAnswerBasisItemIds.includes(answerBasisItem.id);
+                                                                            const isToggling = answerBasisSelectionSavingRequirementId === activeRequirement.id;
+
+                                                                            return (
+                                                                                <div
+                                                                                    key={answerBasisItem.id}
+                                                                                    className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3"
+                                                                                >
+                                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                                                        <div className="space-y-1">
+                                                                                            <div className="font-medium text-slate-950">
+                                                                                                {answerBasisItem.title}
+                                                                                            </div>
+                                                                                            <div className="flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                                <span>{answerBasisItem.answer_basis_type_label}</span>
+                                                                                                {answerBasisItem.original_filename ? (
+                                                                                                    <span>{answerBasisItem.original_filename}</span>
+                                                                                                ) : null}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
+                                                                                            disabled={isToggling || !isSelected}
+                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                                        >
+                                                                                            Fjern
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                    Ingen kilder er valgt for dette kravet ennå.
+                                                                </div>
+                                                            )}
+
+                                                            <div className="space-y-2">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    Velg kilder
+                                                                </div>
+
+                                                                {answerBasisItems.length === 0 ? (
+                                                                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                        Legg til dokumenter eller tekst i kilder-seksjonen for å kunne knytte dem til kravet.
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="space-y-2">
+                                                                        {answerBasisItems.map((answerBasisItem) => {
+                                                                            const isSelected = activeRequirementAnswerBasisItemIds.includes(answerBasisItem.id);
+                                                                            const isToggling = answerBasisSelectionSavingRequirementId === activeRequirement.id;
+
+                                                                            return (
+                                                                                <div
+                                                                                    key={answerBasisItem.id}
+                                                                                    className={`rounded-2xl border px-4 py-3 ${
+                                                                                        isSelected
+                                                                                            ? 'border-violet-200 bg-violet-50/50'
+                                                                                            : 'border-slate-200 bg-white'
+                                                                                    }`}
+                                                                                >
+                                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                                                        <div className="min-w-0 space-y-1">
+                                                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                                                <div className="font-medium text-slate-950">
+                                                                                                    {answerBasisItem.title}
+                                                                                                </div>
+                                                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                                                    {answerBasisItem.answer_basis_type_label}
+                                                                                                </span>
+                                                                                            </div>
+                                                                                            {answerBasisItem.original_filename ? (
+                                                                                                <div className="text-sm text-slate-500">
+                                                                                                    {answerBasisItem.original_filename}
+                                                                                                </div>
+                                                                                            ) : null}
+                                                                                            <p className="max-w-4xl text-sm leading-6 text-slate-600">
+                                                                                                {formatKnowledgeSnippet(answerBasisItem.body_text, 160)}
+                                                                                            </p>
+                                                                                        </div>
+
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
+                                                                                            disabled={isToggling}
+                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                                                isSelected
+                                                                                                    ? 'border border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50'
+                                                                                                    : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
+                                                                                            }`}
+                                                                                        >
+                                                                                            {isSelected ? 'Fjern' : 'Legg til'}
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                            Svarutkastet vises her og kan redigeres direkte. Velg Avansert for kilder og vurderinger.
+                                                        </div>
+                                                    )
+                                                ) : null}
 
                                                 {hasOriginalDifference ? (
                                                     <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3">
@@ -1399,111 +2165,113 @@ export default function AiShow({
                                                     </form>
                                                 ) : null}
 
-                                                <div className="space-y-3 border-t border-slate-200/80 pt-4">
-                                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                            AI-vurdering
+                                                {showAdvancedAI ? (
+                                                    <div className="space-y-3 border-t border-slate-200/80 pt-4">
+                                                        <div className="flex flex-wrap items-center justify-between gap-3">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                Vurdering
+                                                            </div>
+                                                            {hasAssessment && assessmentCompleted ? (
+                                                                <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                    Vurdert {assessmentDateLabel}
+                                                                </span>
+                                                            ) : hasAssessment && assessmentFailed ? (
+                                                                <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                    Feilet
+                                                                </span>
+                                                            ) : null}
                                                         </div>
-                                                        {hasAssessment && assessmentCompleted ? (
-                                                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                Vurdert {assessmentDateLabel}
-                                                            </span>
-                                                        ) : hasAssessment && assessmentFailed ? (
-                                                            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                Feilet
-                                                            </span>
-                                                        ) : null}
-                                                    </div>
 
-                                                    {isApprovedRequirement ? (
-                                                        hasAssessment ? (
-                                                            assessmentCompleted ? (
-                                                                <div className="space-y-3">
-                                                                    <div className="flex flex-wrap gap-2">
-                                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-                                                                            ASSESSMENT_STATUS_META[assessment.assessment_status]?.className
-                                                                                ?? ASSESSMENT_STATUS_META.completed.className
-                                                                        }`}>
-                                                                            {assessment.assessment_status_label ?? ASSESSMENT_STATUS_META.completed.label}
-                                                                        </span>
-                                                                        {assessment.coverage_status ? (
+                                                        {isApprovedRequirement ? (
+                                                            hasAssessment ? (
+                                                                assessmentCompleted ? (
+                                                                    <div className="space-y-3">
+                                                                        <div className="flex flex-wrap gap-2">
                                                                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-                                                                                COVERAGE_STATUS_META[assessment.coverage_status]?.className
-                                                                                    ?? COVERAGE_STATUS_META.missing.className
+                                                                                ASSESSMENT_STATUS_META[assessment.assessment_status]?.className
+                                                                                    ?? ASSESSMENT_STATUS_META.completed.className
                                                                             }`}>
-                                                                                {assessment.coverage_status_label ?? COVERAGE_STATUS_META.missing.label}
+                                                                                {assessment.assessment_status_label ?? ASSESSMENT_STATUS_META.completed.label}
                                                                             </span>
-                                                                        ) : null}
-                                                                        {assessment.risk_level ? (
-                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-                                                                                RISK_LEVEL_META[assessment.risk_level]?.className
-                                                                                    ?? RISK_LEVEL_META.high.className
-                                                                            }`}>
-                                                                                {assessment.risk_level_label ?? RISK_LEVEL_META.high.label}
-                                                                            </span>
-                                                                        ) : null}
-                                                                    </div>
-
-                                                                    <div className="grid gap-3 md:grid-cols-2">
-                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                Oppsummering
-                                                                            </div>
-                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
-                                                                                {assessment.requirement_summary ?? '—'}
-                                                                            </p>
+                                                                            {assessment.coverage_status ? (
+                                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                    COVERAGE_STATUS_META[assessment.coverage_status]?.className
+                                                                                        ?? COVERAGE_STATUS_META.missing.className
+                                                                                }`}>
+                                                                                    {assessment.coverage_status_label ?? COVERAGE_STATUS_META.missing.label}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {assessment.risk_level ? (
+                                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                    RISK_LEVEL_META[assessment.risk_level]?.className
+                                                                                        ?? RISK_LEVEL_META.high.className
+                                                                                }`}>
+                                                                                    {assessment.risk_level_label ?? RISK_LEVEL_META.high.label}
+                                                                                </span>
+                                                                            ) : null}
                                                                         </div>
 
-                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                Begrunnelse
+                                                                        <div className="grid gap-3 md:grid-cols-2">
+                                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    Oppsummering
+                                                                                </div>
+                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                    {assessment.requirement_summary ?? '—'}
+                                                                                </p>
                                                                             </div>
-                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
-                                                                                {assessment.coverage_rationale ?? '—'}
-                                                                            </p>
-                                                                        </div>
 
-                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                Manglende grunnlag
+                                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    Begrunnelse
+                                                                                </div>
+                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                    {assessment.coverage_rationale ?? '—'}
+                                                                                </p>
                                                                             </div>
-                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
-                                                                                {assessment.missing_information ?? '—'}
-                                                                            </p>
-                                                                        </div>
 
-                                                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                Anbefalt neste steg
+                                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    Manglende grunnlag
+                                                                                </div>
+                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                    {assessment.missing_information ?? '—'}
+                                                                                </p>
                                                                             </div>
-                                                                            <p className="mt-2 text-sm leading-6 text-slate-700">
-                                                                                {assessment.recommended_next_step ?? '—'}
-                                                                            </p>
+
+                                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    Anbefalt neste steg
+                                                                                </div>
+                                                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                                                    {assessment.recommended_next_step ?? '—'}
+                                                                                </p>
+                                                                            </div>
                                                                         </div>
                                                                     </div>
-                                                                </div>
+                                                                ) : (
+                                                                    <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-sm leading-6 text-rose-700">
+                                                                        Vurdering feilet for dette kravet. Kjør analyse på nytt for å forsøke igjen.
+                                                                    </div>
+                                                                )
                                                             ) : (
-                                                                <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-sm leading-6 text-rose-700">
-                                                                    AI-vurdering feilet for dette kravet. Kjør analyse på nytt for å forsøke igjen.
+                                                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                                    Vurdering er ikke generert ennå. Bruk &quot;Analyser krav&quot; for å vurdere dette kravet.
                                                                 </div>
                                                             )
                                                         ) : (
                                                             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                AI-vurdering er ikke generert ennå. Bruk &quot;Analyser krav&quot; for å vurdere dette kravet.
-                                                            </div>
-                                                        )
-                                                    ) : (
-                                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                AI-vurdering genereres når kravet er godkjent.
+                                                                Vurdering vises når kravet er godkjent.
                                                             </div>
                                                         )}
-                                                </div>
+                                                    </div>
+                                                ) : null}
 
                                                 {showEvidenceSection ? (
                                                     <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                Bevisgrunnlag
+                                                                Kilder
                                                             </div>
                                                             {isApprovedRequirement ? (
                                                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
@@ -1591,7 +2359,7 @@ export default function AiShow({
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm text-slate-500">
-                                                                Ingen bevisgrunnlag lagret ennå. Oppdater bevisgrunnlag for å finne relevante kunnskapsdokumenter.
+                                                                Ingen kilder lagret ennå. Oppdater kilder for å finne relevante dokumenter.
                                                             </p>
                                                         )}
                                                     </div>
@@ -1672,16 +2440,117 @@ export default function AiShow({
                     </section>
 
                     <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                AI-status
+                        <div className="space-y-5">
+                            <div className="space-y-2">
+                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    Svarutkast
+                                </div>
+                                <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                    I arbeid
+                                </h2>
+                                <p className="text-sm leading-6 text-slate-500">
+                                    Klikk et krav for å åpne svarutkastet. Trykk Lag svar for å generere et nytt.
+                                </p>
                             </div>
-                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                AI-status
-                            </h2>
-                            <p className="text-sm leading-6 text-slate-500">
-                                Denne saken er for øyeblikket markert som {aiStatusMeta.label} basert på tilgjengelige saksdata.
-                            </p>
+
+                            {!activeRequirement ? (
+                                <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
+                                    <div className="text-lg font-semibold text-slate-900">
+                                        Ingen aktivt svarutkast ennå.
+                                    </div>
+                                    <p className="mt-2 text-sm text-slate-500">
+                                        Klikk på et kravkort for å åpne svarutkastet her.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
+                                            Svarutkast
+                                        </div>
+                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                                            {activeRequirement.approval_status_label ?? 'Utkast'}
+                                        </span>
+                                    </div>
+
+                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? (
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                                            Genererer svarutkast ...
+                                        </div>
+                                    ) : null}
+
+                                    {answerDraftError ? (
+                                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                                            {answerDraftError}
+                                        </div>
+                                    ) : null}
+
+                                    {activeRequirementHasDraft ? (
+                                        <>
+                                            <label className="block space-y-2">
+                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    Svarutkast
+                                                </span>
+                                                <textarea
+                                                    value={activeRequirementDraft?.text ?? ''}
+                                                    onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
+                                                    rows={16}
+                                                    disabled={
+                                                        answerDraftGeneratingRequirementId === activeRequirement.id
+                                                        || answerDraftSavingRequirementId === activeRequirement.id
+                                                    }
+                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    placeholder="Svarutkastet vises her og kan redigeres direkte."
+                                                />
+                                            </label>
+
+                                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                                <div className="text-xs text-slate-500">
+                                                    {activeRequirementDraft?.generatedAt ? (
+                                                        <>
+                                                            Generert{' '}
+                                                            {new Intl.DateTimeFormat(locale, {
+                                                                day: '2-digit',
+                                                                month: 'short',
+                                                                year: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            }).format(new Date(activeRequirementDraft.generatedAt))}
+                                                        </>
+                                                    ) : (
+                                                        'Svarutkast er ikke generert ennå.'
+                                                    )}
+                                                    {activeRequirementDraft?.isDirty ? ' Ulagrede endringer.' : ''}
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={saveActiveAnswerDraft}
+                                                    disabled={
+                                                        !activeRequirementDraft
+                                                        || normalizeAnswerDraftText(activeRequirementDraft.text).trim() === ''
+                                                        || !activeRequirement.answer_draft_save_url
+                                                        || answerDraftGeneratingRequirementId === activeRequirement.id
+                                                        || answerDraftSavingRequirementId === activeRequirement.id
+                                                    }
+                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+                                            <div className="text-sm font-semibold text-slate-900">
+                                                Ingen svarutkast er opprettet ennå.
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                Trykk Lag svar på kravet for å generere et utkast for akkurat dette kravet.
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </section>
                 </div>

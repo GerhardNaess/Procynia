@@ -34,7 +34,7 @@ function formatDate(value, locale) {
  * Returns: A customer-app page component for the AI workspace overview.
  * Side effects: Navigation to cases happens through Inertia links.
  */
-export default function AiIndex({ pageTitle = 'AI-arbeid', analysisCases = [] }) {
+export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) {
     const { locale = 'nb-NO' } = usePage().props;
     const rows = Array.isArray(analysisCases) ? analysisCases : [];
 
@@ -43,10 +43,10 @@ export default function AiIndex({ pageTitle = 'AI-arbeid', analysisCases = [] })
             <div className="space-y-7">
                 <section className="space-y-1.5">
                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                        AI-arbeid
+                        Oversikt
                     </div>
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        AI-arbeid
+                        Oversikt
                     </h1>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.
@@ -60,10 +60,10 @@ export default function AiIndex({ pageTitle = 'AI-arbeid', analysisCases = [] })
                                 Saker
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                Saker klare for AI-arbeid
+                                Saker klare for oversikt
                             </h2>
                             <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Disse sakene har nok struktur til at AI-arbeid kan skje videre i saken.
+                                Disse sakene har nok struktur til at arbeid kan skje videre i saken.
                             </p>
                         </div>
 
@@ -146,7 +146,7 @@ export default function AiIndex({ pageTitle = 'AI-arbeid', analysisCases = [] })
                         ) : (
                             <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-12">
                                 <div className="text-lg font-semibold text-slate-900">
-                                    Ingen saker er klare for AI-arbeid ennå
+                                    Ingen saker er klare for oversikt ennå
                                 </div>
                                 <p className="mt-2 text-sm text-slate-500">
                                     Lagrede saker vil dukke opp her når de har nok struktur til videre arbeid.
