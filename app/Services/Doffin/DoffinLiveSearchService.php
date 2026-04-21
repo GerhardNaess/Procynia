@@ -31,6 +31,7 @@ class DoffinLiveSearchService
         $publicationDateFrom = Str::squish((string) ($filters['publication_date_from'] ?? ''));
         $publicationDateTo = Str::squish((string) ($filters['publication_date_to'] ?? ''));
         $publicationPeriod = Str::squish((string) ($filters['publication_period'] ?? ''));
+        $keywordsMode = $this->normalizeKeywordsMode((string) ($filters['keywords_mode'] ?? 'all'));
 
         if (($validationFailure = $this->validatePublicationDateRange($publicationDateFrom, $publicationDateTo, $page, $perPage)) !== null) {
             return $validationFailure;
@@ -91,7 +92,30 @@ class DoffinLiveSearchService
             return $this->fetchSinglePageSearch($payload, $page, $perPage, $buyerFallbackUsed);
         }
 
-        return $this->harvestAndFilterKeywordSearch($payload, $keywords, $page, $perPage, $buyerFallbackUsed);
+        if ($keywordsMode === 'any') {
+            return $this->harvestDiscoveryUnionSearch(
+                $query,
+                $organizationName,
+                $publicationDateFrom,
+                $publicationDateTo,
+                $buyerIds,
+                $cpvCodes,
+                $status,
+                $keywords,
+                $page,
+                $perPage,
+                $buyerFallbackUsed,
+            );
+        }
+
+        return $this->harvestAndFilterKeywordSearch(
+            $payload,
+            $keywords,
+            $page,
+            $perPage,
+            $buyerFallbackUsed,
+            $keywordsMode,
+        );
     }
 
     private function resolveBuyerIdsFromHits(array $hits, string $organizationName): array
@@ -230,7 +254,104 @@ class DoffinLiveSearchService
         return $response;
     }
 
-    private function harvestAndFilterKeywordSearch(array $payload, array $keywords, int $page, int $perPage, bool $fallbackUsed = false): array
+    private function harvestAndFilterKeywordSearch(
+        array $payload,
+        array $keywords,
+        int $page,
+        int $perPage,
+        bool $fallbackUsed = false,
+        string $keywordsMode = 'all',
+    ): array
+    {
+        $searchResult = $this->harvestSearchPages($payload, $perPage, $fallbackUsed);
+
+        if (! ($searchResult['ok'] ?? true)) {
+            return $this->markFallbackUsed($searchResult, $fallbackUsed);
+        }
+
+        $filteredHits = $this->filterResultsByKeywords($searchResult['hits'] ?? [], $keywords, $keywordsMode);
+        $filteredTotal = count($filteredHits);
+        $currentPage = max(1, min($page, max(1, (int) ceil($filteredTotal / $perPage))));
+        $offset = ($currentPage - 1) * $perPage;
+
+        return $this->successResponse(array_slice($filteredHits, $offset, $perPage), $currentPage, $perPage, $filteredTotal, $filteredTotal, $fallbackUsed, $searchResult['meta'] ?? []);
+    }
+
+    private function harvestDiscoveryUnionSearch(
+        string $query,
+        string $organizationName,
+        string $publicationDateFrom,
+        string $publicationDateTo,
+        array $buyerIds,
+        array $cpvCodes,
+        ?string $status,
+        array $keywords,
+        int $page,
+        int $perPage,
+        bool $fallbackUsed = false,
+    ): array
+    {
+        $allHits = [];
+        $meta = [];
+
+        if ($cpvCodes !== []) {
+            $cpvSearch = $this->harvestSearchPages(
+                $this->buildSearchPayload(
+                    $query,
+                    $organizationName,
+                    $publicationDateFrom,
+                    $publicationDateTo,
+                    $buyerIds,
+                    $cpvCodes,
+                    $status,
+                ),
+                $perPage,
+                $fallbackUsed,
+            );
+
+            if (! ($cpvSearch['ok'] ?? true)) {
+                return $this->markFallbackUsed($cpvSearch, $fallbackUsed);
+            }
+
+            $allHits = array_merge($allHits, $cpvSearch['hits'] ?? []);
+            $meta = $cpvSearch['meta'] ?? [];
+        }
+
+        foreach ($keywords as $keyword) {
+            $keywordSearch = $this->harvestSearchPages(
+                $this->buildSearchPayload(
+                    $keyword,
+                    '',
+                    $publicationDateFrom,
+                    $publicationDateTo,
+                    $buyerIds,
+                    [],
+                    $status,
+                ),
+                $perPage,
+                $fallbackUsed,
+            );
+
+            if (! ($keywordSearch['ok'] ?? true)) {
+                return $this->markFallbackUsed($keywordSearch, $fallbackUsed);
+            }
+
+            $allHits = array_merge($allHits, $keywordSearch['hits'] ?? []);
+
+            if ($meta === []) {
+                $meta = $keywordSearch['meta'] ?? [];
+            }
+        }
+
+        $deduplicatedHits = $this->deduplicateHits($allHits);
+        $total = count($deduplicatedHits);
+        $currentPage = max(1, min($page, max(1, (int) ceil($total / $perPage))));
+        $offset = ($currentPage - 1) * $perPage;
+
+        return $this->successResponse(array_slice($deduplicatedHits, $offset, $perPage), $currentPage, $perPage, $total, $total, $fallbackUsed, $meta);
+    }
+
+    private function harvestSearchPages(array $payload, int $perPage, bool $fallbackUsed = false): array
     {
         $firstPageResponse = $this->postSearch($payload + [
             'numHitsPerPage' => $perPage,
@@ -264,12 +385,11 @@ class DoffinLiveSearchService
             $allHits = array_merge($allHits, $this->normalizeHits($pageResponse['items'] ?? []));
         }
 
-        $filteredHits = $this->filterResultsByKeywords($this->deduplicateHits($allHits), $keywords);
-        $filteredTotal = count($filteredHits);
-        $currentPage = max(1, min($page, max(1, (int) ceil($filteredTotal / $perPage))));
-        $offset = ($currentPage - 1) * $perPage;
-
-        return $this->successResponse(array_slice($filteredHits, $offset, $perPage), $currentPage, $perPage, $filteredTotal, $filteredTotal, $fallbackUsed, $firstPageResponse['meta'] ?? []);
+        return [
+            'ok' => true,
+            'hits' => $this->deduplicateHits($allHits),
+            'meta' => $firstPageResponse['meta'] ?? [],
+        ];
     }
 
     private function normalizeHits(mixed $hits): array
@@ -323,7 +443,7 @@ class DoffinLiveSearchService
     /**
      * Apply the keyword filter locally so Doffin only handles the canonical broad search string.
      */
-    private function filterResultsByKeywords(array $hits, array $keywords): array
+    private function filterResultsByKeywords(array $hits, array $keywords, string $keywordsMode = 'all'): array
     {
         $normalizedKeywords = collect($keywords)
             ->map(fn (string $keyword): string => Str::lower(Str::squish($keyword)))
@@ -336,9 +456,17 @@ class DoffinLiveSearchService
             return $hits;
         }
 
+        $keywordsMode = $this->normalizeKeywordsMode($keywordsMode);
+
         return collect($hits)
-            ->filter(function (mixed $hit) use ($normalizedKeywords): bool {
-                return is_array($hit) && $this->hitMatchesAllKeywords($hit, $normalizedKeywords);
+            ->filter(function (mixed $hit) use ($normalizedKeywords, $keywordsMode): bool {
+                if (! is_array($hit)) {
+                    return false;
+                }
+
+                return $keywordsMode === 'any'
+                    ? $this->hitMatchesAnyKeywords($hit, $normalizedKeywords)
+                    : $this->hitMatchesAllKeywords($hit, $normalizedKeywords);
             })
             ->values()
             ->all();
@@ -355,15 +483,42 @@ class DoffinLiveSearchService
         return true;
     }
 
-    private function hitContainsKeyword(array $hit, string $keyword): bool
+    private function hitMatchesAnyKeywords(array $hit, array $keywords): bool
     {
-        foreach ($this->searchableTextForHit($hit) as $text) {
-            if ($text !== '' && str_contains(Str::lower($text), $keyword)) {
+        foreach ($keywords as $keyword) {
+            if ($this->hitContainsKeyword($hit, $keyword)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function hitContainsKeyword(array $hit, string $keyword): bool
+    {
+        foreach ($this->searchableTextForHit($hit) as $text) {
+            if ($text !== '' && $this->textContainsKeyword(Str::lower($text), $keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function textContainsKeyword(string $haystack, string $keyword): bool
+    {
+        if ($keyword === '') {
+            return false;
+        }
+
+        if (! str_contains($keyword, '*')) {
+            return str_contains($haystack, $keyword);
+        }
+
+        $pattern = preg_quote($keyword, '/');
+        $pattern = str_replace('\*', '.*', $pattern);
+
+        return preg_match('/'.$pattern.'/u', $haystack) === 1;
     }
 
     private function searchableTextForHit(array $hit): array
@@ -387,6 +542,13 @@ class DoffinLiveSearchService
         $status = strtoupper(trim($value));
 
         return in_array($status, self::SUPPORTED_STATUSES, true) ? $status : null;
+    }
+
+    private function normalizeKeywordsMode(string $value): string
+    {
+        $mode = Str::lower(Str::squish($value));
+
+        return in_array($mode, ['all', 'any'], true) ? $mode : 'all';
     }
 
     private function normalizePublicationDateRange(string $publicationDateFrom, string $publicationDateTo, string $publicationPeriod): array

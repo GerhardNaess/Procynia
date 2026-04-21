@@ -53,6 +53,7 @@ class NoticeController extends Controller
         $noticeTab = trim((string) $request->string('tab'));
         $isAlertsTab = $mode === 'live' && $noticeTab === 'alerts';
         $useCockpitScope = $request->boolean('cockpit_scope');
+        $keywordsMode = trim((string) $request->string('keywords_mode'));
         $publicationPeriod = trim((string) $request->string('publication_period'));
         $publicationDateFrom = trim((string) $request->string('publication_date_from'));
         $publicationDateTo = trim((string) $request->string('publication_date_to'));
@@ -66,6 +67,7 @@ class NoticeController extends Controller
             'organization_name' => trim((string) $request->string('organization_name')),
             'cpv' => trim((string) $request->string('cpv')),
             'keywords' => trim((string) $request->string('keywords')),
+            'watch_list_id' => trim((string) $request->string('watch_list_id')),
             'publication_date_from' => $publicationDateFrom,
             'publication_date_to' => $publicationDateTo,
             'publication_period' => $publicationPeriod,
@@ -159,6 +161,7 @@ class NoticeController extends Controller
         Log::debug('[DOFFIN][controller] Incoming live notice search request.', [
             'q' => $filters['q'],
             'keywords' => $filters['keywords'],
+            'keywords_mode' => $keywordsMode !== '' ? $keywordsMode : 'all',
             'organization_name' => $filters['organization_name'],
             'cpv' => $filters['cpv'],
             'publication_date_from' => $filters['publication_date_from'],
@@ -170,7 +173,13 @@ class NoticeController extends Controller
             'customer_id' => $customerId,
         ]);
 
-        $searchResponse = $this->liveSearchService->search($filters, $page, $perPage);
+        $searchFilters = $filters;
+
+        if ($keywordsMode !== '') {
+            $searchFilters['keywords_mode'] = $keywordsMode;
+        }
+
+        $searchResponse = $this->liveSearchService->search($searchFilters, $page, $perPage);
         $page = max(1, (int) ($searchResponse['page'] ?? $page));
         $perPage = max(1, (int) ($searchResponse['perPage'] ?? $perPage));
         $fallbackUsed = (bool) ($searchResponse['fallback_used'] ?? false);

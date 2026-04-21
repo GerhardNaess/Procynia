@@ -165,6 +165,7 @@ class DoffinWatchProfileInboxDiscoveryService
                 ->values()
                 ->implode(','),
             'keywords' => $this->keywordsFilter($watchProfile),
+            'keywords_mode' => 'any',
             'publication_period' => '1',
             'status' => 'ACTIVE',
         ];

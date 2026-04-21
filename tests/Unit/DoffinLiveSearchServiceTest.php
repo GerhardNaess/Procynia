@@ -521,6 +521,87 @@ class DoffinLiveSearchServiceTest extends TestCase
         $this->assertSame(['hit-keep'], $filteredIds);
     }
 
+    public function test_it_returns_hits_when_cpv_does_not_match_but_one_watch_list_keyword_does(): void
+    {
+        Http::fake(function ($request) {
+            $searchString = (string) ($request['searchString'] ?? '');
+            $cpvCodes = $request['facets']['cpvCodesId']['checkedItems'] ?? [];
+
+            if ($cpvCodes === ['99999999']) {
+                return Http::response([
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'hits' => [],
+                ], 200);
+            }
+
+            if ($searchString === 'pasvik') {
+                return Http::response([
+                    'numHitsTotal' => 0,
+                    'numHitsAccessible' => 0,
+                    'hits' => [],
+                ], 200);
+            }
+
+            if ($searchString === 'ferge') {
+                return Http::response([
+                    'numHitsTotal' => 1,
+                    'numHitsAccessible' => 1,
+                    'hits' => [
+                        [
+                            'id' => 'hit-ferge',
+                            'buyer' => [
+                                [
+                                    'id' => 'buyer-2',
+                                    'organizationId' => '987654321',
+                                    'name' => 'Kystverket',
+                                ],
+                            ],
+                            'heading' => 'Fergetrafikk i nord',
+                            'description' => 'Fergeforbindelse med nye krav.',
+                            'status' => 'ACTIVE',
+                            'publicationDate' => '2026-03-16',
+                            'deadline' => null,
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response([
+                'numHitsTotal' => 0,
+                'numHitsAccessible' => 0,
+                'hits' => [],
+            ], 200);
+        });
+
+        $result = app(DoffinLiveSearchService::class)->search([
+            'q' => '',
+            'keywords' => 'pasvik, ferge',
+            'keywords_mode' => 'any',
+            'cpv' => '99999999',
+            'organization_name' => '',
+            'publication_period' => '',
+            'status' => '',
+        ], 1, 15);
+
+        Http::assertSentCount(3);
+        Http::assertSent(function ($request): bool {
+            return ($request['facets']['cpvCodesId']['checkedItems'] ?? []) === ['99999999'];
+        });
+
+        Http::assertSent(function ($request): bool {
+            return ($request['searchString'] ?? null) === 'pasvik'
+                && ! isset($request['facets']['cpvCodesId']);
+        });
+
+        Http::assertSent(function ($request): bool {
+            return ($request['searchString'] ?? null) === 'ferge'
+                && ! isset($request['facets']['cpvCodesId']);
+        });
+
+        $this->assertSame(['hit-ferge'], array_values(array_map(static fn (array $hit): string => $hit['id'], $result['hits'])));
+    }
+
     public function test_it_harvests_keyword_pages_so_relevant_soc_hits_are_not_lost_on_later_doffin_pages(): void
     {
         $pageTwoRequested = false;

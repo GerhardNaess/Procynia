@@ -179,6 +179,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
                 'organization_name' => '',
                 'cpv' => '90910000,72222300',
                 'keywords' => 'renhold, tingrett',
+                'watch_list_id' => '1',
                 'publication_date_from' => '2026-03-01',
                 'publication_date_to' => '2026-03-31',
                 'publication_period' => '',
@@ -345,6 +346,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
             'q' => 'Domstoladministrasjonen',
             'cpv' => '90910000,72222300',
             'keywords' => 'renhold, tingrett',
+            'watch_list_id' => '1',
             'publication_date_from' => '2026-03-01',
             'publication_date_to' => '2026-03-31',
             'status' => 'ACTIVE',
@@ -375,6 +377,7 @@ class NoticeControllerLiveSearchContractTest extends TestCase
         $this->assertSame('live', $page['props']['mode']);
         $this->assertSame('90910000,72222300', $page['props']['filters']['cpv']);
         $this->assertSame('renhold, tingrett', $page['props']['filters']['keywords']);
+        $this->assertSame('1', $page['props']['filters']['watch_list_id']);
         $this->assertSame('ACTIVE', $page['props']['filters']['status']);
         $this->assertSame(1, $page['props']['worklist']['saved_count']);
         $this->assertSame(0, $page['props']['worklist']['history_count']);

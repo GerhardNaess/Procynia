@@ -114,6 +114,7 @@ class DoffinWatchProfileSearch extends Command
             'organization_name' => '',
             'cpv' => $this->resolveCpvFilter($watchProfile),
             'keywords' => $this->resolveKeywordsFilter($watchProfile),
+            'keywords_mode' => 'any',
             'publication_period' => '',
             'status' => 'ACTIVE',
         ];

@@ -52,6 +52,7 @@ class DoffinWatchProfileSearchCommandTest extends TestCase
                 'organization_name' => '',
                 'cpv' => '48000000,72000000',
                 'keywords' => "framework agreement\nconsulting",
+                'keywords_mode' => 'any',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
             ], 1, 15)
@@ -111,6 +112,7 @@ class DoffinWatchProfileSearchCommandTest extends TestCase
                 'organization_name' => '',
                 'cpv' => '',
                 'keywords' => 'consulting',
+                'keywords_mode' => 'any',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
             ], 1, 15)
@@ -200,6 +202,7 @@ class DoffinWatchProfileSearchCommandTest extends TestCase
                 'organization_name' => '',
                 'cpv' => '',
                 'keywords' => 'legacy consulting',
+                'keywords_mode' => 'any',
                 'publication_period' => '',
                 'status' => 'ACTIVE',
             ], 1, 15)

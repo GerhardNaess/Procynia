@@ -108,10 +108,12 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         $this->assertStringContainsString('records_created: 2', $firstOutput);
         $this->assertCount(2, $searchCalls);
         $this->assertSame('rammeavtale', $searchCalls[0]['filters']['keywords']);
+        $this->assertSame('any', $searchCalls[0]['filters']['keywords_mode']);
         $this->assertSame('72000000', $searchCalls[0]['filters']['cpv']);
         $this->assertSame('1', $searchCalls[0]['filters']['publication_period']);
         $this->assertSame('ACTIVE', $searchCalls[0]['filters']['status']);
         $this->assertSame('renhold', $searchCalls[1]['filters']['keywords']);
+        $this->assertSame('any', $searchCalls[1]['filters']['keywords_mode']);
 
         $this->assertDatabaseHas('watch_profile_inbox_records', [
             'watch_profile_id' => $personalProfile->id,
@@ -213,6 +215,7 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         $this->assertStringContainsString('records_created: 1', $output);
         $this->assertSame('1', $searchCalls[0]['filters']['publication_period']);
         $this->assertSame('ACTIVE', $searchCalls[0]['filters']['status']);
+        $this->assertSame('any', $searchCalls[0]['filters']['keywords_mode']);
 
         $this->assertDatabaseHas('watch_profile_inbox_records', [
             'watch_profile_id' => $profile->id,
