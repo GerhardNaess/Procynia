@@ -33,6 +33,34 @@ class DocumentChunkerTest extends TestCase
         $this->assertStringContainsString('Siste innhold.', $chunks[1]['content']);
     }
 
+    public function test_it_groups_an_oversized_h1_section_into_few_h2_chunks(): void
+    {
+        $blocks = [
+            ['text' => 'Kort seksjon', 'style' => 'Heading 1', 'level' => 1],
+            ['text' => str_repeat('Kort innhold. ', 20), 'style' => 'Normal', 'level' => null],
+            ['text' => 'Stor seksjon', 'style' => 'Heading 1', 'level' => 1],
+            ['text' => str_repeat('Intro før H2. ', 100), 'style' => 'Normal', 'level' => null],
+            ['text' => 'Underseksjon A', 'style' => 'Heading 2', 'level' => 2],
+            ['text' => str_repeat('A', 11000), 'style' => 'Normal', 'level' => null],
+            ['text' => 'Underseksjon B', 'style' => 'Heading 2', 'level' => 2],
+            ['text' => str_repeat('B', 11000), 'style' => 'Normal', 'level' => null],
+            ['text' => 'Underseksjon C', 'style' => 'Heading 2', 'level' => 2],
+            ['text' => str_repeat('C', 11000), 'style' => 'Normal', 'level' => null],
+        ];
+
+        $chunks = (new DocumentChunker())->chunkStructured($blocks);
+
+        $this->assertCount(3, $chunks);
+        $this->assertStringContainsString('Kort seksjon', $chunks[0]['content']);
+        $this->assertStringContainsString('Stor seksjon', $chunks[1]['content']);
+        $this->assertStringContainsString('Intro før H2.', $chunks[1]['content']);
+        $this->assertStringContainsString('Underseksjon A', $chunks[1]['content']);
+        $this->assertStringContainsString('Underseksjon B', $chunks[1]['content']);
+        $this->assertStringNotContainsString('Underseksjon C', $chunks[1]['content']);
+        $this->assertStringContainsString('Underseksjon C', $chunks[2]['content']);
+        $this->assertChunkOffsetsMatchSource($chunks, $this->structuredSourceText($blocks));
+    }
+
     public function test_it_returns_the_whole_document_as_one_chunk_when_no_real_h1_exists(): void
     {
         $blocks = [

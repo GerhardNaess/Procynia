@@ -11,6 +11,12 @@ class DocumentChunker
 
     private const HARD_MAX_CHUNK_SIZE = 3200;
 
+    private const STRUCTURED_H1_MAX_CHARS = 30000;
+
+    private const STRUCTURED_H2_TARGET_CHARS = 20000;
+
+    private const STRUCTURED_H2_HARD_MAX_CHARS = 35000;
+
     /**
      * Purpose: Split normalized extracted text into deterministic storage chunks.
      * Inputs: Raw extracted text from a saved notice AI document.
@@ -84,7 +90,7 @@ class DocumentChunker
     }
 
     /**
-     * Purpose: Split structured document blocks into chunks using only genuine H1 boundaries.
+     * Purpose: Split structured document blocks into chunks using genuine H1 boundaries first and H2 only as overflow.
      * Inputs: Ordered structured blocks with text and heading levels.
      * Returns: An ordered list of chunk payloads built from full blocks.
      * Side effects: None.
@@ -116,12 +122,14 @@ class DocumentChunker
 
             $sourceTextParts = [];
             $blockStarts = [];
+            $blockEnds = [];
             $cursor = 0;
 
             foreach ($normalizedBlocks as $index => $block) {
                 $blockStarts[$index] = $cursor;
                 $sourceTextParts[] = $block['text'];
                 $cursor += mb_strlen($block['text'], 'UTF-8');
+                $blockEnds[$index] = $cursor;
 
                 if ($index < count($normalizedBlocks) - 1) {
                     $cursor += 2;
@@ -130,48 +138,77 @@ class DocumentChunker
 
             $sourceText = implode("\n\n", $sourceTextParts);
 
-            $firstHeadingIndex = null;
+            $h1Indices = [];
 
             foreach ($normalizedBlocks as $index => $block) {
                 if ((int) ($block['level'] ?? 0) === 1) {
-                    $firstHeadingIndex = $index;
-                    break;
+                    $h1Indices[] = $index;
                 }
             }
 
-            if ($firstHeadingIndex === null) {
+            if ($h1Indices === []) {
                 return [$this->makeChunkPayload($sourceText, 0)];
             }
 
             $chunks = [];
-            $currentContent = '';
-            $currentStart = null;
-            $blockCount = count($normalizedBlocks);
+            $h1Count = count($h1Indices);
 
-            for ($index = $firstHeadingIndex; $index < $blockCount; $index++) {
-                $block = $normalizedBlocks[$index];
-                $blockText = (string) $block['text'];
+            for ($i = 0; $i < $h1Count; $i++) {
+                $sectionStartIndex = $h1Indices[$i];
+                $sectionEndExclusive = $h1Indices[$i + 1] ?? count($normalizedBlocks);
+                $sectionStartOffset = (int) ($blockStarts[$sectionStartIndex] ?? 0);
+                $sectionEndOffset = (int) ($blockEnds[$sectionEndExclusive - 1] ?? $sectionStartOffset);
+                $sectionLength = max(0, $sectionEndOffset - $sectionStartOffset);
 
-                if ((int) ($block['level'] ?? 0) === 1) {
-                    if ($currentContent !== '' && $currentStart !== null) {
-                        $chunks[] = $this->makeChunkPayload($currentContent, $currentStart);
-                    }
-
-                    $currentContent = $blockText;
-                    $currentStart = (int) ($blockStarts[$index] ?? 0);
+                if ($sectionLength <= self::STRUCTURED_H1_MAX_CHARS) {
+                    $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                        $sourceText,
+                        $blockStarts,
+                        $blockEnds,
+                        $sectionStartIndex,
+                        $sectionEndExclusive,
+                        [
+                            'structured_section_heading' => (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
+                            'structured_section_level' => 1,
+                            'structured_subheading' => null,
+                            'structured_subheading_level' => null,
+                        ],
+                    );
 
                     continue;
                 }
 
-                if ($currentContent === '') {
+                $h2Spans = $this->buildStructuredH2Spans($normalizedBlocks, $sectionStartIndex, $sectionEndExclusive);
+
+                if ($h2Spans === []) {
+                    $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                        $sourceText,
+                        $blockStarts,
+                        $blockEnds,
+                        $sectionStartIndex,
+                        $sectionEndExclusive,
+                        [
+                            'structured_section_heading' => (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
+                            'structured_section_level' => 1,
+                            'structured_subheading' => null,
+                            'structured_subheading_level' => null,
+                        ],
+                    );
+
                     continue;
                 }
 
-                $currentContent .= "\n\n".$blockText;
-            }
-
-            if ($currentContent !== '' && $currentStart !== null) {
-                $chunks[] = $this->makeChunkPayload($currentContent, $currentStart);
+                $chunks = array_merge(
+                    $chunks,
+                    $this->packStructuredH2SpansIntoChunks(
+                        $normalizedBlocks,
+                        $blockStarts,
+                        $blockEnds,
+                        $sourceText,
+                        $h2Spans,
+                        (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
+                    ),
+                );
             }
 
             return array_values(array_filter(
@@ -186,6 +223,274 @@ class DocumentChunker
 
             return [];
         }
+    }
+
+    /**
+     * Purpose: Build H2 spans inside one oversized H1 section.
+     * Inputs: Structured blocks and the boundaries of a single H1 section.
+     * Returns: Ordered spans that keep the H1 intro with the first H2 group and then advance from H2 to H2.
+     *
+     * @param array<int, array{text: string, style: ?string, level: ?int}> $blocks
+     * @return array<int, array{start: int, end: int, structured_subheading: ?string, structured_subheading_level: ?int}>
+     */
+    private function buildStructuredH2Spans(array $blocks, int $sectionStartIndex, int $sectionEndExclusive): array
+    {
+        $h2Indices = [];
+
+        for ($index = $sectionStartIndex + 1; $index < $sectionEndExclusive; $index++) {
+            if ((int) ($blocks[$index]['level'] ?? 0) === 2) {
+                $h2Indices[] = $index;
+            }
+        }
+
+        if ($h2Indices === []) {
+            return [];
+        }
+
+        $spans = [];
+        $spanStartIndex = $sectionStartIndex;
+
+        foreach ($h2Indices as $position => $h2Index) {
+            $spanEndExclusive = $h2Indices[$position + 1] ?? $sectionEndExclusive;
+
+            $spans[] = [
+                'start' => $spanStartIndex,
+                'end' => $spanEndExclusive,
+                'structured_subheading' => (string) ($blocks[$h2Index]['text'] ?? ''),
+                'structured_subheading_level' => 2,
+            ];
+
+            $spanStartIndex = $spanEndExclusive;
+        }
+
+        return $spans;
+    }
+
+    /**
+     * Purpose: Pack H2 spans into as few chunks as possible without exceeding the hard ceiling.
+     * Inputs: Structured H2 spans plus the offsets needed to slice them back into source text.
+     * Returns: Structured chunk payloads that preserve H1 as the parent section metadata.
+     *
+     * @param array<int, array{text: string, style: ?string, level: ?int}> $blocks
+     * @param array<int, int> $blockStarts
+     * @param array<int, int> $blockEnds
+     * @param array<int, array{start: int, end: int, structured_subheading: ?string, structured_subheading_level: ?int}> $spans
+     * @return array<int, array<string, mixed>>
+     */
+    private function packStructuredH2SpansIntoChunks(
+        array $blocks,
+        array $blockStarts,
+        array $blockEnds,
+        string $sourceText,
+        array $spans,
+        string $sectionHeading,
+    ): array {
+        $chunks = [];
+        $currentStartIndex = null;
+        $currentEndExclusive = null;
+        $currentMetadata = null;
+
+        foreach ($spans as $span) {
+            $spanStartIndex = (int) ($span['start'] ?? 0);
+            $spanEndExclusive = (int) ($span['end'] ?? $spanStartIndex);
+            $spanStartOffset = (int) ($blockStarts[$spanStartIndex] ?? 0);
+            $spanEndOffset = (int) ($blockEnds[$spanEndExclusive - 1] ?? $spanStartOffset);
+            $spanLength = max(0, $spanEndOffset - $spanStartOffset);
+            $spanMetadata = [
+                'structured_section_heading' => $sectionHeading,
+                'structured_section_level' => 1,
+                'structured_subheading' => isset($span['structured_subheading']) && $span['structured_subheading'] !== ''
+                    ? (string) $span['structured_subheading']
+                    : null,
+                'structured_subheading_level' => isset($span['structured_subheading_level'])
+                    ? (int) $span['structured_subheading_level']
+                    : null,
+            ];
+
+            if ($spanLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+                if ($currentStartIndex !== null && $currentEndExclusive !== null) {
+                    $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                        $sourceText,
+                        $blockStarts,
+                        $blockEnds,
+                        $currentStartIndex,
+                        $currentEndExclusive,
+                        $currentMetadata ?? $spanMetadata,
+                    );
+
+                    $currentStartIndex = null;
+                    $currentEndExclusive = null;
+                    $currentMetadata = null;
+                }
+
+                $chunks = array_merge(
+                    $chunks,
+                    $this->splitStructuredRangeByBlocks(
+                        $sourceText,
+                        $blockStarts,
+                        $blockEnds,
+                        $spanStartIndex,
+                        $spanEndExclusive,
+                        $spanMetadata,
+                    ),
+                );
+
+                continue;
+            }
+
+            if ($currentStartIndex === null || $currentEndExclusive === null) {
+                $currentStartIndex = $spanStartIndex;
+                $currentEndExclusive = $spanEndExclusive;
+                $currentMetadata = $spanMetadata;
+
+                continue;
+            }
+
+            $currentStartOffset = (int) ($blockStarts[$currentStartIndex] ?? 0);
+            $currentEndOffset = (int) ($blockEnds[$currentEndExclusive - 1] ?? $currentStartOffset);
+            $currentLength = max(0, $currentEndOffset - $currentStartOffset);
+            $combinedEndOffset = (int) ($blockEnds[$spanEndExclusive - 1] ?? $currentEndOffset);
+            $combinedLength = max(0, $combinedEndOffset - $currentStartOffset);
+
+            if ($currentLength >= self::STRUCTURED_H2_TARGET_CHARS || $combinedLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+                $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                    $sourceText,
+                    $blockStarts,
+                    $blockEnds,
+                    $currentStartIndex,
+                    $currentEndExclusive,
+                    $currentMetadata ?? $spanMetadata,
+                );
+
+                $currentStartIndex = $spanStartIndex;
+                $currentEndExclusive = $spanEndExclusive;
+                $currentMetadata = $spanMetadata;
+
+                continue;
+            }
+
+            $currentEndExclusive = $spanEndExclusive;
+        }
+
+        if ($currentStartIndex !== null && $currentEndExclusive !== null) {
+            $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                $sourceText,
+                $blockStarts,
+                $blockEnds,
+                $currentStartIndex,
+                $currentEndExclusive,
+                $currentMetadata ?? [
+                    'structured_section_heading' => $sectionHeading,
+                    'structured_section_level' => 1,
+                    'structured_subheading' => null,
+                    'structured_subheading_level' => null,
+                ],
+            );
+        }
+
+        return array_values(array_filter(
+            $chunks,
+            static fn (array $chunk): bool => trim((string) ($chunk['content'] ?? '')) !== ''
+        ));
+    }
+
+    /**
+     * Purpose: Split one oversized structured range into chunks without breaking individual blocks.
+     * Inputs: The source text, the block offsets, and a block range.
+     * Returns: Chunk payloads that preserve source offsets while respecting whole-block boundaries.
+     *
+     * @param array<int, int> $blockStarts
+     * @param array<int, int> $blockEnds
+     * @param array<string, mixed> $metadata
+     * @return array<int, array<string, mixed>>
+     */
+    private function splitStructuredRangeByBlocks(
+        string $sourceText,
+        array $blockStarts,
+        array $blockEnds,
+        int $startIndex,
+        int $endExclusive,
+        array $metadata,
+    ): array {
+        if ($startIndex >= $endExclusive) {
+            return [];
+        }
+
+        $chunks = [];
+        $currentStartIndex = $startIndex;
+        $currentEndExclusive = $startIndex + 1;
+
+        for ($index = $startIndex + 1; $index < $endExclusive; $index++) {
+            $currentStartOffset = (int) ($blockStarts[$currentStartIndex] ?? 0);
+            $currentEndOffset = (int) ($blockEnds[$currentEndExclusive - 1] ?? $currentStartOffset);
+            $currentLength = max(0, $currentEndOffset - $currentStartOffset);
+            $candidateEndOffset = (int) ($blockEnds[$index] ?? $currentEndOffset);
+            $candidateLength = max(0, $candidateEndOffset - $currentStartOffset);
+
+            if ($currentLength >= self::STRUCTURED_H2_TARGET_CHARS || $candidateLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+                $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                    $sourceText,
+                    $blockStarts,
+                    $blockEnds,
+                    $currentStartIndex,
+                    $currentEndExclusive,
+                    $metadata,
+                );
+
+                $currentStartIndex = $index;
+                $currentEndExclusive = $index + 1;
+
+                continue;
+            }
+
+            $currentEndExclusive = $index + 1;
+        }
+
+        if ($currentEndExclusive > $currentStartIndex) {
+            $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                $sourceText,
+                $blockStarts,
+                $blockEnds,
+                $currentStartIndex,
+                $currentEndExclusive,
+                $metadata,
+            );
+        }
+
+        return array_values(array_filter(
+            $chunks,
+            static fn (array $chunk): bool => trim((string) ($chunk['content'] ?? '')) !== ''
+        ));
+    }
+
+    /**
+     * Purpose: Build one structured chunk payload from a block range and optional metadata.
+     * Inputs: The source text, block offsets, and the block range to slice.
+     * Returns: A chunk payload that preserves the original source offsets.
+     *
+     * @param array<int, int> $blockStarts
+     * @param array<int, int> $blockEnds
+     * @param array<string, mixed> $metadata
+     * @return array<string, mixed>
+     */
+    private function makeStructuredChunkPayloadFromRange(
+        string $sourceText,
+        array $blockStarts,
+        array $blockEnds,
+        int $startIndex,
+        int $endExclusive,
+        array $metadata = [],
+    ): array {
+        if ($startIndex >= $endExclusive) {
+            return array_merge($this->makeChunkPayload('', 0), $metadata);
+        }
+
+        $startOffset = (int) ($blockStarts[$startIndex] ?? 0);
+        $endOffset = (int) ($blockEnds[$endExclusive - 1] ?? $startOffset);
+        $contentLength = max(0, $endOffset - $startOffset);
+        $content = mb_substr($sourceText, $startOffset, $contentLength, 'UTF-8');
+
+        return array_merge($this->makeChunkPayload($content, $startOffset), $metadata);
     }
 
     /**
