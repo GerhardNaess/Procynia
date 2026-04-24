@@ -59,6 +59,107 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Render the detailed view for one customer knowledge document.
+     * Inputs: The current frontend request and the route-bound knowledge document.
+     * Returns: An Inertia response with the document overview and chunk list.
+     * Side effects: None.
+     */
+    public function show(Request $request, KnowledgeItem $knowledgeItem): Response
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocumentsQuery($customerId)
+            ->with([
+                'uploadedBy',
+                'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
+            ])
+            ->withCount('chunks')
+            ->whereKey($knowledgeItem->id)
+            ->firstOrFail();
+
+        return Inertia::render('App/AI/KnowledgeBase/Show', [
+            'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
+            'knowledgeItem' => $this->documentDetailPayload($record),
+            'indexUrl' => route('app.ai.knowledge-base.index'),
+            'summaryUpdateUrl' => route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $record->id]),
+            'editUrl' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $record->id]),
+        ]);
+    }
+
+    /**
+     * Purpose: Update the human-readable document summary for a visible knowledge document.
+     * Inputs: The current frontend request and the route-bound knowledge document.
+     * Returns: A redirect back to the detailed view of the document.
+     * Side effects: Updates only the summary column in the database.
+     */
+    public function updateSummary(Request $request, KnowledgeItem $knowledgeItem): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $payload = $this->validatedSummaryPayload($request);
+
+        $record->forceFill([
+            'summary' => $payload['summary'],
+        ])->save();
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', 'Dokumentoppsummering oppdatert.');
+    }
+
+    /**
+     * Purpose: Update the review status for one knowledge chunk.
+     * Inputs: The current frontend request, the parent knowledge document, and the chunk.
+     * Returns: A redirect back to the detailed view of the document.
+     * Side effects: Updates only the chunk review status in the database.
+     */
+    public function updateChunkReviewStatus(
+        Request $request,
+        KnowledgeItem $knowledgeItem,
+        KnowledgeItemChunk $chunk,
+    ): RedirectResponse {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $chunkRecord = $this->scopedChunk($record->id, $chunk->id);
+        $payload = $this->validatedChunkReviewStatusPayload($request);
+
+        $chunkRecord->forceFill([
+            'review_status' => $payload['review_status'],
+        ])->save();
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', 'Chunk-status oppdatert.');
+    }
+
+    /**
+     * Purpose: Update the product metadata for one knowledge chunk.
+     * Inputs: The current frontend request, the parent knowledge document, and the chunk.
+     * Returns: A redirect back to the detailed view of the document.
+     * Side effects: Updates only the editable chunk metadata fields in the database.
+     */
+    public function updateChunkMetadata(
+        Request $request,
+        KnowledgeItem $knowledgeItem,
+        KnowledgeItemChunk $chunk,
+    ): RedirectResponse {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $chunkRecord = $this->scopedChunk($record->id, $chunk->id);
+        $payload = $this->validatedChunkMetadataPayload($request);
+
+        $chunkRecord->forceFill([
+            'title' => $payload['title'],
+            'ai_summary' => $payload['ai_summary'],
+            'service_product_tag' => $payload['service_product_tag'],
+            'theme_tag' => $payload['theme_tag'],
+        ])->save();
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', 'Chunk-metadata oppdatert.');
+    }
+
+    /**
      * Purpose: Render the knowledge document upload form.
      * Inputs: The current frontend request.
      * Returns: An Inertia response for the create page.
@@ -102,6 +203,7 @@ class KnowledgeBaseController extends Controller
 
             $absolutePath = Storage::disk('local')->path($storedPath);
             $extractedText = $this->documentTextExtractor->extractText($absolutePath);
+            $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
             $extractionFailed = trim($extractedText) === '';
 
             $result = DB::transaction(function () use (
@@ -110,6 +212,7 @@ class KnowledgeBaseController extends Controller
                 $request,
                 $storedPath,
                 $extractedText,
+                $structuredBlocks,
                 $extractionFailed,
             ): array {
                 $knowledgeDocument = KnowledgeItem::query()->create([
@@ -137,7 +240,7 @@ class KnowledgeBaseController extends Controller
 
                 return [
                     'knowledge_document' => $knowledgeDocument,
-                    'chunks' => $this->syncChunks($knowledgeDocument, $extractedText),
+                    'chunks' => $this->syncChunks($knowledgeDocument, $structuredBlocks),
                 ];
             });
 
@@ -212,6 +315,7 @@ class KnowledgeBaseController extends Controller
         $storedPath = $record->storage_path;
 
         DB::transaction(function () use ($record): void {
+            $record->chunks()->delete();
             $record->delete();
         });
 
@@ -272,6 +376,20 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Resolve one visible knowledge chunk for the current customer.
+     * Inputs: The knowledge document id and the route-bound chunk id.
+     * Returns: The matching knowledge chunk record.
+     * Side effects: Throws a 404 when the chunk is outside the current document scope.
+     */
+    private function scopedChunk(int $knowledgeItemId, int $knowledgeItemChunkId): KnowledgeItemChunk
+    {
+        return KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $knowledgeItemId)
+            ->whereKey($knowledgeItemChunkId)
+            ->firstOrFail();
+    }
+
+    /**
      * Purpose: Validate and normalize the upload payload for a knowledge document.
      * Inputs: The current frontend request.
      * Returns: A normalized payload ready for persistence.
@@ -280,7 +398,7 @@ class KnowledgeBaseController extends Controller
     private function validatedStorePayload(Request $request): array
     {
         $validated = $request->validate([
-            'document' => ['required', 'file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
+            'document' => ['required', 'file', 'mimes:pdf,docx,xlsx', 'max:20480'],
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'is_active' => ['required', 'boolean'],
         ]);
@@ -308,6 +426,65 @@ class KnowledgeBaseController extends Controller
         return [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'is_active' => (bool) $validated['is_active'],
+        ];
+    }
+
+    /**
+     * Purpose: Validate and normalize the summary update payload for a knowledge document.
+     * Inputs: The current frontend request.
+     * Returns: A normalized payload ready for persistence.
+     * Side effects: Throws validation errors when the request is invalid.
+     */
+    private function validatedSummaryPayload(Request $request): array
+    {
+        $validated = $request->validate([
+            'summary' => ['nullable', 'string', 'max:20000'],
+        ]);
+
+        $summary = trim((string) ($validated['summary'] ?? ''));
+
+        return [
+            'summary' => $summary !== '' ? $summary : null,
+        ];
+    }
+
+    /**
+     * Purpose: Validate and normalize the review status payload for one knowledge chunk.
+     * Inputs: The current frontend request.
+     * Returns: A normalized payload ready for persistence.
+     * Side effects: Throws validation errors when the request is invalid.
+     */
+    private function validatedChunkReviewStatusPayload(Request $request): array
+    {
+        $validated = $request->validate([
+            'review_status' => ['required', 'string', Rule::in(KnowledgeItemChunk::REVIEW_STATUSES)],
+        ]);
+
+        return [
+            'review_status' => Str::lower(trim((string) $validated['review_status'])),
+        ];
+    }
+
+    /**
+     * Purpose: Validate and normalize the editable product metadata for one knowledge chunk.
+     * Inputs: The current frontend request.
+     * Returns: A normalized payload ready for persistence.
+     * Side effects: Throws validation errors when the request is invalid.
+     */
+    private function validatedChunkMetadataPayload(Request $request): array
+    {
+        $validated = $request->validate([
+            'title' => ['nullable', 'string', 'max:255'],
+            'ai_summary' => ['nullable', 'string', 'max:20000'],
+            'service_product_tag' => ['nullable', 'string', 'max:191'],
+            'theme_tag' => ['nullable', 'string', 'max:191'],
+        ]);
+
+        return [
+            'title' => $this->cleanNullableString($validated['title'] ?? null, 255),
+            'ai_summary' => $this->cleanNullableString($validated['ai_summary'] ?? null, 20000),
+            'service_product_tag' => $this->cleanNullableString($validated['service_product_tag'] ?? null, 191),
+            'theme_tag' => $this->cleanNullableString($validated['theme_tag'] ?? null, 191),
         ];
     }
 
@@ -344,6 +521,7 @@ class KnowledgeBaseController extends Controller
             'content_type' => $knowledgeDocument->document_type,
             'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
+            'summary' => $knowledgeDocument->summary,
             'is_active' => (bool) $knowledgeDocument->is_active,
             'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
             'extraction_status' => $knowledgeDocument->extraction_status,
@@ -356,6 +534,7 @@ class KnowledgeBaseController extends Controller
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
             'mime_type' => $knowledgeDocument->mime_type,
+            'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
             'edit_url' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $knowledgeDocument->id]),
             'delete_url' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $knowledgeDocument->id]),
         ];
@@ -374,8 +553,12 @@ class KnowledgeBaseController extends Controller
             'original_filename' => $knowledgeDocument->original_filename,
             'document_type' => $knowledgeDocument->document_type,
             'content_type' => $knowledgeDocument->document_type,
+            'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
+            'content_type_label' => KnowledgeItem::CONTENT_TYPE_LABELS[$knowledgeDocument->content_type] ?? $knowledgeDocument->content_type,
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
+            'summary' => $knowledgeDocument->summary,
             'is_active' => (bool) $knowledgeDocument->is_active,
+            'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
             'file_size_bytes' => $knowledgeDocument->file_size_bytes,
             'file_size_human' => $this->humanFileSize($knowledgeDocument->file_size_bytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
@@ -386,36 +569,88 @@ class KnowledgeBaseController extends Controller
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
             'chunk_count' => $knowledgeDocument->chunks->count(),
+            'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
         ];
     }
 
     /**
+     * Purpose: Convert a knowledge document into the detailed view payload.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: A frontend-ready array for the detail page.
+     * Side effects: None.
+     */
+    private function documentDetailPayload(KnowledgeItem $knowledgeDocument): array
+    {
+        return array_merge(
+            $this->documentFormPayload($knowledgeDocument),
+            [
+                'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
+                'edit_url' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $knowledgeDocument->id]),
+                'index_url' => route('app.ai.knowledge-base.index'),
+                'chunks' => $knowledgeDocument->chunks
+                    ->map(static fn (KnowledgeItemChunk $chunk): array => [
+                        'id' => $chunk->id,
+                        'chunk_index' => (int) $chunk->chunk_index,
+                        'title' => $chunk->title,
+                        'fallback_title' => sprintf('Chunk %d', $chunk->chunk_index + 1),
+                        'content' => (string) $chunk->content,
+                        'content_preview' => Str::limit(Str::squish((string) $chunk->content), 320, '...'),
+                        'review_status' => $chunk->review_status ?: KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+                        'review_status_label' => KnowledgeItemChunk::REVIEW_STATUS_LABELS[$chunk->review_status ?: KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW] ?? ($chunk->review_status ?: KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW),
+                        'review_status_update_url' => route('app.ai.knowledge-base.chunks.review-status.update', [
+                            'knowledgeItem' => $knowledgeDocument->id,
+                            'chunk' => $chunk->id,
+                        ]),
+                        'metadata_update_url' => route('app.ai.knowledge-base.chunks.metadata.update', [
+                            'knowledgeItem' => $knowledgeDocument->id,
+                            'chunk' => $chunk->id,
+                        ]),
+                        'ai_summary' => $chunk->ai_summary,
+                        'service_product_tag' => $chunk->service_product_tag,
+                        'theme_tag' => $chunk->theme_tag,
+                        'start_offset' => (int) $chunk->start_offset,
+                        'end_offset' => (int) $chunk->end_offset,
+                        'embedding_model' => $chunk->embedding_model,
+                        'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
+                        'embedding_error' => $chunk->embedding_error,
+                        'source_filename' => $knowledgeDocument->original_filename,
+                        'source_filetype' => $knowledgeDocument->mime_type,
+                        'knowledge_item_id' => $knowledgeDocument->id,
+                    ])
+                    ->values()
+                    ->all(),
+            ],
+        );
+    }
+
+    /**
      * Purpose: Regenerate deterministic chunks for one knowledge document.
-     * Inputs: The knowledge document and its extracted text.
+     * Inputs: The knowledge document and its structured text blocks.
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, string $extractedText): Collection
+    private function syncChunks(KnowledgeItem $knowledgeDocument, array $structuredBlocks): Collection
     {
         $knowledgeDocument->chunks()->delete();
-        $chunkPayloads = $this->documentChunker->chunkText($extractedText);
+        $chunkPayloads = $this->documentChunker->chunkStructured($structuredBlocks);
 
         if ($chunkPayloads === []) {
             return collect();
         }
 
         return collect($knowledgeDocument->chunks()->createMany(
-            array_map(
-                static fn (array $chunkPayload, int $chunkIndex): array => [
-                    'chunk_index' => $chunkIndex,
-                    'content' => (string) ($chunkPayload['content'] ?? ''),
-                    'start_offset' => (int) ($chunkPayload['char_start'] ?? 0),
-                    'end_offset' => (int) ($chunkPayload['char_end'] ?? 0),
-                ],
-                $chunkPayloads,
-                array_keys($chunkPayloads),
-            ),
-        ));
+                array_map(
+                    static fn (array $chunkPayload, int $chunkIndex): array => [
+                        'chunk_index' => $chunkIndex,
+                        'content' => (string) ($chunkPayload['content'] ?? ''),
+                        'start_offset' => (int) ($chunkPayload['char_start'] ?? 0),
+                        'end_offset' => (int) ($chunkPayload['char_end'] ?? 0),
+                        'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+                    ],
+                    $chunkPayloads,
+                    array_keys($chunkPayloads),
+                ),
+            ));
     }
 
     /**
@@ -548,6 +783,17 @@ class KnowledgeBaseController extends Controller
         }
 
         return 'Ingen ekstrahert tekst.';
+    }
+
+    private function cleanNullableString(mixed $value, int $maxLength): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        return Str::limit($text, $maxLength, '');
     }
 
     /**

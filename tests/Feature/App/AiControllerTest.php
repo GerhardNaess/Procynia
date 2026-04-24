@@ -702,6 +702,23 @@ class AiControllerTest extends TestCase
         $this->assertSame('Leverandøren forplikter seg til å beskrive metode, bemanning og kvalitetsstyring.', $textItem->body_text);
     }
 
+    public function test_ai_answer_basis_document_upload_rejects_unsupported_legacy_file_type(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BASIS-INVALID', 'Basis invalid upload target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:26:00');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.answer-basis.documents.store', ['savedNotice' => $savedNotice->id]), [
+            'documents' => [
+                UploadedFile::fake()->create('legacy.doc', 8, 'application/msword'),
+            ],
+        ]);
+
+        $response->assertSessionHasErrors(['documents.0']);
+    }
+
     public function test_ai_requirement_answer_basis_selection_sync_endpoint_persists_selected_ids(): void
     {
         $context = $this->customerAdminContext();
@@ -1545,7 +1562,7 @@ class AiControllerTest extends TestCase
         $this->assertNull($scopeNoteDocument->processing_finished_at);
         $this->assertStringStartsWith('saved-notices/'.$savedNotice->id.'/ai-documents/', $scopeNoteDocument->stored_path);
         $this->assertSame(0, $requirementsChunks->count());
-        $this->assertGreaterThan(1, $scopeNoteChunks->count());
+        $this->assertSame(1, $scopeNoteChunks->count());
         $this->assertSame(range(0, $scopeNoteChunks->count() - 1), $scopeNoteChunks->pluck('chunk_index')->all());
 
         $this->actingAs($context['user'])
@@ -1563,7 +1580,7 @@ class AiControllerTest extends TestCase
                     && $documentsByFilename->get('requirements-list.docx')['has_extracted_text'] === false
                     && $documentsByFilename->get('scope-note.docx')['has_extracted_text'] === true
                     && $documentsByFilename->get('requirements-list.docx')['chunk_count'] === 0
-                    && $documentsByFilename->get('scope-note.docx')['chunk_count'] > 1
+                    && $documentsByFilename->get('scope-note.docx')['chunk_count'] === 1
                     && $documentsByFilename->get('scope-note.docx')['delete_url'] === route('app.ai.documents.destroy', [
                         'savedNotice' => $savedNotice->id,
                         'document' => $documentsByFilename->get('scope-note.docx')['id'],
@@ -1617,6 +1634,23 @@ class AiControllerTest extends TestCase
                     && $documents->first()['chunk_count'] === 0
                     && $documents->first()['processing_status'] === SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED;
             });
+    }
+
+    public function test_ai_documents_upload_rejects_unsupported_legacy_file_type(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3003-INVALID', 'Invalid upload target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:35:00');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.documents.store', ['savedNotice' => $savedNotice->id]), [
+            'documents' => [
+                UploadedFile::fake()->create('legacy.xls', 8, 'application/vnd.ms-excel'),
+            ],
+        ]);
+
+        $response->assertSessionHasErrors(['documents.0']);
     }
 
     public function test_ai_document_delete_removes_file_chunks_requirements_and_returns_to_the_case_view(): void

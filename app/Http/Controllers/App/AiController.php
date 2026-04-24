@@ -280,7 +280,7 @@ class AiController extends Controller
 
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
-            'documents.*' => ['file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
+            'documents.*' => ['file', 'mimes:pdf,docx,xlsx', 'max:20480'],
         ]);
 
         $documents = $request->file('documents', []);
@@ -314,7 +314,9 @@ class AiController extends Controller
 
             abort_unless(is_string($storedPath) && $storedPath !== '', 500, 'Failed to store AI document.');
 
-            $extractedText = $this->documentTextExtractor->extractText(Storage::disk('local')->path($storedPath));
+            $absolutePath = Storage::disk('local')->path($storedPath);
+            $extractedText = $this->documentTextExtractor->extractText($absolutePath);
+            $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
 
             $documentRecord = $record->aiDocuments()->create([
                 'uploaded_by_user_id' => $request->user()?->id,
@@ -346,7 +348,7 @@ class AiController extends Controller
                 'requested_document_count' => count($documents),
             ]);
 
-            $this->syncDocumentChunks($documentRecord, $extractedText);
+            $this->syncDocumentChunks($documentRecord, $structuredBlocks);
             $queuedRun = $this->requirementExtractionRunService->createQueuedRunForDocument($documentRecord);
             $documentRunId = $queuedRun->uuid;
 
@@ -416,7 +418,7 @@ class AiController extends Controller
 
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
-            'documents.*' => ['file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
+            'documents.*' => ['file', 'mimes:pdf,docx,xlsx', 'max:20480'],
         ]);
 
         $createdItems = $this->requirementAnswerBasisService->createDocumentItems(
@@ -1500,19 +1502,15 @@ class AiController extends Controller
 
     /**
      * Purpose: Synchronize stored text chunks for a saved notice AI document.
-     * Inputs: The persisted AI document and the extracted raw text.
+     * Inputs: The persisted AI document and structured text blocks.
      * Returns: None.
      * Side effects: Deletes existing chunks and recreates them from the extracted text when available.
      */
-    private function syncDocumentChunks(SavedNoticeAiDocument $document, string $extractedText): void
+    private function syncDocumentChunks(SavedNoticeAiDocument $document, array $structuredBlocks): void
     {
         $document->chunks()->delete();
 
-        if (trim($extractedText) === '') {
-            return;
-        }
-
-        $chunks = $this->documentChunker->chunkText($extractedText);
+        $chunks = $this->documentChunker->chunkStructured($structuredBlocks);
 
         if ($chunks === []) {
             return;

@@ -8,12 +8,35 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class KnowledgeItemChunk extends Model
 {
+    public const REVIEW_STATUS_PENDING_REVIEW = 'pending_review';
+
+    public const REVIEW_STATUS_APPROVED = 'approved';
+
+    public const REVIEW_STATUS_REJECTED = 'rejected';
+
+    public const REVIEW_STATUSES = [
+        self::REVIEW_STATUS_PENDING_REVIEW,
+        self::REVIEW_STATUS_APPROVED,
+        self::REVIEW_STATUS_REJECTED,
+    ];
+
+    public const REVIEW_STATUS_LABELS = [
+        self::REVIEW_STATUS_PENDING_REVIEW => 'Trenger review',
+        self::REVIEW_STATUS_APPROVED => 'Godkjent',
+        self::REVIEW_STATUS_REJECTED => 'Avvist',
+    ];
+
     protected $fillable = [
         'knowledge_item_id',
         'chunk_index',
         'content',
         'start_offset',
         'end_offset',
+        'review_status',
+        'title',
+        'ai_summary',
+        'service_product_tag',
+        'theme_tag',
         'embedding_vector',
         'embedding_model',
         'embedding_generated_at',

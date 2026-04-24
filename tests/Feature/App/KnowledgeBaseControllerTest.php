@@ -71,6 +71,8 @@ class KnowledgeBaseControllerTest extends TestCase
                 && $items->count() === 1
                 && $item !== null
                 && $item['original_filename'] === 'company-profile.docx'
+                && $item['show_url'] === route('app.ai.knowledge-base.show', ['knowledgeItem' => $item['id']])
+                && $item['delete_url'] === route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $item['id']])
                 && $item['content_excerpt'] !== ''
                 && $item['chunk_count'] > 0
                 && $item['extraction_status'] === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
@@ -130,6 +132,10 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));
         $this->assertGreaterThan(0, $chunks->count());
         $this->assertSame(range(0, $chunks->count() - 1), $chunks->pluck('chunk_index')->all());
+        $this->assertSame(
+            array_fill(0, $chunks->count(), KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW),
+            $chunks->pluck('review_status')->all(),
+        );
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
@@ -261,6 +267,265 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_base_show_page_can_be_opened_with_chunks_and_metadata(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six B AS');
+        $content = str_repeat('Chunked reference content used to power the detail page. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('detail-reference.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'detail-reference.docx')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · '.$document->original_filename
+                && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index')
+                && data_get($page, 'props.editUrl') === route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id])
+                && data_get($page, 'props.summaryUpdateUrl') === route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $document->id])
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.original_filename') === 'detail-reference.docx'
+                && data_get($page, 'props.knowledgeItem.show_url') === route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id])
+                && data_get($page, 'props.knowledgeItem.document_type_label') === KnowledgeItem::DOCUMENT_TYPE_LABELS[KnowledgeItem::DOCUMENT_TYPE_REFERENCE]
+                && data_get($page, 'props.knowledgeItem.chunk_count') > 0
+                && $chunks->count() > 0
+                && $chunks->first()['title'] === null
+                && $chunks->first()['fallback_title'] === 'Chunk 1'
+                && $chunks->first()['review_status'] === KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW
+                && $chunks->first()['review_status_update_url'] === route('app.ai.knowledge-base.chunks.review-status.update', [
+                    'knowledgeItem' => $document->id,
+                    'chunk' => $chunks->first()['id'],
+                ])
+                && $chunks->first()['metadata_update_url'] === route('app.ai.knowledge-base.chunks.metadata.update', [
+                    'knowledgeItem' => $document->id,
+                    'chunk' => $chunks->first()['id'],
+                ])
+                && $chunks->first()['content_preview'] !== '';
+        });
+    }
+
+    public function test_knowledge_document_chunk_review_status_can_be_updated_from_the_show_page(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six D AS');
+        $content = str_repeat('Chunk review flow document text that will chunk deterministically. ', 18);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('chunk-review.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'chunk-review.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.review-status.update', [
+            'knowledgeItem' => $document->id,
+            'chunk' => $chunk->id,
+        ]), [
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $updatedChunk = KnowledgeItemChunk::query()->whereKey($chunk->id)->firstOrFail();
+        $this->assertSame(KnowledgeItemChunk::REVIEW_STATUS_APPROVED, $updatedChunk->review_status);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.chunks.0.review_status') === KnowledgeItemChunk::REVIEW_STATUS_APPROVED;
+        });
+    }
+
+    public function test_knowledge_document_chunk_review_status_rejects_invalid_values(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six E AS');
+        $content = str_repeat('Chunk review validation document text that will chunk deterministically. ', 18);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('chunk-review-invalid.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'chunk-review-invalid.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.review-status.update', [
+            'knowledgeItem' => $document->id,
+            'chunk' => $chunk->id,
+        ]), [
+            'review_status' => 'invalid-status',
+        ]);
+
+        $response->assertSessionHasErrors(['review_status']);
+        $this->assertSame(KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW, $chunk->fresh()->review_status);
+    }
+
+    public function test_knowledge_document_chunk_metadata_can_be_updated_from_the_show_page(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six F AS');
+        $content = str_repeat('Chunk metadata flow document text that will chunk deterministically. ', 18);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('chunk-metadata.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'chunk-metadata.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.metadata.update', [
+            'knowledgeItem' => $document->id,
+            'chunk' => $chunk->id,
+        ]), [
+            'title' => 'Leverandøravtale',
+            'ai_summary' => 'Dette er en kort oppsummering av chunkens innhold.',
+            'service_product_tag' => 'Kontrakt',
+            'theme_tag' => 'Juridisk',
+            'embedding_model' => 'ignored-by-validation',
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $updatedChunk = KnowledgeItemChunk::query()->whereKey($chunk->id)->firstOrFail();
+        $this->assertSame('Leverandøravtale', $updatedChunk->title);
+        $this->assertSame('Dette er en kort oppsummering av chunkens innhold.', $updatedChunk->ai_summary);
+        $this->assertSame('Kontrakt', $updatedChunk->service_product_tag);
+        $this->assertSame('Juridisk', $updatedChunk->theme_tag);
+        $this->assertSame('text-embedding-3-small', $updatedChunk->embedding_model);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.chunks.0.title') === 'Leverandøravtale'
+                && data_get($page, 'props.knowledgeItem.chunks.0.ai_summary') === 'Dette er en kort oppsummering av chunkens innhold.'
+                && data_get($page, 'props.knowledgeItem.chunks.0.service_product_tag') === 'Kontrakt'
+                && data_get($page, 'props.knowledgeItem.chunks.0.theme_tag') === 'Juridisk';
+        });
+    }
+
+    public function test_knowledge_document_chunk_metadata_rejects_invalid_values(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six G AS');
+        $content = str_repeat('Chunk metadata validation document text that will chunk deterministically. ', 18);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('chunk-metadata-invalid.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'chunk-metadata-invalid.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.metadata.update', [
+            'knowledgeItem' => $document->id,
+            'chunk' => $chunk->id,
+        ]), [
+            'title' => str_repeat('x', 256),
+            'ai_summary' => 'OK',
+            'service_product_tag' => 'OK',
+            'theme_tag' => 'OK',
+        ]);
+
+        $response->assertSessionHasErrors(['title']);
+        $this->assertNull($chunk->fresh()->title);
+    }
+
+    public function test_knowledge_document_summary_can_be_updated_from_the_show_page(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six C AS');
+        $content = str_repeat('Summary editable document text that will chunk deterministically. ', 18);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('summary-editable.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'summary-editable.docx')
+            ->firstOrFail();
+
+        $summary = 'Kort og tydelig oppsummering som kan redigeres på show-siden.';
+
+        $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $document->id]), [
+            'summary' => $summary,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $this->assertSame($summary, $updatedDocument->summary);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document, $summary): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.summary') === $summary;
+        });
+    }
+
     public function test_knowledge_document_update_allows_metadata_only_changes_and_keeps_chunks_intact(): void
     {
         Storage::fake('local');
@@ -329,6 +594,17 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertDatabaseMissing('knowledge_items', ['id' => $document->id]);
         $this->assertDatabaseMissing('knowledge_item_chunks', ['knowledge_item_id' => $document->id]);
         $this->assertTrue(Storage::disk('local')->missing($storedPath));
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $items->isEmpty()
+                && ! $items->contains(fn (array $candidate): bool => $candidate['original_filename'] === $document->original_filename);
+        });
     }
 
     public function test_knowledge_document_routes_are_scoped_to_the_current_customer(): void
@@ -352,6 +628,14 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->actingAs($context['user'])
             ->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $foreignDocument->id]))
             ->assertNotFound();
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $foreignDocument->id]))
+            ->assertNotFound();
+
+        $this->actingAs($context['user'])
+            ->delete(route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $foreignDocument->id]))
+            ->assertNotFound();
     }
 
     public function test_knowledge_document_store_rejects_invalid_file_type(): void
@@ -360,6 +644,20 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => UploadedFile::fake()->create('not-allowed.txt', 8, 'text/plain'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ]);
+
+        $response->assertSessionHasErrors(['document']);
+        $this->assertDatabaseCount('knowledge_items', 0);
+    }
+
+    public function test_knowledge_document_store_rejects_unsupported_legacy_file_type(): void
+    {
+        $context = $this->customerContext('Customer Eleven B AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => UploadedFile::fake()->create('legacy.doc', 8, 'application/msword'),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'is_active' => true,
         ]);

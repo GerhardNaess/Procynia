@@ -48,10 +48,16 @@ Route::prefix('app')
         Route::prefix('/ai/knowledge-base')->name('ai.knowledge-base.')->group(function (): void {
             Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
             Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');
-            Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
-            Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
-            Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
-            Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
+        Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
+        Route::get('/{knowledgeItem}', [KnowledgeBaseController::class, 'show'])->name('show');
+        Route::patch('/{knowledgeItem}/summary', [KnowledgeBaseController::class, 'updateSummary'])->name('summary.update');
+        Route::patch('/{knowledgeItem}/chunks/{chunk}/review-status', [KnowledgeBaseController::class, 'updateChunkReviewStatus'])
+            ->name('chunks.review-status.update');
+        Route::patch('/{knowledgeItem}/chunks/{chunk}/metadata', [KnowledgeBaseController::class, 'updateChunkMetadata'])
+            ->name('chunks.metadata.update');
+        Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
+        Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
+        Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
         });
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');
         Route::get('/ai/{savedNotice}/instructions', [AiController::class, 'instructions'])->name('ai.instructions.show');

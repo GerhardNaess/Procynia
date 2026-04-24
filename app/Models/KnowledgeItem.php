@@ -83,6 +83,7 @@ class KnowledgeItem extends Model
         'content_type',
         'document_type',
         'extracted_text',
+        'summary',
         'extraction_status',
         'extraction_error',
         'uploaded_by_user_id',

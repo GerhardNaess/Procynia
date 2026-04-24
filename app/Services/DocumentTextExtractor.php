@@ -37,6 +37,33 @@ class DocumentTextExtractor
     }
 
     /**
+     * Purpose: Extract structured text blocks from a supported document file.
+     * Inputs: Absolute filesystem path to the stored document.
+     * Returns: An ordered list of text blocks with style and level metadata.
+     * Side effects: Reads the file from disk and may open ZIP archives in memory.
+     *
+     * @return array<int, array{text: string, style: ?string, level: ?int}>
+     */
+    public function extractStructuredText(string $path): array
+    {
+        try {
+            if (! is_file($path) || ! is_readable($path)) {
+                return [];
+            }
+
+            $extension = Str::lower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+            return match ($extension) {
+                'docx' => $this->extractStructuredDocxText($path),
+                'xlsx', 'pdf' => $this->extractStructuredFallbackText($path),
+                default => [],
+            };
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * Purpose: Extract text from a DOCX file by reading word/document.xml.
      * Inputs: Absolute filesystem path to a DOCX file.
      * Returns: Plain text content, or an empty string when extraction fails.
@@ -58,6 +85,213 @@ class DocumentTextExtractor
         }
 
         return $this->extractWordXmlText($xml);
+    }
+
+    /**
+     * Purpose: Extract structured paragraphs from a DOCX file.
+     * Inputs: Absolute filesystem path to a DOCX file.
+     * Returns: Ordered blocks containing text, style, and heading level metadata.
+     * Side effects: Opens the ZIP archive and parses XML.
+     *
+     * @return array<int, array{text: string, style: ?string, level: ?int}>
+     */
+    private function extractStructuredDocxText(string $path): array
+    {
+        $zip = new ZipArchive();
+
+        if ($zip->open($path) !== true) {
+            return [];
+        }
+
+        $documentXml = $zip->getFromName('word/document.xml');
+        $stylesXml = $zip->getFromName('word/styles.xml');
+        $zip->close();
+
+        if (! is_string($documentXml) || trim($documentXml) === '') {
+            return [];
+        }
+
+        return $this->extractDocxStructuredBlocks($documentXml, is_string($stylesXml) ? $stylesXml : null);
+    }
+
+    /**
+     * Purpose: Extract a single structured fallback block from a non-DOCX document.
+     * Inputs: Absolute filesystem path to the document.
+     * Returns: A single block with the extracted plain text, or an empty array when no text exists.
+     * Side effects: Reuses the existing plain-text extractor.
+     *
+     * @return array<int, array{text: string, style: ?string, level: ?int}>
+     */
+    private function extractStructuredFallbackText(string $path): array
+    {
+        $text = trim($this->extractText($path));
+
+        if ($text === '') {
+            return [];
+        }
+
+        return [
+            [
+                'text' => $text,
+                'style' => null,
+                'level' => null,
+            ],
+        ];
+    }
+
+    /**
+     * Purpose: Extract structured paragraph blocks from DOCX XML.
+     * Inputs: Raw WordprocessingML XML content plus optional styles XML content.
+     * Returns: Ordered structured blocks with resolved paragraph style metadata.
+     * Side effects: Parses XML in memory.
+     *
+     * @return array<int, array{text: string, style: ?string, level: ?int}>
+     */
+    private function extractDocxStructuredBlocks(string $documentXml, ?string $stylesXml = null): array
+    {
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument();
+
+            if (! $dom->loadXML($documentXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $styleMap = $this->extractDocxStyleMap($stylesXml);
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+            $blocks = [];
+
+            foreach ($xpath->query('//w:p') as $paragraph) {
+                $textNodes = $xpath->query('.//w:t', $paragraph);
+                $parts = [];
+
+                if ($textNodes !== false) {
+                    foreach ($textNodes as $textNode) {
+                        $parts[] = (string) $textNode->textContent;
+                    }
+                }
+
+                $text = $this->normalizeBlockText(implode(' ', $parts));
+
+                if ($text === '') {
+                    continue;
+                }
+
+                $styleId = null;
+                $styleNode = $xpath->query('.//w:pPr/w:pStyle', $paragraph);
+
+                if ($styleNode !== false && $styleNode->length > 0) {
+                    $styleId = (string) $styleNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+                }
+
+                $resolvedStyle = $styleMap[$styleId] ?? $styleId;
+                $level = $this->resolveDocxHeadingLevel($styleId, $resolvedStyle);
+
+                $blocks[] = [
+                    'text' => $text,
+                    'style' => $resolvedStyle !== '' ? $resolvedStyle : null,
+                    'level' => $level,
+                ];
+            }
+
+            return $blocks;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Read the optional DOCX styles.xml file and map style IDs to style names.
+     * Inputs: Raw styles XML content, if available.
+     * Returns: A map from style ID to human-readable style name.
+     * Side effects: Parses XML in memory.
+     *
+     * @return array<string, string>
+     */
+    private function extractDocxStyleMap(?string $stylesXml): array
+    {
+        if (! is_string($stylesXml) || trim($stylesXml) === '') {
+            return [];
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument();
+
+            if (! $dom->loadXML($stylesXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+
+            $map = [];
+
+            foreach ($xpath->query('//w:style') as $styleNode) {
+                $styleId = (string) $styleNode->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'styleId')?->nodeValue;
+                $styleNameNode = $xpath->query('./w:name', $styleNode);
+                $styleName = null;
+
+                if ($styleNameNode !== false && $styleNameNode->length > 0) {
+                    $styleName = (string) $styleNameNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue;
+                }
+
+                if ($styleId !== '') {
+                    $map[$styleId] = $styleName !== '' ? $styleName : $styleId;
+                }
+            }
+
+            return $map;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Resolve the heading level for a DOCX paragraph style.
+     * Inputs: The raw style ID and the resolved style name.
+     * Returns: 1 for H1, 2 for H2, or null when the style is not a heading.
+     * Side effects: None.
+     */
+    private function resolveDocxHeadingLevel(?string $styleId, ?string $styleName): ?int
+    {
+        $candidates = array_values(array_filter([
+            $styleId,
+            $styleName,
+        ], static fn (?string $value): bool => is_string($value) && trim($value) !== ''));
+
+        foreach ($candidates as $candidate) {
+            $normalized = $this->normalizeDocxStyleKey($candidate);
+
+            if (in_array($normalized, ['heading1', 'overskrift1'], true)) {
+                return 1;
+            }
+
+            if (in_array($normalized, ['heading2', 'overskrift2'], true)) {
+                return 2;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Normalize a DOCX style identifier or style name for heading matching.
+     * Inputs: A style identifier or style name.
+     * Returns: A lowercase alphanumeric key without spacing.
+     * Side effects: None.
+     */
+    private function normalizeDocxStyleKey(string $value): string
+    {
+        $normalized = preg_replace('/[^[:alnum:]]+/u', '', mb_strtolower(trim($value), 'UTF-8'));
+
+        return is_string($normalized) ? $normalized : mb_strtolower(trim($value), 'UTF-8');
     }
 
     /**
@@ -99,7 +333,7 @@ class DocumentTextExtractor
                 }
             }
 
-            return trim(implode("\n", $paragraphs));
+            return $this->normalizeBlockText(implode("\n\n", $paragraphs));
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
@@ -141,7 +375,7 @@ class DocumentTextExtractor
 
         $zip->close();
 
-        return $this->normalizeWhitespace(implode("\n", array_filter($sheets)));
+        return $this->normalizeBlockText(implode("\n\n", array_filter($sheets)));
     }
 
     /**
@@ -242,7 +476,7 @@ class DocumentTextExtractor
                 }
             }
 
-            return trim(implode("\n", $rows));
+            return $this->normalizeBlockText(implode("\n\n", $rows));
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
@@ -283,7 +517,7 @@ class DocumentTextExtractor
             }
         }
 
-        return $this->normalizeWhitespace(implode(' ', $chunks));
+        return $this->normalizeBlockText(implode("\n\n", $chunks));
     }
 
     /**
@@ -295,6 +529,17 @@ class DocumentTextExtractor
     private function decodePdfStream(string $stream): string
     {
         $trimmedStream = ltrim($stream);
+
+        if ($trimmedStream === '') {
+            return $stream;
+        }
+
+        $firstByte = ord($trimmedStream[0]);
+
+        if ($firstByte !== 0x78 && ! str_starts_with($trimmedStream, "\x1f\x8b")) {
+            return $stream;
+        }
+
         $decoded = @gzuncompress($trimmedStream);
 
         if (is_string($decoded) && $decoded !== '') {
@@ -318,31 +563,49 @@ class DocumentTextExtractor
      */
     private function extractPdfTextFromChunk(string $chunk): string
     {
-        $texts = [];
+        $pattern = '/\((?:\\\\.|[^\\\\()])*\)\s*Tj|\[((?:.|\n)*?)\]\s*TJ|BT|ET|T\*|(?:-?\d+(?:\.\d+)?\s+){2}Td|(?:-?\d+(?:\.\d+)?\s+){2}TD/s';
 
-        if (preg_match_all('/\((?:\\\\.|[^\\\\()])*\)\s*Tj/s', $chunk, $matches)) {
-            foreach ($matches[0] as $match) {
-                if (preg_match('/\(((?:\\\\.|[^\\\\()])*)\)\s*Tj/s', $match, $innerMatches)) {
-                    $texts[] = $this->decodePdfString($innerMatches[1]);
-                }
-            }
-        }
-
-        if (preg_match_all('/\[((?:.|\n)*?)\]\s*TJ/s', $chunk, $arrayMatches)) {
-            foreach ($arrayMatches[1] as $arrayChunk) {
-                if (preg_match_all('/\(((?:\\\\.|[^\\\\()])*)\)/s', $arrayChunk, $stringMatches)) {
-                    foreach ($stringMatches[1] as $stringValue) {
-                        $texts[] = $this->decodePdfString($stringValue);
-                    }
-                }
-            }
-        }
-
-        if ($texts === []) {
+        if (! preg_match_all($pattern, $chunk, $matches)) {
             return '';
         }
 
-        return $this->normalizeWhitespace(implode(' ', $texts));
+        $blocks = [];
+        $currentBlockLines = [];
+        $currentLine = '';
+
+        foreach ($matches[0] as $token) {
+            $token = trim((string) $token);
+
+            if ($token === '') {
+                continue;
+            }
+
+            if ($token === 'BT' || $token === 'ET') {
+                $this->flushPdfLine($currentLine, $currentBlockLines);
+                $this->flushPdfBlock($currentBlockLines, $blocks);
+
+                continue;
+            }
+
+            if ($token === 'T*' || preg_match('/^(?:-?\d+(?:\.\d+)?\s+){2}(?:Td|TD)$/s', $token) === 1) {
+                $this->flushPdfLine($currentLine, $currentBlockLines);
+
+                continue;
+            }
+
+            $text = $this->decodePdfTextToken($token);
+
+            if ($text === '') {
+                continue;
+            }
+
+            $currentLine = $currentLine === '' ? $text : $currentLine.' '.$text;
+        }
+
+        $this->flushPdfLine($currentLine, $currentBlockLines);
+        $this->flushPdfBlock($currentBlockLines, $blocks);
+
+        return $this->normalizeBlockText(implode("\n\n", $blocks));
     }
 
     /**
@@ -368,7 +631,71 @@ class DocumentTextExtractor
             '\f' => "\f",
         ]);
 
-        return $this->normalizeWhitespace($value);
+        return $this->normalizeLineText($value);
+    }
+
+    /**
+     * Purpose: Decode one PDF text-show token into readable text.
+     * Inputs: A raw PDF operator token.
+     * Returns: A decoded approximation of the text content.
+     * Side effects: None.
+     */
+    private function decodePdfTextToken(string $token): string
+    {
+        if (preg_match('/^\(((?:\\\\.|[^\\\\()])*)\)\s*Tj$/s', $token, $matches) === 1) {
+            return $this->decodePdfString($matches[1]);
+        }
+
+        if (preg_match('/^\[((?:.|\n)*?)\]\s*TJ$/s', $token, $matches) === 1) {
+            $parts = [];
+
+            if (preg_match_all('/\(((?:\\\\.|[^\\\\()])*)\)/s', $matches[1], $stringMatches)) {
+                foreach ($stringMatches[1] as $stringValue) {
+                    $decoded = $this->decodePdfString((string) $stringValue);
+
+                    if ($decoded !== '') {
+                        $parts[] = $decoded;
+                    }
+                }
+            }
+
+            return $this->normalizeLineText(implode(' ', $parts));
+        }
+
+        return '';
+    }
+
+    /**
+     * Purpose: Add the current PDF line to the active block when it contains text.
+     * Inputs: The current line buffer and the current block line collection.
+     * Returns: None.
+     * Side effects: Appends to the provided arrays by reference.
+     */
+    private function flushPdfLine(string &$currentLine, array &$currentBlockLines): void
+    {
+        $line = $this->normalizeLineText($currentLine);
+
+        if ($line !== '') {
+            $currentBlockLines[] = $line;
+        }
+
+        $currentLine = '';
+    }
+
+    /**
+     * Purpose: Add the current PDF text block to the collected block list when it contains text.
+     * Inputs: The current block lines and the collected block list.
+     * Returns: None.
+     * Side effects: Appends to the provided arrays by reference.
+     */
+    private function flushPdfBlock(array &$currentBlockLines, array &$blocks): void
+    {
+        if ($currentBlockLines === []) {
+            return;
+        }
+
+        $blocks[] = implode("\n", $currentBlockLines);
+        $currentBlockLines = [];
     }
 
     /**
@@ -380,5 +707,48 @@ class DocumentTextExtractor
     private function normalizeWhitespace(string $value): string
     {
         return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    }
+
+    /**
+     * Purpose: Normalize a single visible text line while preserving block boundaries elsewhere.
+     * Inputs: Raw extracted text.
+     * Returns: A trimmed line with collapsed internal spacing.
+     * Side effects: None.
+     */
+    private function normalizeLineText(string $value): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+    }
+
+    /**
+     * Purpose: Normalize extracted text while preserving blank-line block boundaries.
+     * Inputs: Raw extracted text.
+     * Returns: A cleaned text value with single blank lines between blocks.
+     * Side effects: None.
+     */
+    private function normalizeBlockText(string $value): string
+    {
+        $value = str_replace(["\r\n", "\r"], "\n", $value);
+        $lines = preg_split('/\n/u', $value) ?: [];
+        $normalizedLines = [];
+        $previousWasBlank = false;
+
+        foreach ($lines as $line) {
+            $normalizedLine = $this->normalizeLineText((string) $line);
+
+            if ($normalizedLine === '') {
+                if (! $previousWasBlank) {
+                    $normalizedLines[] = '';
+                    $previousWasBlank = true;
+                }
+
+                continue;
+            }
+
+            $normalizedLines[] = $normalizedLine;
+            $previousWasBlank = false;
+        }
+
+        return trim(implode("\n", $normalizedLines));
     }
 }
