@@ -226,6 +226,21 @@ const RISK_LEVEL_META = {
     },
 };
 
+const KNOWLEDGE_GROUNDING_META = {
+    green: {
+        label: 'Godt kunnskapsgrunnlag',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    amber: {
+        label: 'Delvis kunnskapsgrunnlag',
+        className: 'bg-amber-100 text-amber-700 ring-amber-200',
+    },
+    red: {
+        label: 'Svakt kunnskapsgrunnlag',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+};
+
 function formatKnowledgeSnippet(value, maxLength = 200) {
     const normalizedValue = String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -260,6 +275,53 @@ function normalizeAnswerDraftPayload(answerDraft) {
     return {
         text: normalizeAnswerDraftText(answerDraft?.text ?? ''),
         generated_at: answerDraft?.generated_at ?? null,
+        knowledge_grounding: normalizeKnowledgeGroundingPayload(answerDraft?.knowledge_grounding ?? null),
+        generation_state: typeof answerDraft?.generation_state === 'string' ? answerDraft.generation_state : null,
+        missing_knowledge: normalizeMissingKnowledgePayload(answerDraft?.missing_knowledge ?? null),
+    };
+}
+
+function normalizeMissingKnowledgePayload(missingKnowledge) {
+    if (!missingKnowledge || typeof missingKnowledge !== 'object') {
+        return null;
+    }
+
+    const message = typeof missingKnowledge?.message === 'string' ? missingKnowledge.message.trim() : '';
+    const recommendedDocumentTitle = typeof missingKnowledge?.recommended_document_title === 'string'
+        ? missingKnowledge.recommended_document_title.trim()
+        : '';
+    const suggestedFilename = typeof missingKnowledge?.suggested_filename === 'string'
+        ? missingKnowledge.suggested_filename.trim()
+        : '';
+
+    if (message === '' && recommendedDocumentTitle === '' && suggestedFilename === '') {
+        return null;
+    }
+
+    return {
+        message: message !== '' ? message : null,
+        recommended_document_title: recommendedDocumentTitle !== '' ? recommendedDocumentTitle : null,
+        suggested_filename: suggestedFilename !== '' ? suggestedFilename : null,
+    };
+}
+
+function normalizeKnowledgeGroundingPayload(knowledgeGrounding) {
+    if (!knowledgeGrounding || typeof knowledgeGrounding !== 'object') {
+        return null;
+    }
+
+    const level = ['green', 'amber', 'red'].includes(knowledgeGrounding?.level)
+        ? knowledgeGrounding.level
+        : null;
+
+    if (level === null) {
+        return null;
+    }
+
+    return {
+        level,
+        max_score: Number(knowledgeGrounding?.max_score ?? 0),
+        sources_count: Number(knowledgeGrounding?.sources_count ?? 0),
     };
 }
 
@@ -275,6 +337,9 @@ function buildRequirementAnswerDraftState(requirement) {
         text: normalizedText,
         persistedText: normalizedText,
         generatedAt: normalizedDraft.generated_at,
+        knowledgeGrounding: normalizedDraft.knowledge_grounding,
+        generationState: normalizedDraft.generation_state ?? (normalizedText !== '' || normalizedDraft.generated_at !== null ? 'generated' : null),
+        missingKnowledge: normalizedDraft.missing_knowledge,
         isDirty: false,
     };
 }
@@ -485,6 +550,7 @@ export default function AiShow({
                         text: serverDraftState.text,
                         persistedText: serverDraftState.persistedText,
                         generatedAt: serverDraftState.generatedAt,
+                        knowledgeGrounding: serverDraftState.knowledgeGrounding ?? currentDraftState.knowledgeGrounding ?? null,
                         isDirty: false,
                     };
                 }
@@ -590,11 +656,15 @@ export default function AiShow({
     const activeRequirementDraft = activeRequirementKey !== null
         ? answerDraftsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement)
         : null;
+    const activeRequirementBlockedMissingKnowledge = activeRequirementDraft?.generationState === 'blocked_missing_knowledge';
     const activeRequirementHasDraft = activeRequirementDraft !== null
+        && !activeRequirementBlockedMissingKnowledge
         && (
             activeRequirementDraft.generatedAt !== null
             || normalizeAnswerDraftText(activeRequirementDraft.persistedText).trim() !== ''
         );
+    const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
+    const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
     const activeRequirementAnswerBasisItemIds = activeRequirementKey !== null
         ? answerBasisSelectionsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerBasisSelectionState(activeRequirement)
         : [];
@@ -736,8 +806,6 @@ export default function AiShow({
         const requirementKey = String(requirement.id);
         const selectedAnswerBasisItemIds = answerBasisSelectionsByRequirementId[requirementKey]
             ?? buildRequirementAnswerBasisSelectionState(requirement);
-        const existingDraft = answerDraftsByRequirementId[requirementKey] ?? buildRequirementAnswerDraftState(requirement);
-        const hasDraftText = normalizeAnswerDraftText(existingDraft.text).trim() !== '';
 
         setActiveRequirementId(String(requirement.id));
         setAnswerDraftError(null);
@@ -745,10 +813,6 @@ export default function AiShow({
 
         if (!requirement.answer_draft_generate_url) {
             setAnswerDraftError('Svarutkast kan ikke genereres for dette kravet.');
-            return;
-        }
-
-        if (!force && hasDraftText) {
             return;
         }
 
@@ -769,6 +833,7 @@ export default function AiShow({
             });
             const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
             const normalizedText = normalizeAnswerDraftText(answerDraft.text);
+            const knowledgeGrounding = normalizeKnowledgeGroundingPayload(response?.data?.knowledge_grounding ?? null);
             const responseAnswerBasisItemIds = normalizeAnswerBasisItemIds(
                 response?.data?.answer_basis_item_ids ?? selectedAnswerBasisItemIds,
             );
@@ -784,6 +849,9 @@ export default function AiShow({
                     text: normalizedText,
                     persistedText: normalizedText,
                     generatedAt: answerDraft.generated_at,
+                    knowledgeGrounding,
+                    generationState: answerDraft.generation_state ?? (normalizedText !== '' || answerDraft.generated_at !== null ? 'generated' : null),
+                    missingKnowledge: answerDraft.missing_knowledge ?? null,
                     isDirty: false,
                 },
             }));
@@ -870,6 +938,7 @@ export default function AiShow({
                 [activeRequirementKey]: {
                     ...existingDraft,
                     text: normalizedText,
+                    generationState: existingDraft.generationState ?? (normalizedText !== '' ? 'generated' : null),
                     isDirty: normalizedText !== existingDraft.persistedText,
                 },
             };
@@ -906,6 +975,7 @@ export default function AiShow({
             });
             const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
             const savedText = normalizeAnswerDraftText(answerDraft.text);
+            const currentKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
 
             setAnswerDraftsByRequirementId((currentState) => ({
                 ...currentState,
@@ -913,6 +983,9 @@ export default function AiShow({
                     text: savedText,
                     persistedText: savedText,
                     generatedAt: answerDraft.generated_at,
+                    knowledgeGrounding: currentKnowledgeGrounding,
+                    generationState: answerDraft.generation_state ?? 'generated',
+                    missingKnowledge: activeRequirementDraft?.missingKnowledge ?? null,
                     isDirty: false,
                 },
             }));
@@ -1791,6 +1864,11 @@ export default function AiShow({
                                     const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
                                     const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
                                     const canOpenAnswerWorkspace = requirement.source_type === 'ai_candidate';
+                                    const requirementDraftState = answerDraftsByRequirementId[String(requirement.id)] ?? buildRequirementAnswerDraftState(requirement);
+                                    const hasExistingAnswerDraft = (
+                                        requirementDraftState.generatedAt !== null
+                                        || normalizeAnswerDraftText(requirementDraftState.text).trim() !== ''
+                                    );
 
                                     return (
                                         <article
@@ -1859,7 +1937,7 @@ export default function AiShow({
                                                             <button
                                                                 type="button"
                                                                 onClick={() => {
-                                                                    void requestAnswerDraftGeneration(requirement);
+                                                                    void requestAnswerDraftGeneration(requirement, { force: true });
                                                                 }}
                                                                 disabled={requirementUpdatesLocked || answerDraftGeneratingRequirementId === requirement.id}
                                                                 aria-pressed={isActiveRequirement}
@@ -1868,7 +1946,7 @@ export default function AiShow({
                                                                     isActiveRequirement ? 'ring-violet-300' : ''
                                                                 }`}
                                                             >
-                                                                Lag svar
+                                                                {hasExistingAnswerDraft ? 'Lag nytt svar' : 'Lag svar'}
                                                             </button>
                                                         ) : (
                                                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
@@ -2463,7 +2541,11 @@ export default function AiShow({
                                     </p>
                                 </div>
                             ) : (
-                                <div className="space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
+                                <div className={`space-y-4 rounded-[22px] border p-4 ${
+                                    activeRequirementBlockedMissingKnowledge
+                                        ? 'border-rose-200 bg-rose-50/40'
+                                        : 'border-violet-200 bg-violet-50/40'
+                                }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             Svarutkast
@@ -2485,7 +2567,39 @@ export default function AiShow({
                                         </div>
                                     ) : null}
 
-                                    {activeRequirementHasDraft ? (
+                                    {activeRequirementBlockedMissingKnowledge ? (
+                                        <div className="rounded-2xl border border-rose-200 bg-white px-4 py-5 text-sm leading-6 text-slate-700">
+                                            <div className="text-sm font-semibold text-slate-950">
+                                                {activeRequirementMissingKnowledge?.message ?? 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget er for svakt.'}
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                Opprett og last opp et kunnskapsdokument som dekker dette kravet.
+                                            </p>
+
+                                            <div className="mt-4 space-y-2 rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
+                                                <div>
+                                                    <span className="font-semibold text-slate-900">Anbefalt dokumentnavn:</span>{' '}
+                                                    {activeRequirementMissingKnowledge?.recommended_document_title ?? 'Dokumentasjon for udekket krav'}
+                                                </div>
+                                                <div>
+                                                    <span className="font-semibold text-slate-900">Foreslått filnavn:</span>{' '}
+                                                    {activeRequirementMissingKnowledge?.suggested_filename ?? 'dokumentasjon-for-udekket-krav.docx'}
+                                                </div>
+                                            </div>
+
+                                            <p className="mt-4 text-sm leading-6 text-slate-600">
+                                                Når dokumentet er lagt til og behandlet, kan du kjøre «Lag svar» på nytt.
+                                            </p>
+
+                                            {activeRequirementKnowledgeGrounding ? (
+                                                <div className="mt-4 flex justify-end">
+                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
+                                                        {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
+                                                    </span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    ) : activeRequirementHasDraft ? (
                                         <>
                                             <label className="block space-y-2">
                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -2503,6 +2617,14 @@ export default function AiShow({
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </label>
+
+                                            {activeRequirementKnowledgeGrounding ? (
+                                                <div className="flex justify-end">
+                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
+                                                        {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
+                                                    </span>
+                                                </div>
+                                            ) : null}
 
                                             <div className="flex flex-wrap items-center justify-between gap-3">
                                                 <div className="text-xs text-slate-500">

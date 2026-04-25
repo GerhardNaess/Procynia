@@ -9,6 +9,8 @@ use RuntimeException;
 
 class EmbeddingService
 {
+    private const MAX_EMBEDDING_INPUT_CHARS = 6000;
+
     public function __construct(
         private readonly OpenAiClient $openAiClient,
     ) {
@@ -69,10 +71,24 @@ class EmbeddingService
             );
         }
 
+        $embeddingInputs = $this->splitEmbeddingInput($text);
+
+        if ($embeddingInputs === []) {
+            return $this->failureResult(
+                'invalid_request',
+                'Embedding text is empty.',
+                null,
+                null,
+                null,
+                $model,
+                null,
+            );
+        }
+
         try {
             $response = $this->openAiClient->post('embeddings', [
                 'model' => $model,
-                'input' => $text,
+                'input' => count($embeddingInputs) === 1 ? $embeddingInputs[0] : $embeddingInputs,
             ]);
         } catch (ConnectionException $exception) {
             $errorType = str_contains(mb_strtolower($exception->getMessage(), 'UTF-8'), 'timed out')
@@ -138,10 +154,54 @@ class EmbeddingService
             );
         }
 
-        $embedding = data_get($decoded, 'data.0.embedding');
-        $normalizedEmbedding = $this->normalizeEmbedding($embedding);
+        $data = data_get($decoded, 'data', []);
 
-        if ($normalizedEmbedding === null) {
+        if (! is_array($data) || $data === []) {
+            return $this->failureResult(
+                'unexpected_response',
+                'OpenAI embedding response did not include embedding data.',
+                $status,
+                $requestId,
+                $bodyExcerpt,
+                $model,
+                null,
+            );
+        }
+
+        usort(
+            $data,
+            static function (mixed $left, mixed $right): int {
+                return (int) data_get($left, 'index', 0) <=> (int) data_get($right, 'index', 0);
+            },
+        );
+
+        $normalizedEmbeddings = [];
+        $weights = [];
+
+        foreach ($data as $index => $item) {
+            $embedding = $this->normalizeEmbedding(data_get($item, 'embedding'));
+
+            if ($embedding === null) {
+                return $this->failureResult(
+                    'unexpected_response',
+                    'OpenAI embedding response did not include a valid vector.',
+                    $status,
+                    $requestId,
+                    $bodyExcerpt,
+                    $model,
+                    null,
+                );
+            }
+
+            $normalizedEmbeddings[] = $embedding;
+            $weights[] = max(1, mb_strlen((string) ($embeddingInputs[$index] ?? ''), 'UTF-8'));
+        }
+
+        $aggregatedEmbedding = count($normalizedEmbeddings) === 1
+            ? $normalizedEmbeddings[0]
+            : $this->aggregateEmbeddings($normalizedEmbeddings, $weights);
+
+        if ($aggregatedEmbedding === null) {
             return $this->failureResult(
                 'unexpected_response',
                 'OpenAI embedding response did not include a valid vector.',
@@ -161,7 +221,7 @@ class EmbeddingService
 
         return [
             'ok' => true,
-            'embedding' => $normalizedEmbedding,
+            'embedding' => $aggregatedEmbedding,
             'model' => $model,
             'usage' => $usage,
             'error_type' => null,
@@ -170,6 +230,235 @@ class EmbeddingService
             'request_id' => $requestId,
             'response_body_excerpt' => null,
         ];
+    }
+
+    /**
+     * Purpose: Split long embedding text into deterministic parts that stay well below the model limit.
+     * Inputs: A trimmed piece of text to embed.
+     * Returns: One or more text parts that can be embedded safely.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function splitEmbeddingInput(string $text): array
+    {
+        $normalizedText = trim(preg_replace('/\r\n|\r/u', "\n", $text) ?? '');
+
+        if ($normalizedText === '') {
+            return [];
+        }
+
+        if (mb_strlen($normalizedText, 'UTF-8') <= self::MAX_EMBEDDING_INPUT_CHARS) {
+            return [$normalizedText];
+        }
+
+        $paragraphs = preg_split('/\n{2,}/u', $normalizedText) ?: [];
+        $parts = [];
+        $currentPart = '';
+
+        foreach ($paragraphs as $paragraph) {
+            $paragraphParts = $this->splitEmbeddingParagraph((string) $paragraph);
+
+            foreach ($paragraphParts as $paragraphPart) {
+                $paragraphPart = trim((string) $paragraphPart);
+
+                if ($paragraphPart === '') {
+                    continue;
+                }
+
+                if ($currentPart === '') {
+                    $currentPart = $paragraphPart;
+
+                    continue;
+                }
+
+                $candidatePart = $currentPart."\n\n".$paragraphPart;
+
+                if (mb_strlen($candidatePart, 'UTF-8') > self::MAX_EMBEDDING_INPUT_CHARS) {
+                    $parts[] = $currentPart;
+                    $currentPart = $paragraphPart;
+
+                    continue;
+                }
+
+                $currentPart = $candidatePart;
+            }
+        }
+
+        if ($currentPart !== '') {
+            $parts[] = $currentPart;
+        }
+
+        return $parts === [] ? [$normalizedText] : $parts;
+    }
+
+    /**
+     * Purpose: Split one oversized paragraph into smaller, stable embedding parts.
+     * Inputs: A normalized paragraph of text.
+     * Returns: Embedding-safe paragraph parts.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function splitEmbeddingParagraph(string $paragraph): array
+    {
+        $normalizedParagraph = trim(preg_replace('/\s+/u', ' ', $paragraph) ?? '');
+
+        if ($normalizedParagraph === '') {
+            return [];
+        }
+
+        if (mb_strlen($normalizedParagraph, 'UTF-8') <= self::MAX_EMBEDDING_INPUT_CHARS) {
+            return [$normalizedParagraph];
+        }
+
+        $tokens = preg_split('/\s+/u', $normalizedParagraph, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        if ($tokens === []) {
+            return [$normalizedParagraph];
+        }
+
+        $parts = [];
+        $currentPart = '';
+
+        foreach ($tokens as $token) {
+            $token = trim((string) $token);
+
+            if ($token === '') {
+                continue;
+            }
+
+            if (mb_strlen($token, 'UTF-8') > self::MAX_EMBEDDING_INPUT_CHARS) {
+                foreach ($this->splitLongEmbeddingToken($token) as $fragment) {
+                    $fragment = trim((string) $fragment);
+
+                    if ($fragment === '') {
+                        continue;
+                    }
+
+                    $candidatePart = $currentPart === '' ? $fragment : $currentPart.' '.$fragment;
+
+                    if (mb_strlen($candidatePart, 'UTF-8') > self::MAX_EMBEDDING_INPUT_CHARS) {
+                        if ($currentPart !== '') {
+                            $parts[] = $currentPart;
+                        }
+
+                        $currentPart = $fragment;
+
+                        continue;
+                    }
+
+                    $currentPart = $candidatePart;
+                }
+
+                continue;
+            }
+
+            $candidatePart = $currentPart === '' ? $token : $currentPart.' '.$token;
+
+            if (mb_strlen($candidatePart, 'UTF-8') > self::MAX_EMBEDDING_INPUT_CHARS) {
+                if ($currentPart !== '') {
+                    $parts[] = $currentPart;
+                }
+
+                $currentPart = $token;
+
+                continue;
+            }
+
+            $currentPart = $candidatePart;
+        }
+
+        if ($currentPart !== '') {
+            $parts[] = $currentPart;
+        }
+
+        return $parts === [] ? [$normalizedParagraph] : $parts;
+    }
+
+    /**
+     * Purpose: Split one excessively long token into deterministic fragments.
+     * Inputs: A token that still exceeds the embedding safety limit.
+     * Returns: A list of token fragments below the embedding safety limit.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function splitLongEmbeddingToken(string $token): array
+    {
+        $fragments = [];
+        $remaining = $token;
+
+        while ($remaining !== '') {
+            $fragment = mb_substr($remaining, 0, self::MAX_EMBEDDING_INPUT_CHARS, 'UTF-8');
+            $fragments[] = $fragment;
+            $remaining = mb_substr($remaining, self::MAX_EMBEDDING_INPUT_CHARS, null, 'UTF-8');
+        }
+
+        return $fragments;
+    }
+
+    /**
+     * Purpose: Aggregate multiple embedding vectors into one stable vector.
+     * Inputs: The vectors to combine and their relative weights.
+     * Returns: A single normalized embedding vector or null when the input is invalid.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, float>> $embeddings
+     * @param array<int, int> $weights
+     * @return array<int, float>|null
+     */
+    private function aggregateEmbeddings(array $embeddings, array $weights): ?array
+    {
+        if ($embeddings === []) {
+            return null;
+        }
+
+        $dimension = count($embeddings[0]);
+
+        if ($dimension === 0) {
+            return null;
+        }
+
+        $weightedSums = array_fill(0, $dimension, 0.0);
+        $totalWeight = 0.0;
+
+        foreach ($embeddings as $index => $embedding) {
+            if (count($embedding) !== $dimension) {
+                return null;
+            }
+
+            $weight = (float) max(1, (int) ($weights[$index] ?? 1));
+            $totalWeight += $weight;
+
+            foreach ($embedding as $dimensionIndex => $value) {
+                $weightedSums[$dimensionIndex] += $weight * (float) $value;
+            }
+        }
+
+        if ($totalWeight <= 0.0) {
+            return null;
+        }
+
+        $combined = [];
+        $magnitude = 0.0;
+
+        foreach ($weightedSums as $value) {
+            $averageValue = $value / $totalWeight;
+            $combined[] = $averageValue;
+            $magnitude += $averageValue * $averageValue;
+        }
+
+        $magnitude = sqrt($magnitude);
+
+        if ($magnitude <= 0.0) {
+            return null;
+        }
+
+        return array_map(
+            static fn (float $value): float => $value / $magnitude,
+            $combined,
+        );
     }
 
     /**

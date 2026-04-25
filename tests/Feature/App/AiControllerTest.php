@@ -432,6 +432,26 @@ class AiControllerTest extends TestCase
             'answer_draft_generated_at' => null,
         ]);
 
+        [$retrievalKnowledge, $retrievalChunk] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren skal beskrive løsningen.',
+            'requirements-knowledge.docx',
+        );
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
         Http::fake(function (Request $request) use ($requirement) {
             $requestPayload = json_decode((string) $request->body(), true);
 
@@ -478,7 +498,7 @@ class AiControllerTest extends TestCase
         $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 
-    public function test_ai_requirement_answer_draft_generation_endpoint_reuses_existing_drafts_without_calling_openai(): void
+    public function test_ai_requirement_answer_draft_generation_endpoint_overwrites_existing_drafts(): void
     {
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-REUSE', 'Reuse target', [
@@ -503,8 +523,46 @@ class AiControllerTest extends TestCase
             'answer_draft_generated_at' => '2026-04-06 11:45:00',
         ]);
 
-        Http::fake(function (): void {
-            throw new RuntimeException('OpenAI should not be called when an answer draft already exists.');
+        [$retrievalKnowledge, $retrievalChunk] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren skal beskrive løsningen.',
+            'requirements-knowledge.docx',
+        );
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Nytt svarutkast som skal erstatte det gamle.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate_overwrite'],
+            );
         });
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
@@ -516,7 +574,7 @@ class AiControllerTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('requirement_id', $requirement->id);
-        $response->assertJsonPath('answer_draft.text', 'Eksisterende svarutkast.');
+        $response->assertJsonPath('answer_draft.text', 'Nytt svarutkast som skal erstatte det gamle.');
         $response->assertJsonStructure([
             'requirement_id',
             'answer_draft' => [
@@ -524,7 +582,8 @@ class AiControllerTest extends TestCase
                 'generated_at',
             ],
         ]);
-        $this->assertSame('Eksisterende svarutkast.', $requirement->refresh()->answer_draft_text);
+        $this->assertSame('Nytt svarutkast som skal erstatte det gamle.', $requirement->refresh()->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 
     public function test_ai_requirement_answer_draft_update_endpoint_persists_user_edits(): void
@@ -806,6 +865,26 @@ class AiControllerTest extends TestCase
             'answer_draft_generated_at' => null,
         ]);
 
+        [$retrievalKnowledge, $retrievalChunk] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren skal beskrive løsningen.',
+            'requirements-knowledge.docx',
+        );
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
         $documentBasisItem = $this->createAnswerBasisItem($savedNotice, [
             'created_by_user_id' => $context['user']->id,
             'answer_basis_type' => SavedNoticeAiAnswerBasisItem::ANSWER_BASIS_TYPE_DOCUMENT,
@@ -872,6 +951,192 @@ class AiControllerTest extends TestCase
             [$documentBasisItem->id, $textBasisItem->id],
             $requirement->answerBasisItems()->pluck('id')->values()->all(),
         );
+    }
+
+    public function test_ai_requirement_answer_draft_generation_includes_retrieved_knowledge_chunks_in_the_prompt_and_response(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-RAG', 'RAG target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:40:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 12:41:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $retrievalKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Relevant knowledge',
+            'original_filename' => 'relevant-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Leverandøren skal beskrive løsningen.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($retrievalKnowledge);
+        $retrievalChunk = $retrievalKnowledge->chunks()->firstOrFail();
+        $retrievalChunk->forceFill([
+            'title' => 'Dokumentstruktur',
+            'topic' => 'Løsning',
+            'sub_topic' => 'Dokumentasjon',
+            'keywords' => ['løsningen'],
+            'section_title' => 'SIEM',
+            'section_path' => 'SOC-tjenester > SIEM',
+            'embedding_vector' => [1.0, 0.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 12:42:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($retrievalKnowledge, '2026-04-06 12:42:00');
+
+        $otherKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Irrelevant knowledge',
+            'original_filename' => 'irrelevant-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Denne teksten handler om noe annet.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($otherKnowledge);
+        $otherKnowledge->chunks()->firstOrFail()->forceFill([
+            'title' => 'Urelevant struktur',
+            'embedding_vector' => [0.0, 1.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 12:43:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($otherKnowledge, '2026-04-06 12:43:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement, $retrievalKnowledge, $retrievalChunk) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertCount(1, $retrievedKnowledgeChunks);
+            $this->assertSame($retrievalKnowledge->original_filename, $retrievedKnowledgeChunks->first()['document_title']);
+            $this->assertSame('Dokumentstruktur', $retrievedKnowledgeChunks->first()['heading_path']);
+            $this->assertStringContainsString('Leverandøren skal beskrive løsningen.', $retrievedKnowledgeChunks->first()['content_preview']);
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate_rag'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.');
+        $response->assertJsonPath('retrieval_sources.0.document_title', $retrievalKnowledge->original_filename);
+        $response->assertJsonPath('retrieval_sources.0.heading_path', 'Dokumentstruktur');
+        $response->assertJsonPath('retrieval_sources.0.section_title', 'SIEM');
+        $response->assertJsonPath('retrieval_sources.0.section_path', 'SOC-tjenester > SIEM');
+        $response->assertJsonPath('retrieval_sources.0.chunk_id', $retrievalChunk->id);
+        $response->assertJsonPath('retrieval_sources.0.topic', 'Løsning');
+        $response->assertJsonPath('retrieval_sources.0.sub_topic', 'Dokumentasjon');
+        $response->assertJsonPath('retrieval_sources.0.keywords.0', 'løsningen');
+        $response->assertJsonPath('knowledge_grounding.level', 'amber');
+        $response->assertJsonPath('knowledge_grounding.sources_count', 1);
+        $this->assertGreaterThanOrEqual(0.45, (float) $response->json('knowledge_grounding.max_score'));
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_blocks_when_knowledge_grounding_is_red_and_suggests_a_document(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BLOCKED', 'Blocked target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:10:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Kravtekst om lærling og læreforhold.',
+            'text_extracted_at' => '2026-04-06 13:11:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om lærling og læreforhold.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '2.1',
+            'requirement_text' => 'Leverandøren skal ha lærling med godkjent læreforhold og fagbrev.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', '');
+        $response->assertJsonPath('answer_draft.generated_at', null);
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.message', 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget er for svakt.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Lærlingeordning og kompetanseutvikling');
+        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'laerlingeordning-og-kompetanseutvikling.docx');
+        $response->assertJsonPath('knowledge_grounding.level', 'red');
+        $response->assertJsonPath('knowledge_grounding.sources_count', 0);
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
     }
 
     public function test_ai_documents_download_returns_the_uploaded_file_for_visible_cases(): void
@@ -3376,6 +3641,41 @@ class AiControllerTest extends TestCase
             ]);
 
         return $knowledgeItem->refresh();
+    }
+
+    /**
+     * Purpose: Build a deterministic knowledge item and one grounded chunk for answer-generation tests.
+     * Inputs: The owning customer, the grounded content, and the stored filename.
+     * Returns: The persisted knowledge item and its single chunk.
+     * Side effects: Writes knowledge item rows to the test database.
+     */
+    private function createGroundedKnowledgeFixture(Customer $customer, string $content, string $originalFilename): array
+    {
+        $knowledgeItem = $this->createKnowledgeItem($customer, [
+            'title' => 'Relevant knowledge',
+            'original_filename' => $originalFilename,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => $content,
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeItem);
+
+        $knowledgeChunk = $knowledgeItem->chunks()->firstOrFail();
+        $knowledgeChunk->forceFill([
+            'title' => 'Dokumentstruktur',
+            'topic' => 'Løsning',
+            'sub_topic' => 'Dokumentasjon',
+            'keywords' => ['løsningen'],
+            'section_title' => 'SIEM',
+            'section_path' => 'SOC-tjenester > SIEM',
+            'embedding_vector' => [1.0, 0.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 11:03:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($knowledgeItem, '2026-04-06 11:03:00');
+
+        return [$knowledgeItem->refresh(), $knowledgeChunk->refresh()];
     }
 
     private function createCustomer(string $name): Customer

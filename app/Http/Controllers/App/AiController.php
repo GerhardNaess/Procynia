@@ -21,8 +21,10 @@ use App\Services\Ai\Requirements\RequirementExtractionPipeline;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
@@ -64,9 +66,11 @@ class AiController extends Controller
         private readonly RequirementLoader $requirementLoader,
         private readonly RequirementAnswerBasisService $requirementAnswerBasisService,
         private readonly RequirementAnswerDraftService $requirementAnswerDraftService,
+        private readonly RequirementKnowledgeDocumentRecommendationService $requirementKnowledgeDocumentRecommendationService,
         private readonly RequirementEditorService $requirementEditorService,
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
         private readonly DocumentPreviewService $documentPreviewService,
+        private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
     ) {
     }
 
@@ -674,11 +678,47 @@ class AiController extends Controller
             $validated['answer_basis_item_ids'],
         );
 
+        $retrievedKnowledgeChunks = $this->retrievedKnowledgeChunksForRequirement($record, $ownedRequirement);
+        $knowledgeGrounding = $this->calculateKnowledgeGroundingLevel($retrievedKnowledgeChunks, $ownedRequirement->requirement_text);
+
+        if ($this->shouldBlockAnswerDraftGeneration($knowledgeGrounding)) {
+            $missingKnowledge = $this->missingKnowledgeInstructionPayload($ownedRequirement);
+
+            Log::warning('[PROCYNIA][AI_GROUNDING] Answer draft generation blocked due to weak knowledge grounding.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $ownedRequirement->id,
+                'coverage_status' => data_get($knowledgeGrounding, 'level'),
+                'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+                'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+                'recommended_document_title' => $missingKnowledge['recommended_document_title'],
+                'suggested_filename' => $missingKnowledge['suggested_filename'],
+                'reason' => 'knowledge_grounding_red',
+            ]);
+
+            $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
+
+            return response()->json(array_merge(
+                [
+                    'requirement_id' => $ownedRequirement->id,
+                    'answer_draft' => $this->blockedAnswerDraftPayload($knowledgeGrounding, $missingKnowledge),
+                    'answer_basis_item_ids' => $selectedAnswerBasisItems
+                        ->pluck('id')
+                        ->map(static fn (mixed $value): int => (int) $value)
+                        ->values()
+                        ->all(),
+                    'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+                    'retrieval_sources' => $retrievedKnowledgeChunks->all(),
+                    'knowledge_grounding' => $knowledgeGrounding,
+                ],
+            ));
+        }
+
         $persistedRequirement = $this->requirementAnswerDraftService->ensureAnswerDraft(
             $ownedRequirement,
             $selectedAnswerBasisItems,
             (bool) ($validated['force'] ?? false),
             $record->ai_instructions,
+            $retrievedKnowledgeChunks,
         );
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
@@ -692,6 +732,8 @@ class AiController extends Controller
                     ->values()
                     ->all(),
                 'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+                'retrieval_sources' => $retrievedKnowledgeChunks->all(),
+                'knowledge_grounding' => $knowledgeGrounding,
             ],
         ));
     }
@@ -1290,9 +1332,13 @@ class AiController extends Controller
      */
     private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement): array
     {
+        $hasAnswerDraftText = filled(trim((string) ($requirement->answer_draft_text ?? '')));
+
         return [
             'text' => (string) ($requirement->answer_draft_text ?? ''),
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
+            'generation_state' => $hasAnswerDraftText ? 'generated' : null,
+            'missing_knowledge' => null,
         ];
     }
 
@@ -1385,15 +1431,23 @@ class AiController extends Controller
                 'knowledge_item_chunks.*',
                 'knowledge_items.original_filename as knowledge_item_title',
                 'knowledge_items.document_type as content_type',
+                'knowledge_items.summary as knowledge_item_summary',
                 'knowledge_items.updated_at as knowledge_item_updated_at',
             ])
-            ->map(static fn (KnowledgeItemChunk $chunk): array => [
+            ->map(fn (KnowledgeItemChunk $chunk): array => [
                 'chunk_id' => (int) $chunk->id,
                 'knowledge_item_id' => (int) $chunk->knowledge_item_id,
                 'knowledge_item_title' => (string) $chunk->getAttribute('knowledge_item_title'),
                 'content_type' => (string) $chunk->getAttribute('content_type'),
+                'knowledge_item_summary' => (string) $chunk->getAttribute('knowledge_item_summary'),
                 'chunk_index' => (int) $chunk->chunk_index,
                 'content' => (string) $chunk->content,
+                'title' => (string) ($chunk->title ?? ''),
+                'topic' => (string) ($chunk->topic ?? ''),
+                'sub_topic' => (string) ($chunk->sub_topic ?? ''),
+                'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords($chunk->keywords) ?? [],
+                'section_title' => (string) ($chunk->section_title ?? ''),
+                'section_path' => (string) ($chunk->section_path ?? ''),
                 'embedding_vector' => is_array($chunk->embedding_vector) ? $chunk->embedding_vector : null,
                 'embedding_model' => (string) ($chunk->embedding_model ?? ''),
                 'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
@@ -1401,6 +1455,115 @@ class AiController extends Controller
                 'knowledge_item_updated_at' => (string) $chunk->getAttribute('knowledge_item_updated_at'),
             ])
             ->values();
+    }
+
+    /**
+     * Purpose: Retrieve the top knowledge chunks for one requirement using the canonical customer knowledge index.
+     * Inputs: The visible AI case and the requirement being drafted.
+     * Returns: A small ranked collection of retrieval source rows ready for answer drafting.
+     * Side effects: May generate a temporary requirement embedding and logs failures through the existing embedding flow.
+     */
+    private function retrievedKnowledgeChunksForRequirement(SavedNotice $record, SavedNoticeAiRequirement $requirement): Collection
+    {
+        $requirementText = trim((string) $requirement->requirement_text);
+
+        if ($requirementText === '') {
+            return collect();
+        }
+
+        $candidateChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
+
+        if ($candidateChunks->isEmpty()) {
+            return collect();
+        }
+
+        $requirementEmbedding = $this->requirementEmbeddingFor($requirement);
+        $rankedMatches = $this->requirementKnowledgeMatcher->match($requirementText, $candidateChunks, $requirementEmbedding);
+        $candidateChunksById = $candidateChunks->keyBy(static fn (array $candidate): int => (int) data_get($candidate, 'chunk_id', 0));
+
+        return $rankedMatches
+            ->map(function (array $match) use ($candidateChunksById): array {
+                $chunkId = (int) data_get($match, 'chunk_id', 0);
+                $candidate = $candidateChunksById->get($chunkId, []);
+                $content = trim((string) data_get($candidate, 'content', data_get($match, 'chunk_content', '')));
+                $chunkTitle = trim((string) data_get($candidate, 'title', ''));
+                $documentTitle = trim((string) data_get($candidate, 'knowledge_item_title', data_get($match, 'knowledge_item_title', '')));
+                $chunkIndex = (int) data_get($match, 'chunk_index', 0);
+
+                return [
+                    'score' => (float) data_get($match, 'final_score', data_get($match, 'score', 0)),
+                    'base_score' => (float) data_get($match, 'base_score', data_get($match, 'score', 0)),
+                    'embedding_similarity' => data_get($match, 'embedding_similarity'),
+                    'knowledge_item_id' => (int) data_get($match, 'knowledge_item_id', 0),
+                    'document_title' => $documentTitle !== '' ? $documentTitle : null,
+                    'knowledge_item_title' => $documentTitle !== '' ? $documentTitle : null,
+                    'content_type' => (string) data_get($candidate, 'content_type', ''),
+                    'knowledge_item_summary' => (string) data_get($candidate, 'knowledge_item_summary', ''),
+                    'chunk_id' => $chunkId,
+                    'chunk_index' => $chunkIndex,
+                    'heading_path' => $chunkTitle !== '' ? $chunkTitle : sprintf('Chunk %d', $chunkIndex + 1),
+                    'topic' => (string) data_get($candidate, 'topic', ''),
+                    'sub_topic' => (string) data_get($candidate, 'sub_topic', ''),
+                    'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [],
+                    'section_title' => (string) data_get($candidate, 'section_title', ''),
+                    'section_path' => (string) data_get($candidate, 'section_path', ''),
+                    'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
+                ];
+            })
+            ->values();
+    }
+
+    /**
+     * Purpose: Summarize how strongly a retrieval result grounds a generated answer.
+     * Inputs: The retrieval source rows returned for one requirement.
+     * Returns: A compact traffic-light grounding summary.
+     * Side effects: None.
+     */
+    private function calculateKnowledgeGroundingLevel(Collection $retrievedKnowledgeChunks, ?string $requirementText = null): array
+    {
+        return $this->knowledgeChunkCoverageService->evaluateKnowledgeGrounding($retrievedKnowledgeChunks, $requirementText);
+    }
+
+    /**
+     * Purpose: Determine whether a generated answer draft must be blocked because the grounding is too weak.
+     * Inputs: A normalized knowledge grounding payload.
+     * Returns: True when the draft should not be generated.
+     * Side effects: None.
+     */
+    private function shouldBlockAnswerDraftGeneration(array $knowledgeGrounding): bool
+    {
+        return data_get($knowledgeGrounding, 'level') === 'red';
+    }
+
+    /**
+     * Purpose: Build the read-only message shown when knowledge is too weak to draft an answer safely.
+     * Inputs: The requirement that needs a knowledge document.
+     * Returns: A deterministic internal instruction payload.
+     * Side effects: None.
+     */
+    private function missingKnowledgeInstructionPayload(SavedNoticeAiRequirement $requirement): array
+    {
+        return [
+            'message' => 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget er for svakt.',
+            ...$this->requirementKnowledgeDocumentRecommendationService->recommendForRequirement($requirement),
+        ];
+    }
+
+    /**
+     * Purpose: Build the blocked answer draft payload used by the frontend when knowledge grounding is too weak.
+     * Inputs: The grounding payload and the missing-knowledge instruction payload.
+     * Returns: A frontend-ready draft payload.
+     * Side effects: None.
+     */
+    private function blockedAnswerDraftPayload(array $knowledgeGrounding, array $missingKnowledge): array
+    {
+        return [
+            'text' => '',
+            'generated_at' => null,
+            'generation_state' => 'blocked_missing_knowledge',
+            'missing_knowledge' => $missingKnowledge,
+            'knowledge_grounding' => $knowledgeGrounding,
+        ];
     }
 
     /**

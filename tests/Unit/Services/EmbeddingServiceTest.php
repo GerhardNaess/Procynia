@@ -54,6 +54,59 @@ class EmbeddingServiceTest extends TestCase
         });
     }
 
+    public function test_it_splits_large_embedding_inputs_into_multiple_parts_before_sending(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.base_url' => 'https://api.openai.com/v1',
+            'services.openai.embedding_model' => 'text-embedding-3-small',
+        ]);
+
+        $firstParagraph = str_repeat('Procynia embedding input paragraph alpha beta gamma delta epsilon ', 80);
+        $secondParagraph = str_repeat('Procynia embedding input paragraph zeta eta theta iota kappa lambda ', 80);
+
+        Http::fake([
+            'https://api.openai.com/v1/embeddings' => Http::response([
+                'object' => 'list',
+                'data' => [
+                    [
+                        'object' => 'embedding',
+                        'index' => 0,
+                        'embedding' => [1.0, 0.0, 0.0],
+                    ],
+                    [
+                        'object' => 'embedding',
+                        'index' => 1,
+                        'embedding' => [0.0, 1.0, 0.0],
+                    ],
+                ],
+                'model' => 'text-embedding-3-small',
+                'usage' => [
+                    'input_tokens' => 10,
+                    'total_tokens' => 10,
+                ],
+            ], 200),
+        ]);
+
+        $result = app(EmbeddingService::class)->tryEmbedText($firstParagraph."\n\n".$secondParagraph);
+
+        $this->assertTrue($result['ok']);
+        $this->assertCount(3, $result['embedding']);
+        $this->assertGreaterThan(0.0, $result['embedding'][0]);
+        $this->assertGreaterThan(0.0, $result['embedding'][1]);
+
+        Http::assertSentCount(1);
+        Http::assertSent(function (Request $request) use ($firstParagraph, $secondParagraph): bool {
+            return $request->url() === 'https://api.openai.com/v1/embeddings'
+                && $request->method() === 'POST'
+                && $request['model'] === 'text-embedding-3-small'
+                && is_array($request['input'])
+                && count($request['input']) === 2
+                && $request['input'][0] === trim($firstParagraph)
+                && $request['input'][1] === trim($secondParagraph);
+        });
+    }
+
     public function test_it_returns_controlled_invalid_request_results_for_4xx_responses(): void
     {
         config([
@@ -173,6 +226,6 @@ class EmbeddingServiceTest extends TestCase
         $this->assertSame('unexpected_response', $result['error_type']);
         $this->assertSame(200, $result['upstream_status']);
         $this->assertSame('req_200', $result['request_id']);
-        $this->assertStringContainsString('valid vector', (string) $result['error_message']);
+        $this->assertStringContainsString('embedding data', (string) $result['error_message']);
     }
 }

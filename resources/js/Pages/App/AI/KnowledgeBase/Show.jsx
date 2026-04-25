@@ -64,6 +64,16 @@ function formatDateTime(value, locale) {
     }).format(new Date(value));
 }
 
+function formatRetrievalScore(value) {
+    const score = Number(value ?? 0);
+
+    if (!Number.isFinite(score)) {
+        return '—';
+    }
+
+    return score.toFixed(4);
+}
+
 function formatFileSize(bytes) {
     const value = Number(bytes ?? 0);
 
@@ -122,6 +132,22 @@ function formatFileTypeLabel(mimeType) {
     }
 
     return mimeType;
+}
+
+function normalizeChunkKeywordList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((item) => String(item ?? '').replace(/\s+/g, ' ').trim())
+        .filter((item) => item !== '');
+}
+
+function formatChunkKeywordList(value) {
+    const keywords = normalizeChunkKeywordList(value);
+
+    return keywords.length > 0 ? keywords.join(', ') : '—';
 }
 
 function getDocumentStatus(item) {
@@ -275,14 +301,18 @@ export default function KnowledgeBaseShow({
     indexUrl = '/app/ai/knowledge-base',
     summaryUpdateUrl = '/app/ai/knowledge-base',
     editUrl = '/app/ai/knowledge-base',
+    retrievalTestUrl = '/app/ai/knowledge-base/retrieval-test',
 }) {
-    const { locale = 'nb-NO' } = usePage().props;
+    const { locale = 'nb-NO', flash = {} } = usePage().props;
     const [activeTab, setActiveTab] = useState('chunks');
     const [selectedChunkId, setSelectedChunkId] = useState(knowledgeItem?.chunks?.[0]?.id ?? null);
     const [chunkReviewRequest, setChunkReviewRequest] = useState(null);
     const [isChunkMetadataEditing, setIsChunkMetadataEditing] = useState(false);
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
     const tabsRef = useRef(null);
+    const retrievalTestForm = useForm({
+        query: '',
+    });
 
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? 'Kunnskapsdokument';
     const documentStatus = getDocumentStatus(knowledgeItem);
@@ -322,10 +352,16 @@ export default function KnowledgeBaseShow({
         ai_summary: '',
         service_product_tag: '',
         theme_tag: '',
+        topic: '',
+        sub_topic: '',
+        keywords: '',
     });
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
     const nextStep = getNextStep(knowledgeItem, documentStatus, readyChunksCount, totalChunksCount);
     const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus);
+    const retrievalTestResult = flash?.retrievalTest ?? null;
+    const retrievalTestResults = Array.isArray(retrievalTestResult?.results) ? retrievalTestResult.results : [];
+    const retrievalTestError = String(retrievalTestResult?.error ?? '').trim();
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -352,6 +388,9 @@ export default function KnowledgeBaseShow({
         chunkMetadataForm.setData('ai_summary', selectedChunk.ai_summary ?? '');
         chunkMetadataForm.setData('service_product_tag', selectedChunk.service_product_tag ?? '');
         chunkMetadataForm.setData('theme_tag', selectedChunk.theme_tag ?? '');
+        chunkMetadataForm.setData('topic', selectedChunk.topic ?? '');
+        chunkMetadataForm.setData('sub_topic', selectedChunk.sub_topic ?? '');
+        chunkMetadataForm.setData('keywords', normalizeChunkKeywordList(selectedChunk.keywords).join(', '));
         setIsChunkMetadataEditing(false);
         setShowChunkSystemMetadata(false);
     }, [
@@ -360,6 +399,9 @@ export default function KnowledgeBaseShow({
         selectedChunk?.ai_summary,
         selectedChunk?.service_product_tag,
         selectedChunk?.theme_tag,
+        selectedChunk?.topic,
+        selectedChunk?.sub_topic,
+        selectedChunk?.keywords,
     ]);
 
     const submitSummary = (event) => {
@@ -367,6 +409,15 @@ export default function KnowledgeBaseShow({
 
         summaryForm.patch(summaryUpdateUrl, {
             preserveScroll: true,
+        });
+    };
+
+    const submitRetrievalTest = (event) => {
+        event.preventDefault();
+
+        retrievalTestForm.post(retrievalTestUrl, {
+            preserveScroll: true,
+            preserveState: true,
         });
     };
 
@@ -399,6 +450,9 @@ export default function KnowledgeBaseShow({
         chunkMetadataForm.setData('ai_summary', selectedChunk.ai_summary ?? '');
         chunkMetadataForm.setData('service_product_tag', selectedChunk.service_product_tag ?? '');
         chunkMetadataForm.setData('theme_tag', selectedChunk.theme_tag ?? '');
+        chunkMetadataForm.setData('topic', selectedChunk.topic ?? '');
+        chunkMetadataForm.setData('sub_topic', selectedChunk.sub_topic ?? '');
+        chunkMetadataForm.setData('keywords', normalizeChunkKeywordList(selectedChunk.keywords).join(', '));
         chunkMetadataForm.clearErrors();
         setIsChunkMetadataEditing(false);
     };
@@ -452,6 +506,8 @@ export default function KnowledgeBaseShow({
     const selectedChunkSystemMetadata = selectedChunk ? [
         { label: 'Chunk ID', value: selectedChunk.id ?? '—' },
         { label: 'Dokument ID', value: selectedChunk.knowledge_item_id ?? knowledgeItem?.id ?? '—' },
+        { label: 'Seksjon', value: selectedChunk.section_title || '—' },
+        { label: 'Seksjonssti', value: selectedChunk.section_path || '—' },
         { label: 'Chunk index', value: selectedChunk.chunk_index !== null && selectedChunk.chunk_index !== undefined ? selectedChunk.chunk_index + 1 : '—' },
         { label: 'Posisjon start', value: selectedChunk.start_offset !== null && selectedChunk.start_offset !== undefined ? selectedChunk.start_offset + 1 : '—' },
         { label: 'Posisjon slutt', value: selectedChunk.end_offset !== null && selectedChunk.end_offset !== undefined ? selectedChunk.end_offset : '—' },
@@ -969,6 +1025,30 @@ export default function KnowledgeBaseShow({
                                                                     {selectedChunk.theme_tag || '—'}
                                                                 </div>
                                                             </div>
+                                                            <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
+                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    Topic
+                                                                </div>
+                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                    {selectedChunk.topic || '—'}
+                                                                </div>
+                                                            </div>
+                                                            <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
+                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    Sub-topic
+                                                                </div>
+                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                    {selectedChunk.sub_topic || '—'}
+                                                                </div>
+                                                            </div>
+                                                            <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
+                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    Keywords
+                                                                </div>
+                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                    {formatChunkKeywordList(selectedChunk.keywords)}
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     ) : (
                                                         <form onSubmit={submitChunkMetadata} className="mt-4 space-y-4">
@@ -1024,6 +1104,48 @@ export default function KnowledgeBaseShow({
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
+
+                                                                <label className="space-y-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Topic
+                                                                    </span>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={chunkMetadataForm.data.topic}
+                                                                        onChange={(event) => chunkMetadataForm.setData('topic', event.target.value)}
+                                                                        placeholder="F.eks. Servicedesk"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                </label>
+
+                                                                <label className="space-y-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Sub-topic
+                                                                    </span>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={chunkMetadataForm.data.sub_topic}
+                                                                        onChange={(event) => chunkMetadataForm.setData('sub_topic', event.target.value)}
+                                                                        placeholder="F.eks. Lærlingordning"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                </label>
+
+                                                                <label className="space-y-2 sm:col-span-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Keywords
+                                                                    </span>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={chunkMetadataForm.data.keywords}
+                                                                        onChange={(event) => chunkMetadataForm.setData('keywords', event.target.value)}
+                                                                        placeholder="Kommaseparerte nøkkelord"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                    <p className="text-xs text-slate-500">
+                                                                        Lagres som en JSON-array.
+                                                                    </p>
+                                                                </label>
                                                             </div>
                                                         </form>
                                                     )}
@@ -1033,7 +1155,7 @@ export default function KnowledgeBaseShow({
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Systemmetadata
+                                                                Systemdata
                                                             </div>
                                                             <p className="mt-1 text-sm text-slate-500">
                                                                 Kun for sporbarhet og kontroll.
@@ -1045,7 +1167,7 @@ export default function KnowledgeBaseShow({
                                                             onClick={() => setShowChunkSystemMetadata((current) => !current)}
                                                             className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
-                                                            {showChunkSystemMetadata ? 'Skjul systemmetadata' : 'Vis systemmetadata'}
+                                                            {showChunkSystemMetadata ? 'Skjul systemdata' : 'Vis systemdata'}
                                                         </button>
                                                     </div>
 
@@ -1165,6 +1287,164 @@ export default function KnowledgeBaseShow({
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                    ) : null}
+                </section>
+
+                <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                        <div className="space-y-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                Intern retrieval-test
+                            </div>
+                            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
+                                Test chunk-retrieval
+                            </h2>
+                            <p className="max-w-3xl text-sm leading-6 text-slate-600">
+                                Skriv et spørsmål og se hvilke chunks som scorer høyest. Ingen AI-svar genereres.
+                            </p>
+                        </div>
+
+                        {retrievalTestResult?.embedding_model ? (
+                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                                {retrievalTestResult.embedding_model}
+                            </span>
+                        ) : null}
+                    </div>
+
+                    <form onSubmit={submitRetrievalTest} className="mt-5 space-y-3">
+                        <label className="block space-y-2">
+                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                Spørsmål
+                            </span>
+                            <textarea
+                                value={retrievalTestForm.data.query}
+                                onChange={(event) => retrievalTestForm.setData('query', event.target.value)}
+                                rows={3}
+                                placeholder="Skriv et spørsmål eller et krav du vil teste mot kunnskapschunks."
+                                className="w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            />
+                        </label>
+
+                        {retrievalTestForm.errors.query ? (
+                            <p className="text-sm text-rose-600">
+                                {retrievalTestForm.errors.query}
+                            </p>
+                        ) : null}
+
+                        <div className="flex flex-wrap gap-3">
+                            <button
+                                type="submit"
+                                disabled={retrievalTestForm.processing}
+                                className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {retrievalTestForm.processing ? 'Tester...' : 'Test retrieval'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => retrievalTestForm.setData('query', '')}
+                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            >
+                                Tøm
+                            </button>
+                        </div>
+                    </form>
+
+                    {retrievalTestError ? (
+                        <div className="mt-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                            {retrievalTestError}
+                        </div>
+                    ) : null}
+
+                    {retrievalTestResult ? (
+                        <div className="mt-6 space-y-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        Resultater
+                                    </div>
+                                    <div className="mt-1 text-sm text-slate-500">
+                                        {retrievalTestResult.query ? `Spørring: ${retrievalTestResult.query}` : 'Ingen spørring registrert.'}
+                                    </div>
+                                </div>
+
+                                <div className="text-sm font-medium text-slate-600">
+                                    {retrievalTestResult.result_count !== undefined
+                                        ? `${retrievalTestResult.result_count} av ${retrievalTestResult.candidate_count ?? retrievalTestResults.length} treff vist`
+                                        : `${retrievalTestResults.length} treff vist`}
+                                </div>
+                            </div>
+
+                            {retrievalTestResults.length > 0 ? (
+                                <div className="space-y-3">
+                                    {retrievalTestResults.map((result, index) => (
+                                        <article
+                                            key={`${result.chunk_id}-${index}`}
+                                            className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.03)]"
+                                        >
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                <div className="space-y-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <div className="text-sm font-semibold text-slate-950">
+                                                            {result.document_title || 'Ukjent dokument'}
+                                                        </div>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                                            Score {formatRetrievalScore(result.score)}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            Chunk {Number(result.chunk_index ?? 0) + 1}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            {result.heading_path || '—'}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            Chunk ID {result.chunk_id}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            Topic {result.topic || '—'}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            Sub-topic {result.sub_topic || '—'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
+                                                            Seksjon {result.section_title || '—'}
+                                                        </span>
+                                                    </div>
+
+                                                    <p className="text-xs leading-5 text-slate-500">
+                                                        Seksjonssti: {result.section_path || '—'}
+                                                    </p>
+
+                                                    <p className="text-xs leading-5 text-slate-500">
+                                                        Keywords: {formatChunkKeywordList(result.keywords)}
+                                                    </p>
+                                                </div>
+
+                                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                                    Knowledge ID {result.knowledge_item_id}
+                                                </span>
+                                            </div>
+
+                                            <p className="mt-3 text-sm leading-6 text-slate-600">
+                                                {result.content_preview || 'Ingen forhåndsvisning tilgjengelig.'}
+                                            </p>
+                                        </article>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-[18px] border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-500">
+                                    Ingen treff å vise ennå.
+                                </div>
+                            )}
                         </div>
                     ) : null}
                 </section>

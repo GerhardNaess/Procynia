@@ -33,6 +33,44 @@ class DocumentChunkerTest extends TestCase
         $this->assertStringContainsString('Siste innhold.', $chunks[1]['content']);
     }
 
+    public function test_it_assigns_h1_section_context_to_chunks_inside_single_heading_sections(): void
+    {
+        $blocks = [
+            ['text' => 'Bemanning og roller', 'style' => 'Heading 1', 'level' => 1],
+            ['text' => 'Første innholdsblokk under bemanningsseksjonen.', 'style' => 'Normal', 'level' => null],
+            ['text' => 'Organisering og styring', 'style' => 'Heading 1', 'level' => 1],
+            ['text' => 'Andre innholdsblokk under organisasjonsseksjonen.', 'style' => 'Normal', 'level' => null],
+        ];
+
+        $chunks = (new DocumentChunker())->chunkStructured($blocks);
+
+        $this->assertCount(2, $chunks);
+        $this->assertSame('Bemanning og roller', $chunks[0]['section_title']);
+        $this->assertSame('Bemanning og roller', $chunks[0]['section_path']);
+        $this->assertSame('Organisering og styring', $chunks[1]['section_title']);
+        $this->assertSame('Organisering og styring', $chunks[1]['section_path']);
+        $this->assertChunkOffsetsMatchSource($chunks, $this->structuredSourceText($blocks));
+    }
+
+    public function test_it_assigns_h2_section_context_when_an_h1_section_overflows(): void
+    {
+        $blocks = [
+            ['text' => 'SOC-tjenester', 'style' => 'Heading 1', 'level' => 1],
+            ['text' => str_repeat('Intro før H2. ', 2200), 'style' => 'Normal', 'level' => null],
+            ['text' => 'SIEM', 'style' => 'Heading 2', 'level' => 2],
+            ['text' => 'Innhold om SIEM-området.', 'style' => 'Normal', 'level' => null],
+        ];
+
+        $chunks = (new DocumentChunker())->chunkStructured($blocks);
+
+        $this->assertCount(1, $chunks);
+        $this->assertSame('SIEM', $chunks[0]['section_title']);
+        $this->assertSame('SOC-tjenester > SIEM', $chunks[0]['section_path']);
+        $this->assertStringContainsString('SOC-tjenester', $chunks[0]['content']);
+        $this->assertStringContainsString('SIEM', $chunks[0]['content']);
+        $this->assertChunkOffsetsMatchSource($chunks, $this->structuredSourceText($blocks));
+    }
+
     public function test_it_groups_an_oversized_h1_section_into_few_h2_chunks(): void
     {
         $blocks = [

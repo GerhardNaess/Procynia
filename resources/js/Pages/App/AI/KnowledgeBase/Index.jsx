@@ -381,12 +381,6 @@ export default function KnowledgeBaseIndex({
 
                         <div className="flex flex-wrap gap-3 lg:justify-end">
                             <Link
-                                href={createUrl}
-                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                            >
-                                Last opp dokument
-                            </Link>
-                            <Link
                                 href={newDocumentUrl}
                                 className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
                             >

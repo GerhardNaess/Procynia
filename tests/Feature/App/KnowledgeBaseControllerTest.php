@@ -285,6 +285,16 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('original_filename', 'detail-reference.docx')
             ->firstOrFail();
 
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $chunk->forceFill([
+            'section_title' => 'Bemanning og roller',
+            'section_path' => 'SOC-tjenester > Bemanning og roller',
+        ])->save();
+
         $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $response->assertOk();
@@ -296,6 +306,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index')
                 && data_get($page, 'props.editUrl') === route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id])
                 && data_get($page, 'props.summaryUpdateUrl') === route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $document->id])
+                && data_get($page, 'props.retrievalTestUrl') === route('app.ai.knowledge-base.retrieval-test')
                 && data_get($page, 'props.knowledgeItem.id') === $document->id
                 && data_get($page, 'props.knowledgeItem.original_filename') === 'detail-reference.docx'
                 && data_get($page, 'props.knowledgeItem.show_url') === route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id])
@@ -313,7 +324,126 @@ class KnowledgeBaseControllerTest extends TestCase
                     'knowledgeItem' => $document->id,
                     'chunk' => $chunks->first()['id'],
                 ])
+                && array_key_exists('topic', $chunks->first())
+                && array_key_exists('sub_topic', $chunks->first())
+                && array_key_exists('keywords', $chunks->first())
+                && $chunks->first()['section_title'] === 'Bemanning og roller'
+                && $chunks->first()['section_path'] === 'SOC-tjenester > Bemanning og roller'
                 && $chunks->first()['content_preview'] !== '';
+        });
+    }
+
+    public function test_knowledge_document_retrieval_test_returns_top_chunks_for_a_query(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Retrieval AS');
+        $query = 'find the alpha section';
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'retrieval-test.docx',
+            'content' => 'Retrieval debug content.',
+            'original_filename' => 'retrieval-test.docx',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/retrieval-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'extracted_text' => 'Retrieval debug content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        $chunkVectors = [
+            [1.0, 0.0, 0.0],
+            [0.9, 0.1, 0.0],
+            [0.8, 0.2, 0.0],
+            [0.6, 0.4, 0.0],
+            [0.4, 0.6, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+
+        foreach ($chunkVectors as $index => $embeddingVector) {
+            KnowledgeItemChunk::query()->create([
+                'knowledge_item_id' => $document->id,
+                'chunk_index' => $index,
+                'content' => sprintf('Chunk %d content for retrieval testing with distinct terms %s.', $index + 1, str_repeat('alpha beta gamma ', 4)),
+                'start_offset' => $index * 200,
+                'end_offset' => $index * 200 + 120,
+                'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+                'title' => sprintf('Heading %d', $index + 1),
+                'topic' => $index === 0 ? 'Løsning' : 'Drift',
+                'sub_topic' => $index === 0 ? 'Dokumentasjon' : 'Driftstøtte',
+                'keywords' => $index === 0 ? ['løsningen'] : ['drift'],
+                'section_title' => $index === 0 ? 'SIEM' : 'Drift og støtte',
+                'section_path' => $index === 0 ? 'SOC-tjenester > SIEM' : 'SOC-tjenester > Drift og støtte',
+                'embedding_vector' => $embeddingVector,
+                'embedding_model' => 'text-embedding-3-small',
+                'embedding_generated_at' => now(),
+                'embedding_error' => null,
+            ]);
+        }
+
+        $service = Mockery::mock(EmbeddingService::class);
+        $service->shouldReceive('tryEmbedText')
+            ->once()
+            ->with($query)
+            ->andReturn([
+                'ok' => true,
+                'embedding' => [1.0, 0.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ]);
+        $this->app->instance(EmbeddingService::class, $service);
+
+        $response = $this->from(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]))
+            ->actingAs($context['user'])
+            ->post(route('app.ai.knowledge-base.retrieval-test'), [
+                'query' => $query,
+            ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $response->assertSessionHas('retrievalTest', function (array $payload) use ($query): bool {
+            $results = data_get($payload, 'results', []);
+
+            return data_get($payload, 'query') === $query
+                && count($results) === 5
+                && data_get($results, '0.heading_path') === 'Heading 1'
+                && data_get($results, '1.heading_path') === 'Heading 2'
+                && data_get($results, '2.heading_path') === 'Heading 3'
+                && data_get($results, '0.section_title') === 'SIEM'
+                && data_get($results, '0.section_path') === 'SOC-tjenester > SIEM'
+                && data_get($results, '0.topic') === 'Løsning'
+                && data_get($results, '0.sub_topic') === 'Dokumentasjon'
+                && data_get($results, '0.keywords.0') === 'løsningen'
+                && data_get($results, '0.score') > data_get($results, '1.score')
+                && data_get($results, '1.score') > data_get($results, '2.score');
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document, $query): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.retrievalTestUrl') === route('app.ai.knowledge-base.retrieval-test')
+                && data_get($page, 'props.flash.retrievalTest.query') === $query
+                && data_get($page, 'props.flash.retrievalTest.results.0.document_title') === $document->original_filename
+                && data_get($page, 'props.flash.retrievalTest.results.0.heading_path') === 'Heading 1'
+                && data_get($page, 'props.flash.retrievalTest.results.0.section_title') === 'SIEM'
+                && data_get($page, 'props.flash.retrievalTest.results.0.section_path') === 'SOC-tjenester > SIEM'
+                && data_get($page, 'props.flash.retrievalTest.results.0.topic') === 'Løsning'
+                && data_get($page, 'props.flash.retrievalTest.results.0.sub_topic') === 'Dokumentasjon'
+                && data_get($page, 'props.flash.retrievalTest.results.0.keywords.0') === 'løsningen'
+                && data_get($page, 'props.flash.retrievalTest.results.0.chunk_id') !== null
+                && data_get($page, 'props.flash.retrievalTest.results.0.score') !== null;
         });
     }
 
@@ -418,6 +548,11 @@ class KnowledgeBaseControllerTest extends TestCase
             ->orderBy('chunk_index')
             ->firstOrFail();
 
+        $chunk->forceFill([
+            'section_title' => 'Bemanning og roller',
+            'section_path' => 'SOC-tjenester > Bemanning og roller',
+        ])->save();
+
         $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.metadata.update', [
             'knowledgeItem' => $document->id,
             'chunk' => $chunk->id,
@@ -426,6 +561,9 @@ class KnowledgeBaseControllerTest extends TestCase
             'ai_summary' => 'Dette er en kort oppsummering av chunkens innhold.',
             'service_product_tag' => 'Kontrakt',
             'theme_tag' => 'Juridisk',
+            'topic' => 'Servicedesk',
+            'sub_topic' => 'Lærlingordning',
+            'keywords' => 'lærling, fagbrev, lærling, IKT-servicefaget',
             'embedding_model' => 'ignored-by-validation',
         ]);
 
@@ -436,6 +574,11 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('Dette er en kort oppsummering av chunkens innhold.', $updatedChunk->ai_summary);
         $this->assertSame('Kontrakt', $updatedChunk->service_product_tag);
         $this->assertSame('Juridisk', $updatedChunk->theme_tag);
+        $this->assertSame('Servicedesk', $updatedChunk->topic);
+        $this->assertSame('Lærlingordning', $updatedChunk->sub_topic);
+        $this->assertSame(['lærling', 'fagbrev', 'IKT-servicefaget'], $updatedChunk->keywords);
+        $this->assertSame('Bemanning og roller', $updatedChunk->section_title);
+        $this->assertSame('SOC-tjenester > Bemanning og roller', $updatedChunk->section_path);
         $this->assertSame('text-embedding-3-small', $updatedChunk->embedding_model);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
@@ -446,7 +589,12 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.knowledgeItem.chunks.0.title') === 'Leverandøravtale'
                 && data_get($page, 'props.knowledgeItem.chunks.0.ai_summary') === 'Dette er en kort oppsummering av chunkens innhold.'
                 && data_get($page, 'props.knowledgeItem.chunks.0.service_product_tag') === 'Kontrakt'
-                && data_get($page, 'props.knowledgeItem.chunks.0.theme_tag') === 'Juridisk';
+                && data_get($page, 'props.knowledgeItem.chunks.0.theme_tag') === 'Juridisk'
+                && data_get($page, 'props.knowledgeItem.chunks.0.topic') === 'Servicedesk'
+                && data_get($page, 'props.knowledgeItem.chunks.0.sub_topic') === 'Lærlingordning'
+                && data_get($page, 'props.knowledgeItem.chunks.0.keywords.0') === 'lærling'
+                && data_get($page, 'props.knowledgeItem.chunks.0.section_title') === 'Bemanning og roller'
+                && data_get($page, 'props.knowledgeItem.chunks.0.section_path') === 'SOC-tjenester > Bemanning og roller';
         });
     }
 

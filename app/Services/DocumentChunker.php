@@ -167,12 +167,7 @@ class DocumentChunker
                         $blockEnds,
                         $sectionStartIndex,
                         $sectionEndExclusive,
-                        [
-                            'structured_section_heading' => (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
-                            'structured_section_level' => 1,
-                            'structured_subheading' => null,
-                            'structured_subheading_level' => null,
-                        ],
+                        $this->structuredSectionMetadata((string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? '')),
                     );
 
                     continue;
@@ -183,17 +178,12 @@ class DocumentChunker
                 if ($h2Spans === []) {
                     $chunks[] = $this->makeStructuredChunkPayloadFromRange(
                         $sourceText,
-                        $blockStarts,
-                        $blockEnds,
-                        $sectionStartIndex,
-                        $sectionEndExclusive,
-                        [
-                            'structured_section_heading' => (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
-                            'structured_section_level' => 1,
-                            'structured_subheading' => null,
-                            'structured_subheading_level' => null,
-                        ],
-                    );
+                    $blockStarts,
+                    $blockEnds,
+                    $sectionStartIndex,
+                    $sectionEndExclusive,
+                    $this->structuredSectionMetadata((string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? '')),
+                );
 
                     continue;
                 }
@@ -305,6 +295,15 @@ class DocumentChunker
                 'structured_subheading_level' => isset($span['structured_subheading_level'])
                     ? (int) $span['structured_subheading_level']
                     : null,
+                'section_title' => isset($span['structured_subheading']) && $span['structured_subheading'] !== ''
+                    ? (string) $span['structured_subheading']
+                    : (trim($sectionHeading) !== '' ? trim($sectionHeading) : null),
+                'section_path' => $this->structuredSectionPath(
+                    $sectionHeading,
+                    isset($span['structured_subheading']) && $span['structured_subheading'] !== ''
+                        ? (string) $span['structured_subheading']
+                        : null,
+                ),
             ];
 
             if ($spanLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
@@ -384,6 +383,8 @@ class DocumentChunker
                     'structured_section_level' => 1,
                     'structured_subheading' => null,
                     'structured_subheading_level' => null,
+                    'section_title' => trim($sectionHeading) !== '' ? trim($sectionHeading) : null,
+                    'section_path' => $this->structuredSectionPath($sectionHeading, null),
                 ],
             );
         }
@@ -491,6 +492,53 @@ class DocumentChunker
         $content = mb_substr($sourceText, $startOffset, $contentLength, 'UTF-8');
 
         return array_merge($this->makeChunkPayload($content, $startOffset), $metadata);
+    }
+
+    /**
+     * Purpose: Build the canonical section metadata for a structured chunk.
+     * Inputs: The parent H1 heading and an optional H2 subheading.
+     * Returns: Section metadata ready for chunk persistence.
+     * Side effects: None.
+     */
+    private function structuredSectionMetadata(string $sectionHeading, ?string $subheading = null): array
+    {
+        $sectionHeading = trim($sectionHeading);
+        $subheading = $subheading !== null ? trim($subheading) : null;
+        $hasSectionHeading = $sectionHeading !== '';
+        $hasSubheading = $subheading !== null && $subheading !== '';
+
+        return [
+            'structured_section_heading' => $hasSectionHeading ? $sectionHeading : null,
+            'structured_section_level' => 1,
+            'structured_subheading' => $hasSubheading ? $subheading : null,
+            'structured_subheading_level' => $hasSubheading ? 2 : null,
+            'section_title' => $hasSubheading
+                ? $subheading
+                : ($hasSectionHeading ? $sectionHeading : null),
+            'section_path' => $this->structuredSectionPath($sectionHeading, $subheading),
+        ];
+    }
+
+    /**
+     * Purpose: Build a stable display path from the current heading hierarchy.
+     * Inputs: The parent H1 heading and an optional H2 subheading.
+     * Returns: A readable heading path or null when no heading context exists.
+     * Side effects: None.
+     */
+    private function structuredSectionPath(string $sectionHeading, ?string $subheading = null): ?string
+    {
+        $sectionHeading = trim($sectionHeading);
+        $subheading = $subheading !== null ? trim($subheading) : null;
+
+        if ($sectionHeading === '') {
+            return null;
+        }
+
+        if ($subheading !== null && $subheading !== '') {
+            return $sectionHeading.' > '.$subheading;
+        }
+
+        return $sectionHeading;
     }
 
     /**

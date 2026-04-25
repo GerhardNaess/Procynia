@@ -74,6 +74,7 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn (): ?string => $request->session()->get('success'),
                 'error' => fn (): ?string => $request->session()->get('error'),
                 'userCreated' => fn (): ?array => $request->session()->get('userCreated'),
+                'retrievalTest' => fn (): ?array => $request->session()->get('retrievalTest'),
             ],
             'translations' => [
                 'common' => [

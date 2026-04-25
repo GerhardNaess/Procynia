@@ -11,6 +11,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use JsonException;
 use RuntimeException;
 use Throwable;
@@ -39,6 +40,7 @@ class RequirementAnswerDraftService
         Collection $answerBasisItems,
         bool $forceGenerate = false,
         ?string $caseInstructions = null,
+        ?Collection $retrievedKnowledgeChunks = null,
     ): SavedNoticeAiRequirement
     {
         $requirement->loadMissing([
@@ -46,13 +48,16 @@ class RequirementAnswerDraftService
             'evidence.knowledgeItemChunk',
         ]);
 
-        if (! $forceGenerate && filled($requirement->answer_draft_text)) {
-            return $requirement;
-        }
-
         $evidenceRows = $this->answerEvidenceRows($requirement);
         $answerBasisRows = $this->answerBasisRows($answerBasisItems);
-        $answerDraftText = $this->requestAnswerDraft($requirement, $evidenceRows, $answerBasisRows, $caseInstructions);
+        $retrievedKnowledgeRows = $this->retrievedKnowledgeRows($retrievedKnowledgeChunks);
+        $answerDraftText = $this->requestAnswerDraft(
+            $requirement,
+            $evidenceRows,
+            $answerBasisRows,
+            $caseInstructions,
+            $retrievedKnowledgeRows,
+        );
 
         return DB::transaction(function () use ($requirement, $answerDraftText): SavedNoticeAiRequirement {
             $requirement->forceFill([
@@ -99,10 +104,17 @@ class RequirementAnswerDraftService
         Collection $evidenceRows,
         Collection $answerBasisRows,
         ?string $caseInstructions,
+        Collection $retrievedKnowledgeRows,
     ): string
     {
         $response = $this->openAiClient->createResponse(
-            $this->openAiRequestPayload($requirement, $evidenceRows, $answerBasisRows, $caseInstructions),
+            $this->openAiRequestPayload(
+                $requirement,
+                $evidenceRows,
+                $answerBasisRows,
+                $caseInstructions,
+                $retrievedKnowledgeRows,
+            ),
         );
 
         try {
@@ -133,6 +145,7 @@ class RequirementAnswerDraftService
         Collection $evidenceRows,
         Collection $answerBasisRows,
         ?string $caseInstructions,
+        Collection $retrievedKnowledgeRows,
     ): array
     {
         return [
@@ -152,7 +165,13 @@ class RequirementAnswerDraftService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($requirement, $evidenceRows, $answerBasisRows, $caseInstructions),
+                            'text' => $this->userPrompt(
+                                $requirement,
+                                $evidenceRows,
+                                $answerBasisRows,
+                                $caseInstructions,
+                                $retrievedKnowledgeRows,
+                            ),
                         ],
                     ],
                 ],
@@ -181,8 +200,9 @@ class RequirementAnswerDraftService
     {
         return implode("\n", [
             'You draft one editable supplier answer for one tender requirement.',
-            'Use only the provided requirement text and evidence.',
+            'Use only the provided requirement text, evidence, selected answer basis items, and retrieved knowledge chunks.',
             'Use the selected answer basis items as the primary supplier-owned source material when drafting the answer.',
+            'Use the retrieved knowledge chunks as the primary grounded source material for factual content.',
             'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
@@ -191,6 +211,7 @@ class RequirementAnswerDraftService
             'Do not invent facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
             'If evidence is missing, draft cautiously from the requirement text only.',
+            'If the provided sources do not give enough basis, write a short draft that says more information must be clarified.',
             'Keep the answer practical, concise, and suitable for direct editing by the user.',
         ]);
     }
@@ -206,6 +227,7 @@ class RequirementAnswerDraftService
         Collection $evidenceRows,
         Collection $answerBasisRows,
         ?string $caseInstructions,
+        Collection $retrievedKnowledgeRows,
     ): string
     {
         $payload = [
@@ -227,6 +249,10 @@ class RequirementAnswerDraftService
                 ? 'No evidence rows are available. Draft from the requirement text only.'
                 : 'Use the supplied evidence only. Selected evidence has priority over suggested evidence.',
             'evidence' => $this->promptEvidenceRows($evidenceRows),
+            'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
+                ? 'No relevant knowledge chunks were retrieved. Draft cautiously from the requirement text and selected answer basis items only.'
+                : 'Use the retrieved knowledge chunks as the factual foundation for the answer. Do not invent facts beyond the provided sources.',
+            'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
         ];
 
         $normalizedCaseInstructions = $this->normalizeCaseInstructions($caseInstructions);
@@ -365,6 +391,51 @@ class RequirementAnswerDraftService
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Convert retrieved knowledge chunks into compact prompt context.
+     * Inputs: The retrieved knowledge chunk rows.
+     * Returns: A deterministic array with the minimum context needed by the model.
+     * Side effects: None.
+     */
+    private function promptRetrievedKnowledgeRows(Collection $retrievedKnowledgeRows): array
+    {
+        return $retrievedKnowledgeRows
+            ->map(static function (array $retrievalRow): array {
+                $content = trim((string) data_get($retrievalRow, 'content_preview', data_get($retrievalRow, 'content', '')));
+                $headingPath = trim((string) data_get($retrievalRow, 'heading_path', ''));
+                $knowledgeItemTitle = trim((string) data_get($retrievalRow, 'document_title', data_get($retrievalRow, 'knowledge_item_title', '')));
+
+                return [
+                    'score' => (float) data_get($retrievalRow, 'score', 0),
+                    'knowledge_item_id' => (int) data_get($retrievalRow, 'knowledge_item_id', 0),
+                    'document_title' => $knowledgeItemTitle !== '' ? $knowledgeItemTitle : null,
+                    'chunk_id' => (int) data_get($retrievalRow, 'chunk_id', 0),
+                    'chunk_index' => (int) data_get($retrievalRow, 'chunk_index', 0),
+                    'heading_path' => $headingPath !== '' ? $headingPath : null,
+                    'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Purpose: Normalize retrieved knowledge rows before prompt composition.
+     * Inputs: The retrieved knowledge collection or null.
+     * Returns: A deterministic collection with array rows only.
+     * Side effects: None.
+     */
+    private function retrievedKnowledgeRows(?Collection $retrievedKnowledgeChunks): Collection
+    {
+        if (! $retrievedKnowledgeChunks instanceof Collection) {
+            return collect();
+        }
+
+        return $retrievedKnowledgeChunks
+            ->filter(static fn ($row): bool => is_array($row))
+            ->values();
     }
 
     /**
