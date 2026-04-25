@@ -26,7 +26,10 @@ use App\Services\OpenAi\EmbeddingService;
 use App\Services\Ai\Requirements\RequirementExtractionPipeline;
 use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
 use App\Services\RequirementExtractor;
+use App\Services\KnowledgeChunkCoverageService;
 use App\Models\User;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
@@ -49,6 +52,25 @@ class AiControllerTest extends TestCase
 
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'amber',
+                'max_score' => 0.74,
+                'sources_count' => 1,
+            ];
+        });
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'supported_points' => ['Kunnskapsgrunnlaget dekker kravet tilstrekkelig.'],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => null,
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grunnlaget er tilstrekkelig dokumentert.',
+            ];
+        });
     }
 
     protected function tearDown(): void
@@ -465,6 +487,9 @@ class AiControllerTest extends TestCase
             $this->assertIsArray($inputPayload);
             $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
             $this->assertSame('Skriv formelt og bruk Kunde med stor K.', data_get($inputPayload, 'case_instructions'));
+            $this->assertSame('supported', data_get($inputPayload, 'grounding_judge.status'));
+            $this->assertTrue((bool) data_get($inputPayload, 'grounding_judge.can_generate_answer'));
+            $this->assertNotEmpty(data_get($inputPayload, 'grounding_judge.supported_points'));
 
             return Http::response(
                 $this->openAiStructuredResponse([
@@ -496,6 +521,94 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive løsningen og dokumentere metoden.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_calls_the_grounding_judge_before_generating_the_answer(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-ORDER', 'Judge order target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:20:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:21:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')
+            ->once()
+            ->ordered('grounding-judge-flow')
+            ->andReturn([
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'supported_points' => ['Løsningen er dokumentert.'],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => null,
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grunnlaget er tilstrekkelig.',
+            ]);
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        $draftService = Mockery::mock(RequirementAnswerDraftService::class);
+        $draftService->shouldReceive('ensureAnswerDraft')
+            ->once()
+            ->ordered('grounding-judge-flow')
+            ->withArgs(function (
+                SavedNoticeAiRequirement $draftRequirement,
+                $answerBasisItems,
+                bool $forceGenerate,
+                ?string $caseInstructions,
+                ?\Illuminate\Support\Collection $retrievedKnowledgeChunks,
+                array $groundingJudge,
+            ) use ($requirement): bool {
+                return $draftRequirement->id === $requirement->id
+                    && $forceGenerate === false
+                    && $caseInstructions === null
+                    && $retrievedKnowledgeChunks instanceof \Illuminate\Support\Collection
+                    && data_get($groundingJudge, 'status') === 'supported';
+            })
+            ->andReturnUsing(function (SavedNoticeAiRequirement $draftRequirement, ...$ignored): SavedNoticeAiRequirement {
+                $draftRequirement->forceFill([
+                    'answer_draft_text' => 'Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.',
+                    'answer_draft_generated_at' => '2026-04-06 11:22:00',
+                ])->save();
+
+                return $draftRequirement->refresh();
+            });
+        $this->app->instance(RequirementAnswerDraftService::class, $draftService);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.');
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.', $requirement->answer_draft_text);
+        $this->assertSame('2026-04-06 11:22:00', $requirement->answer_draft_generated_at?->toDateTimeString());
+
+        Http::assertNothingSent();
     }
 
     public function test_ai_requirement_answer_draft_generation_endpoint_overwrites_existing_drafts(): void
@@ -1112,6 +1225,18 @@ class AiControllerTest extends TestCase
             'answer_draft_generated_at' => null,
         ]);
 
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'red',
+                'max_score' => 0.12,
+                'sources_count' => 0,
+            ];
+        });
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldNotReceive('judge');
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
         Http::fake();
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
@@ -1131,6 +1256,186 @@ class AiControllerTest extends TestCase
         $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'laerlingeordning-og-kompetanseutvikling.docx');
         $response->assertJsonPath('knowledge_grounding.level', 'red');
         $response->assertJsonPath('knowledge_grounding.sources_count', 0);
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_requirement_answer_draft_generation_blocks_when_grounding_judge_reports_partial_support(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-PARTIAL', 'Judge partial target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:25:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Kravtekst om ITSM og SPOC.',
+            'text_extracted_at' => '2026-04-06 13:26:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om ITSM og SPOC.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.1',
+            'requirement_text' => 'Leverandøren skal beskrive håndtering av saker i ITSM/SPOC.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')
+            ->once()
+            ->andReturn([
+                'status' => 'partial',
+                'can_generate_answer' => false,
+                'supported_points' => ['ITSM er dokumentert i kunnskapsgrunnlaget.'],
+                'unsupported_points' => ['SPOC er ikke dokumentert i kunnskapsgrunnlaget.'],
+                'missing_knowledge_summary' => 'SPOC er ikke dokumentert, så kravet er bare delvis grounded.',
+                'recommended_document_title' => 'Sakshåndtering og servicedesk',
+                'suggested_filename' => 'sakshandtering-og-servicedesk.docx',
+                'reasoning_summary' => 'ITSM finnes, men SPOC mangler i den relevante konteksten.',
+            ]);
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.message', 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget ikke dokumenterer kravet godt nok. Opprett eller last opp relevant kunnskapsdokumentasjon, og prøv deretter å lage svaret på nytt.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.missing_knowledge_summary', 'SPOC er ikke dokumentert, så kravet er bare delvis grounded.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Sakshåndtering og servicedesk');
+        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'sakshandtering-og-servicedesk.docx');
+        $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'partial');
+        $response->assertJsonPath('answer_draft.missing_knowledge.supported_points.0', 'ITSM er dokumentert i kunnskapsgrunnlaget.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'SPOC er ikke dokumentert i kunnskapsgrunnlaget.');
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_requirement_answer_draft_generation_blocks_when_grounding_judge_reports_unsupported(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-UNSUPPORTED', 'Judge unsupported target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:35:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Kravtekst om beredskap.',
+            'text_extracted_at' => '2026-04-06 13:36:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om beredskap.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.2',
+            'requirement_text' => 'Leverandøren skal beskrive beredskap og hendelseshåndtering.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')
+            ->once()
+            ->andReturn([
+                'status' => 'unsupported',
+                'can_generate_answer' => false,
+                'supported_points' => [],
+                'unsupported_points' => ['Beredskap er ikke dokumentert i den relevante kunnskapsbasen.'],
+                'missing_knowledge_summary' => 'Kravet mangler dokumentert støtte i kunnskapsgrunnlaget.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Ingen relevant støtte funnet.',
+            ]);
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'unsupported');
+        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Beredskap er ikke dokumentert i den relevante kunnskapsbasen.');
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_requirement_answer_draft_generation_blocks_safely_when_grounding_judge_fails(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-FAIL', 'Judge fail target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:45:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Kravtekst om tilgangsstyring.',
+            'text_extracted_at' => '2026-04-06 13:46:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om tilgangsstyring.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.3',
+            'requirement_text' => 'Leverandøren skal beskrive tilgangsstyring og identitetsforvaltning.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')
+            ->once()
+            ->andThrow(new RuntimeException('Judge unavailable.'));
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.message', 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget ikke dokumenterer kravet godt nok. Opprett eller last opp relevant kunnskapsdokumentasjon, og prøv deretter å lage svaret på nytt.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.missing_knowledge_summary', 'Procynia kunne ikke vurdere kunnskapsgrunnlaget sikkert.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'unsupported');
 
         $requirement->refresh();
         $this->assertNull($requirement->answer_draft_text);
@@ -3623,6 +3928,36 @@ class AiControllerTest extends TestCase
             ->andReturnUsing($handler);
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic grounding judge for controller integration tests.
+     * Inputs: A callback that returns the desired grounding outcome.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindGroundingJudgeService(callable $handler): void
+    {
+        $service = Mockery::mock(RequirementGroundingJudgeService::class);
+        $service->shouldReceive('judge')
+            ->andReturnUsing($handler);
+
+        $this->app->instance(RequirementGroundingJudgeService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic coverage evaluator for controller integration tests.
+     * Inputs: A callback that returns the desired coverage payload.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindKnowledgeGroundingService(callable $handler): void
+    {
+        $service = Mockery::mock(KnowledgeChunkCoverageService::class)->makePartial();
+        $service->shouldReceive('evaluateKnowledgeGrounding')
+            ->andReturnUsing($handler);
+
+        $this->app->instance(KnowledgeChunkCoverageService::class, $service);
     }
 
     /**

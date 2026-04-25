@@ -41,6 +41,7 @@ class RequirementAnswerDraftService
         bool $forceGenerate = false,
         ?string $caseInstructions = null,
         ?Collection $retrievedKnowledgeChunks = null,
+        ?array $groundingJudge = null,
     ): SavedNoticeAiRequirement
     {
         $requirement->loadMissing([
@@ -57,6 +58,7 @@ class RequirementAnswerDraftService
             $answerBasisRows,
             $caseInstructions,
             $retrievedKnowledgeRows,
+            $groundingJudge,
         );
 
         return DB::transaction(function () use ($requirement, $answerDraftText): SavedNoticeAiRequirement {
@@ -105,6 +107,7 @@ class RequirementAnswerDraftService
         Collection $answerBasisRows,
         ?string $caseInstructions,
         Collection $retrievedKnowledgeRows,
+        ?array $groundingJudge,
     ): string
     {
         $response = $this->openAiClient->createResponse(
@@ -114,6 +117,7 @@ class RequirementAnswerDraftService
                 $answerBasisRows,
                 $caseInstructions,
                 $retrievedKnowledgeRows,
+                $groundingJudge,
             ),
         );
 
@@ -146,6 +150,7 @@ class RequirementAnswerDraftService
         Collection $answerBasisRows,
         ?string $caseInstructions,
         Collection $retrievedKnowledgeRows,
+        ?array $groundingJudge,
     ): array
     {
         return [
@@ -171,6 +176,7 @@ class RequirementAnswerDraftService
                                 $answerBasisRows,
                                 $caseInstructions,
                                 $retrievedKnowledgeRows,
+                                $groundingJudge,
                             ),
                         ],
                     ],
@@ -200,9 +206,11 @@ class RequirementAnswerDraftService
     {
         return implode("\n", [
             'You draft one editable supplier answer for one tender requirement.',
-            'Use only the provided requirement text, evidence, selected answer basis items, and retrieved knowledge chunks.',
+            'Use the requirement text only to understand the customer request; it is not evidence.',
+            'Use only the provided evidence, selected answer basis items, retrieved knowledge chunks, and grounding judge as factual basis.',
             'Use the selected answer basis items as the primary supplier-owned source material when drafting the answer.',
             'Use the retrieved knowledge chunks as the primary grounded source material for factual content.',
+            'If a capability, system, tool, process, certification, role, or commitment is not documented in the supplied knowledge context or is marked unsupported by the grounding judge, do not claim it.',
             'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
@@ -210,8 +218,8 @@ class RequirementAnswerDraftService
             'Do not write an assessment, critique, or coverage commentary.',
             'Do not invent facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
-            'If evidence is missing, draft cautiously from the requirement text only.',
-            'If the provided sources do not give enough basis, write a short draft that says more information must be clarified.',
+            'Do not copy requirement wording into the answer unless it is also grounded in the supplied knowledge context.',
+            'If the provided sources are thin, keep the answer conservative and only state supported facts.',
             'Keep the answer practical, concise, and suitable for direct editing by the user.',
         ]);
     }
@@ -228,6 +236,7 @@ class RequirementAnswerDraftService
         Collection $answerBasisRows,
         ?string $caseInstructions,
         Collection $retrievedKnowledgeRows,
+        ?array $groundingJudge,
     ): string
     {
         $payload = [
@@ -250,9 +259,13 @@ class RequirementAnswerDraftService
                 : 'Use the supplied evidence only. Selected evidence has priority over suggested evidence.',
             'evidence' => $this->promptEvidenceRows($evidenceRows),
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
-                ? 'No relevant knowledge chunks were retrieved. Draft cautiously from the requirement text and selected answer basis items only.'
-                : 'Use the retrieved knowledge chunks as the factual foundation for the answer. Do not invent facts beyond the provided sources.',
+                ? 'No relevant knowledge chunks were retrieved. Do not invent supplier claims.'
+                : 'Use the retrieved knowledge chunks and grounding judge as the factual foundation. Requirement wording is not evidence.',
             'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
+            'grounding_judge_strategy' => is_array($groundingJudge)
+                ? 'The grounding judge is an internal guardrail. Use supported_points as allowed claim candidates. Do not use unsupported_points as supplier claims.'
+                : 'No grounding judge payload was supplied.',
+            'grounding_judge' => $this->promptGroundingJudge($groundingJudge),
         ];
 
         $normalizedCaseInstructions = $this->normalizeCaseInstructions($caseInstructions);
@@ -402,7 +415,7 @@ class RequirementAnswerDraftService
     private function promptRetrievedKnowledgeRows(Collection $retrievedKnowledgeRows): array
     {
         return $retrievedKnowledgeRows
-            ->map(static function (array $retrievalRow): array {
+            ->map(function (array $retrievalRow): array {
                 $content = trim((string) data_get($retrievalRow, 'content_preview', data_get($retrievalRow, 'content', '')));
                 $headingPath = trim((string) data_get($retrievalRow, 'heading_path', ''));
                 $knowledgeItemTitle = trim((string) data_get($retrievalRow, 'document_title', data_get($retrievalRow, 'knowledge_item_title', '')));
@@ -411,14 +424,46 @@ class RequirementAnswerDraftService
                     'score' => (float) data_get($retrievalRow, 'score', 0),
                     'knowledge_item_id' => (int) data_get($retrievalRow, 'knowledge_item_id', 0),
                     'document_title' => $knowledgeItemTitle !== '' ? $knowledgeItemTitle : null,
+                    'knowledge_item_summary' => $this->normalizeNullableString(data_get($retrievalRow, 'knowledge_item_summary')),
                     'chunk_id' => (int) data_get($retrievalRow, 'chunk_id', 0),
                     'chunk_index' => (int) data_get($retrievalRow, 'chunk_index', 0),
                     'heading_path' => $headingPath !== '' ? $headingPath : null,
+                    'topic' => $this->normalizeNullableString(data_get($retrievalRow, 'topic')),
+                    'sub_topic' => $this->normalizeNullableString(data_get($retrievalRow, 'sub_topic')),
+                    'keywords' => $this->normalizeStringList((array) data_get($retrievalRow, 'keywords', [])),
+                    'section_title' => $this->normalizeNullableString(data_get($retrievalRow, 'section_title')),
+                    'section_path' => $this->normalizeNullableString(data_get($retrievalRow, 'section_path')),
                     'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
                 ];
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Convert the grounding judge result into compact prompt context.
+     * Inputs: The grounding judge payload or null.
+     * Returns: A deterministic array for the prompt.
+     * Side effects: None.
+     */
+    private function promptGroundingJudge(?array $groundingJudge): ?array
+    {
+        if (! is_array($groundingJudge)) {
+            return null;
+        }
+
+        return [
+            'status' => in_array(data_get($groundingJudge, 'status'), ['supported', 'partial', 'unsupported'], true)
+                ? data_get($groundingJudge, 'status')
+                : null,
+            'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
+            'supported_points' => $this->normalizeStringList((array) data_get($groundingJudge, 'supported_points', [])),
+            'unsupported_points' => $this->normalizeStringList((array) data_get($groundingJudge, 'unsupported_points', [])),
+            'missing_knowledge_summary' => $this->normalizeNullableString(data_get($groundingJudge, 'missing_knowledge_summary')),
+            'recommended_document_title' => $this->normalizeNullableString(data_get($groundingJudge, 'recommended_document_title')),
+            'suggested_filename' => $this->normalizeNullableString(data_get($groundingJudge, 'suggested_filename')),
+            'reasoning_summary' => $this->normalizeNullableString(data_get($groundingJudge, 'reasoning_summary')),
+        ];
     }
 
     /**
@@ -604,6 +649,50 @@ class RequirementAnswerDraftService
         $normalized = trim(str_replace(["\r\n", "\r"], "\n", (string) $value));
 
         return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * Purpose: Normalize an optional string value for prompt context.
+     * Inputs: A raw scalar or null.
+     * Returns: A trimmed string or null.
+     * Side effects: None.
+     */
+    private function normalizeNullableString(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * Purpose: Normalize a list of strings for prompt context.
+     * Inputs: A mixed array payload.
+     * Returns: A trimmed unique list of non-empty strings.
+     * Side effects: None.
+     */
+    private function normalizeStringList(array $values): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($values as $value) {
+            $item = trim((string) $value);
+
+            if ($item === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($item, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $item;
+        }
+
+        return $normalized;
     }
 
     /**

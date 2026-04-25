@@ -21,6 +21,7 @@ use App\Services\Ai\Requirements\RequirementExtractionPipeline;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
 use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
@@ -66,6 +67,7 @@ class AiController extends Controller
         private readonly RequirementLoader $requirementLoader,
         private readonly RequirementAnswerBasisService $requirementAnswerBasisService,
         private readonly RequirementAnswerDraftService $requirementAnswerDraftService,
+        private readonly RequirementGroundingJudgeService $requirementGroundingJudgeService,
         private readonly RequirementKnowledgeDocumentRecommendationService $requirementKnowledgeDocumentRecommendationService,
         private readonly RequirementEditorService $requirementEditorService,
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
@@ -713,13 +715,123 @@ class AiController extends Controller
             ));
         }
 
+        Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Running grounding judge before answer generation.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $ownedRequirement->id,
+            'coverage_status' => data_get($knowledgeGrounding, 'level'),
+            'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+            'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+        ]);
+
+        try {
+            $groundingJudge = $this->requirementGroundingJudgeService->judge(
+                $ownedRequirement,
+                $retrievedKnowledgeChunks,
+                $knowledgeGrounding,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge failed. Blocking answer generation safely.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $ownedRequirement->id,
+                'coverage_status' => data_get($knowledgeGrounding, 'level'),
+                'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+                'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+                'reason' => 'grounding_judge_failed',
+                'error' => $exception->getMessage(),
+            ]);
+
+            $syntheticJudge = [
+                'status' => 'unsupported',
+                'can_generate_answer' => false,
+                'supported_points' => [],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => 'Procynia kunne ikke vurdere kunnskapsgrunnlaget sikkert.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grounding judge unavailable.',
+            ];
+            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $syntheticJudge);
+
+            return response()->json(array_merge(
+                [
+                    'requirement_id' => $ownedRequirement->id,
+                    'answer_draft' => $this->blockedAnswerDraftPayload($knowledgeGrounding, $missingKnowledge),
+                    'answer_basis_item_ids' => $selectedAnswerBasisItems
+                        ->pluck('id')
+                        ->map(static fn (mixed $value): int => (int) $value)
+                        ->values()
+                        ->all(),
+                    'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+                    'retrieval_sources' => $retrievedKnowledgeChunks->all(),
+                    'knowledge_grounding' => $knowledgeGrounding,
+                ],
+            ));
+        }
+
+        Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge completed.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $ownedRequirement->id,
+            'coverage_status' => data_get($knowledgeGrounding, 'level'),
+            'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+            'judge_status' => data_get($groundingJudge, 'status'),
+            'can_generate_answer' => data_get($groundingJudge, 'can_generate_answer'),
+            'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+            'recommended_document_title' => data_get($groundingJudge, 'recommended_document_title'),
+        ]);
+
+        if (! (bool) data_get($groundingJudge, 'can_generate_answer', false)) {
+            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $groundingJudge);
+
+            Log::warning('[PROCYNIA][AI_GROUNDING_JUDGE] Answer draft generation blocked by grounding judge.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $ownedRequirement->id,
+                'coverage_status' => data_get($knowledgeGrounding, 'level'),
+                'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+                'judge_status' => data_get($groundingJudge, 'status'),
+                'can_generate_answer' => false,
+                'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+                'recommended_document_title' => $missingKnowledge['recommended_document_title'],
+                'suggested_filename' => $missingKnowledge['suggested_filename'],
+                'reason' => 'grounding_judge_blocked',
+            ]);
+
+            $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
+
+            return response()->json(array_merge(
+                [
+                    'requirement_id' => $ownedRequirement->id,
+                    'answer_draft' => $this->blockedAnswerDraftPayload($knowledgeGrounding, $missingKnowledge),
+                    'answer_basis_item_ids' => $selectedAnswerBasisItems
+                        ->pluck('id')
+                        ->map(static fn (mixed $value): int => (int) $value)
+                        ->values()
+                        ->all(),
+                    'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
+                    'retrieval_sources' => $retrievedKnowledgeChunks->all(),
+                    'knowledge_grounding' => $knowledgeGrounding,
+                ],
+            ));
+        }
+
         $persistedRequirement = $this->requirementAnswerDraftService->ensureAnswerDraft(
             $ownedRequirement,
             $selectedAnswerBasisItems,
             (bool) ($validated['force'] ?? false),
             $record->ai_instructions,
             $retrievedKnowledgeChunks,
+            $groundingJudge,
         );
+
+        Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge allowed answer generation.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $ownedRequirement->id,
+            'coverage_status' => data_get($knowledgeGrounding, 'level'),
+            'coverage_score' => data_get($knowledgeGrounding, 'max_score'),
+            'judge_status' => data_get($groundingJudge, 'status'),
+            'can_generate_answer' => true,
+            'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+            'recommended_document_title' => data_get($groundingJudge, 'recommended_document_title'),
+        ]);
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
 
@@ -1550,6 +1662,28 @@ class AiController extends Controller
     }
 
     /**
+     * Purpose: Build the read-only message shown when the grounding judge blocks answer generation.
+     * Inputs: The requirement and the grounding judge result.
+     * Returns: A deterministic internal instruction payload.
+     * Side effects: None.
+     */
+    private function judgeBlockedMissingKnowledgePayload(SavedNoticeAiRequirement $requirement, array $groundingJudge): array
+    {
+        $recommendation = $this->recommendationForGroundingJudge($requirement, $groundingJudge);
+
+        return array_merge([
+            'message' => 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget ikke dokumenterer kravet godt nok. Opprett eller last opp relevant kunnskapsdokumentasjon, og prøv deretter å lage svaret på nytt.',
+            'missing_knowledge_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'missing_knowledge_summary'))
+                ?? 'Kunnskapsgrunnlaget dokumenterer ikke kravet sikkert nok til å generere et svar.',
+            'supported_points' => $this->normalizeStringList(data_get($groundingJudge, 'supported_points', [])),
+            'unsupported_points' => $this->normalizeStringList(data_get($groundingJudge, 'unsupported_points', [])),
+            'reasoning_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'reasoning_summary')),
+            'judge_status' => $this->normalizeOptionalString(data_get($groundingJudge, 'status')),
+            'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
+        ], $recommendation);
+    }
+
+    /**
      * Purpose: Build the blocked answer draft payload used by the frontend when knowledge grounding is too weak.
      * Inputs: The grounding payload and the missing-knowledge instruction payload.
      * Returns: A frontend-ready draft payload.
@@ -1564,6 +1698,144 @@ class AiController extends Controller
             'missing_knowledge' => $missingKnowledge,
             'knowledge_grounding' => $knowledgeGrounding,
         ];
+    }
+
+    /**
+     * Purpose: Resolve a safe document recommendation from the judge output or the existing fallback service.
+     * Inputs: The requirement and the grounding judge result.
+     * Returns: A deterministic recommendation payload.
+     * Side effects: None.
+     */
+    private function recommendationForGroundingJudge(SavedNoticeAiRequirement $requirement, array $groundingJudge): array
+    {
+        $fallback = $this->requirementKnowledgeDocumentRecommendationService->recommendForRequirement($requirement);
+        $recommendedTitle = $this->normalizeDocumentTitleCandidate(data_get($groundingJudge, 'recommended_document_title'));
+        $suggestedFilename = $this->normalizeFilenameCandidate(data_get($groundingJudge, 'suggested_filename'));
+
+        if ($recommendedTitle === null) {
+            return $fallback;
+        }
+
+        if ($suggestedFilename === null) {
+            $suggestedFilename = $this->suggestedFilenameForTitle($recommendedTitle);
+        }
+
+        return [
+            'recommended_document_title' => $recommendedTitle,
+            'suggested_filename' => $suggestedFilename,
+        ];
+    }
+
+    /**
+     * Purpose: Normalize a judge-proposed document title without inventing new content.
+     * Inputs: A raw title candidate.
+     * Returns: A safe title or null.
+     * Side effects: None.
+     */
+    private function normalizeDocumentTitleCandidate(mixed $value): ?string
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', (string) ($value ?? '')) ?? '');
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return Str::limit($normalized, 255, '');
+    }
+
+    /**
+     * Purpose: Normalize a judge-proposed filename safely.
+     * Inputs: A raw filename candidate.
+     * Returns: A safe filename or null.
+     * Side effects: None.
+     */
+    private function normalizeFilenameCandidate(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        $normalized = basename(str_replace('\\', '/', $normalized));
+        $normalized = preg_replace('/[^\pL\pN._-]+/u', '-', $normalized) ?? $normalized;
+        $normalized = preg_replace('/-+/u', '-', $normalized) ?? $normalized;
+        $normalized = trim($normalized, "-._ ");
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (! Str::endsWith(Str::lower($normalized), '.docx')) {
+            $normalized .= '.docx';
+        }
+
+        return Str::limit($normalized, 255, '');
+    }
+
+    /**
+     * Purpose: Build a stable filename from a document title.
+     * Inputs: A document title.
+     * Returns: A stable .docx filename.
+     * Side effects: None.
+     */
+    private function suggestedFilenameForTitle(string $title): string
+    {
+        $slug = Str::slug($title, '-');
+
+        if ($slug === '') {
+            $slug = 'dokumentasjon-for-udekket-krav';
+        }
+
+        return $slug.'.docx';
+    }
+
+    /**
+     * Purpose: Normalize a mixed value into a trimmed nullable string.
+     * Inputs: A raw scalar or null.
+     * Returns: A trimmed string or null.
+     * Side effects: None.
+     */
+    private function normalizeOptionalString(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * Purpose: Normalize a mixed array into a unique list of trimmed strings.
+     * Inputs: A mixed array-like value.
+     * Returns: A deterministic list of strings.
+     * Side effects: None.
+     */
+    private function normalizeStringList(mixed $values): array
+    {
+        if (! is_array($values)) {
+            return [];
+        }
+
+        $normalized = [];
+        $seen = [];
+
+        foreach ($values as $value) {
+            $item = trim((string) $value);
+
+            if ($item === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($item, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $item;
+        }
+
+        return $normalized;
     }
 
     /**

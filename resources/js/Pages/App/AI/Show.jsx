@@ -241,6 +241,25 @@ const KNOWLEDGE_GROUNDING_META = {
     },
 };
 
+const KNOWLEDGE_GROUNDING_JUDGE_META = {
+    supported: {
+        label: 'Støttet av kunnskap',
+        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    },
+    partial: {
+        label: 'Delvis kunnskapsgrunnlag',
+        className: 'bg-amber-100 text-amber-700 ring-amber-200',
+    },
+    unsupported: {
+        label: 'Svakt kunnskapsgrunnlag',
+        className: 'bg-rose-100 text-rose-700 ring-rose-200',
+    },
+    failed: {
+        label: 'Kunne ikke vurderes sikkert',
+        className: 'bg-slate-100 text-slate-700 ring-slate-200',
+    },
+};
+
 function formatKnowledgeSnippet(value, maxLength = 200) {
     const normalizedValue = String(value ?? '').replace(/\s+/g, ' ').trim();
 
@@ -293,8 +312,28 @@ function normalizeMissingKnowledgePayload(missingKnowledge) {
     const suggestedFilename = typeof missingKnowledge?.suggested_filename === 'string'
         ? missingKnowledge.suggested_filename.trim()
         : '';
+    const missingKnowledgeSummary = typeof missingKnowledge?.missing_knowledge_summary === 'string'
+        ? missingKnowledge.missing_knowledge_summary.trim()
+        : '';
+    const reasoningSummary = typeof missingKnowledge?.reasoning_summary === 'string'
+        ? missingKnowledge.reasoning_summary.trim()
+        : '';
+    const judgeStatus = ['supported', 'partial', 'unsupported', 'failed'].includes(missingKnowledge?.judge_status)
+        ? missingKnowledge.judge_status
+        : null;
+    const supportedPoints = normalizeStringList(missingKnowledge?.supported_points ?? []);
+    const unsupportedPoints = normalizeStringList(missingKnowledge?.unsupported_points ?? []);
 
-    if (message === '' && recommendedDocumentTitle === '' && suggestedFilename === '') {
+    if (
+        message === ''
+        && recommendedDocumentTitle === ''
+        && suggestedFilename === ''
+        && missingKnowledgeSummary === ''
+        && reasoningSummary === ''
+        && judgeStatus === null
+        && supportedPoints.length === 0
+        && unsupportedPoints.length === 0
+    ) {
         return null;
     }
 
@@ -302,7 +341,43 @@ function normalizeMissingKnowledgePayload(missingKnowledge) {
         message: message !== '' ? message : null,
         recommended_document_title: recommendedDocumentTitle !== '' ? recommendedDocumentTitle : null,
         suggested_filename: suggestedFilename !== '' ? suggestedFilename : null,
+        missing_knowledge_summary: missingKnowledgeSummary !== '' ? missingKnowledgeSummary : null,
+        reasoning_summary: reasoningSummary !== '' ? reasoningSummary : null,
+        judge_status: judgeStatus,
+        can_generate_answer: typeof missingKnowledge?.can_generate_answer === 'boolean'
+            ? missingKnowledge.can_generate_answer
+            : null,
+        supported_points: supportedPoints,
+        unsupported_points: unsupportedPoints,
     };
+}
+
+function normalizeStringList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const normalizedValues = [];
+    const seen = new Set();
+
+    value.forEach((item) => {
+        const normalizedItem = String(item ?? '').replace(/\s+/g, ' ').trim();
+
+        if (normalizedItem === '') {
+            return;
+        }
+
+        const key = normalizedItem.toLowerCase();
+
+        if (seen.has(key)) {
+            return;
+        }
+
+        seen.add(key);
+        normalizedValues.push(normalizedItem);
+    });
+
+    return normalizedValues;
 }
 
 function normalizeKnowledgeGroundingPayload(knowledgeGrounding) {
@@ -665,6 +740,9 @@ export default function AiShow({
         );
     const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
     const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
+    const activeRequirementMissingKnowledgeJudgeMeta = activeRequirementMissingKnowledge?.judge_status
+        ? KNOWLEDGE_GROUNDING_JUDGE_META[activeRequirementMissingKnowledge.judge_status] ?? null
+        : null;
     const activeRequirementAnswerBasisItemIds = activeRequirementKey !== null
         ? answerBasisSelectionsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerBasisSelectionState(activeRequirement)
         : [];
@@ -2576,6 +2654,12 @@ export default function AiShow({
                                                 Opprett og last opp et kunnskapsdokument som dekker dette kravet.
                                             </p>
 
+                                            {activeRequirementMissingKnowledge?.missing_knowledge_summary ? (
+                                                <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">
+                                                    {activeRequirementMissingKnowledge.missing_knowledge_summary}
+                                                </p>
+                                            ) : null}
+
                                             <div className="mt-4 space-y-2 rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                 <div>
                                                     <span className="font-semibold text-slate-900">Anbefalt dokumentnavn:</span>{' '}
@@ -2587,11 +2671,59 @@ export default function AiShow({
                                                 </div>
                                             </div>
 
+                                            {(activeRequirementMissingKnowledge?.supported_points?.length ?? 0) > 0 || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
+                                                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                                                    {(activeRequirementMissingKnowledge?.supported_points?.length ?? 0) > 0 ? (
+                                                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                Støttede punkter
+                                                            </div>
+                                                            <ul className="mt-3 space-y-2">
+                                                                {activeRequirementMissingKnowledge.supported_points.map((point, index) => (
+                                                                    <li key={`${point}-${index}`} className="flex gap-2">
+                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                                                        <span>{point}</span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    ) : null}
+
+                                                    {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
+                                                        <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                Mangler dokumentasjon for
+                                                            </div>
+                                                            <ul className="mt-3 space-y-2">
+                                                                {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
+                                                                    <li key={`${point}-${index}`} className="flex gap-2">
+                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+                                                                        <span>{point}</span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+
+                                            {activeRequirementMissingKnowledge?.reasoning_summary ? (
+                                                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                    {activeRequirementMissingKnowledge.reasoning_summary}
+                                                </div>
+                                            ) : null}
+
                                             <p className="mt-4 text-sm leading-6 text-slate-600">
                                                 Når dokumentet er lagt til og behandlet, kan du kjøre «Lag svar» på nytt.
                                             </p>
 
-                                            {activeRequirementKnowledgeGrounding ? (
+                                            {activeRequirementMissingKnowledgeJudgeMeta ? (
+                                                <div className="mt-4 flex justify-end">
+                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${activeRequirementMissingKnowledgeJudgeMeta.className}`}>
+                                                        {activeRequirementMissingKnowledgeJudgeMeta.label}
+                                                    </span>
+                                                </div>
+                                            ) : activeRequirementKnowledgeGrounding ? (
                                                 <div className="mt-4 flex justify-end">
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
                                                         {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
