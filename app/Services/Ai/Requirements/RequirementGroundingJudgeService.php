@@ -728,7 +728,10 @@ class RequirementGroundingJudgeService
 
         if ($subject !== '') {
             $subject = preg_split('/\b(?:alle|dette|denne|kravet|l\x{00F8}sningen|tjenesten)\b/iu', $subject, 2)[0] ?? $subject;
-            $subject = $this->trimTrailingTitleConnectors($this->limitTitleSubjectWords($subject, 5));
+            $subject = $this->trimTitleSubjectBoundaries($subject);
+            $subject = $this->trimTrailingTitleConnectors($this->limitTitleSubjectWords($subject, 4));
+            $subject = $this->trimTitleSubjectBoundaries($subject);
+            $subject = $this->trimTrailingTitleConnectors($subject);
 
             if ($subject !== '' && mb_strlen($subject, 'UTF-8') >= 8) {
                 return $this->uppercaseFirstCharacter($subject);
@@ -764,6 +767,26 @@ class RequirementGroundingJudgeService
         return Str::squish(implode(' ', array_slice($words, 0, $maxWords)));
     }
 
+    /**
+     * Purpose: Remove requirement actor fragments and modal verbs before document titles are shortened.
+     * Inputs: A candidate document title subject phrase.
+     * Returns: The phrase stopped before procurement actor wording such as Leverandøren skal.
+     * Side effects: None.
+     */
+    private function trimTitleSubjectBoundaries(string $subject): string
+    {
+        $subject = Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
+
+        if ($subject === '') {
+            return '';
+        }
+
+        $subject = preg_replace('/\b(?:leverand\x{00F8}ren|leverand\x{00F8}rens|leverand\x{00F8}r|kunden|kundens|oppdragsgiver|oppdragsgiveren)\b.*$/iu', '', $subject) ?? $subject;
+        $subject = preg_replace('/\b(?:skal|kan|m\x{00E5}|b\x{00F8}r)\b.*$/iu', '', $subject) ?? $subject;
+        $subject = preg_replace('/\b(?:alle|dette|denne|kravet|l\x{00F8}sningen|tjenesten)\b.*$/iu', '', $subject) ?? $subject;
+
+        return Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
+    }
     /**
      * Purpose: Remove dangling connector words after title shortening.
      * Inputs: A shortened title subject phrase.
@@ -950,9 +973,51 @@ class RequirementGroundingJudgeService
             $slug = 'dokumentasjon-for-kravkontekst';
         }
 
-        return Str::limit($slug, 70, '').'.docx';
+        return $this->shortenSlugWithoutCuttingWords($slug, 60).'.docx';
     }
 
+    /**
+     * Purpose: Shorten a slug without cutting the final word in half.
+     * Inputs: A slug and maximum slug length before the file extension.
+     * Returns: A slug that ends on a complete hyphen-separated word.
+     * Side effects: None.
+     */
+    private function shortenSlugWithoutCuttingWords(string $slug, int $maxLength): string
+    {
+        $slug = trim($slug, '-');
+
+        if ($slug === '') {
+            return 'dokumentasjon-for-kravkontekst';
+        }
+
+        if (mb_strlen($slug, 'UTF-8') <= $maxLength) {
+            return $slug;
+        }
+
+        $parts = array_values(array_filter(
+            explode('-', $slug),
+            static fn (string $part): bool => $part !== '',
+        ));
+        $selected = [];
+        $length = 0;
+
+        foreach ($parts as $part) {
+            $nextLength = $length + mb_strlen($part, 'UTF-8') + ($selected === [] ? 0 : 1);
+
+            if ($nextLength > $maxLength) {
+                break;
+            }
+
+            $selected[] = $part;
+            $length = $nextLength;
+        }
+
+        if ($selected === []) {
+            return $parts[0] ?? 'dokumentasjon-for-kravkontekst';
+        }
+
+        return implode('-', $selected);
+    }
     /**
      * Purpose: Decide whether a recommended document title is missing or only a generic fallback.
      * Inputs: A nullable model-produced title.
