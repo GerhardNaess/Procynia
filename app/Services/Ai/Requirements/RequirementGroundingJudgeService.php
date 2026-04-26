@@ -39,7 +39,7 @@ class RequirementGroundingJudgeService
         try {
             $decoded = $this->decodeJudgePayload($response);
 
-            return $this->validateJudgePayload($decoded);
+            return $this->validateJudgePayload($decoded, (string) $requirement->requirement_text);
         } catch (Throwable $exception) {
             $this->logWarningIfAvailable('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge failed during response parsing.', [
                 'saved_notice_ai_requirement_id' => $requirement->id,
@@ -124,10 +124,15 @@ class RequirementGroundingJudgeService
             'If the requirement asks for specific named systems, tools, standards, roles, commitments, integrations or obligations, those specific elements must be documented before they are directly supported.',
             'Separate directly supported points, related but insufficient points, and unsupported points.',
             'Directly supported means the knowledge documents the same capability, process, service, obligation or practice the requirement asks for, including clear technical equivalents when the practical meaning is the same.',
-            'Related but insufficient means the knowledge is nearby or useful background, but does not prove the concrete requirement point.',
-            'Unsupported means the knowledge does not document the requirement point.',
+            'Related but insufficient means the knowledge is in the same primary domain and delivery area as the requirement, but does not prove the concrete requirement point.',
+            'Nearby operational background alone is not related but insufficient when it does not share the same primary domain as the requirement.',
+            'Unsupported means the knowledge does not document the requirement point or only shares broad generic concepts with it.',
             'Do not require exact word matching when the same practical capability is documented with equivalent technical wording.',
             'Do not infer direct support from broad domain similarity alone.',
+            'Do not infer related but insufficient support from broad generic overlap alone.',
+            'Generic overlap words such as drift, analyse, ansvar, tiltak, frister, rapportering, prosess, tjeneste and plattform are not enough by themselves.',
+            'If the requirement is about FinOps, cost optimization, performance optimization or consumption analysis, general SOC, IRT, logging, telemetry, security operations or project governance evidence is not related unless it also documents the FinOps or optimization domain.',
+            'When the closest evidence is only broad background from another service domain, leave related_but_insufficient_points empty and explain the missing domain-specific documentation in unsupported_points and missing_knowledge_summary.',
             'Do not treat requirement wording as supplier evidence.',
             'Return directly supported points as objects with requirement_point, support_summary, evidence_reference and evidence_quote.',
             'evidence_reference and evidence_quote may be null when the support is clear from the supplied context.',
@@ -152,8 +157,8 @@ class RequirementGroundingJudgeService
             'support_classification' => [
                 'directly_supported' => 'The knowledge explicitly documents the same capability, process, system, obligation or practice the requirement asks for, including clearly equivalent technical wording when the practical meaning is the same.',
                 'directly_supported_service_description' => 'When the requirement asks to describe a service or solution, a document that describes that same service or solution and its operating model counts as direct support.',
-                'related_but_insufficient' => 'The knowledge is nearby or useful background, but it does not prove the supplier satisfies the concrete requirement.',
-                'unsupported' => 'The knowledge does not document the requirement point.',
+                'related_but_insufficient' => 'The knowledge is in the same primary domain and delivery area as the requirement, but it does not prove the supplier satisfies the concrete requirement.',
+                'unsupported' => 'The knowledge does not document the requirement point, or it only shares broad generic operational vocabulary with the requirement.',
             ],
             'judging_rules' => [
                 'Break the requirement into concrete points.',
@@ -166,8 +171,13 @@ class RequirementGroundingJudgeService
                 'Treat a broad request to describe a service or solution as directly supported when the retrieved knowledge describes that same service or solution at an operating-model level.',
                 'For broad service descriptions, directly_supported_points should capture the documented service areas that can safely be used by answer generation.',
                 'Do not treat general domain similarity as direct support.',
+                'Do not treat broad generic vocabulary overlap as related_but_insufficient.',
+                'Only populate related_but_insufficient_points when the evidence shares the same primary domain or delivery area as the requirement.',
+                'If the evidence is from a different domain, put the requirement-specific gap in unsupported_points instead of related_but_insufficient_points.',
+                'For FinOps, cost optimization, performance optimization or consumption-analysis requirements, SOC, IRT, logging, telemetry, security operations and project governance are not related unless the evidence explicitly connects them to FinOps or optimization of platform use or consumption.',
                 'Do not treat the requirement text as supplier evidence.',
             ],
+            'requirement_relevance_profile' => $this->requirementRelevanceProfileFromRequirementText((string) $requirement->requirement_text),
             'answer_length_guidance' => $this->answerLengthGuidanceFromRequirementText((string) $requirement->requirement_text),
             'requirement' => [
                 'id' => $requirement->id,
@@ -190,8 +200,12 @@ class RequirementGroundingJudgeService
                     'evidence_quote' => null,
                 ],
                 'related_but_insufficient' => [
-                    'requirement_point' => 'Spesifikk forpliktelse, integrasjon eller egenskap.',
-                    'support_summary' => 'Kunnskapsgrunnlaget beskriver nærliggende forhold, men dokumenterer ikke den konkrete forpliktelsen, integrasjonen eller egenskapen kravet ber om.',
+                    'requirement_point' => 'Spesifikk forpliktelse, integrasjon eller egenskap i samme primære domene som kravet.',
+                    'support_summary' => 'Kunnskapsgrunnlaget beskriver samme leveranseområde, men dokumenterer ikke den konkrete forpliktelsen, integrasjonen eller egenskapen kravet ber om.',
+                ],
+                'unsupported_due_to_broad_overlap' => [
+                    'requirement_point' => 'FinOps-relaterte anbefalinger for kostnads- og ytelsesoptimalisering.',
+                    'support_summary' => 'Kunnskapsgrunnlaget beskriver generell drift, sikkerhet, logging eller prosjektstyring uten å dokumentere FinOps, kostnadsoptimalisering, ytelsesoptimalisering eller analyse av plattformforbruk.',
                 ],
             ],
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
@@ -205,6 +219,63 @@ class RequirementGroundingJudgeService
         } catch (JsonException $exception) {
             throw new RuntimeException('Unable to encode the grounding judge prompt payload.', 0, $exception);
         }
+    }
+
+    /**
+     * Purpose: Build a deterministic relevance profile so the judge does not treat broad operational overlap as related evidence.
+     * Inputs: The raw requirement text.
+     * Returns: Primary domain terms, ignored generic overlap terms and a strict related-filter flag.
+     * Side effects: None.
+     */
+    private function requirementRelevanceProfileFromRequirementText(string $requirementText): array
+    {
+        $normalized = Str::lower(Str::squish($requirementText));
+        $primaryDomainTerms = [];
+        $domainPatterns = [
+            'finops' => '/\bfinops\b/u',
+            'kostnad' => '/kostnad/u',
+            'kostnadsoptimalisering' => '/kostnadsoptimalisering/u',
+            'ytelse' => '/ytels/u',
+            'ytelsesoptimalisering' => '/ytelsesoptimalisering/u',
+            'driftseffektivisering' => '/driftseffektivisering/u',
+            'effektivisering' => '/effektivisering/u',
+            'optimalisering' => '/optimalisering/u',
+            'forbruk' => '/forbruk/u',
+            'plattformforbruk' => '/plattformforbruk/u',
+            'plattformoptimalisering' => '/plattform.*optimalisering|optimalisering.*plattform/u',
+        ];
+
+        foreach ($domainPatterns as $term => $pattern) {
+            if (preg_match($pattern, $normalized) === 1) {
+                $primaryDomainTerms[] = $term;
+            }
+        }
+
+        return [
+            'primary_domain_terms' => array_values(array_unique($primaryDomainTerms)),
+            'ignored_generic_overlap_terms' => [
+                'analyse',
+                'analyser',
+                'anbefaling',
+                'anbefalinger',
+                'ansvar',
+                'drift',
+                'frist',
+                'frister',
+                'plattform',
+                'prosess',
+                'rapportering',
+                'samhandling',
+                'styring',
+                'tiltak',
+                'tjeneste',
+                'leveranse',
+            ],
+            'strict_related_filtering' => $primaryDomainTerms !== [],
+            'related_but_insufficient_instruction' => $primaryDomainTerms === []
+                ? 'Use normal semantic judgment, but do not use generic vocabulary overlap alone.'
+                : 'Only classify evidence as related but insufficient when it shares at least one primary domain term with the requirement. Generic operational vocabulary alone is unsupported, not related.',
+        ];
     }
 
     /**
@@ -438,7 +509,7 @@ class RequirementGroundingJudgeService
      * Returns: The validated grounding judgment payload.
      * Side effects: Throws when the payload violates the contract.
      */
-    private function validateJudgePayload(array $payload): array
+    private function validateJudgePayload(array $payload, string $requirementText): array
     {
         try {
             $status = $this->requiredStringFromPayload($payload, 'status', 255);
@@ -462,6 +533,10 @@ class RequirementGroundingJudgeService
                 data_get($payload, 'unsupported_points', []),
                 'unsupported_points',
                 1000,
+            );
+            $relatedButInsufficientPoints = $this->filterRelatedButInsufficientPointsByRequirementDomain(
+                $relatedButInsufficientPoints,
+                $requirementText,
             );
             $missingKnowledgeSummary = $this->nullableStringFromPayload($payload, 'missing_knowledge_summary', 1000);
             $reasoningSummary = $this->nullableStringFromPayload($payload, 'reasoning_summary', 1000);
@@ -515,6 +590,47 @@ class RequirementGroundingJudgeService
             'reasoning_summary' => $reasoningSummary,
             'supported_points' => $this->supportedPointRequirementPoints($directlySupportedPoints),
         ];
+    }
+
+    /**
+     * Purpose: Remove related-but-insufficient points that only match generic operational vocabulary for strict domain requirements.
+     * Inputs: The model-produced related points and the raw requirement text.
+     * Returns: A filtered related point list that keeps only same-domain nearby evidence.
+     * Side effects: None.
+     */
+    private function filterRelatedButInsufficientPointsByRequirementDomain(array $points, string $requirementText): array
+    {
+        $profile = $this->requirementRelevanceProfileFromRequirementText($requirementText);
+
+        if (data_get($profile, 'strict_related_filtering') !== true) {
+            return $points;
+        }
+
+        $primaryDomainTerms = array_values(array_filter(
+            (array) data_get($profile, 'primary_domain_terms', []),
+            static fn (mixed $term): bool => is_string($term) && trim($term) !== '',
+        ));
+
+        if ($primaryDomainTerms === []) {
+            return $points;
+        }
+
+        $filtered = [];
+
+        foreach ($points as $point) {
+            $normalizedPoint = Str::lower(Str::squish((string) $point));
+
+            foreach ($primaryDomainTerms as $term) {
+                $normalizedTerm = Str::lower(Str::squish($term));
+
+                if ($normalizedTerm !== '' && str_contains($normalizedPoint, $normalizedTerm)) {
+                    $filtered[] = $point;
+                    break;
+                }
+            }
+        }
+
+        return $filtered;
     }
 
     /**

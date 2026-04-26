@@ -2118,8 +2118,8 @@ export default function AiShow({
                                                                 disabled={requirementUpdatesLocked || answerDraftGeneratingRequirementId === requirement.id}
                                                                 aria-pressed={isActiveRequirement}
                                                                 title="Generer svarutkast for dette kravet"
-                                                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-60 ${sourceTypeMeta.className} ${
-                                                                    isActiveRequirement ? 'ring-violet-300' : ''
+                                                                className={`inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset transition hover:bg-violet-200 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                    isActiveRequirement ? 'ring-violet-300' : 'ring-violet-200'
                                                                 }`}
                                                             >
                                                                 {hasExistingAnswerDraft ? 'Lag nytt svar' : 'Lag svar'}
