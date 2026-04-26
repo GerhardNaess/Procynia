@@ -673,9 +673,9 @@ class RequirementGroundingJudgeService
     }
 
     /**
-     * Purpose: Create requirement-specific document title and filename suggestions when the model returns generic missing-document names.
-     * Inputs: Requirement text, optional requirement identifier, and model-produced title and filename.
-     * Returns: A normalized title and filename that keep meaningful model values but replace generic fallbacks.
+     * Purpose: Create requirement-specific document title and filename suggestions from the requirement context.
+     * Inputs: Requirement text, optional requirement identifier, and model-produced values that are intentionally ignored for deterministic naming.
+     * Returns: A normalized title and filename derived from the requirement instead of the nearest evidence topic.
      * Side effects: None.
      */
     private function requirementSpecificDocumentSuggestion(
@@ -684,16 +684,8 @@ class RequirementGroundingJudgeService
         ?string $recommendedDocumentTitle,
         ?string $suggestedFilename,
     ): array {
-        $generatedTitle = $this->recommendedDocumentTitleFromRequirementText($requirementText, $requirementIdentifier);
-        $generatedFilename = $this->suggestedFilenameFromRecommendedDocumentTitle($generatedTitle);
-
-        if ($this->shouldReplaceRecommendedDocumentTitle($recommendedDocumentTitle)) {
-            $recommendedDocumentTitle = $generatedTitle;
-        }
-
-        if ($this->shouldReplaceSuggestedFilename($suggestedFilename)) {
-            $suggestedFilename = $generatedFilename;
-        }
+        $recommendedDocumentTitle = $this->recommendedDocumentTitleFromRequirementText($requirementText, $requirementIdentifier);
+        $suggestedFilename = $this->suggestedFilenameFromRecommendedDocumentTitle($recommendedDocumentTitle);
 
         return [
             'recommended_document_title' => $recommendedDocumentTitle,
@@ -702,24 +694,246 @@ class RequirementGroundingJudgeService
     }
 
     /**
-     * Purpose: Build a readable Norwegian document title from the requirement's own significant terms.
+     * Purpose: Build a readable Norwegian document title from the requirement's own main context.
      * Inputs: Requirement text and an optional requirement identifier for fallback context.
      * Returns: A deterministic document title for missing documentation.
      * Side effects: None.
      */
     private function recommendedDocumentTitleFromRequirementText(string $requirementText, ?string $requirementIdentifier): string
     {
-        $terms = $this->significantRequirementDisplayTermsFromText($requirementText);
+        $titlePhrase = $this->compactRecommendedDocumentSubject(
+            $this->requirementTitlePhraseFromRequirementText($requirementText),
+            $requirementText,
+        );
 
-        if ($terms !== []) {
-            return Str::limit('Dokumentasjon for '.$this->norwegianDisplayList($terms), 120, '');
+        if ($titlePhrase !== null && $titlePhrase !== '') {
+            return 'Dokumentasjon for '.$titlePhrase;
         }
 
         if ($requirementIdentifier !== null && $requirementIdentifier !== '') {
-            return Str::limit('Dokumentasjon for krav '.$requirementIdentifier, 120, '');
+            return 'Dokumentasjon for krav '.$requirementIdentifier;
         }
 
         return 'Dokumentasjon for kravkontekst';
+    }
+    /**
+     * Purpose: Keep suggested document names short and useful without trying to mirror the whole requirement.
+     * Inputs: A candidate title phrase and the raw requirement text.
+     * Returns: A compact subject phrase or null when no safe subject can be found.
+     * Side effects: None.
+     */
+    private function compactRecommendedDocumentSubject(?string $candidatePhrase, string $requirementText): ?string
+    {
+        $subject = Str::squish((string) ($candidatePhrase ?? ''));
+
+        if ($subject !== '') {
+            $subject = preg_split('/\b(?:alle|dette|denne|kravet|l\x{00F8}sningen|tjenesten)\b/iu', $subject, 2)[0] ?? $subject;
+            $subject = $this->trimTrailingTitleConnectors($this->limitTitleSubjectWords($subject, 5));
+
+            if ($subject !== '' && mb_strlen($subject, 'UTF-8') >= 8) {
+                return $this->uppercaseFirstCharacter($subject);
+            }
+        }
+
+        $terms = array_slice($this->significantRequirementDisplayTermsFromText($requirementText), 0, 3);
+
+        if ($terms === []) {
+            return null;
+        }
+
+        return $this->uppercaseFirstCharacter($this->norwegianDisplayList($terms));
+    }
+
+    /**
+     * Purpose: Limit a document subject to a small number of words so the UI and filename stay readable.
+     * Inputs: A title subject phrase and maximum word count.
+     * Returns: A shortened subject phrase.
+     * Side effects: None.
+     */
+    private function limitTitleSubjectWords(string $subject, int $maxWords): string
+    {
+        $subject = Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
+
+        if ($subject === '') {
+            return '';
+        }
+
+        $words = preg_split('/\s+/u', $subject) ?: [];
+        $words = array_values(array_filter($words, static fn (string $word): bool => trim($word) !== ''));
+
+        return Str::squish(implode(' ', array_slice($words, 0, $maxWords)));
+    }
+
+    /**
+     * Purpose: Remove dangling connector words after title shortening.
+     * Inputs: A shortened title subject phrase.
+     * Returns: The subject phrase without trailing connectors.
+     * Side effects: None.
+     */
+    private function trimTrailingTitleConnectors(string $subject): string
+    {
+        $subject = Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
+
+        do {
+            $previous = $subject;
+            $subject = preg_replace('/\s+(?:og|eller|av|for|med|p\x{00E5}|pa|paa|i|til|under|ved|skal|kan|m\x{00E5}|b\x{00F8}r|leverand\x{00F8}ren|leverand\x{00F8}r|kunden|kundens|oppdragsgiver|oppdragsgiveren|alle|krav|kravet|dette|denne)$/iu', '', $subject) ?? $subject;
+            $subject = Str::squish(trim($subject, " \t\n\r\0\x0B-/.,;:()[]{}"));
+        } while ($subject !== $previous);
+
+        return $subject;
+    }    /**
+     * Purpose: Build a broad requirement-specific title phrase from the actual requirement wording.
+     * Inputs: The raw requirement text.
+     * Returns: A short phrase that represents the main requirement context, or null when no safe phrase exists.
+     * Side effects: None.
+     */
+    private function requirementTitlePhraseFromRequirementText(string $requirementText): ?string
+    {
+        $text = $this->requirementTextWithoutAnswerLengthInstructionsForDisplay($requirementText);
+        $text = preg_replace('/\(([^)]*)\)/u', ', $1', $text) ?? $text;
+        $text = preg_replace('/^\s*leverandøren\s+skal\s+(?:minst\s+)?(?:kunne\s+)?/iu', '', $text, 1) ?? $text;
+        $text = preg_replace('/^\s*leverandørens\s+/iu', '', $text, 1) ?? $text;
+        $text = preg_replace('/\b(?:sin|sitt|sine)\s+/iu', '', $text) ?? $text;
+        $text = $this->nominalizeLeadingRequirementVerb($text);
+        $text = preg_replace('/,?\s+og\s+ved\s+/iu', ' og ', $text) ?? $text;
+        $text = Str::squish($text);
+
+        if ($text === '') {
+            return null;
+        }
+
+        $primaryPhrase = $this->primaryDocumentTitlePhrase($text);
+        $secondaryPhrase = $this->secondaryDocumentTitlePhrase($text);
+        $parts = [];
+
+        if ($primaryPhrase !== null && $primaryPhrase !== '') {
+            $parts[] = $primaryPhrase;
+        }
+
+        if ($secondaryPhrase !== null && $secondaryPhrase !== '' && ! $this->phrasesOverlap($primaryPhrase, $secondaryPhrase)) {
+            $parts[] = $secondaryPhrase;
+        }
+
+        if ($parts === []) {
+            return null;
+        }
+
+        return $this->uppercaseFirstCharacter(Str::limit(implode(' og ', $parts), 95, ''));
+    }
+
+    /**
+     * Purpose: Convert common leading procurement verbs into readable Norwegian title nouns.
+     * Inputs: A requirement phrase without the leading actor and modal verb.
+     * Returns: The same phrase with a title-friendly opening when a safe generic mapping exists.
+     * Side effects: None.
+     */
+    private function nominalizeLeadingRequirementVerb(string $text): string
+    {
+        $replacements = [
+            '/^\s*beskrive\s+/iu' => 'beskrivelse av ',
+            '/^\s*dokumentere\s+/iu' => 'dokumentasjon av ',
+            '/^\s*etablere\s+/iu' => 'etablering av ',
+            '/^\s*forvalte\s+/iu' => 'forvaltning av ',
+            '/^\s*gjennomføre\s+/iu' => 'gjennomføring av ',
+            '/^\s*håndtere\s+/iu' => 'håndtering av ',
+            '/^\s*ivareta\s+/iu' => 'ivaretakelse av ',
+            '/^\s*levere\s+/iu' => 'leveranse av ',
+            '/^\s*rapportere\s+/iu' => 'rapportering av ',
+            '/^\s*sikre\s+/iu' => 'sikring av ',
+            '/^\s*støtte\s+/iu' => 'støtte for ',
+            '/^\s*utarbeide\s+/iu' => 'utarbeidelse av ',
+        ];
+
+        foreach ($replacements as $pattern => $replacement) {
+            $updated = preg_replace($pattern, $replacement, $text, 1, $count);
+
+            if ($count > 0 && $updated !== null) {
+                return $updated;
+            }
+        }
+
+        return $text;
+    }
+
+    /**
+     * Purpose: Extract the first broad title phrase before detail lists and subordinate clauses.
+     * Inputs: A normalized requirement phrase.
+     * Returns: The primary title phrase or null.
+     * Side effects: None.
+     */
+    private function primaryDocumentTitlePhrase(string $text): ?string
+    {
+        $primary = preg_split('/\s*,\s*/u', $text, 2)[0] ?? $text;
+        $primary = preg_replace('/\s+under\s+egen\s+faktisk\s+kontroll\b.*$/iu', '', $primary) ?? $primary;
+        $primary = preg_replace('/\s+etter\s+avtalte\s+frister\b.*$/iu', '', $primary) ?? $primary;
+        $primary = Str::squish(trim($primary, " \t\n\r\0\x0B-/.,;:()[]{}"));
+
+        if ($primary === '' || mb_strlen($primary, 'UTF-8') < 8) {
+            return null;
+        }
+
+        return $primary;
+    }
+
+    /**
+     * Purpose: Extract a second broad title phrase when the requirement has an additional main obligation.
+     * Inputs: A normalized requirement phrase.
+     * Returns: A secondary title phrase or null.
+     * Side effects: None.
+     */
+    private function secondaryDocumentTitlePhrase(string $text): ?string
+    {
+        $matches = [];
+
+        if (! preg_match('/\bog\s+(?:ved\s+)?([^.,;]+)/iu', $text, $matches)) {
+            return null;
+        }
+
+        $secondary = trim((string) ($matches[1] ?? ''));
+        $secondary = preg_replace('/\b(?:triggere|eskalere|koordinere|levere|beskrive|forvalte|håndtere|sikre|støtte|rapportere)\b.*$/iu', '', $secondary) ?? $secondary;
+        $secondary = preg_replace('/\s+etter\s+avtalte\s+frister\b.*$/iu', '', $secondary) ?? $secondary;
+        $secondary = Str::squish(trim($secondary, " \t\n\r\0\x0B-/.,;:()[]{}"));
+
+        if ($secondary === '' || mb_strlen($secondary, 'UTF-8') < 8) {
+            return null;
+        }
+
+        return $secondary;
+    }
+
+    /**
+     * Purpose: Avoid adding the same title meaning twice.
+     * Inputs: Two nullable title phrases.
+     * Returns: True when the phrases are effectively the same.
+     * Side effects: None.
+     */
+    private function phrasesOverlap(?string $first, ?string $second): bool
+    {
+        $normalizedFirst = Str::lower(Str::squish((string) ($first ?? '')));
+        $normalizedSecond = Str::lower(Str::squish((string) ($second ?? '')));
+
+        if ($normalizedFirst === '' || $normalizedSecond === '') {
+            return false;
+        }
+
+        return str_contains($normalizedFirst, $normalizedSecond) || str_contains($normalizedSecond, $normalizedFirst);
+    }
+
+    /**
+     * Purpose: Capitalize the first character without changing the rest of the title phrase.
+     * Inputs: A title phrase.
+     * Returns: The phrase with an uppercase first character.
+     * Side effects: None.
+     */
+    private function uppercaseFirstCharacter(string $value): string
+    {
+        $value = trim($value);
+
+        if ($value === '') {
+            return '';
+        }
+
+        return mb_strtoupper(mb_substr($value, 0, 1, 'UTF-8'), 'UTF-8').mb_substr($value, 1, null, 'UTF-8');
     }
 
     /**
@@ -736,7 +950,7 @@ class RequirementGroundingJudgeService
             $slug = 'dokumentasjon-for-kravkontekst';
         }
 
-        return Str::limit($slug, 110, '').'.docx';
+        return Str::limit($slug, 70, '').'.docx';
     }
 
     /**
