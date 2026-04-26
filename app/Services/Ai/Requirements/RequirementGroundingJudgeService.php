@@ -39,7 +39,11 @@ class RequirementGroundingJudgeService
         try {
             $decoded = $this->decodeJudgePayload($response);
 
-            return $this->validateJudgePayload($decoded, (string) $requirement->requirement_text);
+            return $this->validateJudgePayload(
+                $decoded,
+                (string) $requirement->requirement_text,
+                $this->normalizeNullableString($requirement->requirement_identifier),
+            );
         } catch (Throwable $exception) {
             $this->logWarningIfAvailable('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge failed during response parsing.', [
                 'saved_notice_ai_requirement_id' => $requirement->id,
@@ -133,6 +137,8 @@ class RequirementGroundingJudgeService
             'Do not treat requirement wording as supplier evidence.',
             'Return directly supported points as objects with requirement_point, support_summary, evidence_reference and evidence_quote.',
             'evidence_reference and evidence_quote may be null when the support is clear from the supplied context.',
+            'Return recommended_document_title and suggested_filename based on the requirement-specific subject matter when documentation is missing.',
+            'Do not return generic document names such as Dokumentasjon for udekket krav when the requirement text contains usable context.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
         ]);
@@ -171,6 +177,7 @@ class RequirementGroundingJudgeService
                 'Use requirement_relevance_profile.significant_requirement_terms as anchors for deciding whether nearby evidence is actually related.',
                 'If evidence is from a different subject area, put the requirement-specific gap in unsupported_points instead of related_but_insufficient_points.',
                 'Do not treat the requirement text as supplier evidence.',
+                'When documentation is missing, recommended_document_title and suggested_filename must use the requirement-specific subject matter instead of a generic fallback name.',
             ],
             'requirement_relevance_profile' => $this->requirementRelevanceProfileFromRequirementText((string) $requirement->requirement_text),
             'requirement' => [
@@ -297,6 +304,7 @@ class RequirementGroundingJudgeService
             'levere',
             'minst',
             'månedlig',
+            'månedlige',
             'når',
             'også',
             'over',
@@ -314,9 +322,7 @@ class RequirementGroundingJudgeService
         $seen = [];
 
         foreach ((array) ($matches[0] ?? []) as $token) {
-            $token = trim((string) $token, " -/\t\n\r    /**
-     * Purpose: Convert retrieved knowledge chunks into compact judge context.
-\x0B.,;:()[]{}");
+            $token = trim((string) $token, " \t\n\r\0\x0B-/.,;:()[]{}");
 
             if ($token === '' || mb_strlen($token, 'UTF-8') < 4) {
                 continue;
@@ -574,7 +580,7 @@ class RequirementGroundingJudgeService
      * Returns: The validated grounding judgment payload.
      * Side effects: Throws when the payload violates the contract.
      */
-    private function validateJudgePayload(array $payload, string $requirementText): array
+    private function validateJudgePayload(array $payload, string $requirementText, ?string $requirementIdentifier = null): array
     {
         try {
             $status = $this->requiredStringFromPayload($payload, 'status', 255);
@@ -643,6 +649,15 @@ class RequirementGroundingJudgeService
             $reasoningSummary = $missingKnowledgeSummary;
         }
 
+        $documentSuggestion = $this->requirementSpecificDocumentSuggestion(
+            $requirementText,
+            $requirementIdentifier,
+            $recommendedDocumentTitle,
+            $suggestedFilename,
+        );
+        $recommendedDocumentTitle = $documentSuggestion['recommended_document_title'];
+        $suggestedFilename = $documentSuggestion['suggested_filename'];
+
         return [
             'status' => $status,
             'can_generate_answer' => $status === 'supported' && $canGenerateAnswer === true,
@@ -657,6 +672,248 @@ class RequirementGroundingJudgeService
         ];
     }
 
+    /**
+     * Purpose: Create requirement-specific document title and filename suggestions when the model returns generic missing-document names.
+     * Inputs: Requirement text, optional requirement identifier, and model-produced title and filename.
+     * Returns: A normalized title and filename that keep meaningful model values but replace generic fallbacks.
+     * Side effects: None.
+     */
+    private function requirementSpecificDocumentSuggestion(
+        string $requirementText,
+        ?string $requirementIdentifier,
+        ?string $recommendedDocumentTitle,
+        ?string $suggestedFilename,
+    ): array {
+        $generatedTitle = $this->recommendedDocumentTitleFromRequirementText($requirementText, $requirementIdentifier);
+        $generatedFilename = $this->suggestedFilenameFromRecommendedDocumentTitle($generatedTitle);
+
+        if ($this->shouldReplaceRecommendedDocumentTitle($recommendedDocumentTitle)) {
+            $recommendedDocumentTitle = $generatedTitle;
+        }
+
+        if ($this->shouldReplaceSuggestedFilename($suggestedFilename)) {
+            $suggestedFilename = $generatedFilename;
+        }
+
+        return [
+            'recommended_document_title' => $recommendedDocumentTitle,
+            'suggested_filename' => $suggestedFilename,
+        ];
+    }
+
+    /**
+     * Purpose: Build a readable Norwegian document title from the requirement's own significant terms.
+     * Inputs: Requirement text and an optional requirement identifier for fallback context.
+     * Returns: A deterministic document title for missing documentation.
+     * Side effects: None.
+     */
+    private function recommendedDocumentTitleFromRequirementText(string $requirementText, ?string $requirementIdentifier): string
+    {
+        $terms = $this->significantRequirementDisplayTermsFromText($requirementText);
+
+        if ($terms !== []) {
+            return Str::limit('Dokumentasjon for '.$this->norwegianDisplayList($terms), 120, '');
+        }
+
+        if ($requirementIdentifier !== null && $requirementIdentifier !== '') {
+            return Str::limit('Dokumentasjon for krav '.$requirementIdentifier, 120, '');
+        }
+
+        return 'Dokumentasjon for kravkontekst';
+    }
+
+    /**
+     * Purpose: Build a safe DOCX filename from the normalized recommended document title.
+     * Inputs: A recommended document title.
+     * Returns: A lower-case slug filename ending in .docx.
+     * Side effects: None.
+     */
+    private function suggestedFilenameFromRecommendedDocumentTitle(string $recommendedDocumentTitle): string
+    {
+        $slug = Str::slug($recommendedDocumentTitle, '-');
+
+        if ($slug === '') {
+            $slug = 'dokumentasjon-for-kravkontekst';
+        }
+
+        return Str::limit($slug, 110, '').'.docx';
+    }
+
+    /**
+     * Purpose: Decide whether a recommended document title is missing or only a generic fallback.
+     * Inputs: A nullable model-produced title.
+     * Returns: True when Procynia should replace it with a requirement-specific title.
+     * Side effects: None.
+     */
+    private function shouldReplaceRecommendedDocumentTitle(?string $title): bool
+    {
+        $normalized = Str::lower(Str::squish((string) ($title ?? '')));
+
+        if ($normalized === '') {
+            return true;
+        }
+
+        return in_array($normalized, [
+            'dokumentasjon for udekket krav',
+            'dokumentasjon for krav',
+            'dokumentasjon for manglende krav',
+            'dokumentasjon for manglende dokumentasjon',
+        ], true);
+    }
+
+    /**
+     * Purpose: Decide whether a suggested filename is missing or only a generic fallback.
+     * Inputs: A nullable model-produced filename.
+     * Returns: True when Procynia should replace it with a requirement-specific filename.
+     * Side effects: None.
+     */
+    private function shouldReplaceSuggestedFilename(?string $filename): bool
+    {
+        $normalized = Str::lower(Str::squish((string) ($filename ?? '')));
+
+        if ($normalized === '') {
+            return true;
+        }
+
+        return in_array($normalized, [
+            'dokumentasjon-for-udekket-krav.docx',
+            'dokumentasjon-for-krav.docx',
+            'dokumentasjon-for-manglende-krav.docx',
+            'dokumentasjon-for-manglende-dokumentasjon.docx',
+        ], true);
+    }
+
+    /**
+     * Purpose: Extract display terms from the requirement for document names without using domain-specific hardcoding.
+     * Inputs: The raw requirement text.
+     * Returns: Requirement-specific terms in original order and casing where available.
+     * Side effects: None.
+     */
+    private function significantRequirementDisplayTermsFromText(string $requirementText): array
+    {
+        $cleanedRequirement = $this->requirementTextWithoutAnswerLengthInstructionsForDisplay($requirementText);
+        $matches = [];
+        preg_match_all('/[\p{L}\p{N}][\p{L}\p{N}\-\/]{2,}/u', $cleanedRequirement, $matches);
+
+        $stopTerms = array_flip(array_merge($this->genericOverlapTerms(), [
+            'alle',
+            'andre',
+            'basert',
+            'beskrive',
+            'beskrivelse',
+            'besvarelse',
+            'besvarelsen',
+            'bruk',
+            'denne',
+            'dette',
+            'eller',
+            'etter',
+            'flere',
+            'for',
+            'fra',
+            'gjennom',
+            'gjelder',
+            'hvor',
+            'ikke',
+            'innen',
+            'inkludert',
+            'kan',
+            'konkrete',
+            'krav',
+            'kravet',
+            'kunden',
+            'kundens',
+            'kunne',
+            'leverandør',
+            'leverandøren',
+            'leveranser',
+            'levere',
+            'minst',
+            'månedlig',
+            'månedlige',
+            'når',
+            'også',
+            'over',
+            'samt',
+            'skal',
+            'som',
+            'støtte',
+            'til',
+            'under',
+            'ved',
+            'være',
+        ]));
+
+        $terms = [];
+        $seen = [];
+
+        foreach ((array) ($matches[0] ?? []) as $term) {
+            $term = trim((string) $term, " \t\n\r\0\x0B-/.,;:()[]{}");
+            $normalized = Str::lower(Str::squish($term));
+
+            if ($normalized === '' || mb_strlen($normalized, 'UTF-8') < 4) {
+                continue;
+            }
+
+            if (isset($stopTerms[$normalized])) {
+                continue;
+            }
+
+            if (is_numeric($normalized)) {
+                continue;
+            }
+
+            if (isset($seen[$normalized])) {
+                continue;
+            }
+
+            $seen[$normalized] = true;
+            $terms[] = $term;
+
+            if (count($terms) >= 6) {
+                break;
+            }
+        }
+
+        return $terms;
+    }
+
+    /**
+     * Purpose: Remove answer-length wording while preserving original casing for document-name generation.
+     * Inputs: The raw requirement text.
+     * Returns: Requirement text without answer-length instructions.
+     * Side effects: None.
+     */
+    private function requirementTextWithoutAnswerLengthInstructionsForDisplay(string $requirementText): string
+    {
+        $text = Str::squish($requirementText);
+        $text = preg_replace('/\b(?:besvarelsen|svaret)\s+skal\s+være\s+(?:på|ca\.?|cirka|omtrent|maks|maksimum|inntil)\s+\d{2,5}\s+ord\b/iu', ' ', $text) ?? $text;
+        $text = preg_replace('/\b(?:på|ca\.?|cirka|omtrent|maks|maksimum|inntil)\s+\d{2,5}\s+ord\b/iu', ' ', $text) ?? $text;
+
+        return Str::squish($text);
+    }
+
+    /**
+     * Purpose: Format requirement-specific terms as a short Norwegian display list.
+     * Inputs: A list of extracted terms.
+     * Returns: A readable phrase for titles.
+     * Side effects: None.
+     */
+    private function norwegianDisplayList(array $terms): string
+    {
+        $terms = array_values(array_filter(array_map(
+            static fn (mixed $term): string => trim((string) $term),
+            $terms,
+        ), static fn (string $term): bool => $term !== ''));
+
+        if (count($terms) <= 1) {
+            return (string) ($terms[0] ?? 'kravkontekst');
+        }
+
+        $last = array_pop($terms);
+
+        return implode(', ', $terms).' og '.$last;
+    }
     /**
      * Purpose: Remove related-but-insufficient points that only match generic vocabulary and not the requirement-specific subject matter.
      * Inputs: Model-produced related points and the raw requirement text.
