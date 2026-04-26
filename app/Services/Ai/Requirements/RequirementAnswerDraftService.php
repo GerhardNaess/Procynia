@@ -18,9 +18,11 @@ use Throwable;
 
 class RequirementAnswerDraftService
 {
-    private const MAX_EVIDENCE_ROWS = 5;
+    private const MAX_EVIDENCE_ROWS = 15;
 
-    private const MAX_OUTPUT_TOKENS = 1200;
+    private const MAX_OUTPUT_TOKENS = 7000;
+
+    private const LONG_FORM_TARGET_THRESHOLD = 800;
 
     private const TEMPERATURE = 0;
 
@@ -110,6 +112,20 @@ class RequirementAnswerDraftService
         ?array $groundingJudge,
     ): string
     {
+        $answerLengthGuidance = $this->extractAnswerLengthGuidance($requirement->requirement_text);
+
+        if ($this->shouldUseSectionedLongFormDraft($answerLengthGuidance)) {
+            return $this->requestSectionedLongFormAnswerDraft(
+                $requirement,
+                $evidenceRows,
+                $answerBasisRows,
+                $caseInstructions,
+                $retrievedKnowledgeRows,
+                $groundingJudge,
+                $answerLengthGuidance,
+            );
+        }
+
         $response = $this->openAiClient->createResponse(
             $this->openAiRequestPayload(
                 $requirement,
@@ -118,17 +134,213 @@ class RequirementAnswerDraftService
                 $caseInstructions,
                 $retrievedKnowledgeRows,
                 $groundingJudge,
+                $answerLengthGuidance,
+                false,
             ),
         );
 
         try {
-            return $this->validateAnswerDraftPayload(
+            $answerDraftText = $this->validateAnswerDraftPayload(
                 $this->decodeAnswerDraftPayload($response),
             );
+
+            if ($this->shouldRetryShortTargetAnswer($answerDraftText, $answerLengthGuidance)) {
+                Log::info('OpenAI requirement answer draft was shorter than the requested target length. Retrying once.', [
+                    'saved_notice_ai_requirement_id' => $requirement->id,
+                    'saved_notice_id' => $requirement->saved_notice_id,
+                    'target_word_count' => $answerLengthGuidance['target_word_count'] ?? null,
+                    'estimated_word_count' => $this->estimatedWordCount($answerDraftText),
+                ]);
+
+                $retryResponse = $this->openAiClient->createResponse(
+                    $this->openAiRequestPayload(
+                        $requirement,
+                        $evidenceRows,
+                        $answerBasisRows,
+                        $caseInstructions,
+                        $retrievedKnowledgeRows,
+                        $groundingJudge,
+                        $answerLengthGuidance,
+                        true,
+                    ),
+                );
+
+                return $this->validateAnswerDraftPayload(
+                    $this->decodeAnswerDraftPayload($retryResponse),
+                );
+            }
+
+            return $answerDraftText;
         } catch (Throwable $exception) {
             Log::warning('OpenAI requirement answer draft failed during response parsing.', [
                 'saved_notice_ai_requirement_id' => $requirement->id,
                 'saved_notice_id' => $requirement->saved_notice_id,
+                'request_id' => data_get($response, '_meta.request_id'),
+                'response_id' => data_get($response, 'id'),
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Purpose: Generate long target-length answers as several grounded sections instead of one compressed answer.
+     * Inputs: The requirement, grounded context rows, case instructions, grounding judge result, and extracted length guidance.
+     * Returns: One combined editable answer draft assembled from generated sections.
+     * Side effects: Calls the OpenAI Responses API once per planned section and may append one supplemental section.
+     */
+    private function requestSectionedLongFormAnswerDraft(
+        SavedNoticeAiRequirement $requirement,
+        Collection $evidenceRows,
+        Collection $answerBasisRows,
+        ?string $caseInstructions,
+        Collection $retrievedKnowledgeRows,
+        ?array $groundingJudge,
+        array $answerLengthGuidance,
+    ): string
+    {
+        $draftSections = [];
+
+        foreach ($this->longFormSections($answerLengthGuidance) as $section) {
+            $draftSections[] = $this->requestLongFormSection(
+                $requirement,
+                $evidenceRows,
+                $answerBasisRows,
+                $caseInstructions,
+                $retrievedKnowledgeRows,
+                $groundingJudge,
+                $answerLengthGuidance,
+                $section,
+                false,
+            );
+        }
+
+        $answerDraftText = $this->normalizeDraftText(implode("\n\n", array_filter(
+            $draftSections,
+            static fn (string $sectionText): bool => trim($sectionText) !== '',
+        )));
+
+        if ($this->shouldRetryShortTargetAnswer($answerDraftText, $answerLengthGuidance)) {
+            $targetWordCount = (int) ($answerLengthGuidance['target_word_count'] ?? 0);
+            $estimatedWordCount = $this->estimatedWordCount($answerDraftText);
+            $remainingWordCount = max(180, $targetWordCount - $estimatedWordCount);
+            $supplementalSection = [
+                'section_number' => count($draftSections) + 1,
+                'section_count' => count($draftSections) + 1,
+                'section_title' => 'Utdypende beskrivelse og samlet kundeverdi',
+                'section_focus' => 'Utdyp allerede støttede forhold som ikke er tilstrekkelig forklart i de foregående delene. Bruk bare dokumentert kunnskap, og legg særlig vekt på praktisk leveranse, kundeverdi, samhandling, oppfølging og dokumenterte begrensninger.',
+                'target_word_count' => $remainingWordCount,
+                'minimum_word_count' => max(140, (int) floor($remainingWordCount * 0.70)),
+                'is_supplemental' => true,
+            ];
+
+            Log::info('Sectioned requirement answer draft was shorter than the requested target length. Adding one supplemental grounded section.', [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'target_word_count' => $targetWordCount,
+                'estimated_word_count' => $estimatedWordCount,
+                'remaining_word_count' => $remainingWordCount,
+            ]);
+
+            $draftSections[] = $this->requestLongFormSection(
+                $requirement,
+                $evidenceRows,
+                $answerBasisRows,
+                $caseInstructions,
+                $retrievedKnowledgeRows,
+                $groundingJudge,
+                $answerLengthGuidance,
+                $supplementalSection,
+                true,
+            );
+
+            $answerDraftText = $this->normalizeDraftText(implode("\n\n", array_filter(
+                $draftSections,
+                static fn (string $sectionText): bool => trim($sectionText) !== '',
+            )));
+        }
+
+        if ($this->shouldRetryShortTargetAnswer($answerDraftText, $answerLengthGuidance)) {
+            Log::warning('Sectioned requirement answer draft remained shorter than the requested target length.', [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'target_word_count' => $answerLengthGuidance['target_word_count'] ?? null,
+                'minimum_target_word_count' => $answerLengthGuidance['minimum_target_word_count'] ?? null,
+                'estimated_word_count' => $this->estimatedWordCount($answerDraftText),
+            ]);
+        }
+
+        return $answerDraftText;
+    }
+
+    /**
+     * Purpose: Generate one grounded long-form answer section with a local word target.
+     * Inputs: The requirement, grounded context rows, case instructions, grounding judge result, length guidance, and section plan.
+     * Returns: One validated section text.
+     * Side effects: Calls the OpenAI Responses API and may retry the same section once if it is too short.
+     */
+    private function requestLongFormSection(
+        SavedNoticeAiRequirement $requirement,
+        Collection $evidenceRows,
+        Collection $answerBasisRows,
+        ?string $caseInstructions,
+        Collection $retrievedKnowledgeRows,
+        ?array $groundingJudge,
+        array $answerLengthGuidance,
+        array $section,
+        bool $isLengthRetry,
+    ): string
+    {
+        $response = $this->openAiClient->createResponse(
+            $this->openAiRequestPayload(
+                $requirement,
+                $evidenceRows,
+                $answerBasisRows,
+                $caseInstructions,
+                $retrievedKnowledgeRows,
+                $groundingJudge,
+                $answerLengthGuidance,
+                $isLengthRetry,
+                $section,
+            ),
+        );
+
+        try {
+            $sectionText = $this->validateAnswerDraftPayload(
+                $this->decodeAnswerDraftPayload($response),
+            );
+
+            if (! $isLengthRetry && $this->shouldRetryShortLongFormSection($sectionText, $section)) {
+                Log::info('OpenAI requirement answer draft section was shorter than the section target. Retrying section once.', [
+                    'saved_notice_ai_requirement_id' => $requirement->id,
+                    'saved_notice_id' => $requirement->saved_notice_id,
+                    'section_number' => $section['section_number'] ?? null,
+                    'section_title' => $section['section_title'] ?? null,
+                    'target_word_count' => $section['target_word_count'] ?? null,
+                    'estimated_word_count' => $this->estimatedWordCount($sectionText),
+                ]);
+
+                return $this->requestLongFormSection(
+                    $requirement,
+                    $evidenceRows,
+                    $answerBasisRows,
+                    $caseInstructions,
+                    $retrievedKnowledgeRows,
+                    $groundingJudge,
+                    $answerLengthGuidance,
+                    $section,
+                    true,
+                );
+            }
+
+            return $sectionText;
+        } catch (Throwable $exception) {
+            Log::warning('OpenAI requirement answer draft section failed during response parsing.', [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'section_number' => $section['section_number'] ?? null,
+                'section_title' => $section['section_title'] ?? null,
                 'request_id' => data_get($response, '_meta.request_id'),
                 'response_id' => data_get($response, 'id'),
                 'error' => $exception->getMessage(),
@@ -151,6 +363,9 @@ class RequirementAnswerDraftService
         ?string $caseInstructions,
         Collection $retrievedKnowledgeRows,
         ?array $groundingJudge,
+        array $answerLengthGuidance,
+        bool $isLengthRetry,
+        ?array $longFormSection = null,
     ): array
     {
         return [
@@ -177,6 +392,9 @@ class RequirementAnswerDraftService
                                 $caseInstructions,
                                 $retrievedKnowledgeRows,
                                 $groundingJudge,
+                                $answerLengthGuidance,
+                                $isLengthRetry,
+                                $longFormSection,
                             ),
                         ],
                     ],
@@ -211,9 +429,9 @@ class RequirementAnswerDraftService
             'Use the selected answer basis items as the primary supplier-owned source material when drafting the answer.',
             'Use the retrieved knowledge chunks as the primary grounded source material for factual content.',
             'If a capability, system, tool, process, certification, role, or commitment is not documented in the supplied knowledge context, do not claim it.',
-            'Use only directly_supported_points from the grounding judge as allowed claim candidates.',
-            'Each directly_supported_points item is a concrete evidence-backed object with requirement_point, support_summary, and evidence_reference or evidence_quote.',
-            'Stay within the evidence-backed requirement_point and support_summary for each allowed claim candidate.',
+            'Use directly_supported_points from the grounding judge as the supported coverage map for the answer, not as the full wording limit.',
+            'Each directly_supported_points item identifies a requirement area that has enough grounded support to answer.',
+            'Within directly supported requirement areas, use the supplied evidence rows, selected answer basis items, retrieved knowledge chunks, evidence references, and evidence quotes as detailed factual material.',
             'Treat related_but_insufficient_points as context only, not as supplier evidence.',
             'Do not use unsupported_points or related_but_insufficient_points as supplier claims.',
             'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization.',
@@ -224,8 +442,14 @@ class RequirementAnswerDraftService
             'Do not invent facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
             'Do not copy requirement wording into the answer unless it is also grounded in the supplied knowledge context.',
-            'If the provided sources are thin, keep the answer conservative and only state supported facts.',
-            'Keep the answer practical, concise, and suitable for direct editing by the user.',
+            'If the provided sources are thin, keep the answer factual and conservative, but do not confuse conservative with short.',
+            'Conservative means factually restrained and evidence-backed; it does not mean compressed, generic, or artificially brief.',
+            'Respect explicit answer length requirements supplied in answer_length_guidance.',
+            'If answer_length_guidance.target_word_count is present, the requested word count is a binding drafting requirement, not an optional preference.',
+            'If answer_length_guidance.max_word_count is present, do not exceed that word count.',
+            'Do not silently produce a very short answer when the customer explicitly requests a long answer.',
+            'For long target-length answers, the service may ask for one section at a time. In that case, write only the requested section and meet the local section target.',
+            'Keep the answer practical, complete, and suitable for direct editing by the user.',
         ]);
     }
 
@@ -242,10 +466,15 @@ class RequirementAnswerDraftService
         ?string $caseInstructions,
         Collection $retrievedKnowledgeRows,
         ?array $groundingJudge,
+        array $answerLengthGuidance,
+        bool $isLengthRetry,
+        ?array $longFormSection = null,
     ): string
     {
         $payload = [
-            'instruction' => 'Generate one editable supplier answer draft for this requirement.',
+            'instruction' => is_array($longFormSection)
+                ? 'Generate exactly one section of a longer editable supplier answer draft for this requirement.'
+                : 'Generate one editable supplier answer draft for this requirement.',
             'requirement' => [
                 'id' => $requirement->id,
                 'identifier' => $requirement->requirement_identifier,
@@ -255,12 +484,14 @@ class RequirementAnswerDraftService
                 'review_status' => $requirement->review_status,
             ],
             'answer_style' => 'Write a practical answer a supplier could submit after editing. Do not assess compliance.',
+            'answer_length_guidance' => $answerLengthGuidance,
+            'answer_length_strategy' => $this->answerLengthStrategy($answerLengthGuidance),
             'answer_basis_strategy' => $answerBasisRows->isEmpty()
-                ? 'No answer basis items are selected. Draft from the requirement text and evidence only.'
+                ? 'No answer basis items are selected. Use evidence and retrieved knowledge only; use the requirement text only to understand the customer request.'
                 : 'Use the selected answer basis items as the primary supplier-owned source material. Keep the wording grounded in those items.',
             'answer_basis_items' => $this->promptAnswerBasisRows($answerBasisRows),
             'evidence_strategy' => $evidenceRows->isEmpty()
-                ? 'No evidence rows are available. Draft from the requirement text only.'
+                ? 'No evidence rows are available. Use selected answer basis items and retrieved knowledge chunks only; do not treat requirement wording as evidence.'
                 : 'Use the supplied evidence only. Selected evidence has priority over suggested evidence.',
             'evidence' => $this->promptEvidenceRows($evidenceRows),
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
@@ -268,10 +499,31 @@ class RequirementAnswerDraftService
                 : 'Use the retrieved knowledge chunks and grounding judge as the factual foundation. Requirement wording is not evidence.',
             'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
             'grounding_judge_strategy' => is_array($groundingJudge)
-                ? 'The grounding judge is an internal guardrail. Use only directly_supported_points as allowed claim candidates. Treat related_but_insufficient_points as context only. Do not use related_but_insufficient_points or unsupported_points as supplier claims.'
+                ? 'The grounding judge is an internal guardrail. Use directly_supported_points as the supported coverage map for the answer, not as the full wording limit. Use evidence rows, selected answer basis items, retrieved knowledge chunks, evidence quotes, and evidence references to write detailed factual paragraphs within those supported areas. Treat related_but_insufficient_points as context only. Do not use related_but_insufficient_points or unsupported_points as supplier claims.'
                 : 'No grounding judge payload was supplied.',
             'grounding_judge' => $this->promptGroundingJudge($groundingJudge),
         ];
+
+        if (is_array($longFormSection)) {
+            $payload['long_form_section'] = $longFormSection;
+            $payload['section_length_strategy'] = $this->longFormSectionLengthStrategy($longFormSection, $isLengthRetry);
+            $payload['section_output_contract'] = implode(' ', [
+                'Return only this section inside answer_draft_text.',
+                'Start with the exact section title as a Markdown heading.',
+                'Do not write the other planned sections.',
+                'Do not write a complete answer in this section call.',
+                'Do not include coverage commentary or source analysis.',
+                'Use connected paragraphs rather than a compressed bullet list.',
+            ]);
+        }
+
+        if ($isLengthRetry) {
+            $payload['answer_length_retry_instruction'] = implode(' ', [
+                'The previous draft was shorter than the explicit word-count target.',
+                'Expand supported details without adding unsupported claims.',
+                'Use the supplied evidence, answer basis items, retrieved knowledge chunks, evidence quotes, and directly supported points more fully.',
+            ]);
+        }
 
         $normalizedCaseInstructions = $this->normalizeCaseInstructions($caseInstructions);
 
@@ -284,6 +536,247 @@ class RequirementAnswerDraftService
         } catch (JsonException $exception) {
             throw new RuntimeException('Unable to encode the requirement answer draft prompt payload.', 0, $exception);
         }
+    }
+
+    /**
+     * Purpose: Extract explicit customer answer length guidance from the requirement text.
+     * Inputs: The raw requirement text.
+     * Returns: A deterministic prompt payload with target or maximum word count guidance.
+     * Side effects: None.
+     */
+    private function extractAnswerLengthGuidance(?string $requirementText): array
+    {
+        $normalizedText = Str::squish((string) $requirementText);
+
+        if ($normalizedText === '') {
+            return [
+                'target_word_count' => null,
+                'minimum_target_word_count' => null,
+                'max_word_count' => null,
+                'length_instruction_type' => null,
+                'source_phrase' => null,
+            ];
+        }
+
+        if (preg_match('/\b(maks(?:imum)?|inntil)\s+(\d{2,5})\s+ord\b/iu', $normalizedText, $matches) === 1) {
+            return [
+                'target_word_count' => null,
+                'minimum_target_word_count' => null,
+                'max_word_count' => (int) $matches[2],
+                'length_instruction_type' => 'maximum',
+                'source_phrase' => $matches[0],
+            ];
+        }
+
+        if (preg_match('/\b(på|ca\.?|cirka|omtrent)\s+(\d{2,5})\s+ord\b/iu', $normalizedText, $matches) === 1) {
+            $targetWordCount = (int) $matches[2];
+
+            return [
+                'target_word_count' => $targetWordCount,
+                'minimum_target_word_count' => (int) floor($targetWordCount * 0.85),
+                'max_word_count' => null,
+                'length_instruction_type' => 'target',
+                'source_phrase' => $matches[0],
+            ];
+        }
+
+        return [
+            'target_word_count' => null,
+            'minimum_target_word_count' => null,
+            'max_word_count' => null,
+            'length_instruction_type' => null,
+            'source_phrase' => null,
+        ];
+    }
+
+    /**
+     * Purpose: Convert extracted answer length guidance into direct drafting instructions.
+     * Inputs: The normalized answer length guidance payload.
+     * Returns: A clear strategy string for the model prompt.
+     * Side effects: None.
+     */
+    private function answerLengthStrategy(array $answerLengthGuidance): string
+    {
+        $targetWordCount = $answerLengthGuidance['target_word_count'] ?? null;
+        $maxWordCount = $answerLengthGuidance['max_word_count'] ?? null;
+
+        if (is_int($targetWordCount) && $targetWordCount > 0) {
+            $minimumTargetWordCount = (int) ($answerLengthGuidance['minimum_target_word_count'] ?? floor($targetWordCount * 0.85));
+
+            return implode(' ', [
+                'The customer explicitly requested an answer close to ' . $targetWordCount . ' words.',
+                'When enough grounded knowledge is available, the draft must be at least ' . $minimumTargetWordCount . ' words and should aim close to ' . $targetWordCount . ' words.',
+                'A 250-600 word summary does not satisfy this requirement.',
+                'Write a complete, structured supplier answer using only grounded knowledge.',
+                'If this is a sectioned long-form request, meet the local section target because the sections are combined into the final answer.',
+            ]);
+        }
+
+        if (is_int($maxWordCount) && $maxWordCount > 0) {
+            return implode(' ', [
+                'The customer explicitly requested a maximum answer length of ' . $maxWordCount . ' words.',
+                'Do not exceed that limit.',
+                'Use the available grounded knowledge efficiently and avoid unnecessary repetition.',
+            ]);
+        }
+
+        return 'No explicit word-count instruction was detected. Write a complete answer that matches the requirement scope and available grounded knowledge.';
+    }
+
+    /**
+     * Purpose: Decide whether explicit target-length answers should be generated section by section.
+     * Inputs: The normalized answer length guidance payload.
+     * Returns: True when the requirement asks for a long target answer.
+     * Side effects: None.
+     */
+    private function shouldUseSectionedLongFormDraft(array $answerLengthGuidance): bool
+    {
+        $targetWordCount = $answerLengthGuidance['target_word_count'] ?? null;
+
+        return is_int($targetWordCount) && $targetWordCount >= self::LONG_FORM_TARGET_THRESHOLD;
+    }
+
+    /**
+     * Purpose: Build a deterministic section plan for long target-length answer drafting.
+     * Inputs: The normalized answer length guidance payload.
+     * Returns: Section definitions with local focus and word-count targets.
+     * Side effects: None.
+     */
+    private function longFormSections(array $answerLengthGuidance): array
+    {
+        $targetWordCount = max(self::LONG_FORM_TARGET_THRESHOLD, (int) ($answerLengthGuidance['target_word_count'] ?? self::LONG_FORM_TARGET_THRESHOLD));
+        $templates = [
+            [
+                'section_title' => 'Innledning og samlet forståelse',
+                'section_focus' => 'Forklar leverandørens forståelse av kundens behov og hva den dokumenterte tjenesten samlet sett skal bidra med.',
+            ],
+            [
+                'section_title' => 'Formål og omfang',
+                'section_focus' => 'Beskriv dokumentert formål, omfang, rammer og hvilken verdi tjenesten eller leveransen gir kunden.',
+            ],
+            [
+                'section_title' => 'Leveransemodell og arbeidsform',
+                'section_focus' => 'Beskriv hvordan leveransen er organisert, hvordan arbeidet gjennomføres, og hvilke dokumenterte prosesser eller arbeidsformer som inngår.',
+            ],
+            [
+                'section_title' => 'Operasjonell gjennomføring',
+                'section_focus' => 'Utdyp dokumenterte aktiviteter, flyt, analyser, oppfølging, håndtering og praktisk gjennomføring innenfor de støttede områdene.',
+            ],
+            [
+                'section_title' => 'Roller, ansvar og samhandling',
+                'section_focus' => 'Beskriv dokumenterte roller, ansvar, kontaktflater, kundesamhandling og forventninger til samarbeid.',
+            ],
+            [
+                'section_title' => 'Rapportering, oppfølging og styring',
+                'section_focus' => 'Beskriv dokumentert rapportering, statusoppfølging, styring, kvalitetssikring og kundedialog.',
+            ],
+            [
+                'section_title' => 'Forbedring, kvalitet og dokumenterte begrensninger',
+                'section_focus' => 'Beskriv dokumentert kontinuerlig forbedring, kvalitetsarbeid, læring og eventuelle begrensninger som er uttrykkelig støttet i grunnlaget.',
+            ],
+            [
+                'section_title' => 'Oppsummering av kundeverdi',
+                'section_focus' => 'Oppsummer hvordan de støttede forholdene samlet dekker kundens behov, uten å introdusere nye udokumenterte påstander.',
+            ],
+        ];
+
+        $sectionCount = min(count($templates), max(5, (int) ceil($targetWordCount / 150)));
+        $baseWordCount = intdiv($targetWordCount, $sectionCount);
+        $remainder = $targetWordCount - ($baseWordCount * $sectionCount);
+        $sections = [];
+
+        for ($index = 0; $index < $sectionCount; $index++) {
+            $sectionTargetWordCount = $baseWordCount + ($index < $remainder ? 1 : 0);
+            $sections[] = [
+                'section_number' => $index + 1,
+                'section_count' => $sectionCount,
+                'section_title' => $templates[$index]['section_title'],
+                'section_focus' => $templates[$index]['section_focus'],
+                'target_word_count' => $sectionTargetWordCount,
+                'minimum_word_count' => max(90, (int) floor($sectionTargetWordCount * 0.75)),
+                'is_supplemental' => false,
+            ];
+        }
+
+        return $sections;
+    }
+
+    /**
+     * Purpose: Build direct local length instructions for one generated long-form section.
+     * Inputs: The section plan row and whether this call is a retry.
+     * Returns: A section-specific length strategy string.
+     * Side effects: None.
+     */
+    private function longFormSectionLengthStrategy(array $section, bool $isLengthRetry): string
+    {
+        $targetWordCount = (int) ($section['target_word_count'] ?? 150);
+        $minimumWordCount = (int) ($section['minimum_word_count'] ?? floor($targetWordCount * 0.75));
+
+        return implode(' ', array_filter([
+            'Write this section close to ' . $targetWordCount . ' words.',
+            'The section must normally be at least ' . $minimumWordCount . ' words when the grounded context supports it.',
+            'This local target is part of the total answer length requirement.',
+            'Do not compress this section into a short summary.',
+            $isLengthRetry ? 'This is a retry because the previous section draft was too short; expand supported details without adding unsupported claims.' : null,
+        ]));
+    }
+
+    /**
+     * Purpose: Decide whether one retry is needed because a target-length answer was far too short.
+     * Inputs: The generated answer text and normalized answer length guidance.
+     * Returns: True when a single length-focused retry should be attempted.
+     * Side effects: None.
+     */
+    private function shouldRetryShortTargetAnswer(string $answerDraftText, array $answerLengthGuidance): bool
+    {
+        $targetWordCount = $answerLengthGuidance['target_word_count'] ?? null;
+
+        if (! is_int($targetWordCount) || $targetWordCount < 300) {
+            return false;
+        }
+
+        $estimatedWordCount = $this->estimatedWordCount($answerDraftText);
+        $minimumAcceptableWordCount = (int) ($answerLengthGuidance['minimum_target_word_count'] ?? floor($targetWordCount * 0.85));
+
+        return $estimatedWordCount > 0 && $estimatedWordCount < $minimumAcceptableWordCount;
+    }
+
+    /**
+     * Purpose: Decide whether a generated long-form section needs one local retry.
+     * Inputs: The generated section text and section plan row.
+     * Returns: True when the section is materially shorter than its local target.
+     * Side effects: None.
+     */
+    private function shouldRetryShortLongFormSection(string $sectionText, array $section): bool
+    {
+        $minimumWordCount = (int) ($section['minimum_word_count'] ?? 0);
+
+        if ($minimumWordCount <= 0) {
+            return false;
+        }
+
+        $estimatedWordCount = $this->estimatedWordCount($sectionText);
+
+        return $estimatedWordCount > 0 && $estimatedWordCount < $minimumWordCount;
+    }
+
+    /**
+     * Purpose: Estimate the word count of a generated answer without changing the answer text.
+     * Inputs: The generated answer draft text.
+     * Returns: A Unicode-aware estimated word count.
+     * Side effects: None.
+     */
+    private function estimatedWordCount(string $answerDraftText): int
+    {
+        $normalizedText = Str::squish(strip_tags($answerDraftText));
+
+        if ($normalizedText === '') {
+            return 0;
+        }
+
+        preg_match_all('/[\p{L}\p{N}]+/u', $normalizedText, $matches);
+
+        return count($matches[0] ?? []);
     }
 
     /**
@@ -438,7 +931,7 @@ class RequirementAnswerDraftService
                     'keywords' => $this->normalizeStringList((array) data_get($retrievalRow, 'keywords', [])),
                     'section_title' => $this->normalizeNullableString(data_get($retrievalRow, 'section_title')),
                     'section_path' => $this->normalizeNullableString(data_get($retrievalRow, 'section_path')),
-                    'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
+                    'content_preview' => Str::limit(Str::squish($content), 4000, '...'),
                 ];
             })
             ->values()

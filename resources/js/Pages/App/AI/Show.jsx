@@ -965,7 +965,7 @@ export default function AiShow({
     };
 
     const requestAnswerDraftGeneration = async (requirement, { force = false } = {}) => {
-        if (!requirement || requirement.source_type !== 'ai_candidate') {
+        if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
             return;
         }
 
@@ -1029,7 +1029,7 @@ export default function AiShow({
     };
 
     const openRequirementAnswerWorkspace = (requirement) => {
-        if (!requirement || requirement.source_type !== 'ai_candidate') {
+        if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
             return;
         }
 
@@ -1039,7 +1039,12 @@ export default function AiShow({
     };
 
     const syncRequirementAnswerBasisSelection = async (requirement, nextAnswerBasisItemIds) => {
-        if (!requirement || requirement.source_type !== 'ai_candidate' || !requirement.answer_basis_selection_sync_url) {
+        if (
+            !requirement
+            || !requirement.answer_draft_generate_url
+            || requirement.approval_status === 'rejected'
+            || !requirement.answer_basis_selection_sync_url
+        ) {
             return;
         }
 
@@ -2029,7 +2034,8 @@ export default function AiShow({
                                         : '—';
                                     const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
                                     const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
-                                    const canOpenAnswerWorkspace = requirement.source_type === 'ai_candidate';
+                                    const canOpenAnswerWorkspace = Boolean(requirement.answer_draft_generate_url)
+                                        && approvalStatus !== 'rejected';
                                     const requirementDraftState = answerDraftsByRequirementId[String(requirement.id)] ?? buildRequirementAnswerDraftState(requirement);
                                     const hasExistingAnswerDraft = (
                                         requirementDraftState.generatedAt !== null

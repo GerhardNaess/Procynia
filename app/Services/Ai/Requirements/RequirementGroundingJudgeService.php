@@ -12,7 +12,7 @@ use Throwable;
 
 class RequirementGroundingJudgeService
 {
-    private const MAX_OUTPUT_TOKENS = 1000;
+    private const MAX_OUTPUT_TOKENS = 4000;
 
     private const TEMPERATURE = 0;
 
@@ -37,9 +37,9 @@ class RequirementGroundingJudgeService
         );
 
         try {
-            return $this->validateJudgePayload(
-                $this->decodeJudgePayload($response),
-            );
+            $decoded = $this->decodeJudgePayload($response);
+
+            return $this->validateJudgePayload($decoded);
         } catch (Throwable $exception) {
             $this->logWarningIfAvailable('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge failed during response parsing.', [
                 'saved_notice_ai_requirement_id' => $requirement->id,
@@ -112,27 +112,27 @@ class RequirementGroundingJudgeService
             'You judge grounding quality only.',
             'You are not writing a tender answer.',
             'The requirement text is the customer request, not supplier evidence.',
-            'Do not treat requirement wording as documentation of supplier capability.',
             'Only retrieved knowledge context, chunk metadata, section context and approved document context are evidence.',
-            'Break the requirement into concrete requirement points before judging support.',
-            'Decide whether the knowledge supports each concrete requirement point fully, partially or not at all.',
+            'Decide whether the retrieved knowledge gives enough documented material to generate a safe answer draft.',
+            'Break specific requirements into concrete requirement points.',
+            'Treat answer length, word count, page count, tone and formatting instructions as customer response instructions, not as supplier capabilities or missing knowledge points.',
+            'For broad descriptive requirements, judge whether the knowledge context gives enough concrete material to describe the requested service, capability, process or approach safely.',
+            'A requested answer length, word count, formatting instruction or instruction to describe something is not itself a missing knowledge point.',
+            'Never put requested word counts, requested page counts, tone instructions or formatting instructions in related_but_insufficient_points or unsupported_points.',
+            'If a broad descriptive requirement includes a word count, judge only whether the substantive service, capability, process or approach is documented well enough to generate a grounded answer.',
+            'Do not require every possible detail for a broad descriptive answer when the customer only asks for an overall description.',
+            'If the requirement asks for specific named systems, tools, standards, roles, commitments, integrations or obligations, those specific elements must be documented before they are directly supported.',
             'Separate directly supported points, related but insufficient points, and unsupported points.',
-            'Directly supported means the retrieved knowledge explicitly documents the same capability, process, system, obligation or practice the requirement asks for, including clear technical equivalents when the practical meaning is the same.',
-            'Related but insufficient means the retrieved knowledge is nearby or useful background, but does not prove the supplier satisfies the concrete requirement.',
-            'Unsupported means the retrieved knowledge does not document the requirement point.',
-            'Do not mark general SOC/IRT, monitoring, incident response, governance or portal information as directly supported unless it explicitly documents the exact requested process or capability.',
-            'If a requirement asks for Microsoft change follow-up, recommended actions, consequence assessment, prioritization or change management integration, those must be documented explicitly before they are treated as directly supported.',
+            'Directly supported means the knowledge documents the same capability, process, service, obligation or practice the requirement asks for, including clear technical equivalents when the practical meaning is the same.',
+            'Related but insufficient means the knowledge is nearby or useful background, but does not prove the concrete requirement point.',
+            'Unsupported means the knowledge does not document the requirement point.',
             'Do not require exact word matching when the same practical capability is documented with equivalent technical wording.',
-            'Do not infer direct support from general domain similarity or from the mere presence of one related acronym or tool.',
-            'Direct support must be anchored in the same relevant context and backed by evidence from the supplied knowledge context.',
-            'Identify what is missing when the support is partial or unsupported.',
-            'Return directly supported points as evidence-backed objects with requirement_point, support_summary, and evidence_reference or evidence_quote.',
+            'Do not infer direct support from broad domain similarity alone.',
+            'Do not treat requirement wording as supplier evidence.',
+            'Return directly supported points as objects with requirement_point, support_summary, evidence_reference and evidence_quote.',
+            'evidence_reference and evidence_quote may be null when the support is clear from the supplied context.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
-            'Be conservative when a requested capability, system, tool, process, certification, role or commitment is not explicitly documented in the supplied knowledge context.',
-            'A requirement term appearing in the requirement text is not evidence by itself.',
-            'Examples of direct support: a requirement about telemetry from Microsoft 365 and Azure can be directly supported by knowledge that describes collecting data from cloud services, analysing events across data sources, correlating activity from Microsoft 365 and Azure, and searching across logs.',
-            'Examples of related but insufficient support: a requirement about proactive Microsoft change follow-up is not directly supported by general SOC/IRT monitoring, incident response or governance text unless the change follow-up, recommended actions, consequence assessment, prioritization and change-management integration are documented explicitly.',
         ]);
     }
 
@@ -151,16 +151,24 @@ class RequirementGroundingJudgeService
             'instruction' => 'Evaluate whether the knowledge context is sufficient to generate a safe answer draft.',
             'support_classification' => [
                 'directly_supported' => 'The knowledge explicitly documents the same capability, process, system, obligation or practice the requirement asks for, including clearly equivalent technical wording when the practical meaning is the same.',
+                'directly_supported_service_description' => 'When the requirement asks to describe a service or solution, a document that describes that same service or solution and its operating model counts as direct support.',
                 'related_but_insufficient' => 'The knowledge is nearby or useful background, but it does not prove the supplier satisfies the concrete requirement.',
                 'unsupported' => 'The knowledge does not document the requirement point.',
             ],
             'judging_rules' => [
                 'Break the requirement into concrete points.',
                 'Evaluate each point against the retrieved knowledge context and supporting metadata.',
+                'For broad descriptive requirements, do not treat answer length or requested word count as a missing knowledge point.',
+                'For broad descriptive requirements, decide whether the retrieved knowledge gives enough concrete material for a safe bounded description.',
                 'Do not require exact word matching when equivalent technical wording clearly documents the same practical capability.',
+                'Do not treat length, word count, page count, tone or formatting requirements as missing documentation when the substantive capability is documented.',
+                'Never classify requested answer length, requested word count, requested page count, tone or formatting as related_but_insufficient or unsupported.',
+                'Treat a broad request to describe a service or solution as directly supported when the retrieved knowledge describes that same service or solution at an operating-model level.',
+                'For broad service descriptions, directly_supported_points should capture the documented service areas that can safely be used by answer generation.',
                 'Do not treat general domain similarity as direct support.',
                 'Do not treat the requirement text as supplier evidence.',
             ],
+            'answer_length_guidance' => $this->answerLengthGuidanceFromRequirementText((string) $requirement->requirement_text),
             'requirement' => [
                 'id' => $requirement->id,
                 'identifier' => $requirement->requirement_identifier,
@@ -176,14 +184,14 @@ class RequirementGroundingJudgeService
             ],
             'examples' => [
                 'directly_supported' => [
-                    'requirement_point' => 'Telemetri fra Microsoft 365 og Azure.',
-                    'support_summary' => 'Kunnskapsgrunnlaget beskriver innsamling av data fra skytjenester, korrelasjon av aktivitet fra Microsoft 365 og Azure og søk på tvers av logger.',
-                    'evidence_reference' => 'Chunk med logganalyse og korrelasjon på tvers av Microsoft 365 og Azure.',
-                    'evidence_quote' => 'samler inn data fra kundens endepunkter, nettverksutstyr og skytjenester ... korrelere aktivitet fra for eksempel endepunkter, brannmurer, Microsoft 365, Azure ... søke etter ... på tvers av samtlige logger',
+                    'requirement_point' => 'Beskrivelse av en tjeneste eller prosess.',
+                    'support_summary' => 'Kunnskapsgrunnlaget beskriver formål, omfang, leveransemodell, roller og arbeidsprosesser godt nok til å lage en trygg overordnet beskrivelse.',
+                    'evidence_reference' => 'Chunk med relevant tjeneste- eller prosessbeskrivelse.',
+                    'evidence_quote' => null,
                 ],
                 'related_but_insufficient' => [
-                    'requirement_point' => 'Proaktiv oppfølging av Microsoft-endringer.',
-                    'support_summary' => 'Generell SOC/IRT-overvåkning og hendelseshåndtering er nyttig bakgrunn, men dokumenterer ikke Microsoft-endringsoppfølging eller anbefalte tiltak.',
+                    'requirement_point' => 'Spesifikk forpliktelse, integrasjon eller egenskap.',
+                    'support_summary' => 'Kunnskapsgrunnlaget beskriver nærliggende forhold, men dokumenterer ikke den konkrete forpliktelsen, integrasjonen eller egenskapen kravet ber om.',
                 ],
             ],
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
@@ -197,6 +205,37 @@ class RequirementGroundingJudgeService
         } catch (JsonException $exception) {
             throw new RuntimeException('Unable to encode the grounding judge prompt payload.', 0, $exception);
         }
+    }
+
+    /**
+     * Purpose: Extract explicit customer word-count guidance from the requirement text for judge context.
+     * Inputs: The raw requirement text.
+     * Returns: A deterministic structure separating target and maximum word-count instructions.
+     * Side effects: None.
+     */
+    private function answerLengthGuidanceFromRequirementText(string $requirementText): array
+    {
+        $normalized = Str::lower(Str::squish($requirementText));
+        $targetWordCount = null;
+        $maxWordCount = null;
+        $instructionType = null;
+
+        if (preg_match('/\b(?:maks|maksimum|inntil)\s+(\d{2,5})\s+ord\b/u', $normalized, $matches) === 1) {
+            $maxWordCount = (int) $matches[1];
+            $instructionType = 'maximum';
+        } elseif (preg_match('/\b(?:på|ca\.?|cirka|omtrent)\s+(\d{2,5})\s+ord\b/u', $normalized, $matches) === 1) {
+            $targetWordCount = (int) $matches[1];
+            $instructionType = 'target';
+        }
+
+        return [
+            'target_word_count' => $targetWordCount,
+            'max_word_count' => $maxWordCount,
+            'length_instruction_type' => $instructionType,
+            'judge_instruction' => $instructionType === null
+                ? 'No explicit word-count instruction detected. Judge only substantive grounding.'
+                : 'This is customer answer-length guidance only. Do not treat it as supplier evidence or as a missing knowledge point.',
+        ];
     }
 
     /**
@@ -414,18 +453,18 @@ class RequirementGroundingJudgeService
                 'directly_supported_points',
                 1000,
             );
-            $relatedButInsufficientPoints = $this->requiredStringArrayFromValue(
+            $relatedButInsufficientPoints = $this->flexibleStringArrayFromValue(
                 data_get($payload, 'related_but_insufficient_points', []),
                 'related_but_insufficient_points',
                 1000,
             );
-            $unsupportedPoints = $this->requiredStringArrayFromValue(
+            $unsupportedPoints = $this->flexibleStringArrayFromValue(
                 data_get($payload, 'unsupported_points', []),
                 'unsupported_points',
                 1000,
             );
-            $missingKnowledgeSummary = $this->requiredStringFromPayload($payload, 'missing_knowledge_summary', 1000);
-            $reasoningSummary = $this->requiredStringFromPayload($payload, 'reasoning_summary', 1000);
+            $missingKnowledgeSummary = $this->nullableStringFromPayload($payload, 'missing_knowledge_summary', 1000);
+            $reasoningSummary = $this->nullableStringFromPayload($payload, 'reasoning_summary', 1000);
             $recommendedDocumentTitle = $this->nullableStringFromPayload($payload, 'recommended_document_title', 255);
             $suggestedFilename = $this->nullableStringFromPayload($payload, 'suggested_filename', 255);
         } catch (Throwable $exception) {
@@ -437,32 +476,36 @@ class RequirementGroundingJudgeService
         }
 
         if ($status === 'supported' && $canGenerateAnswer !== true) {
-            throw new RuntimeException('OpenAI grounding judge returned an inconsistent supported verdict.');
+            $status = 'partial';
+            $canGenerateAnswer = false;
         }
 
         if ($status === 'supported' && $directlySupportedPoints === []) {
-            throw new RuntimeException('OpenAI grounding judge marked the requirement as supported without any directly supported points.');
+            $status = 'partial';
+            $canGenerateAnswer = false;
         }
 
-        if ($status === 'supported' && $relatedButInsufficientPoints !== []) {
-            throw new RuntimeException('OpenAI grounding judge marked the requirement as supported while still reporting related but insufficient points.');
-        }
-
-        if ($status === 'supported' && $unsupportedPoints !== []) {
-            throw new RuntimeException('OpenAI grounding judge marked the requirement as supported while still reporting unsupported points.');
+        if ($status !== 'supported') {
+            $canGenerateAnswer = false;
         }
 
         if ($status === 'unsupported' && $directlySupportedPoints !== []) {
-            throw new RuntimeException('OpenAI grounding judge marked the requirement as unsupported while still reporting directly supported points.');
+            $status = 'partial';
         }
 
-        if ($status !== 'supported' && $canGenerateAnswer !== false) {
-            throw new RuntimeException('OpenAI grounding judge returned an inconsistent blocking verdict.');
+        if ($missingKnowledgeSummary === null) {
+            $missingKnowledgeSummary = $status === 'supported'
+                ? 'Kunnskapsgrunnlaget dokumenterer kravet godt nok til å lage et trygt svarutkast.'
+                : 'Kunnskapsgrunnlaget dokumenterer ikke kravet godt nok til å lage et trygt svarutkast.';
+        }
+
+        if ($reasoningSummary === null) {
+            $reasoningSummary = $missingKnowledgeSummary;
         }
 
         return [
             'status' => $status,
-            'can_generate_answer' => $canGenerateAnswer,
+            'can_generate_answer' => $status === 'supported' && $canGenerateAnswer === true,
             'directly_supported_points' => $directlySupportedPoints,
             'related_but_insufficient_points' => $this->normalizeStringList($relatedButInsufficientPoints),
             'unsupported_points' => $this->normalizeStringList($unsupportedPoints),
@@ -663,6 +706,46 @@ class RequirementGroundingJudgeService
     }
 
     /**
+     * Purpose: Normalize a model-produced list that may contain strings or simple point objects.
+     * Inputs: The raw value, logical field name and maximum string length.
+     * Returns: A normalized list of point texts.
+     * Side effects: Throws only when the list itself is not usable.
+     */
+    private function flexibleStringArrayFromValue(mixed $value, string $field, int $maxLength): array
+    {
+        if (! is_array($value)) {
+            throw new RuntimeException(sprintf('The %s field is required.', str_replace('_', ' ', $field)));
+        }
+
+        $normalized = [];
+
+        foreach ($value as $item) {
+            if (is_string($item)) {
+                $text = trim($item);
+            } elseif (is_array($item)) {
+                $text = trim((string) (data_get($item, 'text')
+                    ?? data_get($item, 'requirement_point')
+                    ?? data_get($item, 'support_summary')
+                    ?? ''));
+            } else {
+                throw new RuntimeException(sprintf('The %s field must contain strings or simple objects.', str_replace('_', ' ', $field)));
+            }
+
+            if ($text === '') {
+                continue;
+            }
+
+            if (mb_strlen($text, 'UTF-8') > $maxLength) {
+                throw new RuntimeException(sprintf('The %s field contains an item that is too long.', str_replace('_', ' ', $field)));
+            }
+
+            $normalized[] = $text;
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Purpose: Validate the directly supported point objects returned by the judge.
      * Inputs: The raw value, field name and maximum string length.
      * Returns: A normalized array of supported point objects.
@@ -677,21 +760,35 @@ class RequirementGroundingJudgeService
         $normalized = [];
 
         foreach ($value as $item) {
+            if (is_string($item)) {
+                $text = trim($item);
+
+                if ($text === '') {
+                    continue;
+                }
+
+                if (mb_strlen($text, 'UTF-8') > $maxLength) {
+                    throw new RuntimeException(sprintf('The %s field contains an item that is too long.', str_replace('_', ' ', $field)));
+                }
+
+                $normalized[] = [
+                    'requirement_point' => $text,
+                    'support_summary' => $text,
+                    'evidence_reference' => null,
+                    'evidence_quote' => null,
+                ];
+
+                continue;
+            }
+
             if (! is_array($item)) {
-                throw new RuntimeException(sprintf('The %s field must contain only objects.', str_replace('_', ' ', $field)));
+                throw new RuntimeException(sprintf('The %s field must contain only objects or strings.', str_replace('_', ' ', $field)));
             }
 
             $requirementPoint = $this->requiredStringFromArrayItem($item, 'requirement_point', $maxLength);
             $supportSummary = $this->requiredStringFromArrayItem($item, 'support_summary', $maxLength);
             $evidenceReference = $this->nullableStringFromArrayItem($item, 'evidence_reference', $maxLength);
             $evidenceQuote = $this->nullableStringFromArrayItem($item, 'evidence_quote', $maxLength);
-
-            if ($evidenceReference === null && $evidenceQuote === null) {
-                throw new RuntimeException(sprintf(
-                    'The %s field must include either evidence_reference or evidence_quote.',
-                    str_replace('_', ' ', $field),
-                ));
-            }
 
             $normalized[] = [
                 'requirement_point' => $requirementPoint,

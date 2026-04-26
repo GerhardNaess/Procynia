@@ -2906,6 +2906,14 @@ class AiControllerTest extends TestCase
         $this->assertSame(SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT, $payload['approval_status']);
         $this->assertSame('Redigert', $payload['edit_state_label']);
         $this->assertSame(2, $payload['revision_count']);
+        $this->assertSame(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), $payload['answer_draft_generate_url']);
+        $this->assertSame(route('app.ai.requirements.answer-draft.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), $payload['answer_draft_save_url']);
     }
 
     public function test_ai_requirement_approval_rejection_and_loader_scope_are_explicit(): void
