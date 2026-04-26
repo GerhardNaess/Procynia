@@ -11,6 +11,38 @@ class RequirementKnowledgeDocumentRecommendationService
 
     private const THEME_PATTERNS = [
         [
+            'title' => 'Proaktiv oppfølging av Microsoft-endringer',
+            'needles' => [
+                'microsoft endringer',
+                'microsoft endring',
+                'microsoft oppfølging',
+                'microsoft oppfolging',
+                'microsoft change follow up',
+                'microsoft change management',
+                'microsoft anbefalte tiltak',
+                'microsoft konsekvensvurdering',
+                'microsoft prioritering',
+                'microsoft endringshåndtering',
+                'microsoft endringshandtering',
+            ],
+        ],
+        [
+            'title' => 'Språkkrav og norsk dokumentasjon',
+            'needles' => [
+                'språkkrav',
+                'språkinnstillinger',
+                'språk',
+                'norsk dokumentasjon',
+                'norsk',
+                'bokmål',
+                'b2',
+                'veiledning',
+                'kommunikasjon',
+                'samhandling',
+            ],
+            'min_hits' => 2,
+        ],
+        [
             'title' => 'Lærlingeordning og kompetanseutvikling',
             'needles' => [
                 'lærling',
@@ -71,26 +103,57 @@ class RequirementKnowledgeDocumentRecommendationService
         ],
     ];
 
-    public function recommendForRequirement(SavedNoticeAiRequirement $requirement): array
+    public function recommendForRequirement(SavedNoticeAiRequirement $requirement, ?array $groundingJudge = null): array
     {
-        [$topic, $subTopic, $keywords] = $this->requirementThemeContext($requirement);
+        $judgeThemeTitle = $groundingJudge !== null
+            ? $this->themeTitleFromGroundingJudge($requirement, $groundingJudge)
+            : null;
+        $judgeRecommendedTitle = $groundingJudge !== null
+            ? $this->normalizeThemeValue(data_get($groundingJudge, 'recommended_document_title'))
+            : null;
+        $judgeSuggestedFilename = $groundingJudge !== null
+            ? $this->normalizeFilenameCandidate(data_get($groundingJudge, 'suggested_filename'))
+            : null;
 
-        $recommendedTitle = $this->titleFromMetadata($topic, $subTopic);
+        $recommendedTitle = null;
+        $useJudgeRecommendation = false;
+
+        if ($groundingJudge !== null) {
+            if ($judgeThemeTitle !== null) {
+                if ($judgeRecommendedTitle !== null && $this->judgeRecommendationMatchesTheme($judgeRecommendedTitle, $judgeThemeTitle)) {
+                    $recommendedTitle = $judgeRecommendedTitle;
+                    $useJudgeRecommendation = true;
+                } else {
+                    $recommendedTitle = $judgeThemeTitle;
+                }
+            } elseif ($judgeRecommendedTitle !== null) {
+                $recommendedTitle = $judgeRecommendedTitle;
+                $useJudgeRecommendation = true;
+            }
+        }
 
         if ($recommendedTitle === null) {
-            $sourceText = trim(implode(' ', array_filter([
-                (string) ($requirement->requirement_text ?? ''),
-                implode(' ', $keywords),
-            ])));
+            [$topic, $subTopic, $keywords] = $this->requirementThemeContext($requirement);
+            $recommendedTitle = $this->titleFromMetadata($topic, $subTopic);
 
-            $recommendedTitle = $this->titleFromRequirementText($sourceText) ?? self::FALLBACK_TITLE;
+            if ($recommendedTitle === null) {
+                $sourceText = trim(implode(' ', array_filter([
+                    (string) ($requirement->requirement_text ?? ''),
+                    implode(' ', $keywords),
+                ])));
+
+                $recommendedTitle = $this->titleFromText($sourceText) ?? self::FALLBACK_TITLE;
+            }
         }
 
         $recommendedTitle = $this->normalizeTitle($recommendedTitle);
+        $suggestedFilename = $useJudgeRecommendation && $judgeSuggestedFilename !== null
+            ? $judgeSuggestedFilename
+            : $this->suggestedFilename($recommendedTitle);
 
         return [
             'recommended_document_title' => $recommendedTitle,
-            'suggested_filename' => $this->suggestedFilename($recommendedTitle),
+            'suggested_filename' => $suggestedFilename,
         ];
     }
 
@@ -169,7 +232,55 @@ class RequirementKnowledgeDocumentRecommendationService
      * Returns: A human-readable document title or null when no reliable theme can be derived.
      * Side effects: None.
      */
-    private function titleFromRequirementText(string $requirementText): ?string
+    private function themeTitleFromGroundingJudge(SavedNoticeAiRequirement $requirement, ?array $groundingJudge): ?string
+    {
+        if (! is_array($groundingJudge)) {
+            return null;
+        }
+
+        $sources = [];
+        $unsupportedPoints = $this->normalizeStringList(data_get($groundingJudge, 'unsupported_points', []));
+        $missingKnowledgeSummary = $this->normalizeThemeValue(data_get($groundingJudge, 'missing_knowledge_summary'));
+
+        if ($unsupportedPoints !== []) {
+            $sources[] = implode(' ', $unsupportedPoints);
+        }
+
+        if ($missingKnowledgeSummary !== null) {
+            $sources[] = $missingKnowledgeSummary;
+        }
+
+        $sources[] = (string) ($requirement->requirement_text ?? '');
+
+        [$topic, $subTopic, $keywords] = $this->requirementThemeContext($requirement);
+
+        $metadataTitle = $this->titleFromMetadata($topic, $subTopic);
+        if ($metadataTitle !== null) {
+            $sources[] = $metadataTitle;
+        }
+
+        if ($keywords !== []) {
+            $sources[] = implode(' ', $keywords);
+        }
+
+        foreach ($sources as $source) {
+            $title = $this->titleFromText((string) $source);
+
+            if ($title !== null) {
+                return $title;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Derive a recommended title from a search surface using small deterministic theme patterns.
+     * Inputs: A normalized requirement-like text surface.
+     * Returns: A human-readable document title or null when no reliable theme can be derived.
+     * Side effects: None.
+     */
+    private function titleFromText(string $requirementText): ?string
     {
         $normalizedText = $this->normalizeTextForMatching($requirementText);
 
@@ -178,13 +289,20 @@ class RequirementKnowledgeDocumentRecommendationService
         }
 
         foreach (self::THEME_PATTERNS as $pattern) {
+            $matches = 0;
+            $minimumHits = (int) ($pattern['min_hits'] ?? 1);
+
             foreach ($pattern['needles'] as $needle) {
                 if ($needle === '') {
                     continue;
                 }
 
                 if (str_contains($normalizedText, $this->normalizeTextForMatching($needle))) {
-                    return $pattern['title'];
+                    $matches++;
+
+                    if ($matches >= $minimumHits) {
+                        return $pattern['title'];
+                    }
                 }
             }
         }
@@ -220,6 +338,101 @@ class RequirementKnowledgeDocumentRecommendationService
         $normalized = trim(preg_replace('/\s+/u', ' ', (string) ($value ?? '')) ?? '');
 
         return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * Purpose: Normalize a mixed value into a trimmed unique string list.
+     * Inputs: Raw array-like keyword or point input.
+     * Returns: A de-duplicated array of strings.
+     * Side effects: None.
+     */
+    private function normalizeStringList(mixed $values): array
+    {
+        if ($values === null) {
+            return [];
+        }
+
+        $items = is_array($values)
+            ? $values
+            : preg_split('/[,\n;]+/u', str_replace(["\r\n", "\r"], "\n", (string) $values), -1, PREG_SPLIT_NO_EMPTY);
+
+        if (! is_array($items)) {
+            return [];
+        }
+
+        $normalized = [];
+        $seen = [];
+
+        foreach ($items as $item) {
+            $value = $this->normalizeThemeValue($item);
+
+            if ($value === null) {
+                continue;
+            }
+
+            $key = mb_strtolower($value, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $value;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Normalize a candidate filename into a safe .docx filename.
+     * Inputs: A raw filename candidate.
+     * Returns: A sanitized filename or null.
+     * Side effects: None.
+     */
+    private function normalizeFilenameCandidate(mixed $value): ?string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        $normalized = basename(str_replace('\\', '/', $normalized));
+        $normalized = preg_replace('/[^\pL\pN._-]+/u', '-', $normalized) ?? $normalized;
+        $normalized = preg_replace('/-+/u', '-', $normalized) ?? $normalized;
+        $normalized = trim($normalized, "-._ ");
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (! Str::endsWith(Str::lower($normalized), '.docx')) {
+            $normalized .= '.docx';
+        }
+
+        return Str::limit($normalized, 255, '');
+    }
+
+    /**
+     * Purpose: Validate whether a judge-proposed recommendation matches the detected missing theme.
+     * Inputs: The judge title candidate and the derived theme title.
+     * Returns: True when the titles point to the same theme.
+     * Side effects: None.
+     */
+    private function judgeRecommendationMatchesTheme(string $judgeRecommendedTitle, string $themeTitle): bool
+    {
+        $normalizedJudgeTitle = $this->normalizeTitle($judgeRecommendedTitle);
+        $normalizedThemeTitle = $this->normalizeTitle($themeTitle);
+
+        if ($normalizedJudgeTitle === '' || $normalizedThemeTitle === '') {
+            return false;
+        }
+
+        if (mb_strtolower($normalizedJudgeTitle, 'UTF-8') === mb_strtolower($normalizedThemeTitle, 'UTF-8')) {
+            return true;
+        }
+
+        return $this->titleFromText($normalizedJudgeTitle) === $normalizedThemeTitle;
     }
 
     /**

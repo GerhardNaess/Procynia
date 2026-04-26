@@ -63,7 +63,15 @@ class AiControllerTest extends TestCase
             return [
                 'status' => 'supported',
                 'can_generate_answer' => true,
-                'supported_points' => ['Kunnskapsgrunnlaget dekker kravet tilstrekkelig.'],
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Kunnskapsgrunnlaget dekker kravet tilstrekkelig.',
+                        'support_summary' => 'Kunnskapsgrunnlaget dokumenterer løsningen i relevant kontekst.',
+                        'evidence_reference' => 'Chunk 1 · Relevant knowledge',
+                        'evidence_quote' => 'Leverandøren beskriver løsningen i detalj.',
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
                 'unsupported_points' => [],
                 'missing_knowledge_summary' => null,
                 'recommended_document_title' => null,
@@ -489,7 +497,11 @@ class AiControllerTest extends TestCase
             $this->assertSame('Skriv formelt og bruk Kunde med stor K.', data_get($inputPayload, 'case_instructions'));
             $this->assertSame('supported', data_get($inputPayload, 'grounding_judge.status'));
             $this->assertTrue((bool) data_get($inputPayload, 'grounding_judge.can_generate_answer'));
-            $this->assertNotEmpty(data_get($inputPayload, 'grounding_judge.supported_points'));
+            $this->assertSame('Kunnskapsgrunnlaget dekker kravet tilstrekkelig.', data_get($inputPayload, 'grounding_judge.directly_supported_points.0.requirement_point'));
+            $this->assertSame('Kunnskapsgrunnlaget dokumenterer løsningen i relevant kontekst.', data_get($inputPayload, 'grounding_judge.directly_supported_points.0.support_summary'));
+            $this->assertSame('Chunk 1 · Relevant knowledge', data_get($inputPayload, 'grounding_judge.directly_supported_points.0.evidence_reference'));
+            $this->assertSame('Leverandøren beskriver løsningen i detalj.', data_get($inputPayload, 'grounding_judge.directly_supported_points.0.evidence_quote'));
+            $this->assertSame([], data_get($inputPayload, 'grounding_judge.related_but_insufficient_points'));
 
             return Http::response(
                 $this->openAiStructuredResponse([
@@ -555,7 +567,8 @@ class AiControllerTest extends TestCase
             ->andReturn([
                 'status' => 'supported',
                 'can_generate_answer' => true,
-                'supported_points' => ['Løsningen er dokumentert.'],
+                'directly_supported_points' => ['Løsningen er dokumentert.'],
+                'related_but_insufficient_points' => [],
                 'unsupported_points' => [],
                 'missing_knowledge_summary' => null,
                 'recommended_document_title' => null,
@@ -1274,17 +1287,17 @@ class AiControllerTest extends TestCase
 
         $document = $this->createAiDocument($savedNotice, [
             'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'requirements.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'original_filename' => 'language-requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/language-requirements.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 2048,
-            'extracted_text' => 'Kravtekst om ITSM og SPOC.',
+            'extracted_text' => 'Kravtekst om språk, norsk dokumentasjon og B2-nivå.',
             'text_extracted_at' => '2026-04-06 13:26:00',
         ]);
-        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om ITSM og SPOC.');
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om språk, norsk dokumentasjon og B2-nivå.');
         $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
             'requirement_identifier' => '3.1',
-            'requirement_text' => 'Leverandøren skal beskrive håndtering av saker i ITSM/SPOC.',
+            'requirement_text' => 'Språk i samhandling og dokumentasjon. All kommunikasjon og dokumentasjon skal være på norsk på minimum B2-nivå.',
             'answer_draft_text' => null,
             'answer_draft_generated_at' => null,
         ]);
@@ -1295,12 +1308,13 @@ class AiControllerTest extends TestCase
             ->andReturn([
                 'status' => 'partial',
                 'can_generate_answer' => false,
-                'supported_points' => ['ITSM er dokumentert i kunnskapsgrunnlaget.'],
-                'unsupported_points' => ['SPOC er ikke dokumentert i kunnskapsgrunnlaget.'],
-                'missing_knowledge_summary' => 'SPOC er ikke dokumentert, så kravet er bare delvis grounded.',
-                'recommended_document_title' => 'Sakshåndtering og servicedesk',
-                'suggested_filename' => 'sakshandtering-og-servicedesk.docx',
-                'reasoning_summary' => 'ITSM finnes, men SPOC mangler i den relevante konteksten.',
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => ['Generell SOC/IRT-overvåkning er dokumentert.'],
+                'unsupported_points' => ['Norsk dokumentasjon og B2-nivå er ikke dokumentert i kunnskapsgrunnlaget.'],
+                'missing_knowledge_summary' => 'Kunnskapsgrunnlaget mangler eksplisitt støtte for språkkrav og norsk dokumentasjon.',
+                'recommended_document_title' => 'Språkkrav og norsk dokumentasjon',
+                'suggested_filename' => 'sprakkrav-og-norsk-dokumentasjon.docx',
+                'reasoning_summary' => 'Språkkrav mangler i den relevante konteksten.',
             ]);
         $this->app->instance(RequirementGroundingJudgeService::class, $judge);
 
@@ -1316,12 +1330,81 @@ class AiControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
         $response->assertJsonPath('answer_draft.missing_knowledge.message', 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget ikke dokumenterer kravet godt nok. Opprett eller last opp relevant kunnskapsdokumentasjon, og prøv deretter å lage svaret på nytt.');
-        $response->assertJsonPath('answer_draft.missing_knowledge.missing_knowledge_summary', 'SPOC er ikke dokumentert, så kravet er bare delvis grounded.');
-        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Sakshåndtering og servicedesk');
-        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'sakshandtering-og-servicedesk.docx');
+        $response->assertJsonPath('answer_draft.missing_knowledge.missing_knowledge_summary', 'Kunnskapsgrunnlaget mangler eksplisitt støtte for språkkrav og norsk dokumentasjon.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Språkkrav og norsk dokumentasjon');
+        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'sprakkrav-og-norsk-dokumentasjon.docx');
         $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'partial');
-        $response->assertJsonPath('answer_draft.missing_knowledge.supported_points.0', 'ITSM er dokumentert i kunnskapsgrunnlaget.');
-        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'SPOC er ikke dokumentert i kunnskapsgrunnlaget.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points', []);
+        $response->assertJsonPath('answer_draft.missing_knowledge.related_but_insufficient_points.0', 'Generell SOC/IRT-overvåkning er dokumentert.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Norsk dokumentasjon og B2-nivå er ikke dokumentert i kunnskapsgrunnlaget.');
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_requirement_answer_draft_generation_blocks_when_microsoft_change_follow_up_is_only_related_not_directly_supported(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-MICROSOFT', 'Judge microsoft target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'microsoft-changes.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/microsoft-changes.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Kravtekst om Microsoft-endringer.',
+            'text_extracted_at' => '2026-04-06 13:31:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Kravtekst om Microsoft-endringer.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.1',
+            'requirement_text' => 'Leverandøren bør ha rutiner for å følge opp Microsoft-endringer og proaktivt informere Kunden med anbefalte tiltak, konsekvensvurdering og prioritering, integrert i styring og endringshåndtering.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')
+            ->once()
+            ->andReturn([
+                'status' => 'partial',
+                'can_generate_answer' => false,
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => ['Generell SOC/IRT-overvåkning og hendelseshåndtering er dokumentert.'],
+                'unsupported_points' => [
+                    'Microsoft-endringsoppfølging er ikke dokumentert.',
+                    'Anbefalte tiltak, konsekvensvurdering, prioritering og integrasjon med endringshåndtering er ikke dokumentert.',
+                ],
+                'missing_knowledge_summary' => 'Kunnskapsgrunnlaget mangler dokumentert støtte for Microsoft-endringsoppfølging og tilhørende tiltak.',
+                'recommended_document_title' => 'Beredskap og hendelseshåndtering',
+                'suggested_filename' => 'beredskap-og-hendelseshandtering.docx',
+                'reasoning_summary' => 'Bare generell hendelseshåndtering er funnet.',
+            ]);
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Proaktiv oppfølging av Microsoft-endringer');
+        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'proaktiv-oppfolging-av-microsoft-endringer.docx');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points', []);
+        $response->assertJsonPath('answer_draft.missing_knowledge.related_but_insufficient_points.0', 'Generell SOC/IRT-overvåkning og hendelseshåndtering er dokumentert.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Microsoft-endringsoppfølging er ikke dokumentert.');
 
         $requirement->refresh();
         $this->assertNull($requirement->answer_draft_text);
@@ -1361,7 +1444,8 @@ class AiControllerTest extends TestCase
             ->andReturn([
                 'status' => 'unsupported',
                 'can_generate_answer' => false,
-                'supported_points' => [],
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => ['Generell SOC/IRT-overvåkning er dokumentert.'],
                 'unsupported_points' => ['Beredskap er ikke dokumentert i den relevante kunnskapsbasen.'],
                 'missing_knowledge_summary' => 'Kravet mangler dokumentert støtte i kunnskapsgrunnlaget.',
                 'recommended_document_title' => null,
@@ -1382,7 +1466,11 @@ class AiControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
         $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'unsupported');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points', []);
+        $response->assertJsonPath('answer_draft.missing_knowledge.related_but_insufficient_points.0', 'Generell SOC/IRT-overvåkning er dokumentert.');
         $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Beredskap er ikke dokumentert i den relevante kunnskapsbasen.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Beredskap og hendelseshåndtering');
+        $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'beredskap-og-hendelseshandtering.docx');
 
         $requirement->refresh();
         $this->assertNull($requirement->answer_draft_text);

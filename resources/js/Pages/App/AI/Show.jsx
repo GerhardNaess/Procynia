@@ -321,7 +321,12 @@ function normalizeMissingKnowledgePayload(missingKnowledge) {
     const judgeStatus = ['supported', 'partial', 'unsupported', 'failed'].includes(missingKnowledge?.judge_status)
         ? missingKnowledge.judge_status
         : null;
-    const supportedPoints = normalizeStringList(missingKnowledge?.supported_points ?? []);
+    const directlySupportedPoints = normalizeGroundingPointList(
+        missingKnowledge?.directly_supported_points
+        ?? missingKnowledge?.supported_points
+        ?? [],
+    );
+    const relatedButInsufficientPoints = normalizeStringList(missingKnowledge?.related_but_insufficient_points ?? []);
     const unsupportedPoints = normalizeStringList(missingKnowledge?.unsupported_points ?? []);
 
     if (
@@ -331,7 +336,8 @@ function normalizeMissingKnowledgePayload(missingKnowledge) {
         && missingKnowledgeSummary === ''
         && reasoningSummary === ''
         && judgeStatus === null
-        && supportedPoints.length === 0
+        && directlySupportedPoints.length === 0
+        && relatedButInsufficientPoints.length === 0
         && unsupportedPoints.length === 0
     ) {
         return null;
@@ -347,9 +353,85 @@ function normalizeMissingKnowledgePayload(missingKnowledge) {
         can_generate_answer: typeof missingKnowledge?.can_generate_answer === 'boolean'
             ? missingKnowledge.can_generate_answer
             : null,
-        supported_points: supportedPoints,
+        directly_supported_points: directlySupportedPoints,
+        related_but_insufficient_points: relatedButInsufficientPoints,
         unsupported_points: unsupportedPoints,
+        supported_points: directlySupportedPoints.map((point) => point.requirement_point),
     };
+}
+
+function normalizeGroundingPointList(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const normalizedValues = [];
+    const seen = new Set();
+
+    value.forEach((item) => {
+        if (typeof item === 'string') {
+            const normalizedItem = String(item ?? '').replace(/\s+/g, ' ').trim();
+
+            if (normalizedItem === '') {
+                return;
+            }
+
+            const key = normalizedItem.toLowerCase();
+
+            if (seen.has(key)) {
+                return;
+            }
+
+            seen.add(key);
+            normalizedValues.push({
+                requirement_point: normalizedItem,
+                support_summary: normalizedItem,
+                evidence_reference: null,
+                evidence_quote: null,
+            });
+            return;
+        }
+
+        if (!item || typeof item !== 'object') {
+            return;
+        }
+
+        const requirementPoint = typeof item.requirement_point === 'string'
+            ? item.requirement_point.replace(/\s+/g, ' ').trim()
+            : '';
+        const supportSummary = typeof item.support_summary === 'string'
+            ? item.support_summary.replace(/\s+/g, ' ').trim()
+            : '';
+        const evidenceReference = typeof item.evidence_reference === 'string'
+            ? item.evidence_reference.replace(/\s+/g, ' ').trim()
+            : '';
+        const evidenceQuote = typeof item.evidence_quote === 'string'
+            ? item.evidence_quote.replace(/\s+/g, ' ').trim()
+            : '';
+
+        const normalizedRequirementPoint = requirementPoint !== '' ? requirementPoint : supportSummary;
+        const normalizedSupportSummary = supportSummary !== '' ? supportSummary : requirementPoint;
+
+        if (normalizedRequirementPoint === '' && normalizedSupportSummary === '') {
+            return;
+        }
+
+        const key = normalizedRequirementPoint.toLowerCase() || normalizedSupportSummary.toLowerCase();
+
+        if (seen.has(key)) {
+            return;
+        }
+
+        seen.add(key);
+        normalizedValues.push({
+            requirement_point: normalizedRequirementPoint,
+            support_summary: normalizedSupportSummary,
+            evidence_reference: evidenceReference !== '' ? evidenceReference : null,
+            evidence_quote: evidenceQuote !== '' ? evidenceQuote : null,
+        });
+    });
+
+    return normalizedValues;
 }
 
 function normalizeStringList(value) {
@@ -738,6 +820,9 @@ export default function AiShow({
             activeRequirementDraft.generatedAt !== null
             || normalizeAnswerDraftText(activeRequirementDraft.persistedText).trim() !== ''
         );
+    const activeRequirementDisplayIdentifier = activeRequirement?.current_requirement_identifier
+        ?? activeRequirement?.requirement_identifier
+        ?? '—';
     const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
     const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
     const activeRequirementMissingKnowledgeJudgeMeta = activeRequirementMissingKnowledge?.judge_status
@@ -842,7 +927,10 @@ export default function AiShow({
     };
 
     const startEditingRequirement = (requirement) => {
-        if (requirementUpdatesLocked) {
+        const isEditingCurrentRequirement = editingRequirementId !== null
+            && String(editingRequirementId) === String(requirement?.id ?? '');
+
+        if (requirementUpdatesLocked && !isEditingCurrentRequirement) {
             return;
         }
 
@@ -864,7 +952,7 @@ export default function AiShow({
     const submitRequirementEdit = (event) => {
         event.preventDefault();
 
-        if (!editingRequirement || !editingRequirement.edit_url || requirementEditForm.processing || requirementUpdatesLocked) {
+        if (!editingRequirement || !editingRequirement.edit_url || requirementEditForm.processing) {
             return;
         }
 
@@ -1969,6 +2057,10 @@ export default function AiShow({
                                                     return;
                                                 }
 
+                                                if (event.target instanceof Element && event.target.closest('button,a,input,select,textarea,label')) {
+                                                    return;
+                                                }
+
                                                 if (event.key === 'Enter' || event.key === ' ') {
                                                     event.preventDefault();
                                                     void openRequirementAnswerWorkspace(requirement);
@@ -2304,7 +2396,7 @@ export default function AiShow({
                                                         <div className="flex flex-wrap gap-2">
                                                             <button
                                                                 type="submit"
-                                                                disabled={requirementEditForm.processing || requirementUpdatesLocked}
+                                                                disabled={requirementEditForm.processing}
                                                                 className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {requirementEditForm.processing ? 'Lagrer...' : 'Lagre endringer'}
@@ -2568,7 +2660,7 @@ export default function AiShow({
                                                         <button
                                                             type="button"
                                                             onClick={() => startEditingRequirement(requirement)}
-                                                            disabled={requirementUpdatesLocked || isEditingThisRequirement}
+                                                            disabled={requirementUpdatesLocked && !isEditingThisRequirement}
                                                             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             Rediger
@@ -2626,7 +2718,7 @@ export default function AiShow({
                                 }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
-                                            Svarutkast
+                                            Svarutkast for krav {activeRequirementDisplayIdentifier}
                                         </div>
                                         <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
                                             {activeRequirement.approval_status_label ?? 'Utkast'}
@@ -2653,6 +2745,9 @@ export default function AiShow({
                                             <p className="mt-2 text-sm leading-6 text-slate-600">
                                                 Opprett og last opp et kunnskapsdokument som dekker dette kravet.
                                             </p>
+                                            <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                                                Procynia fant noe relatert kunnskap, men ikke dokumentasjon som dekker kravet direkte.
+                                            </p>
 
                                             {activeRequirementMissingKnowledge?.missing_knowledge_summary ? (
                                                 <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">
@@ -2671,17 +2766,53 @@ export default function AiShow({
                                                 </div>
                                             </div>
 
-                                            {(activeRequirementMissingKnowledge?.supported_points?.length ?? 0) > 0 || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
-                                                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                                                    {(activeRequirementMissingKnowledge?.supported_points?.length ?? 0) > 0 ? (
+                                            {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0
+                                                || (activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0
+                                                || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
+                                                <div className="mt-4 space-y-3">
+                                                    {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
                                                         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                Støttede punkter
+                                                                Direkte støttet
                                                             </div>
                                                             <ul className="mt-3 space-y-2">
-                                                                {activeRequirementMissingKnowledge.supported_points.map((point, index) => (
+                                                                {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
                                                                     <li key={`${point}-${index}`} className="flex gap-2">
                                                                         <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                                                        <span className="space-y-1">
+                                                                            <span className="block font-medium text-slate-900">
+                                                                                {point?.requirement_point ?? '—'}
+                                                                            </span>
+                                                                            {point?.support_summary ? (
+                                                                                <span className="block text-slate-700">
+                                                                                    {point.support_summary}
+                                                                                </span>
+                                                                            ) : null}
+                                                                            {point?.evidence_reference ? (
+                                                                                <span className="block text-xs text-slate-500">
+                                                                                    Bevis: {point.evidence_reference}
+                                                                                </span>
+                                                                            ) : point?.evidence_quote ? (
+                                                                                <span className="block text-xs text-slate-500">
+                                                                                    Bevis: {point.evidence_quote}
+                                                                                </span>
+                                                                            ) : null}
+                                                                        </span>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    ) : null}
+
+                                                    {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
+                                                        <div className="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                                Relatert, men ikke tilstrekkelig
+                                                            </div>
+                                                            <ul className="mt-3 space-y-2">
+                                                                {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
+                                                                    <li key={`${point}-${index}`} className="flex gap-2">
+                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
                                                                         <span>{point}</span>
                                                                     </li>
                                                                 ))}
@@ -2707,7 +2838,8 @@ export default function AiShow({
                                                 </div>
                                             ) : null}
 
-                                            {activeRequirementMissingKnowledge?.reasoning_summary ? (
+                                            {activeRequirementMissingKnowledge?.reasoning_summary
+                                                && activeRequirementMissingKnowledge?.judge_status !== 'failed' ? (
                                                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
                                                     {activeRequirementMissingKnowledge.reasoning_summary}
                                                 </div>
@@ -2735,7 +2867,7 @@ export default function AiShow({
                                         <>
                                             <label className="block space-y-2">
                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Svarutkast
+                                                    Svarutkast for krav {activeRequirementDisplayIdentifier}
                                                 </span>
                                                 <textarea
                                                     value={activeRequirementDraft?.text ?? ''}

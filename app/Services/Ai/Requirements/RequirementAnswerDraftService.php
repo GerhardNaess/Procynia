@@ -210,7 +210,12 @@ class RequirementAnswerDraftService
             'Use only the provided evidence, selected answer basis items, retrieved knowledge chunks, and grounding judge as factual basis.',
             'Use the selected answer basis items as the primary supplier-owned source material when drafting the answer.',
             'Use the retrieved knowledge chunks as the primary grounded source material for factual content.',
-            'If a capability, system, tool, process, certification, role, or commitment is not documented in the supplied knowledge context or is marked unsupported by the grounding judge, do not claim it.',
+            'If a capability, system, tool, process, certification, role, or commitment is not documented in the supplied knowledge context, do not claim it.',
+            'Use only directly_supported_points from the grounding judge as allowed claim candidates.',
+            'Each directly_supported_points item is a concrete evidence-backed object with requirement_point, support_summary, and evidence_reference or evidence_quote.',
+            'Stay within the evidence-backed requirement_point and support_summary for each allowed claim candidate.',
+            'Treat related_but_insufficient_points as context only, not as supplier evidence.',
+            'Do not use unsupported_points or related_but_insufficient_points as supplier claims.',
             'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
@@ -263,7 +268,7 @@ class RequirementAnswerDraftService
                 : 'Use the retrieved knowledge chunks and grounding judge as the factual foundation. Requirement wording is not evidence.',
             'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
             'grounding_judge_strategy' => is_array($groundingJudge)
-                ? 'The grounding judge is an internal guardrail. Use supported_points as allowed claim candidates. Do not use unsupported_points as supplier claims.'
+                ? 'The grounding judge is an internal guardrail. Use only directly_supported_points as allowed claim candidates. Treat related_but_insufficient_points as context only. Do not use related_but_insufficient_points or unsupported_points as supplier claims.'
                 : 'No grounding judge payload was supplied.',
             'grounding_judge' => $this->promptGroundingJudge($groundingJudge),
         ];
@@ -452,18 +457,82 @@ class RequirementAnswerDraftService
             return null;
         }
 
+        $directlySupportedPoints = $this->normalizeSupportedPointObjects(
+            data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
+        );
+        $relatedButInsufficientPoints = $this->normalizeStringList((array) data_get($groundingJudge, 'related_but_insufficient_points', []));
+        $unsupportedPoints = $this->normalizeStringList((array) data_get($groundingJudge, 'unsupported_points', []));
+
         return [
             'status' => in_array(data_get($groundingJudge, 'status'), ['supported', 'partial', 'unsupported'], true)
                 ? data_get($groundingJudge, 'status')
                 : null,
             'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
-            'supported_points' => $this->normalizeStringList((array) data_get($groundingJudge, 'supported_points', [])),
-            'unsupported_points' => $this->normalizeStringList((array) data_get($groundingJudge, 'unsupported_points', [])),
+            'directly_supported_points' => $directlySupportedPoints,
+            'related_but_insufficient_points' => $relatedButInsufficientPoints,
+            'unsupported_points' => $unsupportedPoints,
             'missing_knowledge_summary' => $this->normalizeNullableString(data_get($groundingJudge, 'missing_knowledge_summary')),
             'recommended_document_title' => $this->normalizeNullableString(data_get($groundingJudge, 'recommended_document_title')),
             'suggested_filename' => $this->normalizeNullableString(data_get($groundingJudge, 'suggested_filename')),
             'reasoning_summary' => $this->normalizeNullableString(data_get($groundingJudge, 'reasoning_summary')),
+            'supported_points' => $this->supportedPointRequirementPoints($directlySupportedPoints),
         ];
+    }
+
+    /**
+     * Purpose: Normalize the directly supported points into stable objects for the answer prompt.
+     * Inputs: Raw supported point payload.
+     * Returns: Deterministic supported point objects.
+     * Side effects: None.
+     */
+    private function normalizeSupportedPointObjects(mixed $values): array
+    {
+        if (! is_array($values)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($values as $value) {
+            if (is_string($value)) {
+                $normalizedValue = trim((string) $value);
+
+                if ($normalizedValue === '') {
+                    continue;
+                }
+
+                $normalized[] = [
+                    'requirement_point' => $normalizedValue,
+                    'support_summary' => $normalizedValue,
+                    'evidence_reference' => null,
+                    'evidence_quote' => null,
+                ];
+
+                continue;
+            }
+
+            if (! is_array($value)) {
+                continue;
+            }
+
+            $requirementPoint = $this->normalizeNullableString(data_get($value, 'requirement_point'));
+            $supportSummary = $this->normalizeNullableString(data_get($value, 'support_summary'));
+            $evidenceReference = $this->normalizeNullableString(data_get($value, 'evidence_reference'));
+            $evidenceQuote = $this->normalizeNullableString(data_get($value, 'evidence_quote'));
+
+            if ($requirementPoint === null || $supportSummary === null) {
+                continue;
+            }
+
+            $normalized[] = [
+                'requirement_point' => $requirementPoint,
+                'support_summary' => $supportSummary,
+                'evidence_reference' => $evidenceReference,
+                'evidence_quote' => $evidenceQuote,
+            ];
+        }
+
+        return $normalized;
     }
 
     /**
@@ -690,6 +759,39 @@ class RequirementAnswerDraftService
 
             $seen[$key] = true;
             $normalized[] = $item;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Convert supported point objects to a compatibility string list.
+     * Inputs: The supported point objects from the judge.
+     * Returns: A trimmed unique list of requirement point strings.
+     * Side effects: None.
+     */
+    private function supportedPointRequirementPoints(array $supportedPoints): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($supportedPoints as $supportedPoint) {
+            $requirementPoint = is_string($supportedPoint)
+                ? trim($supportedPoint)
+                : trim((string) data_get($supportedPoint, 'requirement_point', data_get($supportedPoint, 'support_summary', '')));
+
+            if ($requirementPoint === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($requirementPoint, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $requirementPoint;
         }
 
         return $normalized;

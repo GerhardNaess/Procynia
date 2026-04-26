@@ -723,6 +723,12 @@ class AiController extends Controller
             'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
         ]);
 
+        Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Judge context snapshot prepared.', $this->groundingJudgeContextDiagnostics(
+            $record->id,
+            $ownedRequirement->id,
+            $retrievedKnowledgeChunks,
+        ));
+
         try {
             $groundingJudge = $this->requirementGroundingJudgeService->judge(
                 $ownedRequirement,
@@ -743,12 +749,13 @@ class AiController extends Controller
             $syntheticJudge = [
                 'status' => 'unsupported',
                 'can_generate_answer' => false,
-                'supported_points' => [],
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => [],
                 'unsupported_points' => [],
                 'missing_knowledge_summary' => 'Procynia kunne ikke vurdere kunnskapsgrunnlaget sikkert.',
                 'recommended_document_title' => null,
                 'suggested_filename' => null,
-                'reasoning_summary' => 'Grounding judge unavailable.',
+                'reasoning_summary' => null,
             ];
             $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $syntheticJudge);
 
@@ -1670,16 +1677,22 @@ class AiController extends Controller
     private function judgeBlockedMissingKnowledgePayload(SavedNoticeAiRequirement $requirement, array $groundingJudge): array
     {
         $recommendation = $this->recommendationForGroundingJudge($requirement, $groundingJudge);
+        $directlySupportedPoints = $this->normalizeGroundingPointList(
+            data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
+        );
+        $relatedButInsufficientPoints = $this->normalizeStringList(data_get($groundingJudge, 'related_but_insufficient_points', []));
 
         return array_merge([
             'message' => 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget ikke dokumenterer kravet godt nok. Opprett eller last opp relevant kunnskapsdokumentasjon, og prøv deretter å lage svaret på nytt.',
             'missing_knowledge_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'missing_knowledge_summary'))
                 ?? 'Kunnskapsgrunnlaget dokumenterer ikke kravet sikkert nok til å generere et svar.',
-            'supported_points' => $this->normalizeStringList(data_get($groundingJudge, 'supported_points', [])),
+            'directly_supported_points' => $directlySupportedPoints,
+            'related_but_insufficient_points' => $relatedButInsufficientPoints,
             'unsupported_points' => $this->normalizeStringList(data_get($groundingJudge, 'unsupported_points', [])),
             'reasoning_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'reasoning_summary')),
             'judge_status' => $this->normalizeOptionalString(data_get($groundingJudge, 'status')),
             'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
+            'supported_points' => $this->normalizeGroundingPointRequirementPoints($directlySupportedPoints),
         ], $recommendation);
     }
 
@@ -1708,86 +1721,7 @@ class AiController extends Controller
      */
     private function recommendationForGroundingJudge(SavedNoticeAiRequirement $requirement, array $groundingJudge): array
     {
-        $fallback = $this->requirementKnowledgeDocumentRecommendationService->recommendForRequirement($requirement);
-        $recommendedTitle = $this->normalizeDocumentTitleCandidate(data_get($groundingJudge, 'recommended_document_title'));
-        $suggestedFilename = $this->normalizeFilenameCandidate(data_get($groundingJudge, 'suggested_filename'));
-
-        if ($recommendedTitle === null) {
-            return $fallback;
-        }
-
-        if ($suggestedFilename === null) {
-            $suggestedFilename = $this->suggestedFilenameForTitle($recommendedTitle);
-        }
-
-        return [
-            'recommended_document_title' => $recommendedTitle,
-            'suggested_filename' => $suggestedFilename,
-        ];
-    }
-
-    /**
-     * Purpose: Normalize a judge-proposed document title without inventing new content.
-     * Inputs: A raw title candidate.
-     * Returns: A safe title or null.
-     * Side effects: None.
-     */
-    private function normalizeDocumentTitleCandidate(mixed $value): ?string
-    {
-        $normalized = trim(preg_replace('/\s+/u', ' ', (string) ($value ?? '')) ?? '');
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        return Str::limit($normalized, 255, '');
-    }
-
-    /**
-     * Purpose: Normalize a judge-proposed filename safely.
-     * Inputs: A raw filename candidate.
-     * Returns: A safe filename or null.
-     * Side effects: None.
-     */
-    private function normalizeFilenameCandidate(mixed $value): ?string
-    {
-        $normalized = trim((string) ($value ?? ''));
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        $normalized = basename(str_replace('\\', '/', $normalized));
-        $normalized = preg_replace('/[^\pL\pN._-]+/u', '-', $normalized) ?? $normalized;
-        $normalized = preg_replace('/-+/u', '-', $normalized) ?? $normalized;
-        $normalized = trim($normalized, "-._ ");
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        if (! Str::endsWith(Str::lower($normalized), '.docx')) {
-            $normalized .= '.docx';
-        }
-
-        return Str::limit($normalized, 255, '');
-    }
-
-    /**
-     * Purpose: Build a stable filename from a document title.
-     * Inputs: A document title.
-     * Returns: A stable .docx filename.
-     * Side effects: None.
-     */
-    private function suggestedFilenameForTitle(string $title): string
-    {
-        $slug = Str::slug($title, '-');
-
-        if ($slug === '') {
-            $slug = 'dokumentasjon-for-udekket-krav';
-        }
-
-        return $slug.'.docx';
+        return $this->requirementKnowledgeDocumentRecommendationService->recommendForRequirement($requirement, $groundingJudge);
     }
 
     /**
@@ -1836,6 +1770,201 @@ class AiController extends Controller
         }
 
         return $normalized;
+    }
+
+    /**
+     * Purpose: Normalize grounding judge direct support points into stable objects.
+     * Inputs: A raw array-like payload from the judge.
+     * Returns: A deterministic list of supported point objects.
+     * Side effects: None.
+     */
+    private function normalizeGroundingPointList(mixed $values): array
+    {
+        if (! is_array($values)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($values as $value) {
+            if (! is_array($value)) {
+                continue;
+            }
+
+            $requirementPoint = $this->normalizeOptionalString(data_get($value, 'requirement_point'));
+            $supportSummary = $this->normalizeOptionalString(data_get($value, 'support_summary'));
+            $evidenceReference = $this->normalizeOptionalString(data_get($value, 'evidence_reference'));
+            $evidenceQuote = $this->normalizeOptionalString(data_get($value, 'evidence_quote'));
+
+            if ($requirementPoint === null && $supportSummary === null) {
+                continue;
+            }
+
+            $normalized[] = [
+                'requirement_point' => $requirementPoint ?? $supportSummary,
+                'support_summary' => $supportSummary ?? $requirementPoint,
+                'evidence_reference' => $evidenceReference,
+                'evidence_quote' => $evidenceQuote,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Convert normalized grounding points into a compatibility list of strings.
+     * Inputs: The normalized direct support points.
+     * Returns: A deterministic list of requirement point strings.
+     * Side effects: None.
+     */
+    private function normalizeGroundingPointRequirementPoints(array $points): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($points as $point) {
+            $text = trim((string) data_get($point, 'requirement_point', data_get($point, 'support_summary', '')));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($text, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $text;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Log a safe diagnostic snapshot of the grounding judge context.
+     * Inputs: The saved notice id, requirement id, and retrieved knowledge rows.
+     * Returns: A log payload with chunk ids, section context, and evidence-term probes.
+     * Side effects: None.
+     */
+    private function groundingJudgeContextDiagnostics(int $savedNoticeId, int $requirementId, Collection $retrievedKnowledgeChunks): array
+    {
+        $chunkSummaries = $retrievedKnowledgeChunks
+            ->map(function (array $row): array {
+                $contentPreview = (string) data_get($row, 'content_preview', '');
+
+                return [
+                    'chunk_id' => (int) data_get($row, 'chunk_id', 0),
+                    'chunk_index' => (int) data_get($row, 'chunk_index', 0),
+                    'section_title' => $this->normalizeOptionalString(data_get($row, 'section_title')),
+                    'section_path' => $this->normalizeOptionalString(data_get($row, 'section_path')),
+                    'topic' => $this->normalizeOptionalString(data_get($row, 'topic')),
+                    'sub_topic' => $this->normalizeOptionalString(data_get($row, 'sub_topic')),
+                    'keywords' => $this->normalizeStringList((array) data_get($row, 'keywords', [])),
+                    'evidence_terms' => $this->diagnosticEvidenceTermsFromText($contentPreview),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $probeTerms = collect($chunkSummaries)
+            ->pluck('evidence_terms')
+            ->flatten()
+            ->filter(static fn (mixed $term): bool => is_string($term) && trim($term) !== '')
+            ->map(static fn (string $term): string => trim($term))
+            ->unique(fn (string $term): string => mb_strtolower($term, 'UTF-8'))
+            ->values()
+            ->all();
+
+        $compactedContext = json_encode($chunkSummaries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        $contextContainsProbeTerms = $this->contextContainsTerms($compactedContext, $probeTerms);
+
+        return [
+            'saved_notice_id' => $savedNoticeId,
+            'requirement_id' => $requirementId,
+            'retrieved_chunk_count' => $retrievedKnowledgeChunks->count(),
+            'retrieved_chunk_ids' => array_values(array_filter(array_map(
+                static fn (array $row): int => (int) data_get($row, 'chunk_id', 0),
+                $retrievedKnowledgeChunks->all(),
+            ))),
+            'retrieved_chunk_context' => $chunkSummaries,
+            'prompt_context_contains_key_evidence_terms' => $contextContainsProbeTerms,
+        ];
+    }
+
+    /**
+     * Purpose: Derive a compact list of diagnostic evidence terms from safe text.
+     * Inputs: A compact content preview.
+     * Returns: A bounded list of likely evidence terms.
+     * Side effects: None.
+     */
+    private function diagnosticEvidenceTermsFromText(string $text): array
+    {
+        $normalizedText = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+
+        if ($normalizedText === '') {
+            return [];
+        }
+
+        preg_match_all('/\b(?:[A-ZÆØÅ0-9][A-Za-z0-9ÆØÅæøå]+(?:\s+[A-Z0-9ÆØÅ][A-Za-z0-9ÆØÅæøå\-]+){0,3}|[A-ZÆØÅ0-9]{2,}(?:\/[A-ZÆØÅ0-9]{2,})+)\b/u', $normalizedText, $matches);
+
+        if (! is_array($matches[0] ?? null)) {
+            return [];
+        }
+
+        $terms = [];
+        $seen = [];
+
+        foreach ($matches[0] as $term) {
+            $term = trim((string) $term);
+
+            if ($term === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($term, 'UTF-8');
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $terms[] = $term;
+
+            if (count($terms) >= 8) {
+                break;
+            }
+        }
+
+        return $terms;
+    }
+
+    /**
+     * Purpose: Check whether a compact context string contains the probe terms.
+     * Inputs: The serialized compact context and the probe terms.
+     * Returns: True when at least one probe term is present.
+     * Side effects: None.
+     */
+    private function contextContainsTerms(string $context, array $probeTerms): bool
+    {
+        if (trim($context) === '' || $probeTerms === []) {
+            return false;
+        }
+
+        foreach ($probeTerms as $term) {
+            $normalizedTerm = trim((string) $term);
+
+            if ($normalizedTerm === '') {
+                continue;
+            }
+
+            if (str_contains($context, $normalizedTerm)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

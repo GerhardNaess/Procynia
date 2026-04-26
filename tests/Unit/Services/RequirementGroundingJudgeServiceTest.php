@@ -20,7 +20,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_parses_and_validates_supported_judge_payloads(): void
+    public function test_it_parses_and_validates_supported_judge_payloads_with_equivalent_technical_evidence(): void
     {
         $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
@@ -30,18 +30,31 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
                 return data_get($payload, 'text.format.name') === 'requirement_grounding_judge'
                     && is_array($inputPayload)
-                    && data_get($inputPayload, 'requirement.text') === 'Leverandøren skal beskrive ITSM/SPOC.'
+                    && data_get($inputPayload, 'requirement.text') === 'Leverandøren skal støtte telemetri fra Microsoft 365 og Azure.'
                     && data_get($inputPayload, 'coverage.level') === 'amber'
-                    && data_get($inputPayload, 'retrieved_knowledge_chunks.0.section_path') === 'SOC > Servicedesk > SPOC';
+                    && data_get($inputPayload, 'retrieved_knowledge_chunks.0.section_path') === 'SOC > Logganalyse'
+                    && str_contains((string) data_get($inputPayload, 'retrieved_knowledge_chunks.0.content_preview', ''), 'Microsoft 365')
+                    && str_contains((string) data_get($inputPayload, 'retrieved_knowledge_chunks.0.content_preview', ''), 'Azure')
+                    && str_contains((string) data_get($inputPayload, 'judging_rules.2', ''), 'equivalent technical wording')
+                    && data_get($inputPayload, 'examples.directly_supported.requirement_point') === 'Telemetri fra Microsoft 365 og Azure.'
+                    && data_get($inputPayload, 'examples.directly_supported.evidence_reference') !== null;
             }))
             ->andReturn($this->openAiResponse([
                 'status' => 'supported',
                 'can_generate_answer' => true,
-                'supported_points' => ['  ITSM er dokumentert.  ', 'SPOC er dokumentert.'],
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Telemetri fra Microsoft 365 og Azure.',
+                        'support_summary' => 'Kunnskapsgrunnlaget beskriver innsamling av data fra skytjenester og korrelasjon av aktivitet fra Microsoft 365 og Azure.',
+                        'evidence_reference' => 'Chunk 12 · SOC > Logganalyse',
+                        'evidence_quote' => 'samler inn data fra skytjenester ... korrelere aktivitet fra Microsoft 365, Azure ...',
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
                 'unsupported_points' => [],
                 'missing_knowledge_summary' => 'Grunnlaget er tilstrekkelig.',
-                'recommended_document_title' => 'Servicedesk og SPOC',
-                'suggested_filename' => 'servicedesk-og-spoc.docx',
+                'recommended_document_title' => 'Logganalyse og telemetri',
+                'suggested_filename' => 'logganalyse-og-telemetri.docx',
                 'reasoning_summary' => 'Relevant støtte er til stede.',
             ]));
 
@@ -54,17 +67,17 @@ class RequirementGroundingJudgeServiceTest extends TestCase
                 [
                     'score' => 0.74,
                     'knowledge_item_id' => 11,
-                    'document_title' => 'Servicedesk',
-                    'knowledge_item_summary' => 'Dokumentasjon om servicedesk og SPOC.',
+                    'document_title' => 'Logganalyse',
+                    'knowledge_item_summary' => 'Dokumentasjon om datainnsamling og korrelasjon på tvers av kilder.',
                     'chunk_id' => 101,
                     'chunk_index' => 0,
-                    'heading_path' => 'Dokumentstruktur',
-                    'topic' => 'Servicedesk',
-                    'sub_topic' => 'SPOC',
-                    'keywords' => ['ITSM', 'SPOC'],
-                    'section_title' => 'SPOC',
-                    'section_path' => 'SOC > Servicedesk > SPOC',
-                    'content_preview' => 'Servicedesk håndterer saker i ITSM/SPOC.',
+                    'heading_path' => 'SOC > Logganalyse',
+                    'topic' => 'Logganalyse',
+                    'sub_topic' => 'Telemetri',
+                    'keywords' => ['Microsoft 365', 'Azure', 'logger'],
+                    'section_title' => 'Logganalyse',
+                    'section_path' => 'SOC > Logganalyse',
+                    'content_preview' => 'Leverandøren samler inn data fra skytjenester og korrelerer aktivitet fra Microsoft 365 og Azure på tvers av samtlige logger.',
                 ],
             ]),
             [
@@ -76,11 +89,16 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
         $this->assertSame('supported', $result['status']);
         $this->assertTrue($result['can_generate_answer']);
-        $this->assertSame(['ITSM er dokumentert.', 'SPOC er dokumentert.'], $result['supported_points']);
+        $this->assertSame('Telemetri fra Microsoft 365 og Azure.', $result['directly_supported_points'][0]['requirement_point']);
+        $this->assertSame('Kunnskapsgrunnlaget beskriver innsamling av data fra skytjenester og korrelasjon av aktivitet fra Microsoft 365 og Azure.', $result['directly_supported_points'][0]['support_summary']);
+        $this->assertSame('Chunk 12 · SOC > Logganalyse', $result['directly_supported_points'][0]['evidence_reference']);
+        $this->assertSame('samler inn data fra skytjenester ... korrelere aktivitet fra Microsoft 365, Azure ...', $result['directly_supported_points'][0]['evidence_quote']);
+        $this->assertSame([], $result['related_but_insufficient_points']);
         $this->assertSame([], $result['unsupported_points']);
+        $this->assertSame(['Telemetri fra Microsoft 365 og Azure.'], $result['supported_points']);
         $this->assertSame('Grunnlaget er tilstrekkelig.', $result['missing_knowledge_summary']);
-        $this->assertSame('Servicedesk og SPOC', $result['recommended_document_title']);
-        $this->assertSame('servicedesk-og-spoc.docx', $result['suggested_filename']);
+        $this->assertSame('Logganalyse og telemetri', $result['recommended_document_title']);
+        $this->assertSame('logganalyse-og-telemetri.docx', $result['suggested_filename']);
         $this->assertSame('Relevant støtte er til stede.', $result['reasoning_summary']);
     }
 
@@ -92,7 +110,15 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             ->andReturn($this->openAiResponse([
                 'status' => 'partial',
                 'can_generate_answer' => false,
-                'supported_points' => ['ITSM er dokumentert.'],
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'ITSM er dokumentert.',
+                        'support_summary' => 'Etterspurt ITSM-støtte finnes, men ikke for alle konkrete kravpunkter.',
+                        'evidence_reference' => 'Chunk 4 · SOC > Servicedesk',
+                        'evidence_quote' => 'ITSM brukes i servicedesk-arbeidet.',
+                    ],
+                ],
+                'related_but_insufficient_points' => ['Generell overvåkning er dokumentert.'],
                 'unsupported_points' => ['SPOC er ikke dokumentert.'],
                 'missing_knowledge_summary' => 'SPOC mangler.',
                 'recommended_document_title' => null,
@@ -111,9 +137,74 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
         $this->assertSame('partial', $result['status']);
         $this->assertFalse($result['can_generate_answer']);
-        $this->assertSame(['ITSM er dokumentert.'], $result['supported_points']);
+        $this->assertSame('ITSM er dokumentert.', $result['directly_supported_points'][0]['requirement_point']);
+        $this->assertSame('Etterspurt ITSM-støtte finnes, men ikke for alle konkrete kravpunkter.', $result['directly_supported_points'][0]['support_summary']);
+        $this->assertSame(['Generell overvåkning er dokumentert.'], $result['related_but_insufficient_points']);
         $this->assertSame(['SPOC er ikke dokumentert.'], $result['unsupported_points']);
         $this->assertSame('SPOC mangler.', $result['missing_knowledge_summary']);
+    }
+
+    public function test_it_rejects_supported_payloads_without_direct_support_evidence(): void
+    {
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')
+            ->once()
+            ->andReturn($this->openAiResponse([
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Telemetri fra Microsoft 365 og Azure.',
+                        'support_summary' => 'Kunnskapsgrunnlaget beskriver relevant logganalyse.',
+                        'evidence_reference' => null,
+                        'evidence_quote' => null,
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => 'Invalid output.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Invalid output.',
+            ]));
+
+        $service = new RequirementGroundingJudgeService($client);
+
+        $this->expectException(RuntimeException::class);
+
+        $service->judge($this->requirementFixture(), collect(), [
+            'level' => 'amber',
+            'max_score' => 0.74,
+            'sources_count' => 1,
+        ]);
+    }
+
+    public function test_it_rejects_supported_payloads_without_directly_supported_points(): void
+    {
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')
+            ->once()
+            ->andReturn($this->openAiResponse([
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => ['Generell SOC/IRT-overvåkning er dokumentert.'],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => 'Invalid output.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Invalid output.',
+            ]));
+
+        $service = new RequirementGroundingJudgeService($client);
+
+        $this->expectException(RuntimeException::class);
+
+        $service->judge($this->requirementFixture(), collect(), [
+            'level' => 'amber',
+            'max_score' => 0.74,
+            'sources_count' => 1,
+        ]);
     }
 
     public function test_it_rejects_inconsistent_judge_payloads(): void
@@ -124,7 +215,8 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             ->andReturn($this->openAiResponse([
                 'status' => 'supported',
                 'can_generate_answer' => false,
-                'supported_points' => ['ITSM er dokumentert.'],
+                'directly_supported_points' => ['ITSM er dokumentert.'],
+                'related_but_insufficient_points' => [],
                 'unsupported_points' => [],
                 'missing_knowledge_summary' => 'Invalid output.',
                 'recommended_document_title' => null,
@@ -174,14 +266,14 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'id' => 42,
             'saved_notice_id' => 7,
             'requirement_identifier' => '1.1',
-            'requirement_text' => 'Leverandøren skal beskrive ITSM/SPOC.',
+            'requirement_text' => 'Leverandøren skal støtte telemetri fra Microsoft 365 og Azure.',
             'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
             'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
             'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_PENDING,
             'current_requirement_snapshot' => [
-                'topic' => 'Servicedesk',
-                'sub_topic' => 'SPOC',
-                'keywords' => ['ITSM', 'SPOC'],
+                'topic' => 'Logganalyse',
+                'sub_topic' => 'Telemetri',
+                'keywords' => ['Microsoft 365', 'Azure'],
             ],
             'original_candidate_snapshot' => [],
         ]);
