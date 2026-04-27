@@ -13,6 +13,18 @@ class RequirementKnowledgeMatcher
 
     private const HEURISTIC_BOOST = 2;
 
+    private const METADATA_MAX_BOOST = 2.5;
+
+    private const METADATA_FIELD_WEIGHTS = [
+        'keywords' => 1.2,
+        'topic' => 1.0,
+        'sub_topic' => 0.85,
+        'section_title' => 0.75,
+        'section_path' => 0.6,
+        'knowledge_item_title' => 0.55,
+        'knowledge_item_summary' => 0.3,
+    ];
+
     private const STOPWORDS = [
         'and',
         'are',
@@ -83,6 +95,7 @@ class RequirementKnowledgeMatcher
                 }
 
                 $score = count(array_intersect($requirementTokens, $chunkTokens));
+                $score += $this->metadataBoostScore($requirementTokens, $chunk);
                 $contentType = (string) data_get($chunk, 'content_type', '');
 
                 if ($contentType !== '' && isset($heuristicBoosts[$contentType])) {
@@ -271,5 +284,60 @@ class RequirementKnowledgeMatcher
         }
 
         return $boosts;
+    }
+
+    /**
+     * Purpose: Calculate a conservative metadata boost for a chunk.
+     * Inputs: Requirement tokens and one retrieved chunk row.
+     * Returns: A small additive score based on overlapping metadata terms.
+     * Side effects: None.
+     */
+    private function metadataBoostScore(array $requirementTokens, array $chunk): float
+    {
+        if ($requirementTokens === []) {
+            return 0.0;
+        }
+
+        $termWeights = [];
+
+        foreach (self::METADATA_FIELD_WEIGHTS as $field => $fieldWeight) {
+            $metadataTerms = $this->metadataTermsFromValue(data_get($chunk, $field));
+
+            if ($metadataTerms === []) {
+                continue;
+            }
+
+            foreach (array_intersect($requirementTokens, $metadataTerms) as $term) {
+                $termWeights[$term] = max($termWeights[$term] ?? 0.0, (float) $fieldWeight);
+            }
+        }
+
+        if ($termWeights === []) {
+            return 0.0;
+        }
+
+        return min(array_sum($termWeights), self::METADATA_MAX_BOOST);
+    }
+
+    /**
+     * Purpose: Normalize metadata values into comparable terms.
+     * Inputs: A scalar metadata value or an array of metadata values.
+     * Returns: A de-duplicated token list ready for overlap checks.
+     * Side effects: None.
+     */
+    private function metadataTermsFromValue(mixed $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            $value = implode(' ', array_map(
+                static fn (mixed $item): string => trim((string) $item),
+                $value,
+            ));
+        }
+
+        return $this->tokenize($this->normalizeText((string) $value));
     }
 }

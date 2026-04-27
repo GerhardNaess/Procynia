@@ -1766,7 +1766,7 @@ export default function AiShow({
                     </div>
                 </section>
 
-                <div className="grid gap-5 lg:grid-cols-2">
+                <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
                     <section className="lg:col-span-2 rounded-[22px] border border-slate-200 bg-slate-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="flex flex-wrap items-end justify-between gap-3">
                             <div className="space-y-1">
@@ -1857,7 +1857,7 @@ export default function AiShow({
                         </div>
                     </section>
 
-                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
@@ -2010,7 +2010,7 @@ export default function AiShow({
                                 </p>
                             </div>
                         ) : (
-                            <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:max-h-[38rem]">
+                            <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:min-h-0 lg:max-h-none lg:flex-1">
                                 {requirementRows.map((requirement) => {
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
@@ -2707,7 +2707,7 @@ export default function AiShow({
                         )}
                     </section>
 
-                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
                         <div className="space-y-5">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
