@@ -54,6 +54,8 @@ class KnowledgeItemChunk extends Model
         'keywords',
         'section_title',
         'section_path',
+        'heading_path',
+        'chunk_type',
         'matched_terms',
         'summary_for_retrieval',
         'confidence_score',

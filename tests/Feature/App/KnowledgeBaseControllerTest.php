@@ -8,6 +8,7 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\OpenAi\EmbeddingService;
 use Illuminate\Http\UploadedFile;
@@ -27,6 +28,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
+        $this->bindKnowledgeChunkBoundaryService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulEmbeddingService();
     }
@@ -140,6 +142,63 @@ class KnowledgeBaseControllerTest extends TestCase
             array_fill(0, $chunks->count(), KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW),
             $chunks->pluck('review_status')->all(),
         );
+    }
+
+    public function test_knowledge_document_upload_uses_structural_chunking_and_persists_heading_paths_and_offsets(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Four Structured AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('structured-pipeline.docx', [
+                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
+                ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
+                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Underseksjon A', 'style' => 'Heading2'],
+                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
+                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'structured-pipeline.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(2, $chunks->count());
+        $this->assertSame(0, (int) $chunks[0]->start_offset);
+        $this->assertGreaterThan((int) $chunks[0]->start_offset, (int) $chunks[0]->end_offset);
+        $this->assertSame((int) $chunks[0]->end_offset, (int) $chunks[1]->start_offset);
+        $this->assertSame('Strategisk samhandling', $chunks[0]->heading_path);
+        $this->assertSame('semantic', $chunks[0]->chunk_type);
+        $this->assertSame('Andre hovedseksjon', $chunks[1]->heading_path);
+        $this->assertSame('semantic', $chunks[1]->chunk_type);
+        $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Andre hovedseksjon', (string) $chunks[1]->content);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === 'Strategisk samhandling'
+                && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
+                && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
+        });
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
@@ -685,6 +744,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('knowledge_item_id', $document->id)
             ->orderBy('chunk_index')
             ->firstOrFail();
+        $originalTitle = $chunk->fresh()->title;
 
         $response = $this->actingAs($context['user'])->patch(route('app.ai.knowledge-base.chunks.metadata.update', [
             'knowledgeItem' => $document->id,
@@ -697,7 +757,8 @@ class KnowledgeBaseControllerTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors(['title']);
-        $this->assertNull($chunk->fresh()->title);
+        $this->assertSame($originalTitle, $chunk->fresh()->title);
+        $this->assertLessThanOrEqual(255, mb_strlen((string) $chunk->fresh()->title, 'UTF-8'));
     }
 
     public function test_knowledge_document_summary_can_be_updated_from_the_show_page(): void
@@ -945,6 +1006,24 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function createDocxUpload(string $filename, string $text): UploadedFile
     {
+        return $this->createDocxUploadWithBlocks($filename, [
+            [
+                'text' => $text,
+                'style' => null,
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Create a DOCX fixture with explicit structured blocks for upload tests.
+     * Inputs: The client filename and ordered paragraph/table blocks.
+     * Returns: A test uploaded file backed by a real DOCX archive.
+     * Side effects: Writes a temporary ZIP file to the system temp directory.
+     *
+     * @param array<int, array<string, mixed>> $blocks
+     */
+    private function createDocxUploadWithBlocks(string $filename, array $blocks): UploadedFile
+    {
         $path = tempnam(sys_get_temp_dir(), 'procynia-docx-');
 
         if ($path === false) {
@@ -958,11 +1037,19 @@ class KnowledgeBaseControllerTest extends TestCase
             throw new RuntimeException('Unable to create a DOCX archive for testing.');
         }
 
-        $escapedText = htmlspecialchars($text, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $bodyXml = [];
+
+        foreach ($blocks as $block) {
+            $text = (string) data_get($block, 'text', '');
+            $style = data_get($block, 'style');
+
+            $bodyXml[] = $this->docxBodyBlockXml($text, is_string($style) ? $style : null);
+        }
+
         $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             .'<w:body>'
-            .'<w:p><w:r><w:t>'.$escapedText.'</w:t></w:r></w:p>'
+            .implode("\n", $bodyXml)
             .'</w:body>'
             .'</w:document>';
 
@@ -976,6 +1063,37 @@ class KnowledgeBaseControllerTest extends TestCase
             null,
             true,
         );
+    }
+
+    /**
+     * Purpose: Build one DOCX body block for a structured fixture.
+     * Inputs: The visible text and optional paragraph style name.
+     * Returns: A WordprocessingML paragraph or table block.
+     * Side effects: None.
+     */
+    private function docxBodyBlockXml(string $text, ?string $style = null): string
+    {
+        if ($style === 'Table') {
+            return <<<'XML'
+<w:tbl>
+    <w:tr>
+        <w:tc><w:p><w:r><w:t>Tabell A</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Tabell B</w:t></w:r></w:p></w:tc>
+    </w:tr>
+    <w:tr>
+        <w:tc><w:p><w:r><w:t>Rad 1</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Rad 2</w:t></w:r></w:p></w:tc>
+    </w:tr>
+</w:tbl>
+XML;
+        }
+
+        $escapedText = htmlspecialchars($text, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $styleXml = $style !== null && trim($style) !== ''
+            ? '<w:pPr><w:pStyle w:val="'.htmlspecialchars($style, ENT_XML1 | ENT_COMPAT, 'UTF-8').'"/></w:pPr>'
+            : '';
+
+        return '<w:p>'.$styleXml.'<w:r><w:t>'.$escapedText.'</w:t></w:r></w:p>';
     }
 
     /**
@@ -1047,6 +1165,169 @@ class KnowledgeBaseControllerTest extends TestCase
             });
 
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic knowledge chunk boundary service for upload tests.
+     * Inputs: Optional flag to group parsed elements by primary heading.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindKnowledgeChunkBoundaryService(bool $groupByPrimaryHeading = false): void
+    {
+        $service = Mockery::mock(AiKnowledgeChunkBoundaryService::class);
+        $service->shouldReceive('suggestBoundaries')
+            ->andReturnUsing(function (int $customerId, array $documentContext, array $structure) use ($groupByPrimaryHeading): array {
+                $sourceText = trim((string) data_get($structure, 'source_text', ''));
+                $elements = array_values(array_filter(
+                    (array) data_get($structure, 'elements', []),
+                    static fn ($element): bool => is_array($element),
+                ));
+
+                if ($sourceText === '' || $elements === []) {
+                    return [
+                        'model' => 'deterministic-boundary',
+                        'analysis_groups' => [],
+                    ];
+                }
+
+                $groups = $groupByPrimaryHeading
+                    ? $this->groupKnowledgeElementsByPrimaryHeading($elements)
+                    : [$elements];
+
+                $analysisGroups = [];
+
+                foreach ($groups as $groupIndex => $groupElements) {
+                    if (! is_array($groupElements) || $groupElements === []) {
+                        continue;
+                    }
+
+                    $groupStart = (int) data_get($groupElements[0], 'start_offset', 0);
+                    $groupEnd = (int) data_get($groupElements[count($groupElements) - 1], 'end_offset', $groupStart);
+                    $groupText = trim((string) mb_substr($sourceText, $groupStart, max(0, $groupEnd - $groupStart), 'UTF-8'));
+
+                    $analysisGroups[] = [
+                        'group_index' => $groupIndex,
+                        'start_offset' => $groupStart,
+                        'end_offset' => $groupEnd,
+                        'text' => $groupText,
+                        'word_count' => $this->wordCount($groupText),
+                        'elements' => $groupElements,
+                        'previous_group_tail' => null,
+                        'next_group_head' => null,
+                        'suggested_chunks' => [],
+                        'request_id' => null,
+                        'response_id' => null,
+                    ];
+                }
+
+                $groupCount = count($analysisGroups);
+
+                for ($index = 0; $index < $groupCount; $index++) {
+                    $analysisGroups[$index]['previous_group_tail'] = $index > 0
+                        ? Str::limit(trim((string) data_get($analysisGroups[$index - 1], 'text', '')), 180, '')
+                        : null;
+                    $analysisGroups[$index]['next_group_head'] = $index < $groupCount - 1
+                        ? Str::limit(trim((string) data_get($analysisGroups[$index + 1], 'text', '')), 180, '')
+                        : null;
+                }
+
+                return [
+                    'model' => 'deterministic-boundary',
+                    'analysis_groups' => $analysisGroups,
+                ];
+            });
+
+        $this->app->instance(AiKnowledgeChunkBoundaryService::class, $service);
+    }
+
+    /**
+     * Purpose: Group parsed elements by their top-level heading path.
+     * Inputs: The ordered structural elements from the knowledge document parser.
+     * Returns: Ordered element groups where H2 content stays inside the enclosing H1 group.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function groupKnowledgeElementsByPrimaryHeading(array $elements): array
+    {
+        $groups = [];
+        $currentGroup = [];
+        $currentPrimaryHeading = null;
+
+        foreach ($elements as $element) {
+            if (! is_array($element)) {
+                continue;
+            }
+
+            $text = trim((string) data_get($element, 'text', ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $elementPrimaryHeading = $this->primaryHeadingFromPath(data_get($element, 'heading_path'));
+
+            if ($currentGroup !== [] && $currentPrimaryHeading !== null && $elementPrimaryHeading !== null && $elementPrimaryHeading !== $currentPrimaryHeading) {
+                $groups[] = $currentGroup;
+                $currentGroup = [];
+                $currentPrimaryHeading = null;
+            }
+
+            if ($currentPrimaryHeading === null && $elementPrimaryHeading !== null) {
+                $currentPrimaryHeading = $elementPrimaryHeading;
+            }
+
+            $currentGroup[] = $element;
+        }
+
+        if ($currentGroup !== []) {
+            $groups[] = $currentGroup;
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Purpose: Resolve the primary heading segment from a heading path.
+     * Inputs: A heading path string or null.
+     * Returns: The top-level heading segment or null when no heading exists.
+     * Side effects: None.
+     */
+    private function primaryHeadingFromPath(mixed $headingPath): ?string
+    {
+        $text = trim((string) ($headingPath ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        $parts = array_values(array_filter(array_map(
+            static fn (string $part): string => trim($part),
+            explode(' > ', $text),
+        ), static fn (string $part): bool => $part !== ''));
+
+        return $parts !== [] ? $parts[0] : null;
+    }
+
+    /**
+     * Purpose: Count the approximate number of words in a text block.
+     * Inputs: Raw text.
+     * Returns: The word count.
+     * Side effects: None.
+     */
+    private function wordCount(string $text): int
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $text) ?? '');
+
+        if ($normalized === '') {
+            return 0;
+        }
+
+        $parts = preg_split('/\s+/u', $normalized, -1, PREG_SPLIT_NO_EMPTY);
+
+        return is_array($parts) ? count($parts) : 0;
     }
 
     /**

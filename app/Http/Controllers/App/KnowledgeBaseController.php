@@ -7,8 +7,11 @@ use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\User;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
-use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
+use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
+use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
+use App\Services\Knowledge\KnowledgeChunkBuilder;
+use App\Services\Knowledge\KnowledgeDocumentStructureParser;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Support\CustomerContext;
@@ -31,7 +34,10 @@ class KnowledgeBaseController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
-        private readonly DocumentChunker $documentChunker,
+        private readonly KnowledgeDocumentStructureParser $knowledgeDocumentStructureParser,
+        private readonly AiKnowledgeChunkBoundaryService $aiKnowledgeChunkBoundaryService,
+        private readonly KnowledgeChunkBoundaryValidator $knowledgeChunkBoundaryValidator,
+        private readonly KnowledgeChunkBuilder $knowledgeChunkBuilder,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
     ) {
@@ -153,6 +159,7 @@ class KnowledgeBaseController extends Controller
 
             $content = trim((string) data_get($candidate, 'content', ''));
             $title = trim((string) data_get($candidate, 'title', ''));
+            $headingPath = trim((string) data_get($candidate, 'heading_path', ''));
             $keywords = $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [];
 
             $scoredResults[] = [
@@ -161,7 +168,9 @@ class KnowledgeBaseController extends Controller
                 'chunk_id' => (int) data_get($candidate, 'chunk_id'),
                 'chunk_index' => (int) data_get($candidate, 'chunk_index', 0),
                 'document_title' => (string) data_get($candidate, 'knowledge_item_title', ''),
-                'heading_path' => $title !== '' ? $title : sprintf('Chunk %d', ((int) data_get($candidate, 'chunk_index', 0)) + 1),
+                'heading_path' => $headingPath !== ''
+                    ? $headingPath
+                    : ($title !== '' ? $title : sprintf('Chunk %d', ((int) data_get($candidate, 'chunk_index', 0)) + 1)),
                 'topic' => (string) data_get($candidate, 'topic', ''),
                 'sub_topic' => (string) data_get($candidate, 'sub_topic', ''),
                 'keywords' => $keywords,
@@ -324,8 +333,23 @@ class KnowledgeBaseController extends Controller
 
             $absolutePath = Storage::disk('local')->path($storedPath);
             $extractedText = $this->documentTextExtractor->extractText($absolutePath);
-            $structuredBlocks = $this->documentTextExtractor->extractStructuredText($absolutePath);
             $extractionFailed = trim($extractedText) === '';
+            $structure = $this->knowledgeDocumentStructureParser->parse($absolutePath);
+            $boundaryAnalysis = $this->aiKnowledgeChunkBoundaryService->suggestBoundaries($customerId, [
+                'document_title' => $document->getClientOriginalName(),
+                'original_filename' => $document->getClientOriginalName(),
+                'content_type' => $payload['document_type'],
+                'document_type' => $payload['document_type'],
+                'summary' => null,
+            ], $structure);
+            $validatedChunkPlans = $this->knowledgeChunkBoundaryValidator->validate(
+                $structure,
+                (array) data_get($boundaryAnalysis, 'analysis_groups', []),
+            );
+            $chunkPayloads = $this->knowledgeChunkBuilder->build(
+                (string) data_get($structure, 'source_text', ''),
+                $validatedChunkPlans,
+            );
 
             $result = DB::transaction(function () use (
                 $customerId,
@@ -333,7 +357,7 @@ class KnowledgeBaseController extends Controller
                 $request,
                 $storedPath,
                 $extractedText,
-                $structuredBlocks,
+                $chunkPayloads,
                 $extractionFailed,
             ): array {
                 $knowledgeDocument = KnowledgeItem::query()->create([
@@ -361,7 +385,7 @@ class KnowledgeBaseController extends Controller
 
                 return [
                     'knowledge_document' => $knowledgeDocument,
-                    'chunks' => $this->syncChunks($knowledgeDocument, $structuredBlocks),
+                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads),
                 ];
             });
 
@@ -740,6 +764,8 @@ class KnowledgeBaseController extends Controller
                         'keywords' => $chunk->keywords,
                         'section_title' => $chunk->section_title,
                         'section_path' => $chunk->section_path,
+                        'heading_path' => $chunk->heading_path,
+                        'chunk_type' => $chunk->chunk_type,
                         'matched_terms' => $chunk->matched_terms,
                         'summary_for_retrieval' => $chunk->summary_for_retrieval,
                         'confidence_score' => $chunk->confidence_score,
@@ -787,15 +813,14 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
-     * Purpose: Regenerate deterministic chunks for one knowledge document.
-     * Inputs: The knowledge document and its structured text blocks.
+     * Purpose: Persist the final knowledge chunks for one knowledge document.
+     * Inputs: The knowledge document and the validated chunk payloads.
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, array $structuredBlocks): Collection
+    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads): Collection
     {
         $knowledgeDocument->chunks()->delete();
-        $chunkPayloads = $this->documentChunker->chunkStructured($structuredBlocks);
 
         if ($chunkPayloads === []) {
             return collect();
@@ -806,11 +831,17 @@ class KnowledgeBaseController extends Controller
                     static fn (array $chunkPayload, int $chunkIndex): array => [
                         'chunk_index' => $chunkIndex,
                         'content' => (string) ($chunkPayload['content'] ?? ''),
-                        'start_offset' => (int) ($chunkPayload['char_start'] ?? 0),
-                        'end_offset' => (int) ($chunkPayload['char_end'] ?? 0),
+                        'start_offset' => (int) ($chunkPayload['start_offset'] ?? 0),
+                        'end_offset' => (int) ($chunkPayload['end_offset'] ?? 0),
                         'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
                         'section_title' => $chunkPayload['section_title'] ?? null,
                         'section_path' => $chunkPayload['section_path'] ?? null,
+                        'heading_path' => $chunkPayload['heading_path'] ?? null,
+                        'chunk_type' => $chunkPayload['chunk_type'] ?? null,
+                        'title' => $chunkPayload['title'] ?? null,
+                        'topic' => $chunkPayload['topic'] ?? null,
+                        'sub_topic' => $chunkPayload['sub_topic'] ?? null,
+                        'keywords' => $chunkPayload['keywords'] ?? null,
                     ],
                     $chunkPayloads,
                     array_keys($chunkPayloads),

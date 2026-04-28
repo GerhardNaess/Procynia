@@ -1570,6 +1570,8 @@ class AiController extends Controller
                 'chunk_index' => (int) $chunk->chunk_index,
                 'content' => (string) $chunk->content,
                 'title' => (string) ($chunk->title ?? ''),
+                'heading_path' => (string) ($chunk->heading_path ?? $chunk->section_path ?? $chunk->title ?? ''),
+                'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),
                 'topic' => (string) ($chunk->topic ?? ''),
                 'sub_topic' => (string) ($chunk->sub_topic ?? ''),
                 'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords($chunk->keywords) ?? [],
@@ -1697,6 +1699,7 @@ class AiController extends Controller
                 $candidate = $candidateChunksById->get($chunkId, []);
                 $content = trim((string) data_get($candidate, 'content', data_get($match, 'chunk_content', '')));
                 $chunkTitle = trim((string) data_get($candidate, 'title', ''));
+                $chunkHeadingPath = trim((string) data_get($candidate, 'heading_path', ''));
                 $documentTitle = trim((string) data_get($candidate, 'knowledge_item_title', data_get($match, 'knowledge_item_title', '')));
                 $chunkIndex = (int) data_get($match, 'chunk_index', 0);
 
@@ -1711,7 +1714,9 @@ class AiController extends Controller
                     'knowledge_item_summary' => (string) data_get($candidate, 'knowledge_item_summary', ''),
                     'chunk_id' => $chunkId,
                     'chunk_index' => $chunkIndex,
-                    'heading_path' => $chunkTitle !== '' ? $chunkTitle : sprintf('Chunk %d', $chunkIndex + 1),
+                    'heading_path' => $chunkHeadingPath !== ''
+                        ? $chunkHeadingPath
+                        : ($chunkTitle !== '' ? $chunkTitle : sprintf('Chunk %d', $chunkIndex + 1)),
                     'topic' => (string) data_get($candidate, 'topic', ''),
                     'sub_topic' => (string) data_get($candidate, 'sub_topic', ''),
                     'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [],
