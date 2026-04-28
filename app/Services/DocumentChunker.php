@@ -11,11 +11,7 @@ class DocumentChunker
 
     private const HARD_MAX_CHUNK_SIZE = 3200;
 
-    private const STRUCTURED_H1_MAX_CHARS = 30000;
-
-    private const STRUCTURED_H2_TARGET_CHARS = 20000;
-
-    private const STRUCTURED_H2_HARD_MAX_CHARS = 35000;
+    private const STRUCTURED_SECTION_MAX_WORDS = 30000;
 
     /**
      * Purpose: Split normalized extracted text into deterministic storage chunks.
@@ -90,7 +86,7 @@ class DocumentChunker
     }
 
     /**
-     * Purpose: Split structured document blocks into chunks using genuine H1 boundaries first and H2 only as overflow.
+     * Purpose: Split structured document blocks into chunks using H1 as the normal boundary and H2 only as overflow.
      * Inputs: Ordered structured blocks with text and heading levels.
      * Returns: An ordered list of chunk payloads built from full blocks.
      * Side effects: None.
@@ -152,38 +148,105 @@ class DocumentChunker
 
             $chunks = [];
             $h1Count = count($h1Indices);
+            $hasLeadingPrelude = ($h1Indices[0] ?? 0) > 0;
+            $currentStartIndex = null;
+            $currentEndExclusive = null;
+            $currentMetadata = null;
+            $currentWordCount = 0;
+
+            $flushCurrentChunk = function () use (
+                &$chunks,
+                $sourceText,
+                $blockStarts,
+                $blockEnds,
+                &$currentStartIndex,
+                &$currentEndExclusive,
+                &$currentMetadata,
+                &$currentWordCount,
+            ): void {
+                if ($currentStartIndex === null || $currentEndExclusive === null) {
+                    return;
+                }
+
+                $chunks[] = $this->makeStructuredChunkPayloadFromRange(
+                    $sourceText,
+                    $blockStarts,
+                    $blockEnds,
+                    $currentStartIndex,
+                    $currentEndExclusive,
+                    $currentMetadata ?? [],
+                );
+
+                $currentStartIndex = null;
+                $currentEndExclusive = null;
+                $currentMetadata = null;
+                $currentWordCount = 0;
+            };
 
             for ($i = 0; $i < $h1Count; $i++) {
                 $sectionStartIndex = $h1Indices[$i];
                 $sectionEndExclusive = $h1Indices[$i + 1] ?? count($normalizedBlocks);
                 $sectionStartOffset = (int) ($blockStarts[$sectionStartIndex] ?? 0);
                 $sectionEndOffset = (int) ($blockEnds[$sectionEndExclusive - 1] ?? $sectionStartOffset);
-                $sectionLength = max(0, $sectionEndOffset - $sectionStartOffset);
+                $sectionWordCount = $this->countWordsInRange(
+                    $sourceText,
+                    $sectionStartOffset,
+                    $sectionEndOffset,
+                );
+                $sectionContentStartIndex = $i === 0 && $hasLeadingPrelude ? 0 : $sectionStartIndex;
+                $sectionContentStartOffset = (int) ($blockStarts[$sectionContentStartIndex] ?? $sectionStartOffset);
+                $sectionContentWordCount = $this->countWordsInRange(
+                    $sourceText,
+                    $sectionContentStartOffset,
+                    $sectionEndOffset,
+                );
 
-                if ($sectionLength <= self::STRUCTURED_H1_MAX_CHARS) {
-                    $chunks[] = $this->makeStructuredChunkPayloadFromRange(
-                        $sourceText,
-                        $blockStarts,
-                        $blockEnds,
-                        $sectionStartIndex,
-                        $sectionEndExclusive,
-                        $this->structuredSectionMetadata((string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? '')),
-                    );
+                $sectionMetadata = $this->structuredSectionMetadata(
+                    (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
+                );
+
+                if ($sectionWordCount <= self::STRUCTURED_SECTION_MAX_WORDS) {
+                    if ($currentStartIndex === null || $currentEndExclusive === null) {
+                        $currentStartIndex = $sectionContentStartIndex;
+                        $currentEndExclusive = $sectionEndExclusive;
+                        $currentMetadata = $sectionMetadata;
+                        $currentWordCount = $sectionContentWordCount;
+
+                        continue;
+                    }
+
+                    if ($currentWordCount + $sectionWordCount <= self::STRUCTURED_SECTION_MAX_WORDS) {
+                        $currentEndExclusive = $sectionEndExclusive;
+                        $currentWordCount += $sectionWordCount;
+
+                        continue;
+                    }
+
+                    $flushCurrentChunk();
+                    $currentStartIndex = $sectionStartIndex;
+                    $currentEndExclusive = $sectionEndExclusive;
+                    $currentMetadata = $sectionMetadata;
+                    $currentWordCount = $sectionWordCount;
 
                     continue;
                 }
 
+                $flushCurrentChunk();
+
                 $h2Spans = $this->buildStructuredH2Spans($normalizedBlocks, $sectionStartIndex, $sectionEndExclusive);
 
                 if ($h2Spans === []) {
-                    $chunks[] = $this->makeStructuredChunkPayloadFromRange(
-                        $sourceText,
-                    $blockStarts,
-                    $blockEnds,
-                    $sectionStartIndex,
-                    $sectionEndExclusive,
-                    $this->structuredSectionMetadata((string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? '')),
-                );
+                    $chunks = array_merge(
+                        $chunks,
+                        $this->splitStructuredRangeByBlocks(
+                            $sourceText,
+                            $blockStarts,
+                            $blockEnds,
+                            $sectionContentStartIndex,
+                            $sectionEndExclusive,
+                            $sectionMetadata,
+                        ),
+                    );
 
                     continue;
                 }
@@ -197,9 +260,12 @@ class DocumentChunker
                         $sourceText,
                         $h2Spans,
                         (string) ($normalizedBlocks[$sectionStartIndex]['text'] ?? ''),
+                        $sectionContentStartIndex !== $sectionStartIndex ? $sectionContentStartIndex : null,
                     ),
                 );
             }
+
+            $flushCurrentChunk();
 
             return array_values(array_filter(
                 $chunks,
@@ -257,7 +323,7 @@ class DocumentChunker
     }
 
     /**
-     * Purpose: Pack H2 spans into as few chunks as possible without exceeding the hard ceiling.
+     * Purpose: Pack H2 spans into word-limited chunks only when a single H1 section overflows.
      * Inputs: Structured H2 spans plus the offsets needed to slice them back into source text.
      * Returns: Structured chunk payloads that preserve H1 as the parent section metadata.
      *
@@ -274,18 +340,24 @@ class DocumentChunker
         string $sourceText,
         array $spans,
         string $sectionHeading,
+        ?int $leadingStartIndex = null,
     ): array {
         $chunks = [];
         $currentStartIndex = null;
         $currentEndExclusive = null;
         $currentMetadata = null;
+        $currentWordCount = 0;
 
         foreach ($spans as $span) {
             $spanStartIndex = (int) ($span['start'] ?? 0);
             $spanEndExclusive = (int) ($span['end'] ?? $spanStartIndex);
             $spanStartOffset = (int) ($blockStarts[$spanStartIndex] ?? 0);
             $spanEndOffset = (int) ($blockEnds[$spanEndExclusive - 1] ?? $spanStartOffset);
-            $spanLength = max(0, $spanEndOffset - $spanStartOffset);
+            $spanWordCount = $this->countWordsInRange(
+                $sourceText,
+                $spanStartOffset,
+                $spanEndOffset,
+            );
             $spanMetadata = [
                 'structured_section_heading' => $sectionHeading,
                 'structured_section_level' => 1,
@@ -306,7 +378,7 @@ class DocumentChunker
                 ),
             ];
 
-            if ($spanLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+            if ($spanWordCount > self::STRUCTURED_SECTION_MAX_WORDS) {
                 if ($currentStartIndex !== null && $currentEndExclusive !== null) {
                     $chunks[] = $this->makeStructuredChunkPayloadFromRange(
                         $sourceText,
@@ -320,6 +392,7 @@ class DocumentChunker
                     $currentStartIndex = null;
                     $currentEndExclusive = null;
                     $currentMetadata = null;
+                    $currentWordCount = 0;
                 }
 
                 $chunks = array_merge(
@@ -338,20 +411,21 @@ class DocumentChunker
             }
 
             if ($currentStartIndex === null || $currentEndExclusive === null) {
-                $currentStartIndex = $spanStartIndex;
+                $currentStartIndex = $leadingStartIndex ?? $spanStartIndex;
                 $currentEndExclusive = $spanEndExclusive;
                 $currentMetadata = $spanMetadata;
+                $currentWordCount = $leadingStartIndex !== null
+                    ? $this->countWordsInRange(
+                        $sourceText,
+                        (int) ($blockStarts[$leadingStartIndex] ?? $spanStartOffset),
+                        $spanEndOffset,
+                    )
+                    : $spanWordCount;
 
                 continue;
             }
 
-            $currentStartOffset = (int) ($blockStarts[$currentStartIndex] ?? 0);
-            $currentEndOffset = (int) ($blockEnds[$currentEndExclusive - 1] ?? $currentStartOffset);
-            $currentLength = max(0, $currentEndOffset - $currentStartOffset);
-            $combinedEndOffset = (int) ($blockEnds[$spanEndExclusive - 1] ?? $currentEndOffset);
-            $combinedLength = max(0, $combinedEndOffset - $currentStartOffset);
-
-            if ($currentLength >= self::STRUCTURED_H2_TARGET_CHARS || $combinedLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+            if ($currentWordCount + $spanWordCount > self::STRUCTURED_SECTION_MAX_WORDS) {
                 $chunks[] = $this->makeStructuredChunkPayloadFromRange(
                     $sourceText,
                     $blockStarts,
@@ -364,11 +438,13 @@ class DocumentChunker
                 $currentStartIndex = $spanStartIndex;
                 $currentEndExclusive = $spanEndExclusive;
                 $currentMetadata = $spanMetadata;
+                $currentWordCount = $spanWordCount;
 
                 continue;
             }
 
             $currentEndExclusive = $spanEndExclusive;
+            $currentWordCount += $spanWordCount;
         }
 
         if ($currentStartIndex !== null && $currentEndExclusive !== null) {
@@ -424,11 +500,19 @@ class DocumentChunker
         for ($index = $startIndex + 1; $index < $endExclusive; $index++) {
             $currentStartOffset = (int) ($blockStarts[$currentStartIndex] ?? 0);
             $currentEndOffset = (int) ($blockEnds[$currentEndExclusive - 1] ?? $currentStartOffset);
-            $currentLength = max(0, $currentEndOffset - $currentStartOffset);
+            $currentWordCount = $this->countWordsInRange(
+                $sourceText,
+                $currentStartOffset,
+                $currentEndOffset,
+            );
             $candidateEndOffset = (int) ($blockEnds[$index] ?? $currentEndOffset);
-            $candidateLength = max(0, $candidateEndOffset - $currentStartOffset);
+            $candidateWordCount = $this->countWordsInRange(
+                $sourceText,
+                $currentStartOffset,
+                $candidateEndOffset,
+            );
 
-            if ($currentLength >= self::STRUCTURED_H2_TARGET_CHARS || $candidateLength > self::STRUCTURED_H2_HARD_MAX_CHARS) {
+            if ($currentWordCount >= self::STRUCTURED_SECTION_MAX_WORDS || $candidateWordCount > self::STRUCTURED_SECTION_MAX_WORDS) {
                 $chunks[] = $this->makeStructuredChunkPayloadFromRange(
                     $sourceText,
                     $blockStarts,
@@ -1719,7 +1803,43 @@ class DocumentChunker
             'content' => $content,
             'char_start' => $charStart,
             'char_end' => $charStart + mb_strlen($content, 'UTF-8'),
-            'word_count' => preg_match_all('/\S+/u', $content) ?: 0,
+            'word_count' => $this->countWordsInText($content),
         ];
+    }
+
+    /**
+     * Purpose: Count words in a piece of text using whitespace tokenization.
+     * Inputs: Raw text.
+     * Returns: Word count.
+     * Side effects: None.
+     */
+    private function countWordsInText(string $text): int
+    {
+        $text = trim($text);
+
+        if ($text === '') {
+            return 0;
+        }
+
+        return preg_match_all('/\S+/u', $text) ?: 0;
+    }
+
+    /**
+     * Purpose: Count words in a slice of the structured source text.
+     * Inputs: Full source text and absolute character offsets.
+     * Returns: Word count for the selected range.
+     * Side effects: None.
+     */
+    private function countWordsInRange(string $sourceText, int $startOffset, int $endOffset): int
+    {
+        $length = max(0, $endOffset - $startOffset);
+
+        if ($length === 0) {
+            return 0;
+        }
+
+        $slice = mb_substr($sourceText, $startOffset, $length, 'UTF-8');
+
+        return $this->countWordsInText($slice);
     }
 }

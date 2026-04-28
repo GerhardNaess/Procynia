@@ -41,11 +41,7 @@ class OpenAiClient
         $requestId = $this->requestIdFrom($response);
 
         if ($response->failed()) {
-            throw new RuntimeException(sprintf(
-                'OpenAI request to [%s] failed with HTTP status [%d].',
-                $endpoint,
-                $response->status(),
-            ));
+            throw new RuntimeException($this->failureMessageFromResponse($endpoint, $response));
         }
 
         $decoded = $response->json();
@@ -66,6 +62,29 @@ class OpenAiClient
         }
 
         return $decoded;
+    }
+
+    private function failureMessageFromResponse(string $endpoint, Response $response): string
+    {
+        $status = $response->status();
+        $details = $this->errorDetailsFromBody($response->body());
+        $fragments = array_values(array_filter([
+            $details['type'] ?? null,
+            $details['code'] ?? null,
+            $details['param'] ? 'param='.$details['param'] : null,
+            $details['message'] ?? null,
+        ], static fn (?string $value): bool => is_string($value) && trim($value) !== ''));
+
+        if ($fragments === []) {
+            return sprintf('OpenAI request to [%s] failed with HTTP status [%d].', $endpoint, $status);
+        }
+
+        return sprintf(
+            'OpenAI request to [%s] failed with HTTP status [%d]: %s',
+            $endpoint,
+            $status,
+            implode(' | ', $fragments),
+        );
     }
 
     private function pendingRequest(int $timeoutSeconds = 60): PendingRequest

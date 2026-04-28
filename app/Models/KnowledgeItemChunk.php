@@ -26,6 +26,18 @@ class KnowledgeItemChunk extends Model
         self::REVIEW_STATUS_REJECTED => 'Avvist',
     ];
 
+    public const METADATA_STATUS_PENDING_REVIEW = 'pending_review';
+
+    public const METADATA_STATUS_AUTO_APPROVED = 'auto_approved';
+
+    public const METADATA_STATUS_FAILED = 'failed';
+
+    public const METADATA_STATUSES = [
+        self::METADATA_STATUS_PENDING_REVIEW,
+        self::METADATA_STATUS_AUTO_APPROVED,
+        self::METADATA_STATUS_FAILED,
+    ];
+
     protected $fillable = [
         'knowledge_item_id',
         'chunk_index',
@@ -42,6 +54,10 @@ class KnowledgeItemChunk extends Model
         'keywords',
         'section_title',
         'section_path',
+        'matched_terms',
+        'summary_for_retrieval',
+        'confidence_score',
+        'metadata_status',
         'embedding_vector',
         'embedding_model',
         'embedding_generated_at',
@@ -55,6 +71,8 @@ class KnowledgeItemChunk extends Model
             'start_offset' => 'integer',
             'end_offset' => 'integer',
             'keywords' => 'array',
+            'matched_terms' => 'array',
+            'confidence_score' => 'float',
             'embedding_vector' => 'array',
             'embedding_generated_at' => 'datetime',
         ];
@@ -81,6 +99,18 @@ class KnowledgeItemChunk extends Model
     {
         return $this->hasMany(SavedNoticeAiEvidence::class, 'knowledge_item_chunk_id')
             ->orderBy('match_rank')
+            ->orderBy('id');
+    }
+
+    /**
+     * Purpose: Resolve metadata term suggestions grounded in this knowledge chunk.
+     * Inputs: None.
+     * Returns: The related metadata suggestion collection query.
+     * Side effects: None.
+     */
+    public function metadataTermSuggestions(): HasMany
+    {
+        return $this->hasMany(KnowledgeMetadataTermSuggestion::class, 'source_chunk_id')
             ->orderBy('id');
     }
 }

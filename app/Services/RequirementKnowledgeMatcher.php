@@ -19,6 +19,8 @@ class RequirementKnowledgeMatcher
         'keywords' => 1.2,
         'topic' => 1.0,
         'sub_topic' => 0.85,
+        'service_product_tag' => 0.9,
+        'theme_tag' => 0.8,
         'section_title' => 0.75,
         'section_path' => 0.6,
         'knowledge_item_title' => 0.55,
@@ -95,7 +97,12 @@ class RequirementKnowledgeMatcher
                 }
 
                 $score = count(array_intersect($requirementTokens, $chunkTokens));
-                $score += $this->metadataBoostScore($requirementTokens, $chunk);
+                $metadataScore = data_get($chunk, 'metadata_score');
+                $chunkMetadataScore = is_numeric($metadataScore)
+                    ? (float) $metadataScore
+                    : $this->metadataBoostScore($requirementTokens, $chunk);
+
+                $score += $chunkMetadataScore;
                 $contentType = (string) data_get($chunk, 'content_type', '');
 
                 if ($contentType !== '' && isset($heuristicBoosts[$contentType])) {
@@ -115,6 +122,8 @@ class RequirementKnowledgeMatcher
                     'chunk_content' => $chunkContent,
                     'score' => $score,
                     'base_score' => $score,
+                    'metadata_score' => $chunkMetadataScore,
+                    'metadata_matches' => data_get($chunk, 'metadata_matches', []),
                     'embedding_vector' => data_get($chunk, 'embedding_vector'),
                     'embedding_similarity' => null,
                     'final_score' => (float) $score,

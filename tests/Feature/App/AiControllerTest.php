@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App;
 
+use App\Http\Controllers\App\AiController;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\KnowledgeItem;
@@ -28,6 +29,7 @@ use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\RequirementExtractor;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Models\User;
@@ -39,6 +41,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Collection;
 use Mockery;
 use RuntimeException;
 use ZipArchive;
@@ -77,6 +80,14 @@ class AiControllerTest extends TestCase
                 'recommended_document_title' => null,
                 'suggested_filename' => null,
                 'reasoning_summary' => 'Grunnlaget er tilstrekkelig dokumentert.',
+            ];
+        });
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [],
+                'search_text' => '',
+                'intent_summary' => '',
+                'confidence' => 0.0,
             ];
         });
     }
@@ -1213,6 +1224,271 @@ class AiControllerTest extends TestCase
         $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 
+    public function test_ai_requirement_answer_draft_generation_uses_metadata_selected_chunks_before_a_stronger_text_only_match(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-METADATA', 'Metadata target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:50:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'metadata-requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/metadata-requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Beskriv prioritet og oppfølging.',
+            'text_extracted_at' => '2026-04-06 12:51:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Beskriv prioritet og oppfølging.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.2',
+            'requirement_text' => 'Beskriv prioritet og oppfølging.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $selectedKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Selected metadata knowledge',
+            'original_filename' => 'selected-metadata-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Innhold uten kravord.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($selectedKnowledge);
+        $selectedChunk = $selectedKnowledge->chunks()->firstOrFail();
+        $selectedChunk->forceFill([
+            'title' => 'Utvalgt seksjon',
+            'topic' => 'Tema A',
+            'sub_topic' => 'Underemne A',
+            'keywords' => ['Nøkkelord A'],
+            'section_title' => 'Del A',
+            'section_path' => 'Kapittel > Del A',
+            'embedding_vector' => [0.9, 0.1],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 12:52:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($selectedKnowledge, '2026-04-06 12:52:00');
+
+        $competingKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Competing text match',
+            'original_filename' => 'competing-text-match.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Beskriv prioritet og oppfølging i detalj.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($competingKnowledge);
+        $competingChunk = $competingKnowledge->chunks()->firstOrFail();
+        $competingChunk->forceFill([
+            'title' => 'Urelevant seksjon',
+            'topic' => 'Tema B',
+            'sub_topic' => 'Underemne B',
+            'keywords' => ['Nøkkelord B'],
+            'section_title' => 'Del B',
+            'section_path' => 'Kapittel > Del B',
+            'embedding_vector' => [0.8, 0.2],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 12:53:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($competingKnowledge, '2026-04-06 12:53:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [
+                    'topic' => ['Tema A'],
+                ],
+                'search_text' => 'tema a',
+                'intent_summary' => 'Leter etter tema a.',
+                'confidence' => 0.93,
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement, $selectedKnowledge, $selectedChunk, $competingChunk) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertCount(1, $retrievedKnowledgeChunks);
+            $this->assertSame($selectedKnowledge->original_filename, $retrievedKnowledgeChunks->first()['document_title']);
+            $this->assertSame('Utvalgt seksjon', $retrievedKnowledgeChunks->first()['heading_path']);
+            $this->assertSame('Tema A', $retrievedKnowledgeChunks->first()['topic']);
+            $this->assertSame('Underemne A', $retrievedKnowledgeChunks->first()['sub_topic']);
+            $this->assertSame(['Nøkkelord A'], $retrievedKnowledgeChunks->first()['keywords']);
+            $this->assertStringContainsString('Innhold uten kravord.', $retrievedKnowledgeChunks->first()['content_preview']);
+            $this->assertSame($selectedChunk->id, data_get($retrievedKnowledgeChunks->first(), 'chunk_id'));
+            $this->assertNotEquals($competingChunk->id, data_get($retrievedKnowledgeChunks->first(), 'chunk_id'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate_metadata'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.');
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_uses_metadata_candidates_even_when_the_legacy_base_pool_is_empty(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-METADATA-EMPTY-BASE', 'Metadata empty base target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'metadata-empty-base-requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/metadata-empty-base-requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Beskriv prioritet og oppfølging.',
+            'text_extracted_at' => '2026-04-06 13:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Beskriv prioritet og oppfølging.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.3',
+            'requirement_text' => 'Beskriv prioritet og oppfølging.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $selectedKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Metadata selected knowledge',
+            'original_filename' => 'metadata-selected-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Innhold uten kravord.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($selectedKnowledge);
+        $selectedChunk = $selectedKnowledge->chunks()->firstOrFail();
+        $selectedChunk->forceFill([
+            'title' => 'Utvalgt seksjon',
+            'topic' => 'Tema A',
+            'sub_topic' => 'Underemne A',
+            'keywords' => ['Nøkkelord A'],
+            'section_title' => 'Del A',
+            'section_path' => 'Kapittel > Del A',
+            'embedding_vector' => [0.9, 0.1],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 13:02:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($selectedKnowledge, '2026-04-06 13:02:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [
+                    'topic' => ['Tema A'],
+                ],
+                'search_text' => 'tema a',
+                'intent_summary' => 'Leter etter tema a.',
+                'confidence' => 0.92,
+            ];
+        });
+
+        $this->bindAiControllerKnowledgeChunksForMatching(collect());
+
+        Http::fake(function (Request $request) use ($requirement, $selectedKnowledge, $selectedChunk) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertCount(1, $retrievedKnowledgeChunks);
+            $this->assertSame($selectedKnowledge->original_filename, $retrievedKnowledgeChunks->first()['document_title']);
+            $this->assertSame('Utvalgt seksjon', $retrievedKnowledgeChunks->first()['heading_path']);
+            $this->assertSame('Tema A', $retrievedKnowledgeChunks->first()['topic']);
+            $this->assertSame($selectedChunk->id, data_get($retrievedKnowledgeChunks->first(), 'chunk_id'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate_metadata_empty_base'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('requirement_id', $requirement->id);
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.');
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive prioritet og oppfølging med utgangspunkt i metadata-valgt kunnskap.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
     public function test_ai_requirement_answer_draft_generation_blocks_when_knowledge_grounding_is_red_and_suggests_a_document(): void
     {
         $context = $this->customerAdminContext();
@@ -1471,6 +1747,173 @@ class AiControllerTest extends TestCase
         $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Beredskap er ikke dokumentert i den relevante kunnskapsbasen.');
         $response->assertJsonPath('answer_draft.missing_knowledge.recommended_document_title', 'Beredskap og hendelseshåndtering');
         $response->assertJsonPath('answer_draft.missing_knowledge.suggested_filename', 'beredskap-og-hendelseshandtering.docx');
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_requirement_answer_draft_generation_attaches_a_clickable_source_to_directly_supported_points_when_the_source_can_be_resolved(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-JUDGE-SOURCE', 'Judge source target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:40:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'source-chunk.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/source-chunk.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren beskriver en tydelig tjenestebeskrivelse.',
+            'text_extracted_at' => '2026-04-06 13:41:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren beskriver en tydelig tjenestebeskrivelse.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.4',
+            'requirement_text' => 'Leverandøren skal beskrive tjenestebeskrivelsen.',
+            'answer_draft_text' => null,
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $selectedKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Relevant knowledge',
+            'original_filename' => 'source-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($selectedKnowledge);
+        $selectedChunk = $selectedKnowledge->chunks()->firstOrFail();
+        $selectedChunkContent = trim('Leverandøren beskriver en tydelig tjenestebeskrivelse. '.str_repeat('Ytterligere detaljer om tjenestebeskrivelsen og leveransemodellen. ', 30));
+        $selectedChunk->forceFill([
+            'content' => $selectedChunkContent,
+        ])->save();
+        $selectedChunk->forceFill([
+            'title' => 'Utvalgt seksjon',
+            'topic' => 'Tema A',
+            'sub_topic' => 'Underemne A',
+            'keywords' => ['Nøkkelord A'],
+            'section_title' => 'Utvalgt seksjon',
+            'section_path' => 'Dokument > Utvalgt seksjon',
+            'embedding_vector' => [0.9, 0.1],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 13:42:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($selectedKnowledge, '2026-04-06 13:42:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'green',
+                'max_score' => 5.2,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [
+                    'topic' => ['Tema A'],
+                ],
+                'search_text' => 'tema a',
+                'intent_summary' => 'Leter etter tema a.',
+                'confidence' => 0.94,
+            ];
+        });
+
+        $sourceLabel = $selectedKnowledge->original_filename.' · Utvalgt seksjon · Chunk 1';
+        $this->bindGroundingJudgeService(function (...$ignored) use ($sourceLabel): array {
+            return [
+                'status' => 'partial',
+                'can_generate_answer' => false,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Leverandøren beskriver tjenestebeskrivelsen.',
+                        'support_summary' => 'Kunnskapsgrunnlaget dokumenterer en tydelig tjenestebeskrivelse.',
+                        'evidence_reference' => $sourceLabel,
+                        'evidence_quote' => null,
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => [
+                    'Detaljnivået er fortsatt utilstrekkelig for full beskrivelse.',
+                ],
+                'missing_knowledge_summary' => 'Kunnskapsgrunnlaget er delvis dokumentert.',
+                'recommended_document_title' => 'Tjenestebeskrivelse og leveransemodell',
+                'suggested_filename' => 'tjenestebeskrivelse-og-leveransemodell.docx',
+                'reasoning_summary' => 'Kravet er delvis støttet.',
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement, $selectedKnowledge, $selectedChunk) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertCount(1, $retrievedKnowledgeChunks);
+            $this->assertSame($selectedKnowledge->original_filename, $retrievedKnowledgeChunks->first()['document_title']);
+            $this->assertSame('Utvalgt seksjon', $retrievedKnowledgeChunks->first()['section_title']);
+            $this->assertSame($selectedChunk->id, data_get($retrievedKnowledgeChunks->first(), 'chunk_id'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive tjenestebeskrivelsen med utgangspunkt i valgt kunnskap.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_answer_draft_generate_source'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.requirement_point', 'Leverandøren beskriver tjenestebeskrivelsen.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.knowledge_item_id', $selectedKnowledge->id);
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.knowledge_item_chunk_id', $selectedChunk->id);
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.document_title', $selectedKnowledge->original_filename);
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.section_title', 'Utvalgt seksjon');
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.content', $selectedChunkContent);
+        self::assertStringContainsString(
+            'Ytterligere detaljer om tjenestebeskrivelsen og leveransemodellen.',
+            (string) data_get($response->json(), 'answer_draft.missing_knowledge.directly_supported_points.0.source.content_preview'),
+        );
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.source.open_url', route('app.ai.knowledge-base.show', [
+            'knowledgeItem' => $selectedKnowledge->id,
+            'chunk' => $selectedChunk->id,
+        ]));
 
         $requirement->refresh();
         $this->assertNull($requirement->answer_draft_text);
@@ -4054,6 +4497,37 @@ class AiControllerTest extends TestCase
             ->andReturnUsing($handler);
 
         $this->app->instance(KnowledgeChunkCoverageService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic metadata retrieval planner for controller integration tests.
+     * Inputs: A callback that returns the desired retrieval plan.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindMetadataRetrievalPlanService(callable $handler): void
+    {
+        $service = Mockery::mock(MetadataRetrievalPlanService::class);
+        $service->shouldReceive('buildPlan')
+            ->andReturnUsing($handler);
+
+        $this->app->instance(MetadataRetrievalPlanService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a controller instance whose legacy base pool can be forced to a deterministic result.
+     * Inputs: The collection that should be returned from the legacy chunk pool helper.
+     * Returns: None.
+     * Side effects: Replaces the controller binding with a partial mock.
+     */
+    private function bindAiControllerKnowledgeChunksForMatching(Collection $chunks): void
+    {
+        $controller = Mockery::mock($this->app->make(AiController::class))->makePartial();
+        $controller->shouldAllowMockingProtectedMethods();
+        $controller->shouldReceive('knowledgeChunksForMatching')
+            ->andReturn($chunks);
+
+        $this->app->instance(AiController::class, $controller);
     }
 
     /**

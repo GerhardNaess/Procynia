@@ -22,6 +22,10 @@ use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\Ai\Retrieval\KnowledgeMetadataMapService;
+use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
+use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
+use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
@@ -68,6 +72,10 @@ class AiController extends Controller
         private readonly RequirementAnswerBasisService $requirementAnswerBasisService,
         private readonly RequirementAnswerDraftService $requirementAnswerDraftService,
         private readonly RequirementGroundingJudgeService $requirementGroundingJudgeService,
+        private readonly KnowledgeMetadataMapService $knowledgeMetadataMapService,
+        private readonly MetadataRetrievalPlanService $metadataRetrievalPlanService,
+        private readonly MetadataRetrievalPlanValidator $metadataRetrievalPlanValidator,
+        private readonly MetadataCandidateRetrievalService $metadataCandidateRetrievalService,
         private readonly RequirementKnowledgeDocumentRecommendationService $requirementKnowledgeDocumentRecommendationService,
         private readonly RequirementEditorService $requirementEditorService,
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
@@ -757,7 +765,7 @@ class AiController extends Controller
                 'suggested_filename' => null,
                 'reasoning_summary' => null,
             ];
-            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $syntheticJudge);
+            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $syntheticJudge, $retrievedKnowledgeChunks);
 
             return response()->json(array_merge(
                 [
@@ -787,7 +795,7 @@ class AiController extends Controller
         ]);
 
         if (! (bool) data_get($groundingJudge, 'can_generate_answer', false)) {
-            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $groundingJudge);
+            $missingKnowledge = $this->judgeBlockedMissingKnowledgePayload($ownedRequirement, $groundingJudge, $retrievedKnowledgeChunks);
 
             Log::warning('[PROCYNIA][AI_GROUNDING_JUDGE] Answer draft generation blocked by grounding judge.', [
                 'saved_notice_id' => $record->id,
@@ -1533,7 +1541,7 @@ class AiController extends Controller
      * Returns: A compact collection of active knowledge chunks limited to a safe V1 cap.
      * Side effects: None.
      */
-    private function knowledgeChunksForMatching(int $customerId): Collection
+    protected function knowledgeChunksForMatching(int $customerId): Collection
     {
         return KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
@@ -1590,15 +1598,98 @@ class AiController extends Controller
             return collect();
         }
 
-        $candidateChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
+        $metadataMap = $this->knowledgeMetadataMapService->buildForCustomer((int) $record->customer_id);
+        $retrievalPlan = $this->metadataRetrievalPlanService->buildPlan($requirementText, $metadataMap);
+        $validatedPlan = $this->metadataRetrievalPlanValidator->validate($retrievalPlan, $metadataMap);
+        $selectedMetadata = data_get($validatedPlan, 'selected_metadata', []);
+        $candidateChunks = collect();
+        $usedMetadataCandidates = false;
+        $usedBasePoolFallback = false;
+        $metadataCandidateCount = 0;
+        $baseCandidateCount = 0;
 
-        if ($candidateChunks->isEmpty()) {
-            return collect();
+        if (is_array($selectedMetadata) && $selectedMetadata !== []) {
+            Log::info('[PROCYNIA][METADATA_RETRIEVAL] Validated retrieval plan selected metadata; attempting metadata candidate retrieval.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $requirement->id,
+                'customer_id' => $record->customer_id,
+                'selected_field_count' => count($selectedMetadata),
+                'selected_value_count' => $this->selectedMetadataValueCount($selectedMetadata),
+            ]);
+
+            $metadataCandidateChunks = $this->metadataCandidateRetrievalService->retrieveForCustomer((int) $record->customer_id, $validatedPlan);
+            $metadataCandidateCount = $metadataCandidateChunks->count();
+
+            if ($metadataCandidateChunks->isNotEmpty()) {
+                $candidateChunks = $metadataCandidateChunks;
+                $usedMetadataCandidates = true;
+                Log::info('[PROCYNIA][METADATA_RETRIEVAL] Metadata candidate retrieval returned rows; using metadata candidates.', [
+                    'saved_notice_id' => $record->id,
+                    'requirement_id' => $requirement->id,
+                    'customer_id' => $record->customer_id,
+                    'metadata_candidate_count' => $metadataCandidateCount,
+                ]);
+            } else {
+                Log::info('[PROCYNIA][METADATA_RETRIEVAL] Metadata candidate retrieval returned no rows; falling back to the base retrieval pool.', [
+                    'saved_notice_id' => $record->id,
+                    'requirement_id' => $requirement->id,
+                    'customer_id' => $record->customer_id,
+                    'selected_field_count' => count($selectedMetadata),
+                    'selected_value_count' => $this->selectedMetadataValueCount($selectedMetadata),
+                ]);
+            }
+        } else {
+            Log::info('[PROCYNIA][METADATA_RETRIEVAL] Validated retrieval plan contained no selected metadata; using the base retrieval pool.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $requirement->id,
+                'customer_id' => $record->customer_id,
+            ]);
+        }
+
+        if (! $usedMetadataCandidates) {
+            $usedBasePoolFallback = true;
+            $baseCandidateChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
+            $baseCandidateCount = $baseCandidateChunks->count();
+
+            if ($baseCandidateChunks->isEmpty()) {
+                Log::info('[PROCYNIA][METADATA_RETRIEVAL] Base retrieval pool was empty after metadata retrieval attempt; returning no retrieval candidates.', [
+                    'saved_notice_id' => $record->id,
+                    'requirement_id' => $requirement->id,
+                    'customer_id' => $record->customer_id,
+                    'metadata_plan_attempted' => is_array($selectedMetadata) && $selectedMetadata !== [],
+                    'metadata_candidate_count' => $metadataCandidateCount,
+                ]);
+
+                return collect();
+            }
+
+            $candidateChunks = $baseCandidateChunks;
+            Log::info('[PROCYNIA][METADATA_RETRIEVAL] Base retrieval pool selected as fallback candidate set.', [
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $requirement->id,
+                'customer_id' => $record->customer_id,
+                'base_candidate_count' => $baseCandidateCount,
+                'metadata_candidate_count' => $metadataCandidateCount,
+            ]);
         }
 
         $requirementEmbedding = $this->requirementEmbeddingFor($requirement);
         $rankedMatches = $this->requirementKnowledgeMatcher->match($requirementText, $candidateChunks, $requirementEmbedding);
         $candidateChunksById = $candidateChunks->keyBy(static fn (array $candidate): int => (int) data_get($candidate, 'chunk_id', 0));
+
+        Log::info('[PROCYNIA][METADATA_RETRIEVAL] Requirement candidate ranking completed.', [
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $requirement->id,
+            'metadata_plan_attempted' => is_array($selectedMetadata) && $selectedMetadata !== [],
+            'base_candidate_count' => $baseCandidateCount,
+            'metadata_candidate_count' => $metadataCandidateCount,
+            'candidate_count' => $candidateChunks->count(),
+            'used_metadata_candidates' => $usedMetadataCandidates,
+            'used_base_pool_fallback' => $usedBasePoolFallback,
+            'selected_field_count' => is_array($selectedMetadata) ? count($selectedMetadata) : 0,
+            'selected_value_count' => is_array($selectedMetadata) ? $this->selectedMetadataValueCount($selectedMetadata) : 0,
+            'ranked_chunk_ids' => $rankedMatches->take(10)->pluck('chunk_id')->all(),
+        ]);
 
         return $rankedMatches
             ->map(function (array $match) use ($candidateChunksById): array {
@@ -1626,10 +1717,32 @@ class AiController extends Controller
                     'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [],
                     'section_title' => (string) data_get($candidate, 'section_title', ''),
                     'section_path' => (string) data_get($candidate, 'section_path', ''),
+                    'content' => $content,
                     'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
                 ];
             })
             ->values();
+    }
+
+    /**
+     * Purpose: Count how many metadata values the validated retrieval plan selected.
+     * Inputs: The validated metadata selection.
+     * Returns: The total number of selected metadata values.
+     * Side effects: None.
+     */
+    private function selectedMetadataValueCount(array $selectedMetadata): int
+    {
+        $count = 0;
+
+        foreach ($selectedMetadata as $values) {
+            if (! is_array($values)) {
+                continue;
+            }
+
+            $count += count(array_filter($values, static fn (mixed $value): bool => is_string($value) && trim($value) !== ''));
+        }
+
+        return $count;
     }
 
     /**
@@ -1674,12 +1787,17 @@ class AiController extends Controller
      * Returns: A deterministic internal instruction payload.
      * Side effects: None.
      */
-    private function judgeBlockedMissingKnowledgePayload(SavedNoticeAiRequirement $requirement, array $groundingJudge): array
+    private function judgeBlockedMissingKnowledgePayload(
+        SavedNoticeAiRequirement $requirement,
+        array $groundingJudge,
+        Collection $retrievedKnowledgeChunks,
+    ): array
     {
         $recommendation = $this->recommendationForGroundingJudge($requirement, $groundingJudge);
         $directlySupportedPoints = $this->normalizeGroundingPointList(
             data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
         );
+        $directlySupportedPoints = $this->enrichGroundingPointsWithSources($directlySupportedPoints, $retrievedKnowledgeChunks);
         $relatedButInsufficientPoints = $this->normalizeStringList(data_get($groundingJudge, 'related_but_insufficient_points', []));
 
         return array_merge([
@@ -1795,6 +1913,7 @@ class AiController extends Controller
             $supportSummary = $this->normalizeOptionalString(data_get($value, 'support_summary'));
             $evidenceReference = $this->normalizeOptionalString(data_get($value, 'evidence_reference'));
             $evidenceQuote = $this->normalizeOptionalString(data_get($value, 'evidence_quote'));
+            $source = $this->normalizeGroundingSourcePayload(data_get($value, 'source'));
 
             if ($requirementPoint === null && $supportSummary === null) {
                 continue;
@@ -1805,10 +1924,260 @@ class AiController extends Controller
                 'support_summary' => $supportSummary ?? $requirementPoint,
                 'evidence_reference' => $evidenceReference,
                 'evidence_quote' => $evidenceQuote,
+                'source' => $source,
             ];
         }
 
         return $normalized;
+    }
+
+    /**
+     * Purpose: Attach stable source metadata to grounding points when the retrieved chunks can be matched safely.
+     * Inputs: Normalized grounding points and the retrieved knowledge chunk rows.
+     * Returns: The points with optional source payloads.
+     * Side effects: None.
+     */
+    private function enrichGroundingPointsWithSources(array $points, Collection $retrievedKnowledgeChunks): array
+    {
+        if ($points === [] || $retrievedKnowledgeChunks->isEmpty()) {
+            return $points;
+        }
+
+        $retrievalSources = $retrievedKnowledgeChunks->values()->all();
+
+        return array_map(function (array $point) use ($retrievalSources): array {
+            $source = $this->resolveGroundingPointSource($point, $retrievalSources);
+
+            if ($source !== null) {
+                $point['source'] = $source;
+            }
+
+            return $point;
+        }, $points);
+    }
+
+    /**
+     * Purpose: Resolve one grounding point to a retrieved source chunk when the evidence text matches safely.
+     * Inputs: One normalized grounding point and the retrieved knowledge chunk rows.
+     * Returns: A stable source payload or null when no safe match exists.
+     * Side effects: None.
+     */
+    private function resolveGroundingPointSource(array $point, array $retrievalSources): ?array
+    {
+        $reference = $this->normalizeGroundingSourceText(data_get($point, 'evidence_reference'));
+        $quote = $this->normalizeGroundingSourceText(data_get($point, 'evidence_quote'));
+
+        if ($reference === '' && $quote === '') {
+            return null;
+        }
+
+        $bestSource = null;
+        $bestScore = 0;
+        $bestCount = 0;
+
+        foreach ($retrievalSources as $retrievalSource) {
+            if (! is_array($retrievalSource)) {
+                continue;
+            }
+
+            $score = $this->scoreGroundingPointSourceMatch($reference, $quote, $retrievalSource);
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestSource = $retrievalSource;
+                $bestCount = 1;
+                continue;
+            }
+
+            if ($score > 0 && $score === $bestScore) {
+                $bestCount++;
+            }
+        }
+
+        if ($bestSource === null || $bestScore < 80 || $bestCount > 1) {
+            return null;
+        }
+
+        return $this->groundingPointSourcePayload($bestSource);
+    }
+
+    /**
+     * Purpose: Score how well one retrieved chunk matches a grounding point's evidence text.
+     * Inputs: The normalized evidence text and one retrieved source row.
+     * Returns: A deterministic integer score.
+     * Side effects: None.
+     */
+    private function scoreGroundingPointSourceMatch(string $reference, string $quote, array $retrievalSource): int
+    {
+        $score = 0;
+        $documentTitle = $this->normalizeGroundingSourceText(data_get($retrievalSource, 'document_title', data_get($retrievalSource, 'knowledge_item_title', '')));
+        $sectionTitle = $this->normalizeGroundingSourceText(data_get($retrievalSource, 'section_title', data_get($retrievalSource, 'section_path', data_get($retrievalSource, 'heading_path', ''))));
+        $sectionPath = $this->normalizeGroundingSourceText(data_get($retrievalSource, 'section_path', data_get($retrievalSource, 'heading_path', '')));
+        $sourceLabel = $this->normalizeGroundingSourceText($this->groundingSourceLabel($retrievalSource));
+        $contentPreview = $this->normalizeGroundingSourceText(data_get($retrievalSource, 'content_preview', ''));
+        $chunkIndex = (int) data_get($retrievalSource, 'chunk_index', -1);
+        $chunkId = (int) data_get($retrievalSource, 'chunk_id', 0);
+        $chunkLabel = $chunkIndex >= 0 ? $this->normalizeGroundingSourceText(sprintf('chunk %d', $chunkIndex + 1)) : '';
+
+        if ($chunkId > 0 && preg_match('/\b'.preg_quote((string) $chunkId, '/').'\b/u', $reference) === 1) {
+            $score += 100;
+        }
+
+        if ($reference !== '' && $documentTitle !== '' && $sectionTitle !== '' && str_contains($reference, $documentTitle) && str_contains($reference, $sectionTitle)) {
+            $score += 85;
+        }
+
+        if ($reference !== '' && $documentTitle !== '' && $sectionPath !== '' && str_contains($reference, $documentTitle) && str_contains($reference, $sectionPath)) {
+            $score += 80;
+        }
+
+        if ($reference !== '' && $documentTitle !== '' && $chunkLabel !== '' && str_contains($reference, $documentTitle) && str_contains($reference, $chunkLabel)) {
+            $score += 75;
+        }
+
+        if ($sourceLabel !== '' && $reference !== '' && $reference === $sourceLabel) {
+            $score += 90;
+        } elseif ($sourceLabel !== '' && $reference !== '' && str_contains($reference, $sourceLabel)) {
+            $score += 85;
+        }
+
+        if ($documentTitle !== '' && $reference !== '' && str_contains($reference, $documentTitle)) {
+            $score += 20;
+        }
+
+        if ($sectionTitle !== '' && $reference !== '' && str_contains($reference, $sectionTitle)) {
+            $score += 20;
+        }
+
+        if ($sectionPath !== '' && $reference !== '' && str_contains($reference, $sectionPath)) {
+            $score += 15;
+        }
+
+        if ($chunkLabel !== '' && $reference !== '' && str_contains($reference, $chunkLabel)) {
+            $score += 10;
+        }
+
+        if ($quote !== '' && $contentPreview !== '' && str_contains($contentPreview, $quote)) {
+            $score += 90;
+        }
+
+        return $score;
+    }
+
+    /**
+     * Purpose: Convert one retrieved source row into a stable, frontend-friendly source payload.
+     * Inputs: A retrieved knowledge chunk row.
+     * Returns: A normalized source payload or null when it cannot be opened safely.
+     * Side effects: None.
+     */
+    private function groundingPointSourcePayload(array $retrievalSource): ?array
+    {
+        $knowledgeItemId = (int) data_get($retrievalSource, 'knowledge_item_id', 0);
+        $chunkId = (int) data_get($retrievalSource, 'chunk_id', 0);
+        $documentTitle = $this->normalizeOptionalString(data_get($retrievalSource, 'document_title', data_get($retrievalSource, 'knowledge_item_title', '')));
+        $sectionTitle = $this->normalizeOptionalString(data_get($retrievalSource, 'section_title', data_get($retrievalSource, 'section_path', data_get($retrievalSource, 'heading_path', ''))));
+        $sectionPath = $this->normalizeOptionalString(data_get($retrievalSource, 'section_path', data_get($retrievalSource, 'heading_path', '')));
+        $contentPreview = $this->normalizeOptionalString(data_get($retrievalSource, 'content_preview', ''));
+        $chunkIndex = (int) data_get($retrievalSource, 'chunk_index', -1);
+
+        if ($knowledgeItemId <= 0 || $chunkId <= 0) {
+            return null;
+        }
+
+        return [
+            'knowledge_item_id' => $knowledgeItemId,
+            'knowledge_item_chunk_id' => $chunkId,
+            'document_title' => $documentTitle,
+            'section_title' => $sectionTitle,
+            'section_path' => $sectionPath,
+            'chunk_index' => $chunkIndex >= 0 ? $chunkIndex + 1 : null,
+            'source_label' => $this->groundingSourceLabel($retrievalSource),
+            'open_url' => route('app.ai.knowledge-base.show', [
+                'knowledgeItem' => $knowledgeItemId,
+                'chunk' => $chunkId,
+            ]),
+            'content' => $this->normalizeOptionalString(data_get($retrievalSource, 'content')),
+            'content_preview' => $contentPreview,
+        ];
+    }
+
+    /**
+     * Purpose: Build a readable label for a retrieved chunk source.
+     * Inputs: A retrieved knowledge chunk row.
+     * Returns: A compact source label.
+     * Side effects: None.
+     */
+    private function groundingSourceLabel(array $retrievalSource): string
+    {
+        $documentTitle = $this->normalizeOptionalString(data_get($retrievalSource, 'document_title', data_get($retrievalSource, 'knowledge_item_title', '')));
+        $sectionTitle = $this->normalizeOptionalString(data_get($retrievalSource, 'section_title', data_get($retrievalSource, 'section_path', data_get($retrievalSource, 'heading_path', ''))));
+        $chunkIndex = (int) data_get($retrievalSource, 'chunk_index', -1);
+
+        $parts = array_filter([
+            $documentTitle !== '' ? $documentTitle : null,
+            $sectionTitle !== '' ? $sectionTitle : null,
+            $chunkIndex >= 0 ? sprintf('Chunk %d', $chunkIndex + 1) : null,
+        ], static fn (?string $value): bool => $value !== null && $value !== '');
+
+        return trim(implode(' · ', $parts));
+    }
+
+    /**
+     * Purpose: Normalize evidence text so source matching can compare labels safely.
+     * Inputs: A mixed scalar or null.
+     * Returns: A lowercased, punctuation-normalized string.
+     * Side effects: None.
+     */
+    private function normalizeGroundingSourceText(mixed $value): string
+    {
+        $normalized = mb_strtolower(trim((string) ($value ?? '')), 'UTF-8');
+        $normalized = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+        return trim($normalized);
+    }
+
+    /**
+     * Purpose: Normalize an optional source payload returned by the judge or source matcher.
+     * Inputs: A mixed source value.
+     * Returns: A stable source payload or null.
+     * Side effects: None.
+     */
+    private function normalizeGroundingSourcePayload(mixed $value): ?array
+    {
+        if (! is_array($value)) {
+            return null;
+        }
+
+        $knowledgeItemId = (int) data_get($value, 'knowledge_item_id', 0);
+        $knowledgeItemChunkId = (int) data_get($value, 'knowledge_item_chunk_id', 0);
+        $openUrl = $this->normalizeOptionalString(data_get($value, 'open_url'));
+
+        if ($knowledgeItemId <= 0 || $knowledgeItemChunkId <= 0 || $openUrl === null) {
+            return null;
+        }
+
+        $documentTitle = $this->normalizeOptionalString(data_get($value, 'document_title'));
+        $sectionTitle = $this->normalizeOptionalString(data_get($value, 'section_title'));
+        $sectionPath = $this->normalizeOptionalString(data_get($value, 'section_path'));
+        $sourceLabel = $this->normalizeOptionalString(data_get($value, 'source_label'));
+        $content = $this->normalizeOptionalString(data_get($value, 'content'));
+        $contentPreview = $this->normalizeOptionalString(data_get($value, 'content_preview'));
+        $chunkIndex = data_get($value, 'chunk_index');
+        $normalizedChunkIndex = is_numeric($chunkIndex) ? (int) $chunkIndex : null;
+
+        return [
+            'knowledge_item_id' => $knowledgeItemId,
+            'knowledge_item_chunk_id' => $knowledgeItemChunkId,
+            'document_title' => $documentTitle,
+            'section_title' => $sectionTitle,
+            'section_path' => $sectionPath,
+            'chunk_index' => $normalizedChunkIndex,
+            'source_label' => $sourceLabel,
+            'open_url' => $openUrl,
+            'content' => $content,
+            'content_preview' => $contentPreview,
+        ];
     }
 
     /**

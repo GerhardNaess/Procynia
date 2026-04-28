@@ -158,6 +158,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'ai-overview', label: 'Oversikt', href: '/app/ai' },
                 { key: 'ai-work', label: 'I arbeid', href: aiWorkHref },
                 { key: 'ai-instructions', label: 'AI instrukser', href: aiInstructionsHref },
+                { key: 'knowledge-vocabulary', label: 'Selskapsvokabular', href: '/app/ai/knowledge-vocabulary' },
                 { key: 'knowledge-docs', label: 'Kunnskapsdokumenter', href: '/app/ai/knowledge-base' },
             ];
         }
@@ -200,6 +201,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
             if (pathname.startsWith('/app/ai/knowledge-base')) {
                 return 'knowledge-docs';
+            }
+
+            if (pathname.startsWith('/app/ai/knowledge-vocabulary')) {
+                return 'knowledge-vocabulary';
             }
 
             return 'ai-work';

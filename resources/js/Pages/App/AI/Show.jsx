@@ -388,6 +388,7 @@ function normalizeGroundingPointList(value) {
                 support_summary: normalizedItem,
                 evidence_reference: null,
                 evidence_quote: null,
+                source: null,
             });
             return;
         }
@@ -408,6 +409,7 @@ function normalizeGroundingPointList(value) {
         const evidenceQuote = typeof item.evidence_quote === 'string'
             ? item.evidence_quote.replace(/\s+/g, ' ').trim()
             : '';
+        const source = normalizeGroundingSource(item.source);
 
         const normalizedRequirementPoint = requirementPoint !== '' ? requirementPoint : supportSummary;
         const normalizedSupportSummary = supportSummary !== '' ? supportSummary : requirementPoint;
@@ -428,10 +430,199 @@ function normalizeGroundingPointList(value) {
             support_summary: normalizedSupportSummary,
             evidence_reference: evidenceReference !== '' ? evidenceReference : null,
             evidence_quote: evidenceQuote !== '' ? evidenceQuote : null,
+            source,
         });
     });
 
     return normalizedValues;
+}
+
+function normalizeGroundingSource(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+
+    const knowledgeItemId = Number(value.knowledge_item_id);
+    const knowledgeItemChunkId = Number(value.knowledge_item_chunk_id);
+    const documentTitle = typeof value.document_title === 'string'
+        ? value.document_title.replace(/\s+/g, ' ').trim()
+        : '';
+    const sectionTitle = typeof value.section_title === 'string'
+        ? value.section_title.replace(/\s+/g, ' ').trim()
+        : '';
+    const sectionPath = typeof value.section_path === 'string'
+        ? value.section_path.replace(/\s+/g, ' ').trim()
+        : '';
+    const sourceLabel = typeof value.source_label === 'string'
+        ? value.source_label.replace(/\s+/g, ' ').trim()
+        : '';
+    const openUrl = typeof value.open_url === 'string'
+        ? value.open_url.trim()
+        : '';
+    const content = typeof value.content === 'string'
+        ? value.content.trim()
+        : '';
+    const contentPreview = typeof value.content_preview === 'string'
+        ? value.content_preview.replace(/\s+/g, ' ').trim()
+        : '';
+    const chunkIndex = Number(value.chunk_index);
+
+    if (!Number.isInteger(knowledgeItemId) || knowledgeItemId <= 0) {
+        return null;
+    }
+
+    if (!Number.isInteger(knowledgeItemChunkId) || knowledgeItemChunkId <= 0) {
+        return null;
+    }
+
+    return {
+        knowledge_item_id: knowledgeItemId,
+        knowledge_item_chunk_id: knowledgeItemChunkId,
+        document_title: documentTitle !== '' ? documentTitle : null,
+        section_title: sectionTitle !== '' ? sectionTitle : null,
+        section_path: sectionPath !== '' ? sectionPath : null,
+        chunk_index: Number.isInteger(chunkIndex) && chunkIndex > 0 ? chunkIndex : null,
+        source_label: sourceLabel !== '' ? sourceLabel : null,
+        open_url: openUrl !== '' ? openUrl : null,
+        content: content !== '' ? content : null,
+        content_preview: contentPreview !== '' ? contentPreview : null,
+    };
+}
+
+function EvidenceSourceModal({ evidence = null, onClose }) {
+    if (!evidence || typeof onClose !== 'function') {
+        return null;
+    }
+
+    const source = evidence.source ?? null;
+    const contentPreview = source?.content
+        ?? source?.content_preview
+        ?? evidence.evidence_quote
+        ?? evidence.evidence_reference
+        ?? 'Ingen utdrag er tilgjengelig for dette beviset.';
+
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Bevisvisning"
+            onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                    onClose();
+                }
+            }}
+        >
+            <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
+                <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                    <div className="space-y-1">
+                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">
+                            Bevis
+                        </div>
+                        <h2 className="text-xl font-semibold text-slate-950">
+                            {evidence.requirement_point ?? '—'}
+                        </h2>
+                        {evidence.support_summary ? (
+                            <p className="text-sm leading-6 text-slate-500">
+                                {evidence.support_summary}
+                            </p>
+                        ) : null}
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        aria-label="Lukk bevisvisning"
+                    >
+                        ×
+                    </button>
+                </div>
+
+                <div className="grid gap-4 overflow-y-auto px-6 py-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+                    <div className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
+                        <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Kilde
+                            </div>
+                            <div className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+                                <div>
+                                    <span className="font-semibold text-slate-900">Dokument:</span>{' '}
+                                    {source?.document_title ?? '—'}
+                                </div>
+                                <div>
+                                    <span className="font-semibold text-slate-900">Seksjon:</span>{' '}
+                                    {source?.section_title ?? '—'}
+                                </div>
+                                <div>
+                                    <span className="font-semibold text-slate-900">Seksjonssti:</span>{' '}
+                                    {source?.section_path ?? '—'}
+                                </div>
+                                <div>
+                                    <span className="font-semibold text-slate-900">Chunk:</span>{' '}
+                                    {source?.chunk_index ?? '—'}
+                                </div>
+                                <div>
+                                    <span className="font-semibold text-slate-900">Dokument-ID:</span>{' '}
+                                    {source?.knowledge_item_id ?? '—'}
+                                </div>
+                                <div>
+                                    <span className="font-semibold text-slate-900">Chunk-ID:</span>{' '}
+                                    {source?.knowledge_item_chunk_id ?? '—'}
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Utdrag
+                            </div>
+                            <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                                {contentPreview}
+                            </div>
+                        </section>
+                    </div>
+
+                    <aside className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
+                        <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                Bevislinje
+                            </div>
+                            <div className="mt-2 text-sm leading-6 text-slate-700">
+                                {evidence.evidence_reference ? (
+                                    <div className="font-medium text-slate-900">
+                                        {evidence.evidence_reference}
+                                    </div>
+                                ) : null}
+                                {evidence.evidence_quote ? (
+                                    <div className="mt-2 text-slate-600">
+                                        {evidence.evidence_quote}
+                                    </div>
+                                ) : null}
+                                {source?.source_label ? (
+                                    <div className="mt-3 text-xs text-slate-500">
+                                        {source.source_label}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </section>
+                    </aside>
+                </div>
+
+                <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-5">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                        >
+                            Lukk
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
 }
 
 function normalizeStringList(value) {
@@ -609,6 +800,7 @@ export default function AiShow({
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
     const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
     const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
+    const [selectedEvidence, setSelectedEvidence] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
@@ -1040,6 +1232,18 @@ export default function AiShow({
         setAnswerBasisSelectionError(null);
     };
 
+    const openEvidenceSource = (evidence) => {
+        if (!evidence || typeof evidence !== 'object' || !evidence.source) {
+            return;
+        }
+
+        setSelectedEvidence(evidence);
+    };
+
+    const closeEvidenceSource = () => {
+        setSelectedEvidence(null);
+    };
+
     const syncRequirementAnswerBasisSelection = async (requirement, nextAnswerBasisItemIds) => {
         if (
             !requirement
@@ -1117,6 +1321,24 @@ export default function AiShow({
             };
         });
     };
+
+    useEffect(() => {
+        if (!selectedEvidence) {
+            return undefined;
+        }
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                closeEvidenceSource();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [selectedEvidence]);
 
     const saveActiveAnswerDraft = async () => {
         if (activeRequirement === null || activeRequirementDraft === null) {
@@ -2808,15 +3030,35 @@ export default function AiShow({
                                                                                     {point.support_summary}
                                                                                 </span>
                                                                             ) : null}
-                                                                            {point?.evidence_reference ? (
-                                                                                <span className="block text-xs text-slate-500">
-                                                                                    Bevis: {point.evidence_reference}
-                                                                                </span>
-                                                                            ) : point?.evidence_quote ? (
-                                                                                <span className="block text-xs text-slate-500">
-                                                                                    Bevis: {point.evidence_quote}
-                                                                                </span>
-                                                                            ) : null}
+                                                                            {(() => {
+                                                                                const evidenceLabel = point?.evidence_reference
+                                                                                    ?? point?.evidence_quote
+                                                                                    ?? point?.source?.source_label
+                                                                                    ?? null;
+
+                                                                                if (evidenceLabel === null) {
+                                                                                    return null;
+                                                                                }
+
+                                                                                if (point?.source?.open_url) {
+                                                                                    return (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => openEvidenceSource(point)}
+                                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-xs font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                                                            aria-label={`Åpne bevisdetaljer for ${evidenceLabel}`}
+                                                                                        >
+                                                                                            Bevis: {evidenceLabel}
+                                                                                        </button>
+                                                                                    );
+                                                                                }
+
+                                                                                return (
+                                                                                    <span className="block text-xs text-slate-500">
+                                                                                        Bevis: {evidenceLabel}
+                                                                                    </span>
+                                                                                );
+                                                                            })()}
                                                                         </span>
                                                                     </li>
                                                                 ))}
@@ -2897,7 +3139,7 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="w-full max-h-[50vh] resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </label>
@@ -2960,6 +3202,13 @@ export default function AiShow({
                         </div>
                     </section>
                 </div>
+
+                {selectedEvidence?.source ? (
+                    <EvidenceSourceModal
+                        evidence={selectedEvidence}
+                        onClose={closeEvidenceSource}
+                    />
+                ) : null}
             </div>
         </CustomerAppLayout>
     );

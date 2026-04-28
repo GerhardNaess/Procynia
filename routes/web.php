@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\AiController;
+use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
@@ -45,6 +46,16 @@ Route::prefix('app')
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
+        Route::prefix('/ai/knowledge-vocabulary')->name('ai.knowledge-vocabulary.')->group(function (): void {
+            Route::get('/', [KnowledgeVocabularyController::class, 'index'])->name('index');
+            Route::post('/analysis-batches', [KnowledgeVocabularyController::class, 'storeBatch'])->name('analysis-batches.store');
+            Route::delete('/analysis-batches/{batch}', [KnowledgeVocabularyController::class, 'destroyBatch'])->name('analysis-batches.destroy');
+            Route::patch('/terms/{term}', [KnowledgeVocabularyController::class, 'updateTerm'])->name('terms.update');
+            Route::patch('/suggestions/{suggestion}/approve', [KnowledgeVocabularyController::class, 'approveSuggestion'])->name('suggestions.approve');
+            Route::patch('/suggestions/{suggestion}/reject', [KnowledgeVocabularyController::class, 'rejectSuggestion'])->name('suggestions.reject');
+            Route::patch('/suggestions/{suggestion}/merge', [KnowledgeVocabularyController::class, 'mergeSuggestion'])->name('suggestions.merge');
+            Route::patch('/suggestions/{suggestion}/edit-and-approve', [KnowledgeVocabularyController::class, 'editAndApproveSuggestion'])->name('suggestions.edit-and-approve');
+        });
         Route::prefix('/ai/knowledge-base')->name('ai.knowledge-base.')->group(function (): void {
             Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
             Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');

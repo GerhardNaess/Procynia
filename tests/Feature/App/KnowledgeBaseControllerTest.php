@@ -8,6 +8,7 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\OpenAi\EmbeddingService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -26,11 +27,14 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
+        $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulEmbeddingService();
     }
 
     protected function tearDown(): void
     {
+        Mockery::close();
+
         if (DB::transactionLevel() > 0) {
             DB::rollBack();
         }
@@ -163,6 +167,67 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
         $this->assertNotNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_error);
+    }
+
+    public function test_knowledge_document_upload_generates_metadata_before_embedding_and_persists_metadata_fields(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Four D AS');
+
+        $embeddingService = Mockery::mock(EmbeddingService::class);
+        $embeddingService->shouldReceive('tryEmbedText')
+            ->once()
+            ->with(Mockery::on(function (string $text): bool {
+                return str_contains($text, 'Summary: Kort oppsummering for gjenfinning.')
+                    && str_contains($text, 'Service/product tag: Produkt A')
+                    && str_contains($text, 'Theme tag: Tema A')
+                    && str_contains($text, 'Topic: Emne A')
+                    && str_contains($text, 'Sub-topic: Underemne A')
+                    && str_contains($text, 'Content: Metadata generation test content');
+            }))
+            ->andReturn([
+                'ok' => true,
+                'embedding' => [0.11, 0.22, 0.33],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ]);
+        $this->app->instance(EmbeddingService::class, $embeddingService);
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('metadata-generation.docx', 'Metadata generation test content that should be chunked and embedded.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'metadata-generation.docx')
+            ->firstOrFail();
+
+        $chunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->firstOrFail();
+
+        $this->assertSame('Produkt A', $chunk->service_product_tag);
+        $this->assertSame('Tema A', $chunk->theme_tag);
+        $this->assertSame('Emne A', $chunk->topic);
+        $this->assertSame('Underemne A', $chunk->sub_topic);
+        $this->assertSame(['stikkord a', 'stikkord b'], $chunk->keywords);
+        $this->assertSame(['term a'], $chunk->matched_terms);
+        $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->summary_for_retrieval);
+        $this->assertSame(0.91, $chunk->confidence_score);
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
     }
 
     public function test_knowledge_document_upload_persists_embedding_error_when_generation_fails(): void
@@ -938,6 +1003,50 @@ class KnowledgeBaseControllerTest extends TestCase
             });
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic metadata generation service for knowledge document upload tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulKnowledgeMetadataGenerationService(): void
+    {
+        $service = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $service->shouldReceive('generateForChunk')
+            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
+                $summary = 'Kort oppsummering for gjenfinning.';
+                $keywords = ['stikkord a', 'stikkord b'];
+                $matchedTerms = ['term a'];
+                $embeddingInput = implode("\n", array_filter([
+                    'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
+                    'Service/product tag: Produkt A',
+                    'Theme tag: Tema A',
+                    'Topic: Emne A',
+                    'Sub-topic: Underemne A',
+                    'Keywords: '.implode(', ', $keywords),
+                    'Matched terms: '.implode(', ', $matchedTerms),
+                    'Summary: '.$summary,
+                    'Content: '.trim((string) $chunk->content),
+                ]));
+
+                return [
+                    'service_product_tag' => 'Produkt A',
+                    'theme_tag' => 'Tema A',
+                    'topic' => 'Emne A',
+                    'sub_topic' => 'Underemne A',
+                    'keywords' => $keywords,
+                    'matched_terms' => $matchedTerms,
+                    'summary_for_retrieval' => $summary,
+                    'confidence_score' => 0.91,
+                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                    'new_term_suggestions' => [],
+                    'embedding_input' => $embeddingInput,
+                ];
+            });
+
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $service);
     }
 
     /**

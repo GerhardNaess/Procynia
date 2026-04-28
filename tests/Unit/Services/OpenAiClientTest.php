@@ -122,4 +122,51 @@ class OpenAiClientTest extends TestCase
                 && ($context['raw_body'] ?? null) === json_encode($errorBody, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         });
     }
+
+    public function test_it_includes_openai_error_details_in_the_exception_message_for_failed_responses(): void
+    {
+        config([
+            'services.openai.api_key' => 'test-openai-key',
+            'services.openai.base_url' => 'https://api.openai.com/v1',
+            'services.openai.model' => 'gpt-4.1-mini',
+        ]);
+
+        $errorBody = [
+            'error' => [
+                'message' => 'Invalid schema for response_format: Missing required field.',
+                'type' => 'invalid_request_error',
+                'code' => 'invalid_json_schema',
+                'param' => 'text.format.schema',
+            ],
+        ];
+
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response($errorBody, 400),
+        ]);
+
+        try {
+            app(OpenAiClient::class)->createResponse([
+                'model' => 'gpt-4.1-mini',
+                'input' => [
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            [
+                                'type' => 'input_text',
+                                'text' => 'Hello',
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+            $this->fail('Expected the OpenAI client to throw a runtime exception.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('HTTP status [400]', $exception->getMessage());
+            $this->assertStringContainsString('invalid_request_error', $exception->getMessage());
+            $this->assertStringContainsString('invalid_json_schema', $exception->getMessage());
+            $this->assertStringContainsString('text.format.schema', $exception->getMessage());
+            $this->assertStringContainsString('Invalid schema for response_format: Missing required field.', $exception->getMessage());
+        }
+    }
 }

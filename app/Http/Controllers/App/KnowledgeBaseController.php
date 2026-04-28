@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\User;
+use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\DocumentChunker;
 use App\Services\DocumentTextExtractor;
 use App\Services\KnowledgeChunkCoverageService;
@@ -32,6 +33,7 @@ class KnowledgeBaseController extends Controller
         private readonly DocumentTextExtractor $documentTextExtractor,
         private readonly DocumentChunker $documentChunker,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
+        private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
     ) {
     }
 
@@ -79,7 +81,6 @@ class KnowledgeBaseController extends Controller
             ->withCount('chunks')
             ->whereKey($knowledgeItem->id)
             ->firstOrFail();
-
         return Inertia::render('App/AI/KnowledgeBase/Show', [
             'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
             'knowledgeItem' => $this->documentDetailPayload($record),
@@ -739,6 +740,10 @@ class KnowledgeBaseController extends Controller
                         'keywords' => $chunk->keywords,
                         'section_title' => $chunk->section_title,
                         'section_path' => $chunk->section_path,
+                        'matched_terms' => $chunk->matched_terms,
+                        'summary_for_retrieval' => $chunk->summary_for_retrieval,
+                        'confidence_score' => $chunk->confidence_score,
+                        'metadata_status' => $chunk->metadata_status,
                         'start_offset' => (int) $chunk->start_offset,
                         'end_offset' => (int) $chunk->end_offset,
                         'embedding_model' => $chunk->embedding_model,
@@ -830,7 +835,9 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $chunkText = trim((string) $chunk->content);
+            $metadataOutcome = $this->knowledgeChunkMetadataGenerationService->generateForChunk($knowledgeDocument, $chunk);
+            $embeddingInput = $metadataOutcome['embedding_input'] ?? $chunk->content;
+            $chunkText = trim((string) $embeddingInput);
 
             if ($chunkText === '') {
                 $chunk->forceFill([
@@ -840,7 +847,19 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $outcome = app(\App\Services\OpenAi\EmbeddingService::class)->tryEmbedText($chunkText);
+            $chunk->forceFill([
+                'service_product_tag' => $metadataOutcome['service_product_tag'] ?? null,
+                'theme_tag' => $metadataOutcome['theme_tag'] ?? null,
+                'topic' => $metadataOutcome['topic'] ?? null,
+                'sub_topic' => $metadataOutcome['sub_topic'] ?? null,
+                'keywords' => $metadataOutcome['keywords'] ?? null,
+                'matched_terms' => $metadataOutcome['matched_terms'] ?? null,
+                'summary_for_retrieval' => $metadataOutcome['summary_for_retrieval'] ?? null,
+                'confidence_score' => $metadataOutcome['confidence_score'] ?? null,
+                'metadata_status' => $metadataOutcome['metadata_status'] ?? KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+            ])->save();
+
+            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
 
             if (! ($outcome['ok'] ?? false)) {
                 $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);

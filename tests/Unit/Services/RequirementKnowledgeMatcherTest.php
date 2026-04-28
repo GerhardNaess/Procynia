@@ -107,6 +107,28 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertGreaterThan($matches->last()['final_score'], $matches->get(1)['final_score']);
     }
 
+    public function test_it_uses_a_precomputed_metadata_score_when_present(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'metadata søk',
+            collect([
+                $this->chunkPayload(1, 'Weak metadata', 'gamma delta', '2026-04-06 10:00:00', null, [
+                    'metadata_score' => 0.25,
+                ]),
+                $this->chunkPayload(2, 'Strong metadata', 'gamma delta', '2026-04-06 10:01:00', null, [
+                    'metadata_score' => 1.5,
+                ]),
+            ]),
+        );
+
+        $this->assertSame([2, 1], $matches->pluck('chunk_id')->all());
+        $this->assertSame(1.5, $matches->first()['metadata_score']);
+        $this->assertSame(0.25, $matches->get(1)['metadata_score']);
+        $this->assertSame(1.5, $matches->first()['base_score']);
+    }
+
     public function test_it_falls_back_to_base_ranking_when_requirement_embedding_is_missing(): void
     {
         $matcher = app(RequirementKnowledgeMatcher::class);
@@ -143,8 +165,12 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'content' => $content,
             'embedding_vector' => $embeddingVector,
             'knowledge_item_updated_at' => $updatedAt,
+            'metadata_score' => null,
+            'metadata_matches' => [],
             'topic' => '',
             'sub_topic' => '',
+            'service_product_tag' => '',
+            'theme_tag' => '',
             'keywords' => [],
             'section_title' => '',
             'section_path' => '',
