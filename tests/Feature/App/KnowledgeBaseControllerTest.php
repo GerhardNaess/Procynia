@@ -15,6 +15,7 @@ use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
+use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
@@ -36,6 +37,7 @@ class KnowledgeBaseControllerTest extends TestCase
         DB::beginTransaction();
         $this->bindKnowledgeChunkBoundaryService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
+        $this->bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService();
         $this->bindSuccessfulEmbeddingService();
     }
 
@@ -687,6 +689,9 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(2, $suggestions->where('suggested_type', 'topic')->count());
         $this->assertSame(2, $suggestions->where('suggested_type', 'sub_topic')->count());
         $this->assertSame(4, $suggestions->where('suggested_type', 'keywords')->count());
+        $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->suggested_synonyms);
+        $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->suggested_description);
+        $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->reason);
     }
 
     public function test_knowledge_document_upload_continues_when_metadata_generation_ai_fails(): void
@@ -1946,6 +1951,33 @@ XML;
             });
 
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic suggestion enrichment service for upload tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService(): void
+    {
+        $service = Mockery::mock(KnowledgeVocabularySuggestionEnrichmentService::class);
+        $service->shouldReceive('enrichSuggestion')
+            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk, string $field, string $term): array {
+                $heading = trim((string) ($chunk->heading_path ?: $chunk->section_title ?: 'seksjonen'));
+                $baseDescription = trim((string) ($chunk->summary_for_retrieval ?? ''));
+
+                return [
+                    'canonical_name' => $term,
+                    'synonyms' => [
+                        $term.' alternativ',
+                    ],
+                    'description' => $baseDescription !== '' ? $baseDescription : 'Beskrivelse av '.$field.' under '.$heading,
+                    'reason' => 'Foreslått fra chunk-metadata basert på innhold under '.$heading.'.',
+                ];
+            });
+
+        $this->app->instance(KnowledgeVocabularySuggestionEnrichmentService::class, $service);
     }
 
     /**

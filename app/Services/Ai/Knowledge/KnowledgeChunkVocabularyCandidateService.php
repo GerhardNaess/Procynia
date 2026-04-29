@@ -13,6 +13,7 @@ class KnowledgeChunkVocabularyCandidateService
 {
     public function __construct(
         private readonly KnowledgeMetadataVocabularyService $vocabularyService,
+        private readonly KnowledgeVocabularySuggestionEnrichmentService $suggestionEnrichmentService,
     ) {
     }
 
@@ -75,17 +76,38 @@ class KnowledgeChunkVocabularyCandidateService
                 continue;
             }
 
+            $enrichment = $this->suggestionEnrichmentService->enrichSuggestion($document, $chunk, $normalizedField, $term);
+            $normalizedSuggestion = $this->normalizeEnrichedSuggestion($chunk, $normalizedField, $term, $enrichment);
+            $finalSkipReason = $this->skipReasonForTerm($customerId, $normalizedField, $normalizedSuggestion['suggested_canonical_name'], $catalog);
+
+            if ($finalSkipReason !== null) {
+                $skippedCount++;
+
+                Log::info('[PROCYNIA][KNOWLEDGE_VOCABULARY] Chunk vocabulary candidate skipped.', [
+                    'customer_id' => $customerId,
+                    'knowledge_item_id' => $document->id,
+                    'knowledge_item_chunk_id' => $chunk->id,
+                    'field' => $normalizedField,
+                    'term' => $term,
+                    'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
+                    'created_or_skipped' => 'skipped',
+                    'skip_reason' => $finalSkipReason,
+                ]);
+
+                continue;
+            }
+
             KnowledgeMetadataTermSuggestion::query()->create([
                 'customer_id' => $customerId,
                 'source_chunk_id' => $chunk->id,
                 'suggested_term' => $term,
-                'suggested_canonical_name' => $term,
+                'suggested_canonical_name' => $normalizedSuggestion['suggested_canonical_name'],
                 'suggested_type' => $normalizedField,
-                'suggested_synonyms' => [],
-                'suggested_description' => null,
+                'suggested_synonyms' => $normalizedSuggestion['suggested_synonyms'],
+                'suggested_description' => $normalizedSuggestion['suggested_description'],
                 'suggested_canonical_parent' => null,
                 'related_existing_term_id' => null,
-                'reason' => 'Suggested from persisted chunk metadata.',
+                'reason' => $normalizedSuggestion['reason'],
                 'confidence_score' => null,
                 'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
             ]);
@@ -280,5 +302,170 @@ class KnowledgeChunkVocabularyCandidateService
         }
 
         return $normalized;
+    }
+
+    /**
+     * Purpose: Normalize an enriched suggestion payload before persistence.
+     * Inputs: The chunk context, the candidate field, the original term, and the enrichment result.
+     * Returns: A normalized persistence payload with safe fallbacks.
+     * Side effects: None.
+     */
+    private function normalizeEnrichedSuggestion(
+        KnowledgeItemChunk $chunk,
+        string $field,
+        string $term,
+        array $enrichment,
+    ): array {
+        $canonicalName = $this->normalizeText(data_get($enrichment, 'canonical_name'), $term, 191) ?? $term;
+        $synonyms = $this->normalizeSynonyms(data_get($enrichment, 'synonyms'), $canonicalName);
+        $description = $this->normalizeText(
+            data_get($enrichment, 'description'),
+            $this->fallbackDescription($chunk, $field),
+            300,
+        );
+        $reason = $this->normalizeText(
+            data_get($enrichment, 'reason'),
+            $this->fallbackReason($chunk),
+            300,
+        );
+
+        return [
+            'suggested_canonical_name' => $canonicalName,
+            'suggested_synonyms' => $synonyms,
+            'suggested_description' => $description,
+            'reason' => $reason,
+        ];
+    }
+
+    /**
+     * Purpose: Normalize one text value with an optional fallback.
+     * Inputs: The raw value, a fallback value, and the maximum length.
+     * Returns: A trimmed string capped to the requested length, or null.
+     * Side effects: None.
+     */
+    private function normalizeText(mixed $value, mixed $fallbackValue = null, int $maxLength = 300): ?string
+    {
+        foreach ([$value, $fallbackValue] as $candidate) {
+            $cleanValue = trim(Str::squish((string) ($candidate ?? '')));
+
+            if ($cleanValue === '') {
+                continue;
+            }
+
+            return Str::limit($cleanValue, $maxLength, '');
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Normalize enriched synonyms and remove the canonical name from the list.
+     * Inputs: Raw synonym data and the canonical name.
+     * Returns: A trimmed, de-duplicated synonym list.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function normalizeSynonyms(mixed $synonyms, string $canonicalName): array
+    {
+        if (is_string($synonyms)) {
+            $synonyms = preg_split('/[,\n;]+/u', str_replace(["\r\n", "\r"], "\n", $synonyms), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        } elseif (! is_array($synonyms)) {
+            $synonyms = $synonyms === null ? [] : [(string) $synonyms];
+        }
+
+        $normalized = [];
+        $seen = [];
+        $canonicalKey = $this->comparisonKey($canonicalName);
+
+        foreach ($synonyms as $synonym) {
+            $cleanValue = trim(Str::squish((string) $synonym));
+
+            if ($cleanValue === '') {
+                continue;
+            }
+
+            $comparisonKey = $this->comparisonKey($cleanValue);
+
+            if ($comparisonKey === $canonicalKey) {
+                continue;
+            }
+
+            if (isset($seen[$comparisonKey])) {
+                continue;
+            }
+
+            $seen[$comparisonKey] = true;
+            $normalized[] = $cleanValue;
+
+            if (count($normalized) >= 5) {
+                break;
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Build a short fallback description from the persisted chunk context.
+     * Inputs: The chunk context and the candidate field.
+     * Returns: A short descriptive sentence or null.
+     * Side effects: None.
+     */
+    private function fallbackDescription(KnowledgeItemChunk $chunk, string $field): ?string
+    {
+        $summary = trim((string) ($chunk->summary_for_retrieval ?? ''));
+
+        if ($summary !== '') {
+            return Str::limit(Str::squish($summary), 300, '');
+        }
+
+        $heading = $this->preferredHeadingLabel($chunk);
+        $label = KnowledgeMetadataTerm::TYPE_LABELS[$field] ?? $field;
+
+        if ($heading !== null) {
+            return Str::limit('Kort beskrivelse av '.$label.' under '.$heading.'.', 300, '');
+        }
+
+        return Str::limit('Kort beskrivelse av '.$label.' i denne seksjonen.', 300, '');
+    }
+
+    /**
+     * Purpose: Build a short fallback reason from the persisted chunk context.
+     * Inputs: The chunk context.
+     * Returns: A short Norwegian reason string.
+     * Side effects: None.
+     */
+    private function fallbackReason(KnowledgeItemChunk $chunk): string
+    {
+        $heading = $this->preferredHeadingLabel($chunk);
+
+        if ($heading !== null) {
+            return Str::limit('Foreslått fra chunk-metadata basert på innhold under '.$heading.'.', 300, '');
+        }
+
+        return 'Foreslått fra chunk-metadata basert på innhold i denne seksjonen.';
+    }
+
+    /**
+     * Purpose: Prefer the most precise heading label available on the chunk.
+     * Inputs: The persisted chunk.
+     * Returns: The leaf heading label, or the section title, or null.
+     * Side effects: None.
+     */
+    private function preferredHeadingLabel(KnowledgeItemChunk $chunk): ?string
+    {
+        $heading = trim((string) ($chunk->heading_path ?? ''));
+
+        if ($heading !== '') {
+            $parts = preg_split('/\s*>\s*/u', $heading) ?: [$heading];
+            $heading = trim((string) end($parts));
+        }
+
+        if ($heading === '') {
+            $heading = trim((string) ($chunk->section_title ?? ''));
+        }
+
+        return $heading !== '' ? $heading : null;
     }
 }

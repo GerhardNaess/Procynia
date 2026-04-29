@@ -10,8 +10,11 @@ use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
@@ -21,6 +24,14 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
     public function test_it_creates_pending_candidates_from_persisted_chunk_metadata_when_approved_vocab_is_empty(): void
     {
         [$document, $chunk] = $this->fixtureBundle();
+
+        $this->bindOpenAiClient([
+            $this->enrichmentResponse('Tema A', ['Tema A', 'Tema A alternativ'], 'Beskrivelse av Tema A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
+            $this->enrichmentResponse('Underemne A', ['Underemne A', 'Underemne A alternativ'], 'Beskrivelse av Underemne A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
+            $this->enrichmentResponse('Stikkord A', ['Stikkord A', 'Stikkord A alternativ'], 'Beskrivelse av Stikkord A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
+            $this->enrichmentResponse('Stikkord B', ['Stikkord B', 'Stikkord B alternativ'], 'Beskrivelse av Stikkord B.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
+            $this->enrichmentResponse('Stikkord C', ['Stikkord C', 'Stikkord C alternativ'], 'Beskrivelse av Stikkord C.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
+        ]);
 
         $service = app(KnowledgeChunkVocabularyCandidateService::class);
         $result = $service->syncForChunk($document, $chunk);
@@ -35,6 +46,9 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
                 'source_chunk_id',
                 'suggested_term',
                 'suggested_type',
+                'suggested_canonical_name',
+                'suggested_synonyms',
+                'suggested_description',
                 'reason',
                 'status',
             ]);
@@ -50,6 +64,10 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
             'term' => $suggestion->suggested_term,
             'type' => $suggestion->suggested_type,
         ])->all());
+        $this->assertSame(0, KnowledgeMetadataTerm::query()->count());
+        $this->assertNotContains('Tema A', $rows->first()->suggested_synonyms);
+        $this->assertNotEmpty($rows->first()->suggested_description);
+        $this->assertNotEmpty($rows->first()->reason);
     }
 
     public function test_it_skips_existing_approved_and_pending_terms_without_normalizing_domain_values(): void
@@ -58,6 +76,10 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
             'topic' => 'Tema A',
             'sub_topic' => 'Underemne A',
             'keywords' => ['Stikkord A', 'Stikkord B'],
+        ]);
+
+        $this->bindOpenAiClient([
+            $this->enrichmentResponse('Stikkord B', ['Stikkord B', 'Stikkord B alternativ'], 'Beskrivelse av Stikkord B.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
         ]);
 
         KnowledgeMetadataTerm::query()->create([
@@ -112,6 +134,56 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
             'suggested_type' => 'keywords',
             'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
         ]);
+    }
+
+    public function test_it_uses_fallback_reason_when_enrichment_fails_and_keeps_candidate_creation_running(): void
+    {
+        [$document, $chunk] = $this->fixtureBundle([
+            'sub_topic' => null,
+            'keywords' => [],
+            'heading_path' => '2.1 Sammendrag og grunnlag',
+            'section_title' => '2.1 Sammendrag og grunnlag',
+            'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+        ]);
+
+        $this->bindOpenAiClient([], true);
+
+        $service = app(KnowledgeChunkVocabularyCandidateService::class);
+        $result = $service->syncForChunk($document, $chunk);
+
+        $this->assertSame(1, $result['created_count']);
+        $this->assertSame(0, $result['skipped_count']);
+
+        $suggestion = KnowledgeMetadataTermSuggestion::query()->firstOrFail();
+
+        $this->assertSame('Tema A', $suggestion->suggested_canonical_name);
+        $this->assertSame([], $suggestion->suggested_synonyms);
+        $this->assertNotEmpty($suggestion->suggested_description);
+        $this->assertStringContainsString('Foreslått fra chunk-metadata', $suggestion->reason);
+        $this->assertSame(0, KnowledgeMetadataTerm::query()->count());
+    }
+
+    public function test_it_removes_the_canonical_name_from_synonyms_before_persisting(): void
+    {
+        [$document, $chunk] = $this->fixtureBundle([
+            'sub_topic' => null,
+            'keywords' => [],
+            'heading_path' => '2.2 Strategisk partnerskap',
+            'section_title' => '2.2 Strategisk partnerskap',
+            'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+        ]);
+
+        $this->bindOpenAiClient([
+            $this->enrichmentResponse('Tema A', ['Tema A', 'Tema A alternativ', 'Tema A'], 'Beskrivelse av Tema A.', 'Foreslått fra chunk-metadata basert på innhold under 2.2 Strategisk partnerskap.'),
+        ]);
+
+        $service = app(KnowledgeChunkVocabularyCandidateService::class);
+        $service->syncForChunk($document, $chunk);
+
+        $suggestion = KnowledgeMetadataTermSuggestion::query()->firstOrFail();
+
+        $this->assertSame('Tema A', $suggestion->suggested_canonical_name);
+        $this->assertSame(['Tema A alternativ'], $suggestion->suggested_synonyms);
     }
 
     /**
@@ -178,5 +250,48 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * Purpose: Bind a deterministic OpenAI client for suggestion enrichment tests.
+     * Inputs: The list of responses to return, and whether the first call should fail.
+     * Returns: None.
+     * Side effects: Replaces the OpenAI client binding in the container.
+     */
+    private function bindOpenAiClient(array $responses, bool $shouldFail = false): void
+    {
+        $client = Mockery::mock(OpenAiClient::class);
+
+        if ($shouldFail) {
+            $client->shouldReceive('createResponse')
+                ->andThrow(new RuntimeException('OpenAI suggestion enrichment failed.'));
+        } else {
+            $client->shouldReceive('createResponse')
+                ->times(count($responses))
+                ->andReturnUsing(function () use (&$responses): array {
+                    return array_shift($responses) ?? [];
+                });
+        }
+
+        $this->app->instance(OpenAiClient::class, $client);
+    }
+
+    /**
+     * Purpose: Build one OpenAI response payload for suggestion enrichment tests.
+     * Inputs: The canonical name, synonyms, description, and reason.
+     * Returns: A deterministic OpenAI-style response array.
+     * Side effects: None.
+     */
+    private function enrichmentResponse(string $canonicalName, array $synonyms, string $description, string $reason): array
+    {
+        return [
+            'id' => 'resp_enrichment_'.Str::slug($canonicalName).'-'.Str::random(6),
+            'output_text' => json_encode([
+                'canonical_name' => $canonicalName,
+                'synonyms' => $synonyms,
+                'description' => $description,
+                'reason' => $reason,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ];
     }
 }

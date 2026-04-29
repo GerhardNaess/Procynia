@@ -123,11 +123,11 @@ class KnowledgeVocabularyControllerTest extends TestCase
             'suggested_term' => 'Tema A',
             'suggested_canonical_name' => 'Tema A',
             'suggested_type' => 'topic',
-            'suggested_synonyms' => [],
-            'suggested_description' => null,
+            'suggested_synonyms' => ['styring'],
+            'suggested_description' => 'Beskrivelse.',
             'suggested_canonical_parent' => null,
             'related_existing_term_id' => null,
-            'reason' => 'Forslag fra chunk.',
+            'reason' => 'Relevant begrep.',
             'confidence_score' => null,
             'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
         ]);
@@ -139,11 +139,11 @@ class KnowledgeVocabularyControllerTest extends TestCase
             'suggested_term' => 'Underemne A',
             'suggested_canonical_name' => 'Underemne A',
             'suggested_type' => 'sub_topic',
-            'suggested_synonyms' => [],
-            'suggested_description' => null,
+            'suggested_synonyms' => ['oppfølging'],
+            'suggested_description' => 'Beskrivelse.',
             'suggested_canonical_parent' => null,
             'related_existing_term_id' => null,
-            'reason' => 'Forslag fra chunk.',
+            'reason' => 'Relevant begrep.',
             'confidence_score' => null,
             'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
         ]);
@@ -155,11 +155,11 @@ class KnowledgeVocabularyControllerTest extends TestCase
             'suggested_term' => 'Stikkord A',
             'suggested_canonical_name' => 'Stikkord A',
             'suggested_type' => 'keywords',
-            'suggested_synonyms' => [],
-            'suggested_description' => null,
+            'suggested_synonyms' => ['nøkkelord'],
+            'suggested_description' => 'Beskrivelse.',
             'suggested_canonical_parent' => null,
             'related_existing_term_id' => null,
-            'reason' => 'Forslag fra chunk.',
+            'reason' => 'Relevant begrep.',
             'confidence_score' => null,
             'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
         ]);
@@ -174,7 +174,10 @@ class KnowledgeVocabularyControllerTest extends TestCase
                 && data_get($suggestions, 'Tema A.suggested_type_label') === 'Emne'
                 && data_get($suggestions, 'Underemne A.suggested_type_label') === 'Underemne'
                 && data_get($suggestions, 'Stikkord A.suggested_type_label') === 'Nøkkelord'
-                && data_get($suggestions, 'Tema A.source_label') === 'labels.docx · Chunk 1';
+                && data_get($suggestions, 'Tema A.source_label') === 'labels.docx · Chunk 1'
+                && data_get($suggestions, 'Tema A.suggested_synonyms.0') === 'styring'
+                && data_get($suggestions, 'Tema A.suggested_description') === 'Beskrivelse.'
+                && data_get($suggestions, 'Tema A.reason') === 'Relevant begrep.';
         });
     }
 
