@@ -32,6 +32,8 @@ use Throwable;
 
 class KnowledgeBaseController extends Controller
 {
+    private const RULE_BASED_CHUNK_MAX_WORDS = 800;
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
@@ -809,20 +811,89 @@ class KnowledgeBaseController extends Controller
     /**
      * Purpose: Build deterministic chunk payloads directly from parser output for controlled rule-based chunking.
      * Inputs: The parsed knowledge document structure containing source_text and structural elements.
-     * Returns: Ordered chunk payloads for H1-only sections and H2 sections, or one fallback payload when no headings exist.
+     * Returns: Ordered chunk payloads for H1-only sections, H2 sections, and block-based subchunks when a section is oversized.
      * Side effects: None.
      */
     private function buildRuleBasedH2ChunkPayloads(array $structure): array
     {
         $sourceText = (string) data_get($structure, 'source_text', '');
+        $sourceTextLength = mb_strlen($sourceText, 'UTF-8');
         $elements = array_values(array_filter(
             (array) data_get($structure, 'elements', []),
             static fn ($element): bool => is_array($element),
         ));
         $chunkRanges = [];
+        $structuralCandidateCount = 0;
+        $skippedOrEmptyRangesCount = 0;
+        $duplicateRangeCount = 0;
+        $overlappingRangeCount = 0;
+        $coveredCharacterCount = 0;
 
         foreach ($this->groupElementsByPrimaryHeading($elements) as $group) {
             foreach ($this->buildRuleBasedChunkRangesForPrimaryHeadingGroup($group) as $chunkRange) {
+                $startOffset = (int) ($chunkRange['start_offset'] ?? 0);
+                $endOffset = (int) ($chunkRange['end_offset'] ?? 0);
+                $candidateIndex = $structuralCandidateCount++;
+                $chunkKind = (string) ($chunkRange['chunk_kind'] ?? 'h2_section');
+                $headingPath = $this->cleanNullableString($chunkRange['heading_path'] ?? null, 255);
+                $sectionTitle = $this->cleanNullableString($chunkRange['section_title'] ?? null, 255) ?? $headingPath;
+                $sectionPath = $this->cleanNullableString($chunkRange['section_path'] ?? null, 255) ?? $sectionTitle;
+                $rawCandidateContent = mb_substr($sourceText, $startOffset, max(0, $endOffset - $startOffset), 'UTF-8');
+                $candidateContent = trim($rawCandidateContent);
+                $candidateContentLength = mb_strlen($candidateContent, 'UTF-8');
+                $candidateWordCount = count(preg_split('/\s+/u', $candidateContent, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+                $willSplit = $candidateWordCount > self::RULE_BASED_CHUNK_MAX_WORDS;
+
+                $chunkRange['candidate_index'] = $candidateIndex;
+                $chunkRange['content_length'] = $candidateContentLength;
+                $chunkRange['word_count'] = $candidateWordCount;
+                $chunkRange['will_split'] = $willSplit;
+                $chunkRange['excerpt'] = mb_substr($candidateContent, 0, 120, 'UTF-8');
+                $chunkRange['section_title'] = $sectionTitle;
+                $chunkRange['section_path'] = $sectionPath;
+                $chunkRange['heading_path'] = $headingPath ?? $sectionTitle;
+
+                if ($willSplit) {
+                    $blocks = [];
+                    $rawBlocks = preg_split('/\n{2,}/u', $rawCandidateContent, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                    $blockCursor = 0;
+
+                    foreach ($rawBlocks as $blockIndex => $blockText) {
+                        $blockText = trim((string) $blockText);
+
+                        if ($blockText === '') {
+                            continue;
+                        }
+
+                        $relativeStart = mb_strpos($rawCandidateContent, $blockText, $blockCursor, 'UTF-8');
+
+                        if ($relativeStart === false) {
+                            $relativeStart = $blockCursor;
+                        }
+
+                        $relativeEnd = $relativeStart + mb_strlen($blockText, 'UTF-8');
+                        $blockCursor = $relativeEnd;
+
+                        $blocks[] = [
+                            'block_index' => $blockIndex,
+                            'relative_start' => $relativeStart,
+                            'relative_end' => $relativeEnd,
+                            'absolute_start_offset' => $startOffset + $relativeStart,
+                            'absolute_end_offset' => $startOffset + $relativeEnd,
+                            'word_count' => count(preg_split('/\s+/u', $blockText, -1, PREG_SPLIT_NO_EMPTY) ?: []),
+                            'starts_with' => mb_substr($blockText, 0, 80, 'UTF-8'),
+                        ];
+                    }
+
+                    $subChunkRanges = $this->buildRuleBasedSubChunksFromBlocks($chunkRange, $blocks, $sourceText);
+
+                    foreach ($subChunkRanges as $subChunkRange) {
+                        $chunkRanges[] = $subChunkRange;
+                    }
+
+                    continue;
+                }
+
                 $chunkRanges[] = $chunkRange;
             }
         }
@@ -843,45 +914,62 @@ class KnowledgeBaseController extends Controller
 
             $chunkPayloads = [];
             $seenRanges = [];
+            $lastAcceptedEndOffset = null;
 
             foreach ($chunkRanges as $chunkRange) {
                 $startOffset = (int) ($chunkRange['start_offset'] ?? 0);
                 $endOffset = (int) ($chunkRange['end_offset'] ?? 0);
+                $partIndex = isset($chunkRange['part_index']) ? (int) $chunkRange['part_index'] : null;
 
                 if ($endOffset <= $startOffset) {
+                    $skippedOrEmptyRangesCount++;
                     continue;
                 }
 
                 $rangeSignature = $startOffset.'-'.$endOffset;
 
                 if (isset($seenRanges[$rangeSignature])) {
+                    $duplicateRangeCount++;
                     continue;
                 }
 
                 $seenRanges[$rangeSignature] = true;
 
-                $content = trim(mb_substr($sourceText, $startOffset, $endOffset - $startOffset, 'UTF-8'));
+                if ($lastAcceptedEndOffset !== null && $startOffset < $lastAcceptedEndOffset) {
+                    $overlappingRangeCount++;
+                }
+
+                $rawContent = mb_substr($sourceText, $startOffset, $endOffset - $startOffset, 'UTF-8');
+                $content = trim($rawContent);
 
                 if ($content === '') {
+                    $skippedOrEmptyRangesCount++;
                     continue;
                 }
 
                 $headingPath = $this->cleanNullableString($chunkRange['heading_path'] ?? null, 255);
                 $chunkKind = (string) ($chunkRange['chunk_kind'] ?? 'h2_section');
 
-                if ($chunkKind === 'h1_section' && $headingPath !== null && $headingPath !== '') {
+                if ($chunkKind === 'h1_section' && $partIndex === null && $headingPath !== null && $headingPath !== '') {
                     $content = trim($headingPath."\n\n".$content);
                 }
+
+                $wordCount = count(preg_split('/\s+/u', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+                $contentLength = mb_strlen($content, 'UTF-8');
+
+                $coveredCharacterCount += $endOffset - $startOffset;
+                $lastAcceptedEndOffset = $endOffset;
 
                 $chunkPayloads[] = [
                     'content' => $content,
                     'start_offset' => $startOffset,
                     'end_offset' => $endOffset,
                     'section_title' => $headingPath,
-                    'section_path' => $headingPath,
+                    'section_path' => $this->cleanNullableString($chunkRange['section_path'] ?? null, 255) ?? $headingPath,
                     'heading_path' => $headingPath,
                     'chunk_type' => 'semantic',
                     'title' => $headingPath,
+                    'part_index' => $partIndex,
                     'topic' => null,
                     'sub_topic' => null,
                     'keywords' => null,
@@ -899,6 +987,8 @@ class KnowledgeBaseController extends Controller
             return [];
         }
 
+        $wordCount = count(preg_split('/\s+/u', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
         return [
             [
                 'content' => $content,
@@ -909,6 +999,7 @@ class KnowledgeBaseController extends Controller
                 'heading_path' => null,
                 'chunk_type' => 'document',
                 'title' => null,
+                'part_index' => null,
                 'topic' => null,
                 'sub_topic' => null,
                 'keywords' => null,
@@ -1057,6 +1148,8 @@ class KnowledgeBaseController extends Controller
                 'start_offset' => $startOffset,
                 'end_offset' => $endOffset,
                 'heading_path' => $primaryHeading,
+                'section_title' => $primaryHeading,
+                'section_path' => $primaryHeading,
                 'chunk_kind' => 'h1_section',
             ]];
         }
@@ -1067,6 +1160,8 @@ class KnowledgeBaseController extends Controller
         foreach ($h2Sections as $index => $h2Section) {
             $startOffset = (int) data_get($h2Section, 'start_offset', 0);
             $endOffset = (int) data_get($h2Section, 'end_offset', 0);
+            $fullHeadingPath = $this->cleanNullableString($h2Section['heading_path'] ?? null, 255) ?? $primaryHeading;
+            $headingTitle = $this->headingLeafFromPath($fullHeadingPath) ?? $fullHeadingPath;
 
             if ($index === 0 && $leadingStart < $startOffset) {
                 $startOffset = $leadingStart;
@@ -1079,12 +1174,138 @@ class KnowledgeBaseController extends Controller
             $ranges[] = [
                 'start_offset' => $startOffset,
                 'end_offset' => $endOffset,
-                'heading_path' => $primaryHeading,
+                'heading_path' => $headingTitle,
+                'section_title' => $headingTitle,
+                'section_path' => $fullHeadingPath,
                 'chunk_kind' => 'h2_section',
             ];
         }
 
         return $ranges;
+    }
+
+    /**
+     * Purpose: Split an oversized structural candidate into block-based subchunks.
+     * Inputs: The candidate range metadata, ordered block descriptors, and canonical source text.
+     * Returns: Ordered chunk ranges derived from the block boundaries.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $candidate
+     * @param array<int, array{
+     *     block_index: int,
+     *     relative_start: int,
+     *     relative_end: int,
+     *     absolute_start_offset: int,
+     *     absolute_end_offset: int,
+     *     word_count: int,
+     *     starts_with: string
+     * }> $blocks
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildRuleBasedSubChunksFromBlocks(array $candidate, array $blocks, string $sourceText): array
+    {
+        if ($blocks === []) {
+            return [];
+        }
+
+        $candidateIndex = isset($candidate['candidate_index']) ? (int) $candidate['candidate_index'] : 0;
+        $headingPath = $this->cleanNullableString($candidate['heading_path'] ?? null, 255);
+        $sectionTitle = $this->cleanNullableString($candidate['section_title'] ?? null, 255) ?? $headingPath;
+        $sectionPath = $this->cleanNullableString($candidate['section_path'] ?? null, 255) ?? $sectionTitle;
+        $chunkKind = (string) ($candidate['chunk_kind'] ?? 'h2_section');
+        $candidateEndOffset = isset($candidate['end_offset']) ? (int) $candidate['end_offset'] : null;
+        $subChunks = [];
+        $currentBlocks = [];
+        $currentWordCount = 0;
+
+        $flushCurrentBlocks = function (array &$currentBlocks, int &$currentWordCount, array &$subChunks, ?int $boundaryEndOffset = null) use ($candidateIndex, $headingPath, $sectionTitle, $sectionPath, $chunkKind): void {
+            if ($currentBlocks === []) {
+                return;
+            }
+
+            $firstBlock = $currentBlocks[0];
+            $lastBlock = $currentBlocks[array_key_last($currentBlocks)];
+            $startOffset = (int) ($firstBlock['absolute_start_offset'] ?? 0);
+            $endOffset = $boundaryEndOffset !== null
+                ? $boundaryEndOffset
+                : (int) ($lastBlock['absolute_end_offset'] ?? $startOffset);
+
+            if ($endOffset <= $startOffset) {
+                $currentBlocks = [];
+                $currentWordCount = 0;
+
+                return;
+            }
+
+            $subChunks[] = [
+                'start_offset' => $startOffset,
+                'end_offset' => $endOffset,
+                'heading_path' => $headingPath,
+                'section_title' => $sectionTitle,
+                'section_path' => $sectionPath,
+                'chunk_kind' => $chunkKind,
+                'candidate_index' => $candidateIndex,
+            ];
+
+            $currentBlocks = [];
+            $currentWordCount = 0;
+        };
+
+        foreach ($blocks as $block) {
+            $blockWordCount = (int) ($block['word_count'] ?? 0);
+
+            if ($currentBlocks !== [] && $currentWordCount + $blockWordCount > self::RULE_BASED_CHUNK_MAX_WORDS) {
+                $flushCurrentBlocks(
+                    $currentBlocks,
+                    $currentWordCount,
+                    $subChunks,
+                    isset($block['absolute_start_offset']) ? (int) $block['absolute_start_offset'] : null,
+                );
+            }
+
+            $currentBlocks[] = $block;
+            $currentWordCount += $blockWordCount;
+        }
+
+        $flushCurrentBlocks(
+            $currentBlocks,
+            $currentWordCount,
+            $subChunks,
+            $candidateEndOffset,
+        );
+
+        if (count($subChunks) <= 1) {
+            return $subChunks;
+        }
+
+        foreach ($subChunks as $index => &$subChunk) {
+            $subChunk['part_index'] = $index + 1;
+        }
+        unset($subChunk);
+
+        return $subChunks;
+    }
+
+    /**
+     * Purpose: Resolve the most specific heading segment from a heading path.
+     * Inputs: A heading path string or null.
+     * Returns: The deepest heading segment or null when no heading exists.
+     * Side effects: None.
+     */
+    private function headingLeafFromPath(mixed $headingPath): ?string
+    {
+        $text = trim((string) ($headingPath ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        $parts = array_values(array_filter(array_map(
+            static fn (string $part): string => trim($part),
+            explode(' > ', $text),
+        ), static fn (string $part): bool => $part !== ''));
+
+        return $parts !== [] ? $parts[array_key_last($parts)] : null;
     }
 
     /**

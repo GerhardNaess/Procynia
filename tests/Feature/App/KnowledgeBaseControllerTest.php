@@ -212,8 +212,8 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(
             [
                 'Kapittel 1',
-                'Kapittel 2',
-                'Kapittel 2',
+                '2.1 Sammendrag og helhetlig løsningsforslag',
+                '2.2 Strategisk partnerskap, veikart og måloppnåelse',
                 'Kapittel 3',
             ],
             array_values(array_map(
@@ -230,10 +230,132 @@ class KnowledgeBaseControllerTest extends TestCase
         );
         $this->assertStringContainsString('Kapittel 1', (string) $payloads[0]['content']);
         $this->assertStringContainsString('Kapittel 1 tekst.', (string) $payloads[0]['content']);
-        $this->assertStringContainsString('Kapittel 2.1 tekst.', (string) $payloads[1]['content']);
-        $this->assertStringContainsString('Kapittel 2.2 tekst.', (string) $payloads[2]['content']);
+        $this->assertStringContainsString('Sammendrag og helhetlig løsningsforslag.', (string) $payloads[1]['content']);
+        $this->assertStringContainsString('Strategisk partnerskap, veikart og måloppnåelse.', (string) $payloads[2]['content']);
         $this->assertStringContainsString('Kapittel 3', (string) $payloads[3]['content']);
         $this->assertStringContainsString('Kapittel 3 tekst.', (string) $payloads[3]['content']);
+        $this->assertSame('Kapittel 1', $payloads[0]['section_path']);
+        $this->assertSame('Kapittel 2 > 2.1 Sammendrag og helhetlig løsningsforslag', $payloads[1]['section_path']);
+        $this->assertSame('Kapittel 2 > 2.2 Strategisk partnerskap, veikart og måloppnåelse', $payloads[2]['section_path']);
+        $this->assertSame('Kapittel 3', $payloads[3]['section_path']);
+        $this->assertNull($payloads[0]['part_index']);
+        $this->assertNull($payloads[1]['part_index']);
+        $this->assertNull($payloads[2]['part_index']);
+        $this->assertNull($payloads[3]['part_index']);
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_splits_oversized_h2_sections_on_block_boundaries(): void
+    {
+        $structure = $this->ruleBasedOversizedChunkStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $this->assertCount(5, $payloads);
+        $this->assertSame(
+            [
+                'Kapittel 1',
+                '2.1 Sammendrag og grunnlag',
+                '2.1 Sammendrag og grunnlag',
+                '2.2 Kort oppsummering',
+                'Kapittel 3',
+            ],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertSame(
+            [null, 1, 2, null, null],
+            array_values(array_map(
+                static fn (array $payload): mixed => $payload['part_index'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertSame('Kapittel 2 > 2.1 Sammendrag og grunnlag', $payloads[1]['section_path']);
+        $this->assertSame('Kapittel 2 > 2.2 Kort oppsummering', $payloads[3]['section_path']);
+        $startOffsets = array_values(array_map(
+            static fn (array $payload): int => (int) $payload['start_offset'],
+            $payloads,
+        ));
+        $sortedStartOffsets = $startOffsets;
+        sort($sortedStartOffsets);
+
+        $this->assertSame($sortedStartOffsets, $startOffsets);
+
+        foreach ($payloads as $payload) {
+            $this->assertNotSame('', trim((string) $payload['content']));
+        }
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_only_splits_when_word_count_exceeds_the_threshold(): void
+    {
+        $structureAtThreshold = $this->ruleBasedThresholdBoundaryStructureFixture(400, 400);
+        $payloadsAtThreshold = $this->invokeBuildRuleBasedH2ChunkPayloads($structureAtThreshold);
+
+        $this->assertCount(1, $payloadsAtThreshold);
+        $this->assertSame(
+            ['2.1 Grensetest'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloadsAtThreshold,
+            )),
+        );
+        $this->assertSame([null], array_values(array_map(
+            static fn (array $payload): mixed => $payload['part_index'] ?? null,
+            $payloadsAtThreshold,
+        )));
+        $this->assertSame(800, array_sum(array_map(
+            static fn (array $payload): int => count(preg_split('/\s+/u', trim((string) $payload['content']), -1, PREG_SPLIT_NO_EMPTY) ?: []),
+            $payloadsAtThreshold,
+        )));
+
+        $structureAboveThreshold = $this->ruleBasedThresholdBoundaryStructureFixture(400, 401);
+        $payloadsAboveThreshold = $this->invokeBuildRuleBasedH2ChunkPayloads($structureAboveThreshold);
+
+        $this->assertCount(2, $payloadsAboveThreshold);
+        $this->assertSame(
+            ['2.1 Grensetest', '2.1 Grensetest'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloadsAboveThreshold,
+            )),
+        );
+        $this->assertSame([1, 2], array_values(array_map(
+            static fn (array $payload): mixed => $payload['part_index'] ?? null,
+            $payloadsAboveThreshold,
+        )));
+        $this->assertSame(801, array_sum(array_map(
+            static fn (array $payload): int => count(preg_split('/\s+/u', trim((string) $payload['content']), -1, PREG_SPLIT_NO_EMPTY) ?: []),
+            $payloadsAboveThreshold,
+        )));
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_splits_oversized_h1_sections_on_block_boundaries(): void
+    {
+        $structure = $this->ruleBasedOversizedH1StructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $this->assertCount(2, $payloads);
+        $this->assertSame(
+            ['Kapittel A', 'Kapittel A'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertSame([1, 2], array_values(array_map(
+            static fn (array $payload): mixed => $payload['part_index'] ?? null,
+            $payloads,
+        )));
+        $this->assertSame(
+            ['Kapittel A', 'Kapittel A'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['section_path'] ?? null,
+                $payloads,
+            )),
+        );
+        foreach ($payloads as $payload) {
+            $this->assertNotSame('', trim((string) $payload['content']));
+        }
     }
 
     public function test_knowledge_document_upload_persists_boundary_metadata_even_when_approved_vocabulary_is_empty(): void
@@ -1177,7 +1299,7 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedChunkStructureFixture(): array
     {
-        $sections = [
+        return $this->buildRuleBasedStructureFixture([
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 1',
@@ -1187,15 +1309,15 @@ class KnowledgeBaseControllerTest extends TestCase
             ],
             [
                 'type' => 'h2_section',
-                'heading_path' => 'Kapittel 2 > 2.1',
-                'text' => 'Kapittel 2.1 tekst.',
+                'heading_path' => 'Kapittel 2 > 2.1 Sammendrag og helhetlig løsningsforslag',
+                'text' => 'Sammendrag og helhetlig løsningsforslag.',
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'h2_section',
-                'heading_path' => 'Kapittel 2 > 2.2',
-                'text' => 'Kapittel 2.2 tekst.',
+                'heading_path' => 'Kapittel 2 > 2.2 Strategisk partnerskap, veikart og måloppnåelse',
+                'text' => 'Strategisk partnerskap, veikart og måloppnåelse.',
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
@@ -1206,8 +1328,150 @@ class KnowledgeBaseControllerTest extends TestCase
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
-        ];
+        ]);
+    }
 
+    /**
+     * Purpose: Build a synthetic structure fixture with one oversized H2 section that must be split on block boundaries.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with one H1-only section, one oversized H2 section, one small H2 section, and another H1-only section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedOversizedChunkStructureFixture(): array
+    {
+        $paragraphs = [];
+
+        for ($index = 1; $index <= 8; $index++) {
+            $paragraphs[] = $this->repeatedWords(sprintf('blok-%d', $index), 100);
+        }
+
+        $oversizedSectionText = implode("\n\n", array_merge(
+            ['2.1 Sammendrag og grunnlag'],
+            $paragraphs,
+        ));
+
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel 1',
+                'text' => 'Kapittel 1 tekst.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > 2.1 Sammendrag og grunnlag',
+                'text' => $oversizedSectionText,
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > 2.2 Kort oppsummering',
+                'text' => 'Kort oppsummering.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel 3',
+                'text' => 'Kapittel 3 tekst.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a synthetic structure fixture with one oversized H1-only section that must be split on block boundaries.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with one oversized H1-only section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedOversizedH1StructureFixture(): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel A',
+                'text' => $this->repeatedWords('kapittel-a-del-1', 201),
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel A',
+                'text' => $this->repeatedWords('kapittel-a-del-2', 201),
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel A',
+                'text' => $this->repeatedWords('kapittel-a-del-3', 201),
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel A',
+                'text' => $this->repeatedWords('kapittel-a-del-4', 201),
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a synthetic H2 section fixture that straddles the chunk threshold with two paragraph blocks.
+     * Inputs: Word counts for the first and second paragraph blocks.
+     * Returns: A parsed-structure shaped array with one H2 section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedThresholdBoundaryStructureFixture(int $firstBlockWords, int $secondBlockWords): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel Grense > 2.1 Grensetest',
+                'text' => $this->repeatedWords('grenseord-a', $firstBlockWords)
+                    ."\n\n"
+                    .$this->repeatedWords('grenseord-b', $secondBlockWords),
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a parsed-structure shaped fixture from ordered document sections.
+     * Inputs: Ordered section descriptors with text and heading metadata.
+     * Returns: A source_text plus offset-aware elements array.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $sections
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function buildRuleBasedStructureFixture(array $sections): array
+    {
         $sourceTextParts = [];
         $elements = [];
         $cursor = 0;
@@ -1218,10 +1482,6 @@ class KnowledgeBaseControllerTest extends TestCase
             $startOffset = $cursor;
             $sourceTextParts[] = $text;
             $cursor += mb_strlen($text, 'UTF-8');
-
-            if ($index < $lastIndex) {
-                $cursor += 2;
-            }
 
             $elements[] = [
                 'id' => sprintf('element-%04d', $index + 1),
@@ -1234,12 +1494,27 @@ class KnowledgeBaseControllerTest extends TestCase
                 'heading_level' => $section['heading_level'],
                 'relation_hint' => $section['relation_hint'],
             ];
+
+            if ($index < $lastIndex) {
+                $cursor += 2;
+            }
         }
 
         return [
             'source_text' => implode("\n\n", $sourceTextParts),
             'elements' => $elements,
         ];
+    }
+
+    /**
+     * Purpose: Repeat a phrase a fixed number of times to create predictable test content length.
+     * Inputs: The token or phrase to repeat and the number of repetitions.
+     * Returns: A whitespace-separated string with a stable word count.
+     * Side effects: None.
+     */
+    private function repeatedWords(string $phrase, int $count): string
+    {
+        return implode(' ', array_fill(0, $count, $phrase));
     }
 
     /**
