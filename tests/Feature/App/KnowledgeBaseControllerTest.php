@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App;
 
+use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
@@ -200,6 +201,39 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
                 && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
         });
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_includes_h1_only_sections_without_duplication(): void
+    {
+        $structure = $this->ruleBasedChunkStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $this->assertCount(4, $payloads);
+        $this->assertSame(
+            [
+                'Kapittel 1',
+                'Kapittel 2',
+                'Kapittel 2',
+                'Kapittel 3',
+            ],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertSame(
+            ['semantic', 'semantic', 'semantic', 'semantic'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertStringContainsString('Kapittel 1', (string) $payloads[0]['content']);
+        $this->assertStringContainsString('Kapittel 1 tekst.', (string) $payloads[0]['content']);
+        $this->assertStringContainsString('Kapittel 2.1 tekst.', (string) $payloads[1]['content']);
+        $this->assertStringContainsString('Kapittel 2.2 tekst.', (string) $payloads[2]['content']);
+        $this->assertStringContainsString('Kapittel 3', (string) $payloads[3]['content']);
+        $this->assertStringContainsString('Kapittel 3 tekst.', (string) $payloads[3]['content']);
     }
 
     public function test_knowledge_document_upload_persists_boundary_metadata_even_when_approved_vocabulary_is_empty(): void
@@ -1128,6 +1162,102 @@ class KnowledgeBaseControllerTest extends TestCase
             null,
             true,
         );
+    }
+
+    /**
+     * Purpose: Build a synthetic structure fixture for the rule-based H1/H2 chunk payload builder.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with one H1-only section, one H1 with H2 subsections, and another H1-only section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedChunkStructureFixture(): array
+    {
+        $sections = [
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel 1',
+                'text' => 'Kapittel 1 tekst.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > 2.1',
+                'text' => 'Kapittel 2.1 tekst.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > 2.2',
+                'text' => 'Kapittel 2.2 tekst.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel 3',
+                'text' => 'Kapittel 3 tekst.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+        ];
+
+        $sourceTextParts = [];
+        $elements = [];
+        $cursor = 0;
+        $lastIndex = array_key_last($sections);
+
+        foreach ($sections as $index => $section) {
+            $text = (string) $section['text'];
+            $startOffset = $cursor;
+            $sourceTextParts[] = $text;
+            $cursor += mb_strlen($text, 'UTF-8');
+
+            if ($index < $lastIndex) {
+                $cursor += 2;
+            }
+
+            $elements[] = [
+                'id' => sprintf('element-%04d', $index + 1),
+                'type' => $section['type'],
+                'heading_path' => $section['heading_path'],
+                'text' => $text,
+                'start_offset' => $startOffset,
+                'end_offset' => $cursor,
+                'order_index' => $index,
+                'heading_level' => $section['heading_level'],
+                'relation_hint' => $section['relation_hint'],
+            ];
+        }
+
+        return [
+            'source_text' => implode("\n\n", $sourceTextParts),
+            'elements' => $elements,
+        ];
+    }
+
+    /**
+     * Purpose: Invoke the private rule-based chunk payload builder.
+     * Inputs: The parsed structure array.
+     * Returns: The generated chunk payloads.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $structure
+     * @return array<int, array<string, mixed>>
+     */
+    private function invokeBuildRuleBasedH2ChunkPayloads(array $structure): array
+    {
+        $controller = app(KnowledgeBaseController::class);
+        $method = new \ReflectionMethod($controller, 'buildRuleBasedH2ChunkPayloads');
+        $method->setAccessible(true);
+
+        return $method->invoke($controller, $structure);
     }
 
     /**

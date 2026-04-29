@@ -807,54 +807,90 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
-     * Purpose: Build deterministic H2 chunk payloads directly from parser output for controlled rule-based chunking.
+     * Purpose: Build deterministic chunk payloads directly from parser output for controlled rule-based chunking.
      * Inputs: The parsed knowledge document structure containing source_text and structural elements.
-     * Returns: One chunk payload per h2_section element, or one fallback payload when no H2 sections exist.
+     * Returns: Ordered chunk payloads for H1-only sections and H2 sections, or one fallback payload when no headings exist.
      * Side effects: None.
      */
     private function buildRuleBasedH2ChunkPayloads(array $structure): array
     {
         $sourceText = (string) data_get($structure, 'source_text', '');
-        $elements = (array) data_get($structure, 'elements', []);
-        $chunkPayloads = [];
+        $elements = array_values(array_filter(
+            (array) data_get($structure, 'elements', []),
+            static fn ($element): bool => is_array($element),
+        ));
+        $chunkRanges = [];
 
-        foreach ($elements as $element) {
-            if ((string) data_get($element, 'type', '') !== 'h2_section') {
-                continue;
+        foreach ($this->groupElementsByPrimaryHeading($elements) as $group) {
+            foreach ($this->buildRuleBasedChunkRangesForPrimaryHeadingGroup($group) as $chunkRange) {
+                $chunkRanges[] = $chunkRange;
             }
-
-            $startOffset = (int) data_get($element, 'start_offset', 0);
-            $endOffset = (int) data_get($element, 'end_offset', 0);
-
-            if ($endOffset <= $startOffset) {
-                continue;
-            }
-
-            $content = trim(mb_substr($sourceText, $startOffset, $endOffset - $startOffset, 'UTF-8'));
-
-            if ($content === '') {
-                continue;
-            }
-
-            $headingPath = $this->cleanNullableString(data_get($element, 'heading_path'), 255);
-
-            $chunkPayloads[] = [
-                'content' => $content,
-                'start_offset' => $startOffset,
-                'end_offset' => $endOffset,
-                'section_title' => $headingPath,
-                'section_path' => $headingPath,
-                'heading_path' => $headingPath,
-                'chunk_type' => 'h2_section',
-                'title' => $headingPath,
-                'topic' => null,
-                'sub_topic' => null,
-                'keywords' => null,
-            ];
         }
 
-        if ($chunkPayloads !== []) {
-            return $chunkPayloads;
+        if ($chunkRanges !== []) {
+            usort(
+                $chunkRanges,
+                static function (array $left, array $right): int {
+                    $startComparison = ((int) ($left['start_offset'] ?? 0)) <=> ((int) ($right['start_offset'] ?? 0));
+
+                    if ($startComparison !== 0) {
+                        return $startComparison;
+                    }
+
+                    return ((int) ($left['end_offset'] ?? 0)) <=> ((int) ($right['end_offset'] ?? 0));
+                },
+            );
+
+            $chunkPayloads = [];
+            $seenRanges = [];
+
+            foreach ($chunkRanges as $chunkRange) {
+                $startOffset = (int) ($chunkRange['start_offset'] ?? 0);
+                $endOffset = (int) ($chunkRange['end_offset'] ?? 0);
+
+                if ($endOffset <= $startOffset) {
+                    continue;
+                }
+
+                $rangeSignature = $startOffset.'-'.$endOffset;
+
+                if (isset($seenRanges[$rangeSignature])) {
+                    continue;
+                }
+
+                $seenRanges[$rangeSignature] = true;
+
+                $content = trim(mb_substr($sourceText, $startOffset, $endOffset - $startOffset, 'UTF-8'));
+
+                if ($content === '') {
+                    continue;
+                }
+
+                $headingPath = $this->cleanNullableString($chunkRange['heading_path'] ?? null, 255);
+                $chunkKind = (string) ($chunkRange['chunk_kind'] ?? 'h2_section');
+
+                if ($chunkKind === 'h1_section' && $headingPath !== null && $headingPath !== '') {
+                    $content = trim($headingPath."\n\n".$content);
+                }
+
+                $chunkPayloads[] = [
+                    'content' => $content,
+                    'start_offset' => $startOffset,
+                    'end_offset' => $endOffset,
+                    'section_title' => $headingPath,
+                    'section_path' => $headingPath,
+                    'heading_path' => $headingPath,
+                    'chunk_type' => 'semantic',
+                    'title' => $headingPath,
+                    'topic' => null,
+                    'sub_topic' => null,
+                    'keywords' => null,
+                ];
+            }
+
+            if ($chunkPayloads !== []) {
+                return $chunkPayloads;
+            }
         }
 
         $content = trim($sourceText);
@@ -878,6 +914,199 @@ class KnowledgeBaseController extends Controller
                 'keywords' => null,
             ],
         ];
+    }
+
+    /**
+     * Purpose: Group normalized structural elements by their top-level heading context.
+     * Inputs: Ordered parser elements with heading_path metadata.
+     * Returns: Ordered element groups where each group belongs to one primary heading.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array{
+     *     primary_heading: ?string,
+     *     elements: array<int, array<string, mixed>>
+     * }>
+     */
+    private function groupElementsByPrimaryHeading(array $elements): array
+    {
+        $groups = [];
+        $currentGroup = [];
+        $currentPrimaryHeading = null;
+        $pendingPrelude = [];
+        $seenRealHeading = false;
+
+        foreach ($elements as $element) {
+            $text = trim((string) data_get($element, 'text', ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $primaryHeading = $this->primaryHeadingFromPath(data_get($element, 'heading_path'));
+
+            if ($primaryHeading === null) {
+                if (! $seenRealHeading) {
+                    $pendingPrelude[] = $element;
+
+                    continue;
+                }
+
+                $currentGroup[] = $element;
+
+                continue;
+            }
+
+            if (! $seenRealHeading) {
+                $seenRealHeading = true;
+                $currentPrimaryHeading = $primaryHeading;
+                $currentGroup = array_merge($pendingPrelude, [$element]);
+                $pendingPrelude = [];
+
+                continue;
+            }
+
+            if ($primaryHeading !== $currentPrimaryHeading) {
+                if ($currentGroup !== []) {
+                    $groups[] = [
+                        'primary_heading' => $currentPrimaryHeading,
+                        'elements' => $currentGroup,
+                    ];
+                }
+
+                $currentGroup = [$element];
+                $currentPrimaryHeading = $primaryHeading;
+
+                continue;
+            }
+
+            $currentGroup[] = $element;
+        }
+
+        if ($currentGroup !== []) {
+            $groups[] = [
+                'primary_heading' => $currentPrimaryHeading,
+                'elements' => $currentGroup,
+            ];
+        } elseif ($pendingPrelude !== []) {
+            $groups[] = [
+                'primary_heading' => null,
+                'elements' => $pendingPrelude,
+            ];
+        }
+
+        return $groups;
+    }
+
+    /**
+     * Purpose: Convert one primary heading group into chunk ranges without splitting H2 sections.
+     * Inputs: One ordered set of elements belonging to the same top-level heading context.
+     * Returns: Ordered chunk ranges for either the full H1-only group or its contained H2 sections.
+     * Side effects: None.
+     *
+     * @param array{
+     *     primary_heading: ?string,
+     *     elements: array<int, array<string, mixed>>
+     * } $group
+     * @return array<int, array{start_offset: int, end_offset: int, heading_path: ?string, chunk_kind: string}>
+     */
+    private function buildRuleBasedChunkRangesForPrimaryHeadingGroup(array $group): array
+    {
+        $groupElements = array_values(array_filter(
+            (array) ($group['elements'] ?? []),
+            static fn ($element): bool => is_array($element),
+        ));
+
+        if ($groupElements === []) {
+            return [];
+        }
+
+        $primaryHeading = $this->cleanNullableString($group['primary_heading'] ?? null, 255);
+
+        if ($primaryHeading === null) {
+            return [];
+        }
+
+        $h2Sections = array_values(array_filter(
+            $groupElements,
+            static fn (array $element): bool => (string) data_get($element, 'type', '') === 'h2_section',
+        ));
+
+        if ($h2Sections === []) {
+            $startOffset = null;
+            $endOffset = null;
+
+            foreach ($groupElements as $element) {
+                $elementStart = (int) data_get($element, 'start_offset', 0);
+                $elementEnd = (int) data_get($element, 'end_offset', 0);
+
+                if ($startOffset === null || $elementStart < $startOffset) {
+                    $startOffset = $elementStart;
+                }
+
+                if ($endOffset === null || $elementEnd > $endOffset) {
+                    $endOffset = $elementEnd;
+                }
+            }
+
+            if ($startOffset === null || $endOffset === null || $endOffset <= $startOffset) {
+                return [];
+            }
+
+            return [[
+                'start_offset' => $startOffset,
+                'end_offset' => $endOffset,
+                'heading_path' => $primaryHeading,
+                'chunk_kind' => 'h1_section',
+            ]];
+        }
+
+        $ranges = [];
+        $leadingStart = (int) data_get($groupElements[0], 'start_offset', 0);
+
+        foreach ($h2Sections as $index => $h2Section) {
+            $startOffset = (int) data_get($h2Section, 'start_offset', 0);
+            $endOffset = (int) data_get($h2Section, 'end_offset', 0);
+
+            if ($index === 0 && $leadingStart < $startOffset) {
+                $startOffset = $leadingStart;
+            }
+
+            if ($endOffset <= $startOffset) {
+                continue;
+            }
+
+            $ranges[] = [
+                'start_offset' => $startOffset,
+                'end_offset' => $endOffset,
+                'heading_path' => $primaryHeading,
+                'chunk_kind' => 'h2_section',
+            ];
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * Purpose: Resolve the primary heading segment from a heading path.
+     * Inputs: A heading path string or null.
+     * Returns: The top-level heading segment or null when no heading exists.
+     * Side effects: None.
+     */
+    private function primaryHeadingFromPath(mixed $headingPath): ?string
+    {
+        $text = trim((string) ($headingPath ?? ''));
+
+        if ($text === '') {
+            return null;
+        }
+
+        $parts = array_values(array_filter(array_map(
+            static fn (string $part): string => trim($part),
+            explode(' > ', $text),
+        ), static fn (string $part): bool => $part !== ''));
+
+        return $parts[0] ?? null;
     }
 
     /**
