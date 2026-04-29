@@ -739,6 +739,7 @@ export default function AiShow({
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
+    documents_upload_url: documentsUploadUrl = '',
     answer_basis_items: answerBasisItemsProp = [],
 }) {
     const currentCaseId = caseData?.id ?? null;
@@ -746,6 +747,7 @@ export default function AiShow({
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
     } = usePage().props;
+    const fileInputRef = useRef(null);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
@@ -782,6 +784,9 @@ export default function AiShow({
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
+    const documentUploadForm = useForm({
+        documents: [],
+    });
     const manualRequirementForm = useForm({
         requirement_identifier: '',
         requirement_text: '',
@@ -806,8 +811,12 @@ export default function AiShow({
     const editingRequirement = editingRequirementId !== null
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
         : null;
+    const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
     const manualRequirementError = Object.values(manualRequirementForm.errors).find(Boolean) ?? null;
     const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
+    const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
+        ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
+        : 'Ingen filer valgt ennå.';
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
@@ -976,6 +985,10 @@ export default function AiShow({
         .map((answerBasisItemId) => answerBasisItemsById[String(answerBasisItemId)])
         .filter(Boolean);
 
+    const handleDocumentChange = (event) => {
+        documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
+    };
+
     const resolveRequirementSourceDocument = (requirement) => {
         const requirementDocumentId = requirement?.saved_notice_ai_document_id ?? null;
 
@@ -984,6 +997,26 @@ export default function AiShow({
         }
 
         return documentRows.find((document) => String(document?.id ?? '') === String(requirementDocumentId)) ?? null;
+    };
+
+    const submitDocuments = (event) => {
+        event.preventDefault();
+
+        if (!documentsUploadUrl || documentUploadForm.processing) {
+            return;
+        }
+
+        documentUploadForm.post(documentsUploadUrl, {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: () => {
+                documentUploadForm.reset('documents');
+
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                }
+            },
+        });
     };
 
     const submitManualRequirement = (event) => {
@@ -1415,8 +1448,70 @@ export default function AiShow({
                     </div>
                 </section>
 
-                <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
-                    <section className="lg:col-span-2 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+                <section className="mb-5 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="space-y-5">
+                        <div className="space-y-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                Anbudsdokumenter
+                            </div>
+                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+                                Anbudsdokumenter
+                            </h2>
+                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                                Last opp konkurransegrunnlag, kravspesifikasjoner eller vedlegg som Procynia skal bruke til å ekstrahere kravkandidater.
+                            </p>
+                        </div>
+
+                        <form onSubmit={submitDocuments} className="space-y-4">
+                            <div className="space-y-2">
+                                <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
+                                    Velg filer
+                                </label>
+                                <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                    <label
+                                        htmlFor="ai-documents"
+                                        className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                    >
+                                        Velg filer
+                                    </label>
+                                    <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                        {selectedDocumentsLabel}
+                                    </span>
+                                    <input
+                                        id="ai-documents"
+                                        ref={fileInputRef}
+                                        type="file"
+                                        multiple
+                                        accept=".pdf,.doc,.docx,.xls,.xlsx"
+                                        onChange={handleDocumentChange}
+                                        className="sr-only"
+                                    />
+                                </div>
+                                <p className="text-xs leading-5 text-slate-500">
+                                    Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
+                                </p>
+                                {documentError ? (
+                                    <p className="text-sm text-rose-600">{documentError}</p>
+                                ) : null}
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={
+                                    documentUploadForm.processing
+                                    || !documentsUploadUrl
+                                    || documentUploadForm.data.documents.length === 0
+                                }
+                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {documentUploadForm.processing ? 'Laster opp...' : 'Last opp og ekstraher krav'}
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
+                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
@@ -2269,8 +2364,8 @@ export default function AiShow({
                         )}
                     </section>
 
-                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
-                        <div className="space-y-5">
+                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+                        <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                     Svarutkast
@@ -2284,7 +2379,7 @@ export default function AiShow({
                             </div>
 
                             {!activeRequirement ? (
-                                <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
+                                <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                     <div className="text-lg font-semibold text-slate-900">
                                         Ingen aktivt svarutkast ennå.
                                     </div>
@@ -2293,7 +2388,7 @@ export default function AiShow({
                                     </p>
                                 </div>
                             ) : (
-                                <div className={`space-y-4 rounded-[22px] border p-4 ${
+                                <div className={`flex min-h-0 flex-1 flex-col gap-4 rounded-[22px] border p-4 ${
                                     activeRequirementBlockedMissingKnowledge
                                         ? 'border-rose-200 bg-rose-50/40'
                                         : 'border-violet-200 bg-violet-50/40'
@@ -2466,8 +2561,8 @@ export default function AiShow({
                                             ) : null}
                                         </div>
                                     ) : activeRequirementHasDraft ? (
-                                        <>
-                                            <label className="block space-y-2">
+                                        <div className="flex min-h-0 flex-1 flex-col gap-4">
+                                            <label className="flex min-h-0 flex-1 flex-col gap-2">
                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                     Svarutkast for krav {activeRequirementDisplayIdentifier}
                                                 </span>
@@ -2479,7 +2574,7 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="w-full max-h-[50vh] resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="min-h-0 w-full flex-1 resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </label>
@@ -2492,7 +2587,7 @@ export default function AiShow({
                                                 </div>
                                             ) : null}
 
-                                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                            <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
                                                 <div className="text-xs text-slate-500">
                                                     {activeRequirementDraft?.generatedAt ? (
                                                         <>
@@ -2526,9 +2621,9 @@ export default function AiShow({
                                                     {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
                                                 </button>
                                             </div>
-                                        </>
+                                        </div>
                                     ) : (
-                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
+                                        <div className="flex min-h-0 flex-1 flex-col justify-start rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
                                             <div className="text-sm font-semibold text-slate-900">
                                                 Ingen svarutkast er opprettet ennå.
                                             </div>
@@ -2541,6 +2636,7 @@ export default function AiShow({
                             )}
                         </div>
                     </section>
+
                 </div>
 
                 {selectedEvidence?.source ? (
