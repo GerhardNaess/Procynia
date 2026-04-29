@@ -133,6 +133,81 @@ class KnowledgeChunkMetadataValidatorTest extends TestCase
         $this->assertSame('Nytt begrep', $result['new_term_suggestions'][0]['suggested_term']);
     }
 
+    public function test_it_preserves_persisted_descriptive_metadata_when_ai_payload_is_empty(): void
+    {
+        [$document, $chunk, $vocabularyMap] = $this->fixtureBundle();
+
+        $chunk->forceFill([
+            'topic' => 'Persisted topic',
+            'sub_topic' => 'Persisted sub-topic',
+            'keywords' => ['alpha', 'beta'],
+        ])->save();
+
+        $validator = app(KnowledgeChunkMetadataValidator::class);
+        $result = $validator->validate($document, $chunk, [
+            'service_product_tag' => 'samhandling',
+            'theme_tag' => 'driftsmodell',
+            'topic' => null,
+            'sub_topic' => null,
+            'keywords' => [],
+            'matched_terms' => [],
+            'summary_for_retrieval' => 'Beskriver faste møtefora for oppfølging.',
+            'confidence_score' => 0.94,
+            'new_term_suggestions' => [],
+        ], $vocabularyMap);
+
+        $this->assertSame('Persisted topic', $result['topic']);
+        $this->assertSame('Persisted sub-topic', $result['sub_topic']);
+        $this->assertSame(['alpha', 'beta'], $result['keywords']);
+    }
+
+    public function test_it_trims_and_limits_descriptive_scalar_fields(): void
+    {
+        [$document, $chunk, $vocabularyMap] = $this->fixtureBundle();
+
+        $validator = app(KnowledgeChunkMetadataValidator::class);
+        $longTopic = '  '.str_repeat('Tema ', 60).'  ';
+        $longSubTopic = " \n".str_repeat('Undertema ', 60)."\n ";
+
+        $result = $validator->validate($document, $chunk, [
+            'service_product_tag' => 'samhandling',
+            'theme_tag' => 'driftsmodell',
+            'topic' => $longTopic,
+            'sub_topic' => $longSubTopic,
+            'keywords' => ['SLA', 'KPI'],
+            'matched_terms' => ['samhandling', 'SLA'],
+            'summary_for_retrieval' => 'Beskriver faste møtefora for oppfølging.',
+            'confidence_score' => 0.94,
+            'new_term_suggestions' => [],
+        ], $vocabularyMap);
+
+        $this->assertSame(Str::limit(Str::squish($longTopic), 191, ''), $result['topic']);
+        $this->assertSame(Str::limit(Str::squish($longSubTopic), 191, ''), $result['sub_topic']);
+        $this->assertTrue(mb_strlen((string) $result['topic'], 'UTF-8') <= 191);
+        $this->assertTrue(mb_strlen((string) $result['sub_topic'], 'UTF-8') <= 191);
+    }
+
+    public function test_it_normalizes_blank_descriptive_scalar_fields_to_null_without_fallbacks(): void
+    {
+        [$document, $chunk, $vocabularyMap] = $this->fixtureBundle();
+
+        $validator = app(KnowledgeChunkMetadataValidator::class);
+        $result = $validator->validate($document, $chunk, [
+            'service_product_tag' => 'samhandling',
+            'theme_tag' => 'driftsmodell',
+            'topic' => '   ',
+            'sub_topic' => "\n\t",
+            'keywords' => ['SLA', 'KPI'],
+            'matched_terms' => ['samhandling', 'SLA'],
+            'summary_for_retrieval' => 'Beskriver faste møtefora for oppfølging.',
+            'confidence_score' => 0.94,
+            'new_term_suggestions' => [],
+        ], $vocabularyMap);
+
+        $this->assertNull($result['topic']);
+        $this->assertNull($result['sub_topic']);
+    }
+
     private function fixtureBundle(): array
     {
         $customer = $this->createCustomer('Validator Customer AS');

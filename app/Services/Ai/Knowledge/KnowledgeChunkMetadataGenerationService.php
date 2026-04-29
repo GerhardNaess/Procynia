@@ -53,6 +53,7 @@ class KnowledgeChunkMetadataGenerationService
         try {
             $response = $this->openAiClient->createResponse($payload);
             $decoded = $this->decodePayload($response);
+            $decoded = $this->applyDescriptiveMetadataFallbacks($chunk, $decoded);
             $validated = $this->validator->validate($document, $chunk, $decoded, $vocabularyMap);
         } catch (Throwable $exception) {
             $validated = $this->failedValidationResult($chunk);
@@ -247,24 +248,31 @@ class KnowledgeChunkMetadataGenerationService
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],
-            'chunk' => [
-                'id' => $chunk->id,
-                'chunk_index' => $chunk->chunk_index,
-                'title' => $chunk->title,
-                'section_title' => $chunk->section_title,
-                'section_path' => $chunk->section_path,
-                'content' => $chunk->content,
-            ],
-            'allowed_metadata_fields' => data_get($vocabularyMap, 'available_fields', []),
-            'approved_vocabulary' => data_get($vocabularyMap, 'terms', []),
-            'instructions' => [
-                'Use existing approved values when they fit the chunk.',
-                'Return canonical names for approved values.',
-                'Put genuinely new or unknown concepts in new_term_suggestions.',
-                'summary_for_retrieval must be short and concrete.',
-                'confidence_score must be a number between 0 and 1.',
-            ],
-        ];
+                'chunk' => [
+                    'id' => $chunk->id,
+                    'chunk_index' => $chunk->chunk_index,
+                    'title' => $chunk->title,
+                    'heading_path' => $chunk->heading_path,
+                    'section_title' => $chunk->section_title,
+                    'section_path' => $chunk->section_path,
+                    'content' => $chunk->content,
+                ],
+                'allowed_metadata_fields' => data_get($vocabularyMap, 'available_fields', []),
+                'approved_vocabulary' => data_get($vocabularyMap, 'terms', []),
+                'instructions' => [
+                    'Use existing approved values when they fit the chunk.',
+                    'Return canonical names for approved values.',
+                    'Topic is the short main theme for the chunk, and sub_topic is a narrower descriptive theme within that topic.',
+                    'Topic and sub_topic are descriptive chunk metadata, not controlled vocabulary fields.',
+                    'Fill topic and sub_topic for every chunk with meaningful content.',
+                    'Leave topic and sub_topic empty only when the chunk has no meaningful content.',
+                    'Use the same language as the chunk content for topic and sub_topic.',
+                    'Service/product tag and theme tag are the controlled vocabulary fields.',
+                    'Put genuinely new or unknown concepts in new_term_suggestions.',
+                    'summary_for_retrieval must be short and concrete.',
+                    'confidence_score must be a number between 0 and 1.',
+                ],
+            ];
 
         try {
             return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -566,6 +574,181 @@ class KnowledgeChunkMetadataGenerationService
             'suggestion_count' => count($suggestions),
             'elapsed_ms' => $this->elapsedMs($startedAt),
         ]);
+    }
+
+    /**
+     * Purpose: Fill descriptive metadata gaps using deterministic chunk context when the model returns blanks.
+     * Inputs: The persisted chunk and the decoded AI metadata payload.
+     * Returns: The metadata payload with topic/sub_topic populated when safe.
+     * Side effects: None.
+     */
+    private function applyDescriptiveMetadataFallbacks(KnowledgeItemChunk $chunk, array $metadata): array
+    {
+        if (trim((string) $chunk->content) === '') {
+            return $metadata;
+        }
+
+        $topic = $this->normalizeMetadataText(data_get($metadata, 'topic'));
+
+        if ($topic === null) {
+            $topic = $this->deriveFallbackTopic($chunk, $metadata);
+        }
+
+        if ($topic !== null) {
+            $metadata['topic'] = $topic;
+        }
+
+        $subTopic = $this->normalizeMetadataText(data_get($metadata, 'sub_topic'));
+
+        if ($subTopic === null) {
+            $subTopic = $this->deriveFallbackSubTopic($chunk, $metadata, $topic);
+        }
+
+        if ($subTopic !== null) {
+            $metadata['sub_topic'] = $subTopic;
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * Purpose: Derive a stable fallback topic from the most precise structural context available.
+     * Inputs: The persisted chunk and the decoded AI metadata payload.
+     * Returns: A short descriptive topic or null.
+     * Side effects: None.
+     */
+    private function deriveFallbackTopic(KnowledgeItemChunk $chunk, array $metadata): ?string
+    {
+        $headingPath = $this->normalizeMetadataText($this->preferredHeadingLabel($chunk));
+
+        if ($headingPath !== null) {
+            return $headingPath;
+        }
+
+        $summary = $this->normalizeMetadataText(data_get($metadata, 'summary_for_retrieval'));
+
+        if ($summary !== null) {
+            return $summary;
+        }
+
+        $keywords = $this->normalizeKeywordListForFallback(data_get($metadata, 'keywords'));
+
+        if ($keywords !== []) {
+            return $this->normalizeMetadataText($keywords[0]);
+        }
+
+        $sectionTitle = $this->normalizeMetadataText($chunk->section_title ?? null);
+
+        if ($sectionTitle !== null) {
+            return $sectionTitle;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Derive a stable fallback sub-topic from the chunk context and any resolved topic.
+     * Inputs: The persisted chunk, decoded AI metadata, and the resolved fallback topic.
+     * Returns: A short descriptive sub-topic or null.
+     * Side effects: None.
+     */
+    private function deriveFallbackSubTopic(KnowledgeItemChunk $chunk, array $metadata, ?string $resolvedTopic = null): ?string
+    {
+        $summary = $this->normalizeMetadataText(data_get($metadata, 'summary_for_retrieval'));
+
+        if ($summary !== null) {
+            return $summary;
+        }
+
+        $keywords = $this->normalizeKeywordListForFallback(data_get($metadata, 'keywords'));
+
+        if ($keywords !== []) {
+            return $this->normalizeMetadataText(implode(', ', array_slice($keywords, 0, 3)));
+        }
+
+        $topic = $this->normalizeMetadataText($resolvedTopic ?? null);
+
+        if ($topic !== null) {
+            return $topic;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Prefer the most precise heading label available on the chunk.
+     * Inputs: The persisted chunk.
+     * Returns: The leaf heading label, or the section title, or null.
+     * Side effects: None.
+     */
+    private function preferredHeadingLabel(KnowledgeItemChunk $chunk): ?string
+    {
+        $heading = trim((string) ($chunk->heading_path ?? ''));
+
+        if ($heading !== '') {
+            $parts = preg_split('/\s*>\s*/u', $heading) ?: [$heading];
+            $heading = trim((string) end($parts));
+        }
+
+        if ($heading === '') {
+            $heading = trim((string) ($chunk->section_title ?? ''));
+        }
+
+        return $heading !== '' ? $heading : null;
+    }
+
+    /**
+     * Purpose: Normalize fallback metadata text without changing the underlying meaning.
+     * Inputs: A raw scalar value and an optional maximum length.
+     * Returns: A trimmed string capped to a safe length, or null.
+     * Side effects: None.
+     */
+    private function normalizeMetadataText(mixed $value, int $maxLength = 191): ?string
+    {
+        $normalized = Str::squish(trim((string) ($value ?? '')));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        return Str::limit($normalized, $maxLength, '');
+    }
+
+    /**
+     * Purpose: Normalize a raw keyword payload into a stable list for fallback derivation.
+     * Inputs: Raw keyword data from the decoded AI metadata payload.
+     * Returns: A trimmed de-duplicated keyword list.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function normalizeKeywordListForFallback(mixed $keywords): array
+    {
+        if (is_string($keywords)) {
+            $keywords = preg_split('/[,\n;]+/u', $keywords, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        } elseif (! is_array($keywords)) {
+            return [];
+        }
+
+        $normalized = [];
+        $seen = [];
+
+        foreach ($keywords as $keyword) {
+            $cleanKeyword = trim(Str::squish((string) $keyword));
+
+            if ($cleanKeyword === '') {
+                continue;
+            }
+
+            if (isset($seen[$cleanKeyword])) {
+                continue;
+            }
+
+            $seen[$cleanKeyword] = true;
+            $normalized[] = $cleanKeyword;
+        }
+
+        return $normalized;
     }
 
     /**

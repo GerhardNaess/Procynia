@@ -385,7 +385,7 @@ class KnowledgeBaseController extends Controller
                 ];
             });
 
-            $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
+            $this->syncChunkEmbeddings($result['knowledge_document'], $result['chunks']);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
@@ -1386,9 +1386,40 @@ class KnowledgeBaseController extends Controller
 
             $chunk->refresh();
             $chunkKeywords = $this->normalizeExactKeywordList($chunk->keywords);
+            $chunkContent = trim((string) $chunk->content);
+            $contentWordCount = count(preg_split('/\s+/u', $chunkContent, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
+            Log::info('[PROCYNIA][CHUNK_METADATA]', [
+                'knowledge_item_id' => $knowledgeDocument->id,
+                'chunk_id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'heading_path' => $chunk->heading_path,
+                'content_word_count' => $contentWordCount,
+                'metadata_generation_started' => true,
+            ]);
 
             $metadataOutcome = $this->knowledgeChunkMetadataGenerationService->generateForChunk($knowledgeDocument, $chunk);
             $embeddingInput = $metadataOutcome['embedding_input'] ?? $chunk->content;
+            $metadataKeywords = $this->normalizeExactKeywordList(data_get($metadataOutcome, 'keywords'));
+
+            if ($metadataKeywords === null || $metadataKeywords === []) {
+                $metadataKeywords = $chunkKeywords;
+            }
+
+            $metadataGenerationFailed = ($metadataOutcome['metadata_status'] ?? null) === KnowledgeItemChunk::METADATA_STATUS_FAILED;
+
+            Log::info('[PROCYNIA][CHUNK_METADATA]', [
+                'knowledge_item_id' => $knowledgeDocument->id,
+                'chunk_id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'heading_path' => $chunk->heading_path,
+                'content_word_count' => $contentWordCount,
+                'metadata_generation_started' => false,
+                'metadata_generation_succeeded' => ! $metadataGenerationFailed,
+                'metadata_generation_failed' => $metadataGenerationFailed,
+                'validation_failed_reason' => $metadataGenerationFailed ? 'metadata_status_failed' : null,
+            ]);
+
             $metadataUpdates = [
                 'service_product_tag' => $this->cleanNullableString(data_get($metadataOutcome, 'service_product_tag'), 191)
                     ?? $this->cleanNullableString($chunk->service_product_tag, 191),
@@ -1398,8 +1429,7 @@ class KnowledgeBaseController extends Controller
                     ?? $this->cleanNullableString($chunk->topic, 191),
                 'sub_topic' => $this->cleanNullableString(data_get($metadataOutcome, 'sub_topic'), 191)
                     ?? $this->cleanNullableString($chunk->sub_topic, 191),
-                'keywords' => $this->normalizeExactKeywordList(data_get($metadataOutcome, 'keywords'))
-                    ?? $chunkKeywords,
+                'keywords' => $metadataKeywords,
                 'matched_terms' => $metadataOutcome['matched_terms'] ?? null,
                 'summary_for_retrieval' => $metadataOutcome['summary_for_retrieval'] ?? null,
                 'confidence_score' => $metadataOutcome['confidence_score'] ?? null,

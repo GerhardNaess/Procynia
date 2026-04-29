@@ -6,13 +6,17 @@ use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
+use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
 use App\Services\OpenAi\EmbeddingService;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -184,7 +188,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(0, (int) $chunks[0]->start_offset);
         $this->assertGreaterThan((int) $chunks[0]->start_offset, (int) $chunks[0]->end_offset);
         $this->assertSame((int) $chunks[0]->end_offset, (int) $chunks[1]->start_offset);
-        $this->assertSame('Strategisk samhandling', $chunks[0]->heading_path);
+        $this->assertSame('Underseksjon A', $chunks[0]->heading_path);
         $this->assertSame('semantic', $chunks[0]->chunk_type);
         $this->assertSame('Andre hovedseksjon', $chunks[1]->heading_path);
         $this->assertSame('semantic', $chunks[1]->chunk_type);
@@ -197,7 +201,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $showResponse->assertOk();
         $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
-                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === 'Strategisk samhandling'
+                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === 'Underseksjon A'
                 && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
                 && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
         });
@@ -371,15 +375,32 @@ class KnowledgeBaseControllerTest extends TestCase
                 return [
                     'service_product_tag' => 'Produkt A',
                     'theme_tag' => 'Tema A',
-                    'topic' => null,
-                    'sub_topic' => null,
-                    'keywords' => [],
+                    'topic' => 'Tema '.($chunk->chunk_index + 1),
+                    'sub_topic' => 'Underemne '.($chunk->chunk_index + 1),
+                    'keywords' => [
+                        'stikkord-'.($chunk->chunk_index + 1).'-a',
+                        'stikkord-'.($chunk->chunk_index + 1).'-b',
+                        'stikkord-'.($chunk->chunk_index + 1).'-c',
+                    ],
                     'matched_terms' => [],
                     'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
                     'confidence_score' => 0.25,
                     'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
                     'new_term_suggestions' => [],
-                    'embedding_input' => 'Content: '.trim((string) $chunk->content),
+                    'embedding_input' => implode("\n", array_filter([
+                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
+                        'Service/product tag: Produkt A',
+                        'Theme tag: Tema A',
+                        'Topic: Tema '.($chunk->chunk_index + 1),
+                        'Sub-topic: Underemne '.($chunk->chunk_index + 1),
+                        'Keywords: '.implode(', ', [
+                            'stikkord-'.($chunk->chunk_index + 1).'-a',
+                            'stikkord-'.($chunk->chunk_index + 1).'-b',
+                            'stikkord-'.($chunk->chunk_index + 1).'-c',
+                        ]),
+                        'Summary: Kort oppsummering for gjenfinning.',
+                        'Content: '.trim((string) $chunk->content),
+                    ])),
                 ];
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
@@ -420,6 +441,296 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('Underemne 2', $chunks[1]->sub_topic);
         $this->assertSame(['stikkord-2-a', 'stikkord-2-b', 'stikkord-2-c'], $chunks[1]->keywords);
         $this->assertSame(0, KnowledgeMetadataTerm::query()->count());
+    }
+
+    public function test_knowledge_document_upload_generates_metadata_for_each_chunk_and_keeps_chunk_content_unchanged(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Four Structured Metadata Calls AS');
+
+        $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $metadataService->shouldReceive('generateForChunk')
+            ->twice()
+            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
+                $chunkNumber = $chunk->chunk_index + 1;
+                $summary = 'Kort oppsummering '.$chunkNumber;
+                $keywords = ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'];
+
+                return [
+                    'service_product_tag' => 'Produkt A',
+                    'theme_tag' => 'Tema A',
+                    'topic' => 'Emne '.$chunkNumber,
+                    'sub_topic' => 'Underemne '.$chunkNumber,
+                    'keywords' => $keywords,
+                    'matched_terms' => ['term '.$chunkNumber],
+                    'summary_for_retrieval' => $summary,
+                    'confidence_score' => 0.91,
+                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                    'new_term_suggestions' => [],
+                    'embedding_input' => implode("\n", array_filter([
+                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
+                        'Service/product tag: Produkt A',
+                        'Theme tag: Tema A',
+                        'Topic: Emne '.$chunkNumber,
+                        'Sub-topic: Underemne '.$chunkNumber,
+                        'Keywords: '.implode(', ', $keywords),
+                        'Matched terms: term '.$chunkNumber,
+                        'Summary: '.$summary,
+                        'Content: '.trim((string) $chunk->content),
+                    ])),
+                ];
+            });
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('structured-metadata-calls.docx', [
+                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
+                ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
+                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Underseksjon A', 'style' => 'Heading2'],
+                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
+                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'structured-metadata-calls.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(2, $chunks->count());
+        $this->assertSame('Emne 1', $chunks[0]->topic);
+        $this->assertSame('Underemne 1', $chunks[0]->sub_topic);
+        $this->assertSame(['stikkord-1-a', 'stikkord-1-b'], $chunks[0]->keywords);
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunks[0]->metadata_status);
+        $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
+        $this->assertSame('Emne 2', $chunks[1]->topic);
+        $this->assertSame('Underemne 2', $chunks[1]->sub_topic);
+        $this->assertSame(['stikkord-2-a', 'stikkord-2-b'], $chunks[1]->keywords);
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunks[1]->metadata_status);
+        $this->assertStringContainsString('Andre hovedseksjon', (string) $chunks[1]->content);
+    }
+
+    public function test_knowledge_document_upload_generates_metadata_for_each_final_chunk_in_a_six_chunk_document(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Four Structured Six Chunk Metadata AS');
+
+        $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $metadataService->shouldReceive('generateForChunk')
+            ->times(6)
+            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
+                $chunkNumber = $chunk->chunk_index + 1;
+
+                return [
+                    'service_product_tag' => 'Produkt A',
+                    'theme_tag' => 'Tema A',
+                    'topic' => 'Emne '.$chunkNumber,
+                    'sub_topic' => 'Underemne '.$chunkNumber,
+                    'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                    'matched_terms' => ['term '.$chunkNumber],
+                    'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
+                    'confidence_score' => 0.91,
+                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                    'new_term_suggestions' => [],
+                    'embedding_input' => implode("\n", array_filter([
+                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
+                        'Service/product tag: Produkt A',
+                        'Theme tag: Tema A',
+                        'Topic: Emne '.$chunkNumber,
+                        'Sub-topic: Underemne '.$chunkNumber,
+                        'Keywords: stikkord-'.$chunkNumber.'-a, stikkord-'.$chunkNumber.'-b',
+                        'Matched terms: term '.$chunkNumber,
+                        'Summary: Kort oppsummering '.$chunkNumber,
+                        'Content: '.trim((string) $chunk->content),
+                    ])),
+                ];
+            });
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('structured-metadata-six.docx', [
+                ['text' => 'Kapittel 1', 'style' => 'Heading1'],
+                ['text' => 'Tekst 1.', 'style' => 'Normal'],
+                ['text' => 'Kapittel 2', 'style' => 'Heading1'],
+                ['text' => 'Tekst 2.', 'style' => 'Normal'],
+                ['text' => 'Kapittel 3', 'style' => 'Heading1'],
+                ['text' => 'Tekst 3.', 'style' => 'Normal'],
+                ['text' => 'Kapittel 4', 'style' => 'Heading1'],
+                ['text' => 'Tekst 4.', 'style' => 'Normal'],
+                ['text' => 'Kapittel 5', 'style' => 'Heading1'],
+                ['text' => 'Tekst 5.', 'style' => 'Normal'],
+                ['text' => 'Kapittel 6', 'style' => 'Heading1'],
+                ['text' => 'Tekst 6.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'structured-metadata-six.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(6, $chunks->count());
+        $this->assertSame(range(0, 5), $chunks->pluck('chunk_index')->all());
+        $this->assertSame('Emne 1', $chunks[0]->topic);
+        $this->assertSame('Emne 6', $chunks[5]->topic);
+        $this->assertStringContainsString('Kapittel 1', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Tekst 6.', (string) $chunks[5]->content);
+    }
+
+    public function test_knowledge_document_upload_fills_blank_topic_and_sub_topic_from_chunk_context_and_creates_vocabulary_candidates(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->twice()
+            ->andReturnUsing(function (): array {
+                static $chunkNumber = 0;
+
+                $chunkNumber++;
+                $summary = 'Kort oppsummering '.$chunkNumber;
+
+                return [
+                    'id' => 'resp_blank_metadata_'.$chunkNumber,
+                    'output_text' => json_encode([
+                        'service_product_tag' => '',
+                        'theme_tag' => '',
+                        'topic' => '',
+                        'sub_topic' => '',
+                        'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                        'matched_terms' => [],
+                        'summary_for_retrieval' => $summary,
+                        'new_term_suggestions' => [],
+                        'confidence_score' => 0.42,
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+        $this->app->instance(OpenAiClient::class, $openAiClient);
+
+        $metadataService = new KnowledgeChunkMetadataGenerationService(
+            $openAiClient,
+            app(KnowledgeMetadataVocabularyService::class),
+            app(KnowledgeChunkMetadataValidator::class),
+        );
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $context = $this->customerContext('Customer Four Blank Metadata AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('structured-metadata-blanks.docx', [
+                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
+                ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
+                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Underseksjon A', 'style' => 'Heading2'],
+                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
+                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'structured-metadata-blanks.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(2, $chunks->count());
+        $this->assertSame('Underseksjon A', $chunks[0]->heading_path);
+        $this->assertSame('Underseksjon A', $chunks[0]->topic);
+        $this->assertSame('Kort oppsummering 1', $chunks[0]->sub_topic);
+        $this->assertSame(['stikkord-1-a', 'stikkord-1-b'], $chunks[0]->keywords);
+        $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
+        $this->assertSame('Andre hovedseksjon', $chunks[1]->heading_path);
+        $this->assertSame('Andre hovedseksjon', $chunks[1]->topic);
+        $this->assertSame('Kort oppsummering 2', $chunks[1]->sub_topic);
+        $this->assertSame(['stikkord-2-a', 'stikkord-2-b'], $chunks[1]->keywords);
+        $this->assertStringContainsString('Andre hovedseksjon', (string) $chunks[1]->content);
+
+        $suggestions = KnowledgeMetadataTermSuggestion::query()
+            ->whereIn('source_chunk_id', $chunks->pluck('id'))
+            ->get();
+
+        $this->assertSame(2, $suggestions->where('suggested_type', 'topic')->count());
+        $this->assertSame(2, $suggestions->where('suggested_type', 'sub_topic')->count());
+        $this->assertSame(4, $suggestions->where('suggested_type', 'keywords')->count());
+    }
+
+    public function test_knowledge_document_upload_continues_when_metadata_generation_ai_fails(): void
+    {
+        Storage::fake('local');
+
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->once()
+            ->andThrow(new RuntimeException('OpenAI metadata request failed with HTTP status [500].'));
+
+        $metadataService = new KnowledgeChunkMetadataGenerationService(
+            $openAiClient,
+            app(KnowledgeMetadataVocabularyService::class),
+            app(KnowledgeChunkMetadataValidator::class),
+        );
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $context = $this->customerContext('Customer Four Metadata Failure AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('metadata-failure.docx', 'Metadata generation failure should not block upload.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'metadata-failure.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(1, $chunks->count());
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_FAILED, $chunks[0]->metadata_status);
+        $this->assertNull($chunks[0]->topic);
+        $this->assertNull($chunks[0]->sub_topic);
+        $this->assertTrue($chunks[0]->keywords === null || $chunks[0]->keywords === []);
+        $this->assertNotNull($chunks[0]->embedding_vector);
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void

@@ -121,15 +121,17 @@ class KnowledgeChunkMetadataValidator
      */
     private function normalizeDescriptiveScalarField(mixed $rawValue, mixed $fallbackValue = null): ?string
     {
-        $fallback = trim((string) ($fallbackValue ?? ''));
+        foreach ([$fallbackValue, $rawValue] as $candidate) {
+            $cleanValue = Str::squish(trim((string) ($candidate ?? '')));
 
-        if ($fallback !== '') {
-            return $fallback;
+            if ($cleanValue === '') {
+                continue;
+            }
+
+            return Str::limit($cleanValue, 191, '');
         }
 
-        $cleanValue = trim((string) ($rawValue ?? ''));
-
-        return $cleanValue !== '' ? $cleanValue : null;
+        return null;
     }
 
     /**
