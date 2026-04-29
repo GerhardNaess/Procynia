@@ -28,17 +28,14 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         $this->bindOpenAiClient([
             $this->enrichmentResponse('Tema A', ['Tema A', 'Tema A alternativ'], 'Beskrivelse av Tema A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
             $this->enrichmentResponse('Underemne A', ['Underemne A', 'Underemne A alternativ'], 'Beskrivelse av Underemne A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
-            $this->enrichmentResponse('Stikkord A', ['Stikkord A', 'Stikkord A alternativ'], 'Beskrivelse av Stikkord A.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
-            $this->enrichmentResponse('Stikkord B', ['Stikkord B', 'Stikkord B alternativ'], 'Beskrivelse av Stikkord B.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
-            $this->enrichmentResponse('Stikkord C', ['Stikkord C', 'Stikkord C alternativ'], 'Beskrivelse av Stikkord C.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
         ]);
 
         $service = app(KnowledgeChunkVocabularyCandidateService::class);
         $result = $service->syncForChunk($document, $chunk);
 
-        $this->assertSame(5, $result['created_count']);
+        $this->assertSame(2, $result['created_count']);
         $this->assertSame(0, $result['skipped_count']);
-        $this->assertSame(5, KnowledgeMetadataTermSuggestion::query()->count());
+        $this->assertSame(2, KnowledgeMetadataTermSuggestion::query()->count());
 
         $rows = KnowledgeMetadataTermSuggestion::query()
             ->orderBy('id')
@@ -57,9 +54,6 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         $this->assertSame([
             ['term' => 'Tema A', 'type' => 'topic'],
             ['term' => 'Underemne A', 'type' => 'sub_topic'],
-            ['term' => 'Stikkord A', 'type' => 'keywords'],
-            ['term' => 'Stikkord B', 'type' => 'keywords'],
-            ['term' => 'Stikkord C', 'type' => 'keywords'],
         ], $rows->map(static fn (KnowledgeMetadataTermSuggestion $suggestion): array => [
             'term' => $suggestion->suggested_term,
             'type' => $suggestion->suggested_type,
@@ -68,6 +62,7 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         $this->assertNotContains('Tema A', $rows->first()->suggested_synonyms);
         $this->assertNotEmpty($rows->first()->suggested_description);
         $this->assertNotEmpty($rows->first()->reason);
+        $this->assertSame(0, $rows->where('suggested_type', 'keywords')->count());
     }
 
     public function test_it_skips_existing_approved_and_pending_terms_without_normalizing_domain_values(): void
@@ -75,12 +70,9 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         [$document, $chunk] = $this->fixtureBundle([
             'topic' => 'Tema A',
             'sub_topic' => 'Underemne A',
-            'keywords' => ['Stikkord A', 'Stikkord B'],
         ]);
 
-        $this->bindOpenAiClient([
-            $this->enrichmentResponse('Stikkord B', ['Stikkord B', 'Stikkord B alternativ'], 'Beskrivelse av Stikkord B.', 'Foreslått fra chunk-metadata basert på innhold under Kapittel 1.'),
-        ]);
+        $this->bindOpenAiClient([]);
 
         KnowledgeMetadataTerm::query()->create([
             'customer_id' => $document->customer_id,
@@ -124,16 +116,9 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         $service = app(KnowledgeChunkVocabularyCandidateService::class);
         $result = $service->syncForChunk($document, $chunk);
 
-        $this->assertSame(1, $result['created_count']);
-        $this->assertSame(3, $result['skipped_count']);
-        $this->assertSame(3, KnowledgeMetadataTermSuggestion::query()->count());
-        $this->assertDatabaseHas('knowledge_metadata_term_suggestions', [
-            'customer_id' => $document->customer_id,
-            'source_chunk_id' => $chunk->id,
-            'suggested_term' => 'Stikkord B',
-            'suggested_type' => 'keywords',
-            'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
-        ]);
+        $this->assertSame(0, $result['created_count']);
+        $this->assertSame(2, $result['skipped_count']);
+        $this->assertSame(2, KnowledgeMetadataTermSuggestion::query()->count());
     }
 
     public function test_it_uses_fallback_reason_when_enrichment_fails_and_keeps_candidate_creation_running(): void
@@ -265,6 +250,9 @@ class KnowledgeChunkVocabularyCandidateServiceTest extends TestCase
         if ($shouldFail) {
             $client->shouldReceive('createResponse')
                 ->andThrow(new RuntimeException('OpenAI suggestion enrichment failed.'));
+        } elseif ($responses === []) {
+            $client->shouldReceive('createResponse')
+                ->never();
         } else {
             $client->shouldReceive('createResponse')
                 ->times(count($responses))

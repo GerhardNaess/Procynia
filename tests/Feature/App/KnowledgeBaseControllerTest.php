@@ -688,7 +688,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame(2, $suggestions->where('suggested_type', 'topic')->count());
         $this->assertSame(2, $suggestions->where('suggested_type', 'sub_topic')->count());
-        $this->assertSame(4, $suggestions->where('suggested_type', 'keywords')->count());
+        $this->assertSame(0, $suggestions->where('suggested_type', 'keywords')->count());
         $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->suggested_synonyms);
         $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->suggested_description);
         $this->assertNotEmpty($suggestions->firstWhere('suggested_type', 'topic')->reason);

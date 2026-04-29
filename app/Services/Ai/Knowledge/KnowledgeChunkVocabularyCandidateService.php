@@ -144,7 +144,6 @@ class KnowledgeChunkVocabularyCandidateService
         $entries = [];
         $topic = trim((string) ($chunk->topic ?? ''));
         $subTopic = trim((string) ($chunk->sub_topic ?? ''));
-        $keywords = $this->normalizeExactList($chunk->keywords);
 
         if ($topic !== '') {
             $entries[] = [
@@ -157,19 +156,6 @@ class KnowledgeChunkVocabularyCandidateService
             $entries[] = [
                 'field' => KnowledgeMetadataTerm::TYPE_SUB_TOPIC,
                 'term' => $subTopic,
-            ];
-        }
-
-        foreach ($keywords as $keyword) {
-            $cleanKeyword = trim((string) $keyword);
-
-            if ($cleanKeyword === '') {
-                continue;
-            }
-
-            $entries[] = [
-                'field' => KnowledgeMetadataTerm::TYPE_KEYWORDS,
-                'term' => $cleanKeyword,
             ];
         }
 
