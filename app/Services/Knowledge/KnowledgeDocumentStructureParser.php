@@ -208,7 +208,9 @@ class KnowledgeDocumentStructureParser
                 }
             }
 
-            return $this->mergeContiguousListElements($rawElements);
+            $mergedElements = $this->mergeContiguousListElements($rawElements);
+
+            return $this->groupH2Sections($mergedElements);
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
@@ -622,6 +624,122 @@ class KnowledgeDocumentStructureParser
         $parts = array_values(array_filter($parts, static fn (string $heading): bool => $heading !== ''));
 
         return $parts !== [] ? implode(' > ', $parts) : null;
+    }
+
+    /**
+     * Purpose: Group parsed DOCX elements into deterministic H2 sections before chunking.
+     * Inputs: The ordered raw elements extracted from the DOCX body after list merging.
+     * Returns: Ordered elements where each H2 section is represented as one structural section element.
+     * Side effects: None.
+     *
+     * @param array<int, array{
+     *     type: string,
+     *     heading_path: ?string,
+     *     text: string,
+     *     heading_level: ?int,
+     *     relation_hint: ?string
+     * }> $elements
+     * @return array<int, array{
+     *     type: string,
+     *     heading_path: ?string,
+     *     text: string,
+     *     heading_level: ?int,
+     *     relation_hint: ?string
+     * }>
+     */
+    private function groupH2Sections(array $elements): array
+    {
+        $grouped = [];
+        $currentSection = [];
+
+        foreach ($elements as $element) {
+            $type = (string) ($element['type'] ?? 'other');
+            $headingLevel = isset($element['heading_level']) ? (int) $element['heading_level'] : null;
+            $text = trim((string) ($element['text'] ?? ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            if ($type === 'heading' && $headingLevel === 1) {
+                if ($currentSection !== []) {
+                    $grouped[] = $this->buildH2SectionElement($currentSection);
+                    $currentSection = [];
+                }
+
+                continue;
+            }
+
+            if ($type === 'heading' && $headingLevel === 2) {
+                if ($currentSection !== []) {
+                    $grouped[] = $this->buildH2SectionElement($currentSection);
+                }
+
+                $element['text'] = $text;
+                $currentSection = [$element];
+
+                continue;
+            }
+
+            if ($currentSection !== []) {
+                $element['text'] = $text;
+                $currentSection[] = $element;
+
+                continue;
+            }
+
+            $element['text'] = $text;
+            $grouped[] = $element;
+        }
+
+        if ($currentSection !== []) {
+            $grouped[] = $this->buildH2SectionElement($currentSection);
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Purpose: Build one deterministic H2 section element from contiguous raw elements.
+     * Inputs: The H2 heading element and all following elements until the next H1 or H2.
+     * Returns: One raw structural element representing the complete H2 section.
+     * Side effects: None.
+     *
+     * @param array<int, array{
+     *     type: string,
+     *     heading_path: ?string,
+     *     text: string,
+     *     heading_level: ?int,
+     *     relation_hint: ?string
+     * }> $sectionElements
+     * @return array{
+     *     type: string,
+     *     heading_path: ?string,
+     *     text: string,
+     *     heading_level: ?int,
+     *     relation_hint: ?string
+     * }
+     */
+    private function buildH2SectionElement(array $sectionElements): array
+    {
+        $firstElement = $sectionElements[0] ?? [];
+        $textParts = [];
+
+        foreach ($sectionElements as $sectionElement) {
+            $text = trim((string) ($sectionElement['text'] ?? ''));
+
+            if ($text !== '') {
+                $textParts[] = $text;
+            }
+        }
+
+        return [
+            'type' => 'h2_section',
+            'heading_path' => $this->normalizeNullableString($firstElement['heading_path'] ?? null),
+            'text' => trim(implode("\n\n", $textParts)),
+            'heading_level' => 2,
+            'relation_hint' => 'h2_section',
+        ];
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
+use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
@@ -84,6 +85,96 @@ class KnowledgeVocabularyControllerTest extends TestCase
                 && count(data_get($props, 'sourceDocuments', [])) === 1
                 && data_get($props, 'sourceDocuments.0.id') === $document->id
                 && data_get($props, 'suggestions.0.related_existing_term_label') === 'Governance';
+        });
+    }
+
+    public function test_it_shows_correct_field_labels_for_chunk_based_suggestions(): void
+    {
+        $context = $this->customerContext('Vocabulary Chunk Labels AS');
+
+        $document = $this->createKnowledgeItem($context['customer'], [
+            'original_filename' => 'labels.docx',
+            'summary' => 'Dokumentsammendrag.',
+            'extracted_text' => 'Tema A, Underemne A og stikkord.',
+        ]);
+
+        $batch = KnowledgeVocabularyAnalysisBatch::query()->create([
+            'customer_id' => $context['customer']->id,
+            'status' => KnowledgeVocabularyAnalysisBatch::STATUS_PENDING_REVIEW,
+            'source_document_ids' => [$document->id],
+            'summary' => 'Kort oppsummering.',
+            'error_message' => null,
+            'created_by' => $context['user']->id,
+        ]);
+
+        $chunk = KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Tema A, Underemne A og stikkord.',
+            'start_offset' => 0,
+            'end_offset' => 40,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeMetadataTermSuggestion::query()->create([
+            'customer_id' => $context['customer']->id,
+            'batch_id' => $batch->id,
+            'source_chunk_id' => $chunk->id,
+            'suggested_term' => 'Tema A',
+            'suggested_canonical_name' => 'Tema A',
+            'suggested_type' => 'topic',
+            'suggested_synonyms' => [],
+            'suggested_description' => null,
+            'suggested_canonical_parent' => null,
+            'related_existing_term_id' => null,
+            'reason' => 'Forslag fra chunk.',
+            'confidence_score' => null,
+            'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
+        ]);
+
+        KnowledgeMetadataTermSuggestion::query()->create([
+            'customer_id' => $context['customer']->id,
+            'batch_id' => $batch->id,
+            'source_chunk_id' => $chunk->id,
+            'suggested_term' => 'Underemne A',
+            'suggested_canonical_name' => 'Underemne A',
+            'suggested_type' => 'sub_topic',
+            'suggested_synonyms' => [],
+            'suggested_description' => null,
+            'suggested_canonical_parent' => null,
+            'related_existing_term_id' => null,
+            'reason' => 'Forslag fra chunk.',
+            'confidence_score' => null,
+            'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
+        ]);
+
+        KnowledgeMetadataTermSuggestion::query()->create([
+            'customer_id' => $context['customer']->id,
+            'batch_id' => $batch->id,
+            'source_chunk_id' => $chunk->id,
+            'suggested_term' => 'Stikkord A',
+            'suggested_canonical_name' => 'Stikkord A',
+            'suggested_type' => 'keywords',
+            'suggested_synonyms' => [],
+            'suggested_description' => null,
+            'suggested_canonical_parent' => null,
+            'related_existing_term_id' => null,
+            'reason' => 'Forslag fra chunk.',
+            'confidence_score' => null,
+            'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-vocabulary.index'));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $suggestions = collect(data_get($page, 'props.suggestions', []))->keyBy('suggested_term');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeVocabulary/Index'
+                && data_get($suggestions, 'Tema A.suggested_type_label') === 'Emne'
+                && data_get($suggestions, 'Underemne A.suggested_type_label') === 'Underemne'
+                && data_get($suggestions, 'Stikkord A.suggested_type_label') === 'Nøkkelord'
+                && data_get($suggestions, 'Tema A.source_label') === 'labels.docx · Chunk 1';
         });
     }
 

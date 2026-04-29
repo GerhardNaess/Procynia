@@ -7,6 +7,7 @@ use Illuminate\Support\Str;
 use JsonException;
 use RuntimeException;
 use Throwable;
+use Illuminate\Support\Facades\Log;
 
 class AiKnowledgeChunkBoundaryService
 {
@@ -79,9 +80,13 @@ class AiKnowledgeChunkBoundaryService
 
             try {
                 $response = $this->openAiClient->createResponse($payload);
+                Log::info('[TT][AI_BOUNDARY_RAW_RESPONSE]', [
+                    'response' => $response,
+                ]);
+                $this->assertCompletedResponse($response);
                 $requestId = data_get($response, '_meta.request_id');
                 $decoded = $this->decodeResponse($response);
-                $analysisGroups[$index]['suggested_chunks'] = $this->normalizeChunkSuggestions($decoded);
+                $analysisGroups[$index]['suggested_chunks'] = $this->normalizeChunkSuggestions($decoded, $group);
                 $analysisGroups[$index]['request_id'] = is_string($requestId) ? $requestId : null;
                 $analysisGroups[$index]['response_id'] = is_string(data_get($response, 'id')) ? (string) data_get($response, 'id') : null;
             } catch (Throwable $exception) {
@@ -89,7 +94,7 @@ class AiKnowledgeChunkBoundaryService
                 $analysisGroups[$index]['request_id'] = is_string($requestId) ? $requestId : null;
                 $analysisGroups[$index]['response_id'] = null;
 
-                \Log::warning('[PROCYNIA][KNOWLEDGE_CHUNKING] Boundary suggestion failed; continuing with deterministic validation.', [
+                Log::warning('[PROCYNIA][KNOWLEDGE_CHUNKING] Boundary suggestion failed; continuing with deterministic validation.', [
                     'customer_id' => $customerId,
                     'document_title' => (string) data_get($documentContext, 'document_title', ''),
                     'group_index' => $group['group_index'] ?? $index,
@@ -133,68 +138,14 @@ class AiKnowledgeChunkBoundaryService
         }
 
         $groups = [];
-        $currentElements = [];
-        $currentStartOffset = null;
-        $currentEndOffset = null;
-        $currentWordCount = 0;
+        $partitionedElements = $this->hasReliableHeadingContext($elements)
+            ? $this->partitionElementsByHeadingSection($elements)
+            : [$elements];
 
-        foreach ($elements as $element) {
-            $elementStart = (int) data_get($element, 'start_offset', 0);
-            $elementEnd = (int) data_get($element, 'end_offset', $elementStart);
-            $elementText = trim((string) data_get($element, 'text', ''));
-            $elementWordCount = $this->wordCount($elementText);
-
-            if ($elementText === '') {
-                continue;
-            }
-
-            if ($currentElements !== [] && $currentWordCount >= self::PREFERRED_GROUP_MIN_WORDS) {
-                $candidateWordCount = $currentWordCount + $elementWordCount;
-
-                if ($candidateWordCount > self::PREFERRED_GROUP_MAX_WORDS || $currentWordCount >= self::PREFERRED_GROUP_TARGET_WORDS) {
-                    $groups[] = $this->makeAnalysisGroup(
-                        $sourceText,
-                        $currentElements,
-                        (int) $currentStartOffset,
-                        (int) $currentEndOffset,
-                        count($groups),
-                    );
-
-                    $currentElements = [];
-                    $currentStartOffset = null;
-                    $currentEndOffset = null;
-                    $currentWordCount = 0;
-                }
-            }
-
-            $currentElements[] = $element;
-            $currentStartOffset = $currentStartOffset ?? $elementStart;
-            $currentEndOffset = $elementEnd;
-            $currentWordCount += $elementWordCount;
-
-            if ($currentWordCount >= self::PREFERRED_GROUP_MAX_WORDS) {
-                $groups[] = $this->makeAnalysisGroup(
-                    $sourceText,
-                    $currentElements,
-                    (int) $currentStartOffset,
-                    (int) $currentEndOffset,
-                    count($groups),
-                );
-
-                $currentElements = [];
-                $currentStartOffset = null;
-                $currentEndOffset = null;
-                $currentWordCount = 0;
-            }
-        }
-
-        if ($currentElements !== [] && $currentStartOffset !== null && $currentEndOffset !== null) {
-            $groups[] = $this->makeAnalysisGroup(
-                $sourceText,
-                $currentElements,
-                (int) $currentStartOffset,
-                (int) $currentEndOffset,
-                count($groups),
+        foreach ($partitionedElements as $sectionElements) {
+            $groups = array_merge(
+                $groups,
+                $this->buildAnalysisGroupsForElements($sourceText, $sectionElements, count($groups)),
             );
         }
 
@@ -210,6 +161,183 @@ class AiKnowledgeChunkBoundaryService
         }
 
         return $groups;
+    }
+
+    /**
+     * Purpose: Build analysis groups from one ordered structural element set.
+     * Inputs: The canonical source text, a contiguous element subset, and the starting group index.
+     * Returns: Ordered analysis groups that stay within the supplied structural subset.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array{
+     *     group_index: int,
+     *     start_offset: int,
+     *     end_offset: int,
+     *     text: string,
+     *     word_count: int,
+     *     elements: array<int, array<string, mixed>>,
+     *     previous_group_tail: ?string,
+     *     next_group_head: ?string,
+     *     suggested_chunks: array<int, array<string, mixed>>,
+     *     request_id: ?string,
+     *     response_id: ?string
+     * }>
+     */
+    private function buildAnalysisGroupsForElements(string $sourceText, array $elements, int $groupIndexOffset): array
+    {
+        $groups = [];
+        $currentElements = [];
+        $currentStartOffset = null;
+        $currentEndOffset = null;
+        $currentWordCount = 0;
+
+        foreach ($elements as $element) {
+            $elementStart = (int) data_get($element, 'start_offset', 0);
+            $elementEnd = (int) data_get($element, 'end_offset', $elementStart);
+            $elementText = trim((string) data_get($element, 'text', ''));
+            $elementWordCount = $this->wordCount($elementText);
+
+            if ($elementText === '') {
+                continue;
+            }
+
+            $keepLeadInTogether = $this->shouldKeepLeadInWithFollowingList($currentElements, $element);
+
+            if (! $keepLeadInTogether && $currentElements !== [] && $currentWordCount >= self::PREFERRED_GROUP_MIN_WORDS) {
+                $candidateWordCount = $currentWordCount + $elementWordCount;
+
+                if ($candidateWordCount > self::PREFERRED_GROUP_MAX_WORDS || $currentWordCount >= self::PREFERRED_GROUP_TARGET_WORDS) {
+                    $groups[] = $this->makeAnalysisGroup(
+                        $sourceText,
+                        $currentElements,
+                        (int) $currentStartOffset,
+                        (int) $currentEndOffset,
+                        $groupIndexOffset + count($groups),
+                    );
+
+                    $currentElements = [];
+                    $currentStartOffset = null;
+                    $currentEndOffset = null;
+                    $currentWordCount = 0;
+                }
+            }
+
+            $currentElements[] = $element;
+            $currentStartOffset = $currentStartOffset ?? $elementStart;
+            $currentEndOffset = $elementEnd;
+            $currentWordCount += $elementWordCount;
+
+            if (! $keepLeadInTogether && $currentWordCount >= self::PREFERRED_GROUP_MAX_WORDS) {
+                $groups[] = $this->makeAnalysisGroup(
+                    $sourceText,
+                    $currentElements,
+                    (int) $currentStartOffset,
+                    (int) $currentEndOffset,
+                    $groupIndexOffset + count($groups),
+                );
+
+                $currentElements = [];
+                $currentStartOffset = null;
+                $currentEndOffset = null;
+                $currentWordCount = 0;
+            }
+        }
+
+        if ($currentElements !== [] && $currentStartOffset !== null && $currentEndOffset !== null) {
+            $groups[] = $this->makeAnalysisGroup(
+                $sourceText,
+                $currentElements,
+                (int) $currentStartOffset,
+                (int) $currentEndOffset,
+                $groupIndexOffset + count($groups),
+            );
+        }
+
+        return array_values($groups);
+    }
+
+    /**
+     * Purpose: Determine whether heading metadata is available for section-aware grouping.
+     * Inputs: Ordered structural elements.
+     * Returns: True when at least one reliable heading path or heading level exists.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     */
+    private function hasReliableHeadingContext(array $elements): bool
+    {
+        foreach ($elements as $element) {
+            if ($this->normalizeNullableString(data_get($element, 'heading_path')) !== null) {
+                return true;
+            }
+
+            if (data_get($element, 'heading_level') !== null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Purpose: Partition ordered elements into contiguous hard-boundary sections.
+     * Inputs: Ordered structural elements with heading metadata.
+     * Returns: A list of contiguous section element sets.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function partitionElementsByHeadingSection(array $elements): array
+    {
+        $sections = [];
+        $currentSection = [];
+        $currentKey = null;
+
+        foreach ($elements as $element) {
+            $headingPath = $this->normalizeNullableString(data_get($element, 'heading_path'));
+            $sectionKey = $headingPath ?? '__unheaded__';
+
+            if ($currentSection !== [] && $sectionKey !== $currentKey) {
+                $sections[] = $currentSection;
+                $currentSection = [];
+            }
+
+            $currentKey = $sectionKey;
+            $currentSection[] = $element;
+        }
+
+        if ($currentSection !== []) {
+            $sections[] = $currentSection;
+        }
+
+        return $sections;
+    }
+
+    /**
+     * Purpose: Decide whether the current lead-in paragraph should stay attached to the following list.
+     * Inputs: The current analysis group elements and the next structural element.
+     * Returns: True when the next list element should not trigger a word-count split.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $currentElements
+     * @param array<string, mixed> $nextElement
+     */
+    private function shouldKeepLeadInWithFollowingList(array $currentElements, array $nextElement): bool
+    {
+        if ($currentElements === []) {
+            return false;
+        }
+
+        $lastElement = $currentElements[array_key_last($currentElements)] ?? null;
+
+        if (! is_array($lastElement)) {
+            return false;
+        }
+
+        return (string) data_get($lastElement, 'relation_hint', '') === 'lead_in'
+            && (string) data_get($nextElement, 'type', '') === 'list';
     }
 
     /**
@@ -316,6 +444,9 @@ class AiKnowledgeChunkBoundaryService
             'You must keep intro text together with its directly related list when they belong together.',
             'You must not split a list group unless the text is too large and the split keeps list items intact.',
             'You must not mix unrelated main topics in one chunk.',
+            'You must provide a non-empty topic, non-empty sub_topic, and 3 to 8 concrete keywords for every chunk.',
+            'Derive topic, sub_topic, and keywords only from the supplied text and heading_path.',
+            'Use topic for the main subject area and sub_topic for the specific subject inside that chunk.',
             'Prefer chunks around 300 to 700 words.',
             'Avoid chunks smaller than 100 words unless the analyzed group is naturally short.',
             'Avoid chunks larger than 1200 words unless a table or unavoidable structure requires it.',
@@ -375,6 +506,8 @@ class AiKnowledgeChunkBoundaryService
                 'Do not separate intro text from a directly related list unless necessary.',
                 'Return chunk offsets relative to the analysis group text.',
                 'Keep chunk bodies semantically coherent.',
+                'For every chunk, return a non-empty topic, non-empty sub_topic, and 3 to 8 concrete keywords.',
+                'Metadata must describe the chunk content, not the whole document.',
             ],
         ];
 
@@ -411,15 +544,23 @@ class AiKnowledgeChunkBoundaryService
                                 'type' => 'string',
                             ],
                             'topic' => [
-                                'type' => ['string', 'null'],
+                                'type' => 'string',
+                                'minLength' => 2,
+                                'maxLength' => 255,
                             ],
                             'sub_topic' => [
-                                'type' => ['string', 'null'],
+                                'type' => 'string',
+                                'minLength' => 2,
+                                'maxLength' => 255,
                             ],
                             'keywords' => [
                                 'type' => 'array',
+                                'minItems' => 3,
+                                'maxItems' => 8,
                                 'items' => [
                                     'type' => 'string',
+                                    'minLength' => 2,
+                                    'maxLength' => 80,
                                 ],
                             ],
                         ],
@@ -468,6 +609,34 @@ class AiKnowledgeChunkBoundaryService
         }
 
         return $decoded;
+    }
+
+    /**
+     * Purpose: Ensure the OpenAI Responses payload completed successfully before parsing.
+     * Inputs: The raw OpenAI response payload.
+     * Returns: None.
+     * Side effects: Throws when the response is incomplete or truncated.
+     */
+    private function assertCompletedResponse(array $response): void
+    {
+        $status = trim((string) data_get($response, 'status', ''));
+
+        if ($status !== 'completed') {
+            $reason = trim((string) data_get($response, 'incomplete_details.reason', ''));
+            $message = 'OpenAI knowledge chunk boundary response was not completed.';
+
+            if ($reason !== '') {
+                $message .= ' Reason: '.$reason.'.';
+            }
+
+            throw new RuntimeException($message);
+        }
+
+        $reason = trim((string) data_get($response, 'incomplete_details.reason', ''));
+
+        if ($reason === 'max_output_tokens') {
+            throw new RuntimeException('OpenAI knowledge chunk boundary response was truncated by max_output_tokens.');
+        }
     }
 
     /**
@@ -539,42 +708,80 @@ class AiKnowledgeChunkBoundaryService
 
     /**
      * Purpose: Normalize chunk suggestions from the AI response.
-     * Inputs: The decoded assistant payload.
-     * Returns: An ordered list of chunk suggestion payloads.
+     * Inputs: The decoded assistant payload and the related analysis group.
+     * Returns: An ordered list of chunk suggestion payloads with safe metadata fallbacks.
      * Side effects: None.
      *
      * @param array<string, mixed> $decoded
+     * @param array<string, mixed> $analysisGroup
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeChunkSuggestions(array $decoded): array
+    private function normalizeChunkSuggestions(array $decoded, array $analysisGroup): array
     {
         $chunks = data_get($decoded, 'chunks', []);
+        $metadataFallbacks = $this->metadataFallbacks($analysisGroup);
 
         if (! is_array($chunks)) {
             return [];
         }
 
         $normalized = [];
+        $previousStart = null;
+        $previousEnd = null;
+        $seenPairs = [];
 
         foreach ($chunks as $chunk) {
             if (! is_array($chunk)) {
                 continue;
             }
 
-            $start = (int) data_get($chunk, 'start_offset_relative', 0);
-            $end = (int) data_get($chunk, 'end_offset_relative', 0);
+            $rawStart = data_get($chunk, 'start_offset_relative');
+            $rawEnd = data_get($chunk, 'end_offset_relative');
 
-            if ($end <= $start) {
-                continue;
+            if (! is_int($rawStart) || ! is_int($rawEnd)) {
+                return [];
+            }
+
+            $start = $rawStart;
+            $end = $rawEnd;
+
+            if ($start < 0 || $end <= $start) {
+                return [];
+            }
+
+            if ($previousStart !== null && $start <= $previousStart) {
+                return [];
+            }
+
+            if ($previousEnd !== null && $start < $previousEnd) {
+                return [];
+            }
+
+            $pairKey = $start.'|'.$end;
+
+            if (isset($seenPairs[$pairKey])) {
+                return [];
+            }
+
+            $seenPairs[$pairKey] = true;
+            $previousStart = $start;
+            $previousEnd = $end;
+
+            $topic = $this->normalizeNullableString(data_get($chunk, 'topic')) ?? $metadataFallbacks['topic'];
+            $subTopic = $this->normalizeNullableString(data_get($chunk, 'sub_topic')) ?? $metadataFallbacks['sub_topic'];
+            $keywords = $this->normalizeKeywords(data_get($chunk, 'keywords'));
+
+            if ($keywords === []) {
+                $keywords = $metadataFallbacks['keywords'];
             }
 
             $normalized[] = [
                 'start_offset_relative' => $start,
                 'end_offset_relative' => $end,
                 'short_reason' => trim((string) data_get($chunk, 'short_reason', '')),
-                'topic' => $this->normalizeNullableString(data_get($chunk, 'topic')),
-                'sub_topic' => $this->normalizeNullableString(data_get($chunk, 'sub_topic')),
-                'keywords' => $this->normalizeKeywords(data_get($chunk, 'keywords')),
+                'topic' => $topic,
+                'sub_topic' => $subTopic,
+                'keywords' => $keywords,
             ];
         }
 
@@ -592,6 +799,91 @@ class AiKnowledgeChunkBoundaryService
         return array_values($normalized);
     }
 
+
+    /**
+     * Purpose: Build deterministic metadata fallbacks from the analysis group's heading context.
+     * Inputs: One analysis group with parsed structural elements.
+     * Returns: A topic, sub-topic, and keyword list used only when AI metadata is missing.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $analysisGroup
+     * @return array{topic: string, sub_topic: string, keywords: array<int, string>}
+     */
+    private function metadataFallbacks(array $analysisGroup): array
+    {
+        $headingSegments = [];
+
+        foreach ((array) data_get($analysisGroup, 'elements', []) as $element) {
+            if (! is_array($element)) {
+                continue;
+            }
+
+            foreach ($this->headingPathSegments(data_get($element, 'heading_path')) as $segment) {
+                $key = mb_strtolower($segment, 'UTF-8');
+                $headingSegments[$key] = $segment;
+            }
+        }
+
+        $segments = array_values($headingSegments);
+        $topic = $this->normalizeNullableString($segments[0] ?? null) ?? 'Kunnskapsdokument';
+        $subTopic = $this->normalizeNullableString(end($segments) ?: null) ?? $topic;
+        $keywords = [];
+
+        foreach (array_reverse($segments) as $segment) {
+            $text = $this->normalizeNullableString($segment);
+
+            if ($text === null) {
+                continue;
+            }
+
+            $keywords[] = $text;
+
+            if (count($keywords) >= 5) {
+                break;
+            }
+        }
+
+        if ($keywords === []) {
+            $keywords[] = $topic;
+        }
+
+        return [
+            'topic' => $topic,
+            'sub_topic' => $subTopic,
+            'keywords' => array_values(array_unique($keywords)),
+        ];
+    }
+
+    /**
+     * Purpose: Split a stored heading path into clean heading segments.
+     * Inputs: A raw heading_path value.
+     * Returns: Ordered heading path segments.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function headingPathSegments(mixed $headingPath): array
+    {
+        $text = trim((string) ($headingPath ?? ''));
+
+        if ($text === '') {
+            return [];
+        }
+
+        $segments = preg_split('/\s*>\s*/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $normalized = [];
+
+        foreach ($segments as $segment) {
+            $value = $this->normalizeNullableString($segment);
+
+            if ($value !== null) {
+                $normalized[] = $value;
+            }
+        }
+
+        return $normalized;
+    }
+
     /**
      * Purpose: Normalize a nullable string value to a trimmed nullable string.
      * Inputs: A raw scalar value or null.
@@ -602,7 +894,11 @@ class AiKnowledgeChunkBoundaryService
     {
         $text = trim((string) ($value ?? ''));
 
-        return $text !== '' ? $text : null;
+        if ($text === '') {
+            return null;
+        }
+
+        return mb_substr($text, 0, 255, 'UTF-8');
     }
 
     /**
@@ -625,19 +921,17 @@ class AiKnowledgeChunkBoundaryService
         $seen = [];
 
         foreach ($keywords as $keyword) {
-            $text = trim((string) $keyword);
+            $text = trim(Str::squish((string) $keyword));
 
             if ($text === '') {
                 continue;
             }
 
-            $key = mb_strtolower($text, 'UTF-8');
-
-            if (isset($seen[$key])) {
+            if (isset($seen[$text])) {
                 continue;
             }
 
-            $seen[$key] = true;
+            $seen[$text] = true;
             $normalized[] = $text;
         }
 

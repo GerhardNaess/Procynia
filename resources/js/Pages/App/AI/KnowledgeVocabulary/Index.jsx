@@ -701,6 +701,10 @@ export default function KnowledgeVocabularyIndex({
                                             {suggestions.map((suggestion) => {
                                                 const mergeOptions = approvedTermsByType[suggestion.suggested_type] ?? [];
                                                 const selectedMergeTarget = mergeTargets[suggestion.id] ?? suggestion.related_existing_term_id ?? (mergeOptions[0]?.id ?? null);
+                                                const confidenceScore = suggestion.confidence_score;
+                                                const confidenceLabel = confidenceScore === null || confidenceScore === undefined
+                                                    ? '—'
+                                                    : Number(confidenceScore).toFixed(2);
 
                                                 return (
                                                     <tr key={suggestion.id} className="align-top">
@@ -710,7 +714,7 @@ export default function KnowledgeVocabularyIndex({
                                                                     {suggestion.suggested_canonical_name || suggestion.suggested_term}
                                                                 </div>
                                                                 <div className="text-xs uppercase tracking-[0.12em] text-slate-400">
-                                                                    {suggestion.suggested_type}
+                                                                    {suggestion.suggested_type_label ?? suggestion.suggested_type}
                                                                 </div>
                                                                 {suggestion.suggested_synonyms?.length > 0 ? (
                                                                     <div className="flex flex-wrap gap-1.5">
@@ -747,7 +751,7 @@ export default function KnowledgeVocabularyIndex({
                                                                         Confidence
                                                                     </span>
                                                                     <div>
-                                                                        {Number(suggestion.confidence_score ?? 0).toFixed(2)}
+                                                                        {confidenceLabel}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -758,7 +762,7 @@ export default function KnowledgeVocabularyIndex({
                                                                     <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                                                                         Batch
                                                                     </span>
-                                                                    <div>{suggestion.batch_label}</div>
+                                                                    <div>{suggestion.source_label ?? suggestion.batch_label}</div>
                                                                 </div>
                                                                 {suggestion.related_existing_term_label ? (
                                                                     <div className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">

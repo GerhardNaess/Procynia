@@ -402,6 +402,7 @@ class KnowledgeVocabularyController extends Controller
             ->with([
                 'analysisBatch.creator',
                 'relatedExistingTerm',
+                'sourceChunk.knowledgeItem',
             ])
             ->where('customer_id', $customerId)
             ->where('status', KnowledgeMetadataTermSuggestion::STATUS_PENDING)
@@ -415,9 +416,12 @@ class KnowledgeVocabularyController extends Controller
                 'batch_id' => $suggestion->batch_id,
                 'batch_label' => $suggestion->analysisBatch ? sprintf('Batch #%d', $suggestion->analysisBatch->id) : '—',
                 'batch_status' => $suggestion->analysisBatch ? $suggestion->analysisBatch->status : null,
+                'source_chunk_id' => $suggestion->source_chunk_id,
+                'source_label' => $this->suggestionSourceLabel($suggestion),
                 'related_existing_term_id' => $suggestion->related_existing_term_id,
                 'related_existing_term_label' => $suggestion->relatedExistingTerm?->canonical_name,
-                'suggested_type' => $suggestion->suggested_type,
+                'suggested_type' => $this->normalizeSuggestionType((string) $suggestion->suggested_type),
+                'suggested_type_label' => KnowledgeMetadataTerm::TYPE_LABELS[$this->normalizeSuggestionType((string) $suggestion->suggested_type)] ?? $this->normalizeSuggestionType((string) $suggestion->suggested_type),
                 'suggested_term' => $suggestion->suggested_term ?: $suggestion->suggested_canonical_name,
                 'suggested_canonical_name' => $suggestion->suggested_canonical_name,
                 'suggested_synonyms' => $suggestion->suggested_synonyms ?? [],
@@ -680,6 +684,44 @@ class KnowledgeVocabularyController extends Controller
             KnowledgeMetadataTermSuggestion::STATUS_APPROVED => 'Forslag godkjent.',
             default => 'Forslag oppdatert.',
         };
+    }
+
+    /**
+     * Purpose: Resolve a suggestion source label for the workspace list.
+     * Inputs: A pending suggestion row.
+     * Returns: A short source label or null when no source chunk exists.
+     * Side effects: None.
+     */
+    private function suggestionSourceLabel(KnowledgeMetadataTermSuggestion $suggestion): ?string
+    {
+        if ($suggestion->sourceChunk === null) {
+            return null;
+        }
+
+        $documentTitle = $suggestion->sourceChunk->knowledgeItem?->original_filename
+            ?? $suggestion->sourceChunk->knowledgeItem?->title
+            ?? null;
+        $chunkNumber = (int) $suggestion->sourceChunk->chunk_index + 1;
+
+        if ($documentTitle === null) {
+            return sprintf('Chunk #%d', $chunkNumber);
+        }
+
+        return sprintf('%s · Chunk %d', $documentTitle, $chunkNumber);
+    }
+
+    /**
+     * Purpose: Normalize a vocabulary suggestion type to the canonical field name.
+     * Inputs: A raw suggestion type value.
+     * Returns: The canonical type key or the original trimmed value when unsupported.
+     * Side effects: None.
+     */
+    private function normalizeSuggestionType(string $type): string
+    {
+        $normalized = trim($type);
+        $normalized = KnowledgeMetadataTerm::TYPE_ALIASES[$normalized] ?? $normalized;
+
+        return $normalized !== '' ? $normalized : $type;
     }
 
 }

@@ -30,7 +30,7 @@ class KnowledgeChunkBuilder
             $contentLength = max(0, $endOffset - $startOffset);
             $content = mb_substr($sourceText, $startOffset, $contentLength, 'UTF-8');
 
-            $payloads[] = [
+            $payloads[] = $this->applyBoundaryMetadata([
                 'chunk_index' => $index,
                 'content' => $content,
                 'start_offset' => $startOffset,
@@ -44,7 +44,7 @@ class KnowledgeChunkBuilder
                 'topic' => $this->nullableString(data_get($plan, 'topic')),
                 'sub_topic' => $this->nullableString(data_get($plan, 'sub_topic')),
                 'keywords' => $this->normalizeKeywords(data_get($plan, 'keywords')),
-            ];
+            ], $plan);
         }
 
         return $payloads;
@@ -127,19 +127,17 @@ class KnowledgeChunkBuilder
         $seen = [];
 
         foreach ($keywords as $keyword) {
-            $text = trim((string) $keyword);
+            $text = trim(Str::squish((string) $keyword));
 
             if ($text === '') {
                 continue;
             }
 
-            $key = mb_strtolower($text, 'UTF-8');
-
-            if (isset($seen[$key])) {
+            if (isset($seen[$text])) {
                 continue;
             }
 
-            $seen[$key] = true;
+            $seen[$text] = true;
             $normalized[] = $text;
         }
 
@@ -172,5 +170,28 @@ class KnowledgeChunkBuilder
         }
 
         return Str::limit($title, 255, '');
+    }
+
+    /**
+     * Purpose: Apply boundary-derived semantic metadata to one chunk payload without overwriting existing values.
+     * Inputs: The partially built chunk payload and the validated boundary plan.
+     * Returns: The payload with topic, sub-topic and keywords filled when available.
+     * Side effects: None.
+     */
+    private function applyBoundaryMetadata(array $payload, array $plan): array
+    {
+        if (! array_key_exists('topic', $payload) || $this->nullableString($payload['topic'] ?? null) === null) {
+            $payload['topic'] = $this->nullableString(data_get($plan, 'topic'));
+        }
+
+        if (! array_key_exists('sub_topic', $payload) || $this->nullableString($payload['sub_topic'] ?? null) === null) {
+            $payload['sub_topic'] = $this->nullableString(data_get($plan, 'sub_topic'));
+        }
+
+        if (! array_key_exists('keywords', $payload) || ! is_array($payload['keywords'] ?? null) || $payload['keywords'] === []) {
+            $payload['keywords'] = $this->normalizeKeywords(data_get($plan, 'keywords'));
+        }
+
+        return $payload;
     }
 }

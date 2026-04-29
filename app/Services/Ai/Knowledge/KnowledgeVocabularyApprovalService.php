@@ -331,6 +331,7 @@ class KnowledgeVocabularyApprovalService
     private function normalizeType(string $value): string
     {
         $type = trim(Str::squish($value));
+        $type = KnowledgeMetadataTerm::TYPE_ALIASES[$type] ?? $type;
 
         return in_array($type, KnowledgeMetadataTerm::TYPES, true) ? $type : '';
     }

@@ -5,6 +5,7 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -199,6 +200,70 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
                 && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
         });
+    }
+
+    public function test_knowledge_document_upload_persists_boundary_metadata_even_when_approved_vocabulary_is_empty(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true, true);
+
+        $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $metadataService->shouldReceive('generateForChunk')
+            ->twice()
+            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
+                return [
+                    'service_product_tag' => 'Produkt A',
+                    'theme_tag' => 'Tema A',
+                    'topic' => null,
+                    'sub_topic' => null,
+                    'keywords' => [],
+                    'matched_terms' => [],
+                    'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+                    'confidence_score' => 0.25,
+                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+                    'new_term_suggestions' => [],
+                    'embedding_input' => 'Content: '.trim((string) $chunk->content),
+                ];
+            });
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $context = $this->customerContext('Customer Four Structured Metadata AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('structured-metadata.docx', [
+                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
+                ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
+                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Underseksjon A', 'style' => 'Heading2'],
+                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
+                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'structured-metadata.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $this->assertSame(2, $chunks->count());
+        $this->assertSame('Tema 1', $chunks[0]->topic);
+        $this->assertSame('Underemne 1', $chunks[0]->sub_topic);
+        $this->assertSame(['stikkord-1-a', 'stikkord-1-b', 'stikkord-1-c'], $chunks[0]->keywords);
+        $this->assertSame('Tema 2', $chunks[1]->topic);
+        $this->assertSame('Underemne 2', $chunks[1]->sub_topic);
+        $this->assertSame(['stikkord-2-a', 'stikkord-2-b', 'stikkord-2-c'], $chunks[1]->keywords);
+        $this->assertSame(0, KnowledgeMetadataTerm::query()->count());
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
@@ -1173,11 +1238,11 @@ XML;
      * Returns: None.
      * Side effects: Replaces the container binding with a predictable fake service.
      */
-    private function bindKnowledgeChunkBoundaryService(bool $groupByPrimaryHeading = false): void
+    private function bindKnowledgeChunkBoundaryService(bool $groupByPrimaryHeading = false, bool $includeMetadataSuggestions = false): void
     {
         $service = Mockery::mock(AiKnowledgeChunkBoundaryService::class);
         $service->shouldReceive('suggestBoundaries')
-            ->andReturnUsing(function (int $customerId, array $documentContext, array $structure) use ($groupByPrimaryHeading): array {
+            ->andReturnUsing(function (int $customerId, array $documentContext, array $structure) use ($groupByPrimaryHeading, $includeMetadataSuggestions): array {
                 $sourceText = trim((string) data_get($structure, 'source_text', ''));
                 $elements = array_values(array_filter(
                     (array) data_get($structure, 'elements', []),
@@ -1215,7 +1280,18 @@ XML;
                         'elements' => $groupElements,
                         'previous_group_tail' => null,
                         'next_group_head' => null,
-                        'suggested_chunks' => [],
+                        'suggested_chunks' => $includeMetadataSuggestions ? [[
+                            'start_offset_relative' => 0,
+                            'end_offset_relative' => mb_strlen($groupText, 'UTF-8'),
+                            'short_reason' => 'Boundary chunk '.$groupIndex,
+                            'topic' => 'Tema '.($groupIndex + 1),
+                            'sub_topic' => 'Underemne '.($groupIndex + 1),
+                            'keywords' => [
+                                'stikkord-'.($groupIndex + 1).'-a',
+                                'stikkord-'.($groupIndex + 1).'-b',
+                                'stikkord-'.($groupIndex + 1).'-c',
+                            ],
+                        ]] : [],
                         'request_id' => null,
                         'response_id' => null,
                     ];

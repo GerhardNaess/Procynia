@@ -125,6 +125,49 @@ class KnowledgeChunkBoundaryValidatorTest extends TestCase
         $this->assertStringContainsString('Mer forklaring.', $result[0]['content']);
     }
 
+    public function test_it_rejects_zero_length_and_repeated_ai_boundaries_and_falls_back_to_deterministic_packing(): void
+    {
+        $structure = $this->structureFromBlocks([
+            ['type' => 'paragraph', 'text' => 'Intro før hovedseksjon.', 'heading_path' => null],
+            ['type' => 'heading', 'text' => 'Hovedseksjon', 'heading_path' => 'Hovedseksjon', 'heading_level' => 1],
+            ['type' => 'paragraph', 'text' => 'Forklaring.', 'heading_path' => 'Hovedseksjon'],
+            ['type' => 'paragraph', 'text' => 'Mer forklaring.', 'heading_path' => 'Hovedseksjon'],
+        ]);
+
+        $elements = $structure['elements'];
+        $validator = app(KnowledgeChunkBoundaryValidator::class);
+        $result = $validator->validate($structure, [[
+            'group_index' => 0,
+            'start_offset' => 0,
+            'end_offset' => mb_strlen($structure['source_text'], 'UTF-8'),
+            'text' => $structure['source_text'],
+            'elements' => $elements,
+            'suggested_chunks' => [
+                [
+                    'start_offset_relative' => 0,
+                    'end_offset_relative' => 0,
+                    'short_reason' => 'Zero-length chunk.',
+                    'topic' => 'Tema A',
+                    'sub_topic' => 'Underemne A',
+                    'keywords' => ['A'],
+                ],
+                [
+                    'start_offset_relative' => 0,
+                    'end_offset_relative' => 0,
+                    'short_reason' => 'Repeated zero-length chunk.',
+                    'topic' => 'Tema A',
+                    'sub_topic' => 'Underemne A',
+                    'keywords' => ['A'],
+                ],
+            ],
+        ]]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Hovedseksjon', $result[0]['heading_path']);
+        $this->assertStringContainsString('Intro før hovedseksjon.', $result[0]['content']);
+        $this->assertStringContainsString('Mer forklaring.', $result[0]['content']);
+    }
+
     /**
      * Purpose: Build canonical source text and structural elements for validator tests.
      * Inputs: Ordered structural block definitions.

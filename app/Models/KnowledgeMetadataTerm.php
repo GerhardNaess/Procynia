@@ -15,6 +15,8 @@ class KnowledgeMetadataTerm extends Model
 
     public const TYPE_SUB_TOPIC = 'sub_topic';
 
+    public const TYPE_KEYWORDS = 'keywords';
+
     public const TYPE_KEYWORD = 'keyword';
 
     public const TYPE_ROLE = 'role';
@@ -29,12 +31,16 @@ class KnowledgeMetadataTerm extends Model
 
     public const TYPE_INDUSTRY = 'industry';
 
+    public const TYPE_ALIASES = [
+        self::TYPE_KEYWORD => self::TYPE_KEYWORDS,
+    ];
+
     public const TYPES = [
         self::TYPE_SERVICE_PRODUCT_TAG,
         self::TYPE_THEME_TAG,
         self::TYPE_TOPIC,
         self::TYPE_SUB_TOPIC,
-        self::TYPE_KEYWORD,
+        self::TYPE_KEYWORDS,
         self::TYPE_ROLE,
         self::TYPE_PROCESS,
         self::TYPE_SYSTEM,
@@ -48,7 +54,7 @@ class KnowledgeMetadataTerm extends Model
         self::TYPE_THEME_TAG => 'Tema',
         self::TYPE_TOPIC => 'Emne',
         self::TYPE_SUB_TOPIC => 'Underemne',
-        self::TYPE_KEYWORD => 'Nøkkelord',
+        self::TYPE_KEYWORDS => 'Nøkkelord',
         self::TYPE_ROLE => 'Rolle',
         self::TYPE_PROCESS => 'Prosess',
         self::TYPE_SYSTEM => 'System',

@@ -28,7 +28,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_it_builds_embedding_input_and_persists_pending_suggestions_for_unknown_values(): void
+    public function test_it_builds_embedding_input_without_persisting_descriptive_field_suggestions(): void
     {
         [$document, $chunk] = $this->fixtureBundle();
 
@@ -56,13 +56,12 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
 
         $this->assertSame('Governance', $result['service_product_tag']);
         $this->assertSame('Drift', $result['theme_tag']);
-        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW, $result['metadata_status']);
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $result['metadata_status']);
         $this->assertStringContainsString('Summary: Beskriver faste møtefora for oppfølging.', $result['embedding_input']);
         $this->assertStringContainsString('Service/product tag: Governance', $result['embedding_input']);
         $this->assertStringContainsString('Keywords: SLA, Nytt begrep', $result['embedding_input']);
-        $this->assertSame(1, KnowledgeMetadataTermSuggestion::query()->count());
-        $this->assertSame('Nytt begrep', KnowledgeMetadataTermSuggestion::query()->firstOrFail()->suggested_term);
-        $this->assertSame($chunk->id, KnowledgeMetadataTermSuggestion::query()->firstOrFail()->source_chunk_id);
+        $this->assertSame([], $result['new_term_suggestions']);
+        $this->assertSame(0, KnowledgeMetadataTermSuggestion::query()->count());
     }
 
     public function test_it_skips_persisting_suggestions_for_approved_canonical_names_and_synonyms(): void

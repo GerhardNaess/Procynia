@@ -4,6 +4,7 @@ namespace App\Services\Ai\Knowledge;
 
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
@@ -331,6 +332,7 @@ class KnowledgeChunkMetadataGenerationService
                         'required' => [
                             'suggested_term',
                             'suggested_type',
+                            'suggested_canonical_parent',
                             'reason',
                         ],
                         'additionalProperties' => false,
@@ -522,8 +524,9 @@ class KnowledgeChunkMetadataGenerationService
             }
 
             $term = trim((string) data_get($suggestion, 'suggested_term', ''));
+            $type = $this->normalizeSuggestionType(data_get($suggestion, 'suggested_type', ''));
 
-            if ($term === '') {
+            if ($term === '' || ! in_array($type, [KnowledgeMetadataTerm::TYPE_SERVICE_PRODUCT_TAG, KnowledgeMetadataTerm::TYPE_THEME_TAG], true)) {
                 continue;
             }
 
@@ -531,7 +534,7 @@ class KnowledgeChunkMetadataGenerationService
                 'customer_id' => (int) $document->customer_id,
                 'source_chunk_id' => $chunk->id,
                 'suggested_term' => $term,
-                'suggested_type' => trim((string) data_get($suggestion, 'suggested_type', 'keyword')) ?: 'keyword',
+                'suggested_type' => $type,
                 'suggested_canonical_parent' => $this->normalizeNullableString(data_get($suggestion, 'suggested_canonical_parent')),
                 'reason' => $this->normalizeNullableString(data_get($suggestion, 'reason')),
                 'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
@@ -587,5 +590,19 @@ class KnowledgeChunkMetadataGenerationService
         $normalized = trim((string) ($value ?? ''));
 
         return $normalized !== '' ? $normalized : null;
+    }
+
+    /**
+     * Purpose: Normalize an AI vocabulary suggestion type to the canonical field name.
+     * Inputs: A raw suggested type value.
+     * Returns: The canonical type key or an empty string.
+     * Side effects: None.
+     */
+    private function normalizeSuggestionType(mixed $value): string
+    {
+        $type = trim((string) ($value ?? ''));
+        $type = KnowledgeMetadataTerm::TYPE_ALIASES[$type] ?? $type;
+
+        return in_array($type, KnowledgeMetadataTerm::TYPES, true) ? $type : '';
     }
 }

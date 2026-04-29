@@ -323,6 +323,7 @@ class KnowledgeMetadataVocabularyService
     private function normalizeCatalogType(string $type): string
     {
         $type = trim(mb_strtolower(Str::squish($type), 'UTF-8'));
+        $type = KnowledgeMetadataTerm::TYPE_ALIASES[$type] ?? $type;
 
         return in_array($type, $this->catalogTypes(), true) ? $type : '';
     }

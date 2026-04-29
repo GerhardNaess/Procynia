@@ -38,8 +38,8 @@ class KnowledgeChunkMetadataValidatorTest extends TestCase
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $result['metadata_status']);
         $this->assertSame('Governance', $result['service_product_tag']);
         $this->assertSame('Drift', $result['theme_tag']);
-        $this->assertSame('Samhandlingsfora og møtestruktur', $result['topic']);
-        $this->assertSame('Strategisk, taktisk og operativ oppfølging', $result['sub_topic']);
+        $this->assertSame('møtestruktur', $result['topic']);
+        $this->assertSame('operativ oppfølging', $result['sub_topic']);
         $this->assertSame(['SLA', 'KPI'], $result['keywords']);
         $this->assertSame(['Governance', 'SLA'], $result['matched_terms']);
         $this->assertSame('Beskriver faste møtefora for oppfølging.', $result['summary_for_retrieval']);

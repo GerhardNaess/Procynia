@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Knowledge;
 
+use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeVocabularyAnalysisBatch;
 use Illuminate\Support\Facades\DB;
@@ -258,8 +259,9 @@ class KnowledgeVocabularySuggestionValidationService
     private function normalizeType(mixed $value): string
     {
         $type = trim((string) ($value ?? ''));
+        $type = KnowledgeMetadataTerm::TYPE_ALIASES[$type] ?? $type;
 
-        return in_array($type, \App\Models\KnowledgeMetadataTerm::TYPES, true) ? $type : '';
+        return in_array($type, KnowledgeMetadataTerm::TYPES, true) ? $type : '';
     }
 
     /**

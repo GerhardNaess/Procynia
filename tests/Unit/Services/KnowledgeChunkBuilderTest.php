@@ -66,9 +66,13 @@ class KnowledgeChunkBuilderTest extends TestCase
         $this->assertSame('semantic', $payloads[0]['chunk_type']);
         $this->assertSame('Strategisk samhandling', $payloads[0]['title']);
         $this->assertSame('Strategisk samhandling', $payloads[0]['section_title']);
+        $this->assertSame('Tema A', $payloads[0]['topic']);
+        $this->assertSame('Underemne A', $payloads[0]['sub_topic']);
         $this->assertSame(['samhandling', 'SLA'], $payloads[0]['keywords']);
         $this->assertSame('Andre hovedseksjon', $payloads[1]['heading_path']);
         $this->assertSame('list', $payloads[1]['chunk_type']);
+        $this->assertSame('Tema B', $payloads[1]['topic']);
+        $this->assertSame('Underemne B', $payloads[1]['sub_topic']);
         $this->assertSame(['drift', 'tilgjengelighet'], $payloads[1]['keywords']);
         $this->assertSame('Andre hovedseksjon', $payloads[1]['title']);
         $this->assertSame('pending_review', $payloads[0]['review_status']);

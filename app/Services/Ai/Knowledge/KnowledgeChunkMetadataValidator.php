@@ -29,57 +29,50 @@ class KnowledgeChunkMetadataValidator
     ): array {
         $chunkContent = trim((string) $chunk->content);
 
-        $serviceProductTag = $this->normalizeScalarField(
+        $serviceProductTag = $this->normalizeControlledScalarField(
             field: 'service_product_tag',
             rawValue: data_get($rawPayload, 'service_product_tag'),
             vocabularyMap: $vocabularyMap,
         );
-        $themeTag = $this->normalizeScalarField(
+        $themeTag = $this->normalizeControlledScalarField(
             field: 'theme_tag',
             rawValue: data_get($rawPayload, 'theme_tag'),
             vocabularyMap: $vocabularyMap,
         );
-        $topic = $this->normalizeScalarField(
-            field: 'topic',
+        $topic = $this->normalizeDescriptiveScalarField(
             rawValue: data_get($rawPayload, 'topic'),
-            vocabularyMap: $vocabularyMap,
+            fallbackValue: $chunk->topic,
         );
-        $subTopic = $this->normalizeScalarField(
-            field: 'sub_topic',
+        $subTopic = $this->normalizeDescriptiveScalarField(
             rawValue: data_get($rawPayload, 'sub_topic'),
-            vocabularyMap: $vocabularyMap,
+            fallbackValue: $chunk->sub_topic,
         );
-        $keywords = $this->normalizeKeywordList(data_get($rawPayload, 'keywords'), $vocabularyMap);
+        $keywords = $this->normalizeDescriptiveKeywordList(data_get($rawPayload, 'keywords'), $chunk->keywords);
         $matchedTerms = $this->normalizeMatchedTerms(data_get($rawPayload, 'matched_terms'), $chunkContent, $vocabularyMap);
         $summaryForRetrieval = $this->normalizeSummary(data_get($rawPayload, 'summary_for_retrieval'), $chunkContent);
         $confidenceScore = $this->normalizeConfidenceScore(data_get($rawPayload, 'confidence_score'));
         $suggestions = $this->normalizeSuggestions(data_get($rawPayload, 'new_term_suggestions'), $chunkContent, $vocabularyMap, [
             'service_product_tag' => $serviceProductTag,
             'theme_tag' => $themeTag,
-            'topic' => $topic,
-            'sub_topic' => $subTopic,
-            'keywords' => $keywords,
         ]);
 
         $centralFieldValues = [
             'service_product_tag' => $serviceProductTag,
             'theme_tag' => $themeTag,
-            'topic' => $topic,
-            'sub_topic' => $subTopic,
         ];
 
         $hasMissingCentralField = collect($centralFieldValues)
             ->contains(static fn (mixed $value): bool => ! is_string($value) || trim($value) === '');
 
         $hasSuggestedValues = $suggestions !== [];
-        $hasApprovedKeyword = $keywords !== [];
         $hasHighConfidence = $confidenceScore >= self::AUTO_APPROVE_CONFIDENCE_THRESHOLD;
+        $hasDescriptiveMetadata = $topic !== null && $subTopic !== null && $keywords !== [];
         $allCentralFieldsApproved = ! $hasMissingCentralField
             && $this->allCentralFieldsApproved($centralFieldValues, $vocabularyMap);
 
         $metadataStatus = KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW;
 
-        if ($allCentralFieldsApproved && $hasHighConfidence && ! $hasSuggestedValues && $hasApprovedKeyword) {
+        if ($allCentralFieldsApproved && $hasHighConfidence && ! $hasSuggestedValues && $hasDescriptiveMetadata) {
             $metadataStatus = KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED;
         } elseif ($summaryForRetrieval === '') {
             $metadataStatus = KnowledgeItemChunk::METADATA_STATUS_FAILED;
@@ -102,12 +95,12 @@ class KnowledgeChunkMetadataValidator
     }
 
     /**
-     * Purpose: Validate and normalize one scalar metadata field.
+     * Purpose: Validate and normalize one controlled scalar metadata field.
      * Inputs: The field name, raw value, and approved vocabulary map.
      * Returns: A trimmed canonical or original value, or null when empty.
      * Side effects: None.
      */
-    private function normalizeScalarField(string $field, mixed $rawValue, array $vocabularyMap): ?string
+    private function normalizeControlledScalarField(string $field, mixed $rawValue, array $vocabularyMap): ?string
     {
         $cleanValue = trim((string) ($rawValue ?? ''));
 
@@ -121,28 +114,54 @@ class KnowledgeChunkMetadataValidator
     }
 
     /**
-     * Purpose: Normalize and validate the AI keyword list.
-     * Inputs: Raw keyword data and the approved vocabulary map.
+     * Purpose: Normalize and preserve the descriptive topic metadata from the chunk or raw payload.
+     * Inputs: Raw AI data and the persisted chunk fallback value.
+     * Returns: A trimmed string or null.
+     * Side effects: None.
+     */
+    private function normalizeDescriptiveScalarField(mixed $rawValue, mixed $fallbackValue = null): ?string
+    {
+        $fallback = trim((string) ($fallbackValue ?? ''));
+
+        if ($fallback !== '') {
+            return $fallback;
+        }
+
+        $cleanValue = trim((string) ($rawValue ?? ''));
+
+        return $cleanValue !== '' ? $cleanValue : null;
+    }
+
+    /**
+     * Purpose: Normalize and preserve the descriptive keyword list from the chunk or raw payload.
+     * Inputs: Raw AI data and the persisted chunk fallback value.
      * Returns: A stable keyword list capped to a reasonable size.
      * Side effects: None.
      */
-    private function normalizeKeywordList(mixed $rawValue, array $vocabularyMap): array
+    private function normalizeDescriptiveKeywordList(mixed $rawValue, mixed $fallbackValue = null): array
     {
-        $keywords = $this->splitList($rawValue);
+        $keywords = $this->preserveStringList($fallbackValue);
+
+        if ($keywords === []) {
+            $keywords = $this->preserveStringList($rawValue);
+        }
+
         $normalized = [];
         $seen = [];
 
         foreach ($keywords as $keyword) {
-            $canonical = $this->vocabularyService->resolveCanonicalValue($vocabularyMap, 'keywords', $keyword);
-            $value = $canonical ?? $keyword;
-            $key = $this->comparisonKey($value);
+            $cleanKeyword = trim(Str::squish((string) $keyword));
 
-            if ($key === '' || isset($seen[$key])) {
+            if ($cleanKeyword === '') {
                 continue;
             }
 
-            $seen[$key] = true;
-            $normalized[] = $value;
+            if (isset($seen[$cleanKeyword])) {
+                continue;
+            }
+
+            $seen[$cleanKeyword] = true;
+            $normalized[] = $cleanKeyword;
         }
 
         return array_slice($normalized, 0, 20);
@@ -251,6 +270,10 @@ class KnowledgeChunkMetadataValidator
                 return;
             }
 
+            if (! in_array($cleanType, ['service_product_tag', 'theme_tag'], true)) {
+                return;
+            }
+
             if ($this->suggestionMatchesApprovedVocabulary($vocabularyMap, $cleanType, $cleanTerm)) {
                 return;
             }
@@ -279,7 +302,7 @@ class KnowledgeChunkMetadataValidator
             );
         }
 
-        foreach (['service_product_tag', 'theme_tag', 'topic', 'sub_topic'] as $field) {
+        foreach (['service_product_tag', 'theme_tag'] as $field) {
             $value = trim((string) ($normalizedFields[$field] ?? ''));
 
             if ($value === '') {
@@ -298,35 +321,18 @@ class KnowledgeChunkMetadataValidator
             );
         }
 
-        foreach ($normalizedFields['keywords'] ?? [] as $keyword) {
-            if (! is_string($keyword) || trim($keyword) === '') {
-                continue;
-            }
-
-            if ($this->vocabularyService->resolveCanonicalValue($vocabularyMap, 'keywords', $keyword) !== null) {
-                continue;
-            }
-
-            $addSuggestion(
-                $keyword,
-                'keyword',
-                null,
-                'Nøkkelordet finnes ikke i godkjent vokabular.',
-            );
-        }
-
         return array_values($suggestions);
     }
 
     /**
-     * Purpose: Determine whether every central field matches the approved vocabulary.
+     * Purpose: Determine whether every controlled field matches the approved vocabulary.
      * Inputs: The normalized field values and the approved vocabulary map.
-     * Returns: True when all central fields resolve to approved vocabulary values.
+     * Returns: True when all controlled fields resolve to approved vocabulary values.
      * Side effects: None.
      */
     private function allCentralFieldsApproved(array $normalizedFields, array $vocabularyMap): bool
     {
-        foreach (['service_product_tag', 'theme_tag', 'topic', 'sub_topic'] as $field) {
+        foreach (['service_product_tag', 'theme_tag'] as $field) {
             $value = trim((string) ($normalizedFields[$field] ?? ''));
 
             if ($value === '') {
@@ -372,6 +378,35 @@ class KnowledgeChunkMetadataValidator
             }
 
             $seen[$key] = true;
+            $normalized[] = $cleanItem;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Purpose: Split a descriptive list into trimmed strings while preserving the original values.
+     * Inputs: Raw list data.
+     * Returns: A trimmed list of string values without case folding or accent normalization.
+     * Side effects: None.
+     */
+    private function preserveStringList(mixed $value): array
+    {
+        if (is_string($value)) {
+            $value = preg_split('/[,\n;]+/u', str_replace(["\r\n", "\r"], "\n", $value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        } elseif (! is_array($value)) {
+            $value = $value === null ? [] : [(string) $value];
+        }
+
+        $normalized = [];
+
+        foreach ($value as $item) {
+            $cleanItem = trim(Str::squish((string) $item));
+
+            if ($cleanItem === '') {
+                continue;
+            }
+
             $normalized[] = $cleanItem;
         }
 

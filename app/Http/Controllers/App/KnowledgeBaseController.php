@@ -12,6 +12,7 @@ use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
 use App\Services\Knowledge\KnowledgeChunkBuilder;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
+use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Support\CustomerContext;
@@ -40,6 +41,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkBuilder $knowledgeChunkBuilder,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
+        private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
     ) {
     }
 
@@ -335,21 +337,13 @@ class KnowledgeBaseController extends Controller
             $extractedText = $this->documentTextExtractor->extractText($absolutePath);
             $extractionFailed = trim($extractedText) === '';
             $structure = $this->knowledgeDocumentStructureParser->parse($absolutePath);
-            $boundaryAnalysis = $this->aiKnowledgeChunkBoundaryService->suggestBoundaries($customerId, [
+            $chunkPayloads = $this->buildRuleBasedH2ChunkPayloads($structure);
+
+            Log::info('[PROCYNIA][KNOWLEDGE_CHUNKING] Rule-based H2 chunk payloads built without AI boundary.', [
+                'customer_id' => $customerId,
                 'document_title' => $document->getClientOriginalName(),
-                'original_filename' => $document->getClientOriginalName(),
-                'content_type' => $payload['document_type'],
-                'document_type' => $payload['document_type'],
-                'summary' => null,
-            ], $structure);
-            $validatedChunkPlans = $this->knowledgeChunkBoundaryValidator->validate(
-                $structure,
-                (array) data_get($boundaryAnalysis, 'analysis_groups', []),
-            );
-            $chunkPayloads = $this->knowledgeChunkBuilder->build(
-                (string) data_get($structure, 'source_text', ''),
-                $validatedChunkPlans,
-            );
+                'chunk_payload_count' => count($chunkPayloads),
+            ]);
 
             $result = DB::transaction(function () use (
                 $customerId,
@@ -389,7 +383,7 @@ class KnowledgeBaseController extends Controller
                 ];
             });
 
-            $this->syncChunkEmbeddings($result['knowledge_document'], $result['chunks']);
+            $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
@@ -813,6 +807,80 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Build deterministic H2 chunk payloads directly from parser output for controlled rule-based chunking.
+     * Inputs: The parsed knowledge document structure containing source_text and structural elements.
+     * Returns: One chunk payload per h2_section element, or one fallback payload when no H2 sections exist.
+     * Side effects: None.
+     */
+    private function buildRuleBasedH2ChunkPayloads(array $structure): array
+    {
+        $sourceText = (string) data_get($structure, 'source_text', '');
+        $elements = (array) data_get($structure, 'elements', []);
+        $chunkPayloads = [];
+
+        foreach ($elements as $element) {
+            if ((string) data_get($element, 'type', '') !== 'h2_section') {
+                continue;
+            }
+
+            $startOffset = (int) data_get($element, 'start_offset', 0);
+            $endOffset = (int) data_get($element, 'end_offset', 0);
+
+            if ($endOffset <= $startOffset) {
+                continue;
+            }
+
+            $content = trim(mb_substr($sourceText, $startOffset, $endOffset - $startOffset, 'UTF-8'));
+
+            if ($content === '') {
+                continue;
+            }
+
+            $headingPath = $this->cleanNullableString(data_get($element, 'heading_path'), 255);
+
+            $chunkPayloads[] = [
+                'content' => $content,
+                'start_offset' => $startOffset,
+                'end_offset' => $endOffset,
+                'section_title' => $headingPath,
+                'section_path' => $headingPath,
+                'heading_path' => $headingPath,
+                'chunk_type' => 'h2_section',
+                'title' => $headingPath,
+                'topic' => null,
+                'sub_topic' => null,
+                'keywords' => null,
+            ];
+        }
+
+        if ($chunkPayloads !== []) {
+            return $chunkPayloads;
+        }
+
+        $content = trim($sourceText);
+
+        if ($content === '') {
+            return [];
+        }
+
+        return [
+            [
+                'content' => $content,
+                'start_offset' => 0,
+                'end_offset' => mb_strlen($sourceText, 'UTF-8'),
+                'section_title' => null,
+                'section_path' => null,
+                'heading_path' => null,
+                'chunk_type' => 'document',
+                'title' => null,
+                'topic' => null,
+                'sub_topic' => null,
+                'keywords' => null,
+            ],
+        ];
+    }
+
+    /**
      * Purpose: Persist the final knowledge chunks for one knowledge document.
      * Inputs: The knowledge document and the validated chunk payloads.
      * Returns: None.
@@ -866,8 +934,28 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
+            $chunk->refresh();
+            $chunkKeywords = $this->normalizeExactKeywordList($chunk->keywords);
+
             $metadataOutcome = $this->knowledgeChunkMetadataGenerationService->generateForChunk($knowledgeDocument, $chunk);
             $embeddingInput = $metadataOutcome['embedding_input'] ?? $chunk->content;
+            $metadataUpdates = [
+                'service_product_tag' => $this->cleanNullableString(data_get($metadataOutcome, 'service_product_tag'), 191)
+                    ?? $this->cleanNullableString($chunk->service_product_tag, 191),
+                'theme_tag' => $this->cleanNullableString(data_get($metadataOutcome, 'theme_tag'), 191)
+                    ?? $this->cleanNullableString($chunk->theme_tag, 191),
+                'topic' => $this->cleanNullableString(data_get($metadataOutcome, 'topic'), 191)
+                    ?? $this->cleanNullableString($chunk->topic, 191),
+                'sub_topic' => $this->cleanNullableString(data_get($metadataOutcome, 'sub_topic'), 191)
+                    ?? $this->cleanNullableString($chunk->sub_topic, 191),
+                'keywords' => $this->normalizeExactKeywordList(data_get($metadataOutcome, 'keywords'))
+                    ?? $chunkKeywords,
+                'matched_terms' => $metadataOutcome['matched_terms'] ?? null,
+                'summary_for_retrieval' => $metadataOutcome['summary_for_retrieval'] ?? null,
+                'confidence_score' => $metadataOutcome['confidence_score'] ?? null,
+                'metadata_status' => $metadataOutcome['metadata_status'] ?? KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+            ];
+
             $chunkText = trim((string) $embeddingInput);
 
             if ($chunkText === '') {
@@ -878,17 +966,75 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
+            $chunk->forceFill($metadataUpdates)->save();
+            $chunk->refresh();
+
+            Log::info('[PROCYNIA][KNOWLEDGE_CHUNKING] Chunk persisted with metadata', [
+                'knowledge_item_id' => $knowledgeDocument->id,
+                'knowledge_item_chunk_id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'has_topic' => trim((string) $chunk->topic) !== '',
+                'has_sub_topic' => trim((string) $chunk->sub_topic) !== '',
+                'keywords_count' => count($this->normalizeExactKeywordList($chunk->keywords) ?? []),
+            ]);
+
+            $this->knowledgeChunkVocabularyCandidateService->syncForChunk($knowledgeDocument, $chunk);
+
+            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
+
+            if (! ($outcome['ok'] ?? false)) {
+                $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
+
+                $chunk->forceFill([
+                    'embedding_error' => (string) ($outcome['error_message'] ?? 'Knowledge chunk embedding failed.'),
+                ])->save();
+
+                continue;
+            }
+
             $chunk->forceFill([
-                'service_product_tag' => $metadataOutcome['service_product_tag'] ?? null,
-                'theme_tag' => $metadataOutcome['theme_tag'] ?? null,
-                'topic' => $metadataOutcome['topic'] ?? null,
-                'sub_topic' => $metadataOutcome['sub_topic'] ?? null,
-                'keywords' => $metadataOutcome['keywords'] ?? null,
-                'matched_terms' => $metadataOutcome['matched_terms'] ?? null,
-                'summary_for_retrieval' => $metadataOutcome['summary_for_retrieval'] ?? null,
-                'confidence_score' => $metadataOutcome['confidence_score'] ?? null,
-                'metadata_status' => $metadataOutcome['metadata_status'] ?? KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+                'embedding_vector' => $outcome['embedding'] ?? null,
+                'embedding_model' => $outcome['model'] ?? null,
+                'embedding_generated_at' => now(),
+                'embedding_error' => null,
             ])->save();
+        }
+    }
+
+    /**
+     * Purpose: Generate embeddings for rule-based chunks without running generative metadata enrichment.
+     * Inputs: The knowledge document and its persisted chunks.
+     * Returns: None.
+     * Side effects: Calls the embedding service and stores embedding fields on each chunk.
+     */
+    private function syncChunkEmbeddingsWithoutMetadata(KnowledgeItem $knowledgeDocument, Collection $chunks): void
+    {
+        if ($chunks->isEmpty()) {
+            return;
+        }
+
+        foreach ($chunks as $chunk) {
+            if (! $chunk instanceof KnowledgeItemChunk) {
+                continue;
+            }
+
+            $chunk->refresh();
+            $chunkText = trim((string) $chunk->content);
+
+            if ($chunkText === '') {
+                $chunk->forceFill([
+                    'embedding_error' => 'Chunk content was empty and was not embedded.',
+                ])->save();
+
+                continue;
+            }
+
+            Log::info('[PROCYNIA][KNOWLEDGE_CHUNKING] Rule-based chunk persisted without AI metadata.', [
+                'knowledge_item_id' => $knowledgeDocument->id,
+                'knowledge_item_chunk_id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'chunk_content_length' => mb_strlen($chunkText, 'UTF-8'),
+            ]);
 
             $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
 
@@ -1015,6 +1161,47 @@ class KnowledgeBaseController extends Controller
         }
 
         return Str::limit($text, $maxLength, '');
+    }
+
+    /**
+     * Purpose: Normalize a chunk keyword list without changing the user-facing values.
+     * Inputs: Raw keyword data from the persisted chunk or metadata payload.
+     * Returns: A trimmed, de-duplicated keyword list or null when no usable keywords exist.
+     * Side effects: None.
+     *
+     * @return array<int, string>|null
+     */
+    private function normalizeExactKeywordList(mixed $keywords): ?array
+    {
+        if ($keywords instanceof Collection) {
+            $keywords = $keywords->all();
+        } elseif (is_string($keywords)) {
+            $keywords = json_decode($keywords, true);
+        }
+
+        if (! is_array($keywords)) {
+            return null;
+        }
+
+        $normalized = [];
+        $seen = [];
+
+        foreach ($keywords as $keyword) {
+            $text = trim(Str::squish((string) $keyword));
+
+            if ($text === '') {
+                continue;
+            }
+
+            if (isset($seen[$text])) {
+                continue;
+            }
+
+            $seen[$text] = true;
+            $normalized[] = $text;
+        }
+
+        return $normalized !== [] ? $normalized : null;
     }
 
     /**
