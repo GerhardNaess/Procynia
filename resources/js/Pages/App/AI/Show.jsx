@@ -274,22 +274,6 @@ function formatKnowledgeSnippet(value, maxLength = 200) {
     return `${normalizedValue.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
-function formatDocumentFailureDetails(document) {
-    if (!document || document.processing_status !== 'failed') {
-        return null;
-    }
-
-    const failureStage = document.processing_failure_stage ?? document.processing_error_type ?? null;
-    const failureType = document.processing_failure_type ?? document.processing_error_type ?? null;
-    const failureMessage = document.processing_failure_message ?? document.processing_error_message ?? null;
-
-    return {
-        failureStage,
-        failureType,
-        failureMessage,
-    };
-}
-
 function normalizeAnswerDraftPayload(answerDraft) {
     return {
         text: normalizeAnswerDraftText(answerDraft?.text ?? ''),
@@ -750,30 +734,23 @@ export default function AiShow({
     case: caseData = null,
     ai_status: aiStatus = 'not_started',
     requirements_count: requirementsCount = 0,
-    requirements_overview: requirementsOverviewProp = {},
     requirements = [],
     requirements_store_url: requirementsStoreUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
-    documents_upload_url: documentsUploadUrl = '',
     answer_basis_items: answerBasisItemsProp = [],
-    answer_basis_documents_upload_url: answerBasisDocumentsUploadUrl = '',
-    answer_basis_text_store_url: answerBasisTextStoreUrl = '',
 }) {
     const currentCaseId = caseData?.id ?? null;
     const {
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
     } = usePage().props;
-    const fileInputRef = useRef(null);
-    const answerBasisDocumentFileInputRef = useRef(null);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
     const [refreshingEvidence, setRefreshingEvidence] = useState(false);
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
-    const [deletingDocumentId, setDeletingDocumentId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
     const [activeRequirementId, setActiveRequirementId] = useState(() => {
         if (currentCaseId === null || currentCaseId === undefined) {
@@ -805,16 +782,6 @@ export default function AiShow({
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
-    const documentUploadForm = useForm({
-        documents: [],
-    });
-    const answerBasisDocumentUploadForm = useForm({
-        documents: [],
-    });
-    const answerBasisTextForm = useForm({
-        title: '',
-        body_text: '',
-    });
     const manualRequirementForm = useForm({
         requirement_identifier: '',
         requirement_text: '',
@@ -835,21 +802,12 @@ export default function AiShow({
 
         return accumulator;
     }, {});
-    const requirementsOverview = requirementsOverviewProp && typeof requirementsOverviewProp === 'object'
-        ? requirementsOverviewProp
-        : {};
     const documentNeedsRefresh = hasActiveDocumentProcessing(documentRows);
     const editingRequirement = editingRequirementId !== null
         ? requirementRows.find((requirement) => requirement.id === editingRequirementId) ?? null
         : null;
-    const documentError = Object.values(documentUploadForm.errors).find(Boolean) ?? null;
-    const answerBasisDocumentError = Object.values(answerBasisDocumentUploadForm.errors).find(Boolean) ?? null;
-    const answerBasisTextError = Object.values(answerBasisTextForm.errors).find(Boolean) ?? null;
     const manualRequirementError = Object.values(manualRequirementForm.errors).find(Boolean) ?? null;
     const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
-    const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
-        ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
-        : 'Ingen filer valgt ennå.';
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
@@ -862,16 +820,6 @@ export default function AiShow({
         || manualRequirementForm.processing
         || requirementEditForm.processing
         || editingRequirementId !== null;
-    const approvedRequirementsTotal = Number(requirementsOverview.approved_total ?? requirementsOverview.confirmed_total ?? 0);
-    const draftRequirementsTotal = Number(requirementsOverview.draft_total ?? requirementsOverview.pending_total ?? 0);
-    const rejectedRequirementsTotal = Number(requirementsOverview.rejected_total ?? 0);
-    const notStartedRequirementsTotal = Number(requirementsOverview.not_started_total ?? 0);
-    const inProgressRequirementsTotal = Number(requirementsOverview.in_progress_total ?? 0);
-    const doneRequirementsTotal = Number(requirementsOverview.done_total ?? 0);
-    const unassignedApprovedRequirementsTotal = Number(
-        requirementsOverview.unassigned_approved_total ?? requirementsOverview.unassigned_confirmed_total ?? 0,
-    );
-    const assignedApprovedRequirementsTotal = Math.max(approvedRequirementsTotal - unassignedApprovedRequirementsTotal, 0);
     const updatedAtLabel = caseData?.updated_at
         ? new Intl.DateTimeFormat(locale, {
             day: '2-digit',
@@ -1028,14 +976,6 @@ export default function AiShow({
         .map((answerBasisItemId) => answerBasisItemsById[String(answerBasisItemId)])
         .filter(Boolean);
 
-    const handleDocumentChange = (event) => {
-        documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
-    };
-
-    const handleAnswerBasisDocumentChange = (event) => {
-        answerBasisDocumentUploadForm.setData('documents', Array.from(event.target.files ?? []));
-    };
-
     const resolveRequirementSourceDocument = (requirement) => {
         const requirementDocumentId = requirement?.saved_notice_ai_document_id ?? null;
 
@@ -1044,63 +984,6 @@ export default function AiShow({
         }
 
         return documentRows.find((document) => String(document?.id ?? '') === String(requirementDocumentId)) ?? null;
-    };
-
-    const submitDocuments = (event) => {
-        event.preventDefault();
-
-        if (!documentsUploadUrl || documentUploadForm.processing) {
-            return;
-        }
-
-        documentUploadForm.post(documentsUploadUrl, {
-            forceFormData: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                documentUploadForm.reset('documents');
-
-                if (fileInputRef.current) {
-                    fileInputRef.current.value = '';
-                }
-            },
-        });
-    };
-
-    const submitAnswerBasisDocuments = (event) => {
-        event.preventDefault();
-
-        if (!answerBasisDocumentsUploadUrl || answerBasisDocumentUploadForm.processing) {
-            return;
-        }
-
-        answerBasisDocumentUploadForm.post(answerBasisDocumentsUploadUrl, {
-            forceFormData: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                answerBasisDocumentUploadForm.reset('documents');
-                answerBasisDocumentUploadForm.clearErrors();
-
-                if (answerBasisDocumentFileInputRef.current) {
-                    answerBasisDocumentFileInputRef.current.value = '';
-                }
-            },
-        });
-    };
-
-    const submitAnswerBasisText = (event) => {
-        event.preventDefault();
-
-        if (!answerBasisTextStoreUrl || answerBasisTextForm.processing) {
-            return;
-        }
-
-        answerBasisTextForm.post(answerBasisTextStoreUrl, {
-            preserveScroll: true,
-            onSuccess: () => {
-                answerBasisTextForm.reset();
-                answerBasisTextForm.clearErrors();
-            },
-        });
     };
 
     const submitManualRequirement = (event) => {
@@ -1502,30 +1385,6 @@ export default function AiShow({
         });
     };
 
-    const deleteDocument = (document) => {
-        if (!document.delete_url || deletingDocumentId !== null) {
-            return;
-        }
-
-        const confirmed = window.confirm(
-            'Slette dette opplastede dokumentet? Dette fjerner filen, ekstrahert tekst, tekstbiter og kravkandidater.',
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
-        setDeletingDocumentId(document.id);
-
-        router.delete(document.delete_url, {
-            preserveScroll: true,
-            preserveState: true,
-            onFinish: () => {
-                setDeletingDocumentId(null);
-            },
-        });
-    };
-
     return (
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
@@ -1556,541 +1415,22 @@ export default function AiShow({
                     </div>
                 </section>
 
-                <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="space-y-5">
-                        <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Anbudsdokumenter
-                            </div>
-                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                Anbudsdokumenter
-                            </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Last opp anbudsdokumenter for analyse.
-                            </p>
-                        </div>
-
-                        <form onSubmit={submitDocuments} className="space-y-4">
-                            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
-                                <div className="space-y-2">
-                                    <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
-                                        Velg filer
-                                    </label>
-                                    <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                                        <label
-                                            htmlFor="ai-documents"
-                                            className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-                                        >
-                                            Velg filer
-                                        </label>
-                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
-                                            {selectedDocumentsLabel}
-                                        </span>
-                                        <input
-                                            id="ai-documents"
-                                            ref={fileInputRef}
-                                            type="file"
-                                            multiple
-                                            accept=".pdf,.doc,.docx,.xls,.xlsx"
-                                            onChange={handleDocumentChange}
-                                            className="sr-only"
-                                        />
-                                    </div>
-                                    <p className="text-xs leading-5 text-slate-500">
-                                        Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
-                                    </p>
-                                    {documentError ? (
-                                        <p className="text-sm text-rose-600">{documentError}</p>
-                                    ) : null}
-                                </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={
-                                        documentUploadForm.processing
-                                        || !documentsUploadUrl
-                                        || documentUploadForm.data.documents.length === 0
-                                    }
-                                    className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60 lg:mt-7"
-                                >
-                                    Last opp anbudsdokumenter
-                                </button>
-                            </div>
-                        </form>
-
-                        {documentRows.length === 0 ? (
-                            <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
-                                <div className="text-lg font-semibold text-slate-900">
-                                    Ingen anbudsdokumenter er lastet opp ennå.
-                                </div>
-                                <p className="mt-2 text-sm text-slate-500">
-                                    Opplastede dokumenter vises her når de er lagt til i denne saken.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="overflow-hidden rounded-[22px] border border-slate-200">
-                                <div className="overflow-x-auto">
-                                    <table className="min-w-full divide-y divide-slate-200">
-                                        <thead className="bg-slate-50">
-                                            <tr>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Filnavn
-                                                </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Lastet opp
-                                                </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Størrelse
-                                                </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Status
-                                                </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Lastet opp av
-                                                </th>
-                                                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                    Handlinger
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-200 bg-white">
-                                            {documentRows.map((document) => {
-                                                const documentStatusMeta = DOCUMENT_STATUS_META[document.processing_status] ?? DOCUMENT_STATUS_META.uploaded;
-                                                const chunkCount = Number(document.chunk_count ?? 0);
-                                                const isDeleting = deletingDocumentId === document.id;
-                                                const failureDetails = formatDocumentFailureDetails(document);
-                                                const uploadedAtLabel = document.uploaded_at
-                                                    ? new Intl.DateTimeFormat(locale, {
-                                                        day: '2-digit',
-                                                        month: 'short',
-                                                        year: 'numeric',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit',
-                                                    }).format(new Date(document.uploaded_at))
-                                                    : '—';
-
-                                                return (
-                                                    <tr
-                                                        key={document.id}
-                                                        id={`ai-document-row-${document.id}`}
-                                                        className="align-top transition-colors"
-                                                    >
-                                                        <td className="px-5 py-4">
-                                                            <div className="space-y-1.5">
-                                                                <div className="font-medium text-slate-950">
-                                                                    {document.original_filename}
-                                                                </div>
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {document.has_extracted_text ? (
-                                                                        <div className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                                                                            Tekst ekstrahert
-                                                                        </div>
-                                                                    ) : null}
-                                                                    {chunkCount > 0 ? (
-                                                                        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                            Tekstbiter: {chunkCount}
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
-                                                            {uploadedAtLabel}
-                                                        </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
-                                                            {document.file_size_human ?? '—'}
-                                                        </td>
-                                                        <td className="px-5 py-4">
-                                                            <div className="space-y-2">
-                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${documentStatusMeta.className}`}>
-                                                                    {documentStatusMeta.label}
-                                                                </span>
-                                                                {failureDetails ? (
-                                                                    <div className="max-w-sm rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-800">
-                                                                        <div className="font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                            Feilsti
-                                                                        </div>
-                                                                        <div className="mt-1">
-                                                                            Stadium: {failureDetails.failureStage ?? '—'}
-                                                                        </div>
-                                                                        <div>
-                                                                            Type: {failureDetails.failureType ?? '—'}
-                                                                        </div>
-                                                                        {failureDetails.failureMessage ? (
-                                                                            <div className="mt-1 whitespace-pre-wrap">
-                                                                                {failureDetails.failureMessage}
-                                                                            </div>
-                                                                        ) : null}
-                                                                    </div>
-                                                                ) : null}
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-5 py-4 text-sm text-slate-600">
-                                                            {document.uploaded_by ?? '—'}
-                                                        </td>
-                                                        <td className="px-5 py-4">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => deleteDocument(document)}
-                                                                disabled={isDeleting || deletingDocumentId !== null}
-                                                                className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            >
-                                                                {isDeleting ? 'Sletter...' : 'Slett'}
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </section>
-
-                <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="space-y-5">
-                        <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Kilder
-                            </div>
-                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                Kilder
-                            </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Legg inn dokumenter og tekst som AI kan bruke når svarutkast genereres eller forbedres.
-                            </p>
-                        </div>
-
-                        <div className="grid gap-4 lg:grid-cols-2">
-                            <form onSubmit={submitAnswerBasisDocuments} className="space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
-                                <div className="space-y-1">
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-violet-600">
-                                        Legg til dokument
-                                    </div>
-                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
-                                        Last opp kildedokumenter
-                                    </h3>
-                                    <p className="text-xs leading-5 text-slate-500">
-                                        Disse dokumentene kan brukes av AI ved generering av svar.
-                                    </p>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label htmlFor="ai-answer-basis-documents" className="text-sm font-medium text-slate-700">
-                                        Velg filer
-                                    </label>
-                                    <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                                        <label
-                                            htmlFor="ai-answer-basis-documents"
-                                            className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
-                                        >
-                                            Velg filer
-                                        </label>
-                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
-                                            {answerBasisDocumentUploadForm.data.documents.length > 0
-                                                ? answerBasisDocumentUploadForm.data.documents.map((document) => document.name).join(', ')
-                                                : 'Ingen filer valgt ennå.'}
-                                        </span>
-                                        <input
-                                            id="ai-answer-basis-documents"
-                                            ref={answerBasisDocumentFileInputRef}
-                                            type="file"
-                                            multiple
-                                            accept=".pdf,.doc,.docx,.xls,.xlsx"
-                                            onChange={handleAnswerBasisDocumentChange}
-                                            className="sr-only"
-                                        />
-                                    </div>
-                                    <p className="text-xs leading-5 text-slate-500">
-                                        Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
-                                    </p>
-                                    {answerBasisDocumentError ? (
-                                        <p className="text-sm text-rose-600">{answerBasisDocumentError}</p>
-                                    ) : null}
-                                </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={
-                                        answerBasisDocumentUploadForm.processing
-                                        || !answerBasisDocumentsUploadUrl
-                                        || answerBasisDocumentUploadForm.data.documents.length === 0
-                                    }
-                                    className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {answerBasisDocumentUploadForm.processing ? 'Laster opp...' : 'Legg til dokument'}
-                                </button>
-                            </form>
-
-                            <form onSubmit={submitAnswerBasisText} className="space-y-4 rounded-[22px] border border-slate-200 bg-slate-50/70 p-4">
-                                <div className="space-y-1">
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                        Legg til tekst
-                                    </div>
-                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
-                                        Lim inn eller skriv tekst
-                                    </h3>
-                                    <p className="text-xs leading-5 text-slate-500">
-                                        Bruk dette for metodikk, standardtekster, referansebeskrivelser og andre gjenbrukbare tekstblokker.
-                                    </p>
-                                </div>
-
-                                <label className="block space-y-1">
-                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        Tittel
-                                    </span>
-                                    <input
-                                        type="text"
-                                        value={answerBasisTextForm.data.title}
-                                        onChange={(event) => answerBasisTextForm.setData('title', event.target.value)}
-                                        disabled={answerBasisTextForm.processing}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        placeholder="For eksempel Metodebeskrivelse"
-                                    />
-                                    {answerBasisTextForm.errors.title ? (
-                                        <p className="text-sm text-rose-600">{answerBasisTextForm.errors.title}</p>
-                                    ) : null}
-                                </label>
-
-                                <label className="block space-y-1">
-                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        Tekst
-                                    </span>
-                                    <textarea
-                                        value={answerBasisTextForm.data.body_text}
-                                        onChange={(event) => answerBasisTextForm.setData('body_text', event.target.value)}
-                                        rows={6}
-                                        disabled={answerBasisTextForm.processing}
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        placeholder="Skriv eller lim inn gjenbrukbar tekst som AI kan bruke."
-                                    />
-                                    {answerBasisTextForm.errors.body_text ? (
-                                        <p className="text-sm text-rose-600">{answerBasisTextForm.errors.body_text}</p>
-                                    ) : null}
-                                </label>
-
-                                {answerBasisTextError ? (
-                                    <p className="text-sm text-rose-600">{answerBasisTextError}</p>
-                                ) : null}
-
-                                <button
-                                    type="submit"
-                                    disabled={answerBasisTextForm.processing || !answerBasisTextStoreUrl}
-                                    className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    {answerBasisTextForm.processing ? 'Lagrer...' : 'Legg til tekst'}
-                                </button>
-                            </form>
-                        </div>
-
-                        {answerBasisItems.length === 0 ? (
-                            <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
-                                <div className="text-lg font-semibold text-slate-900">
-                                    Ingen kilder er lagt til ennå.
-                                </div>
-                                <p className="mt-2 text-sm text-slate-500">
-                                    Legg til dokumenter eller tekstblokker som AI kan bruke når du genererer svarutkast.
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {answerBasisItems.map((answerBasisItem) => {
-                                    const isDeleting = deletingAnswerBasisItemId === answerBasisItem.id;
-                                    const bodySnippet = formatKnowledgeSnippet(answerBasisItem.body_text, 220);
-
-                                    return (
-                                        <div
-                                            key={answerBasisItem.id}
-                                            className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm"
-                                        >
-                                            <div className="flex flex-wrap items-start justify-between gap-3">
-                                                <div className="space-y-2">
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <div className="font-medium text-slate-950">
-                                                            {answerBasisItem.title}
-                                                        </div>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                            {answerBasisItem.answer_basis_type_label}
-                                                        </span>
-                                                    </div>
-                                                    {answerBasisItem.original_filename ? (
-                                                        <div className="text-sm text-slate-500">
-                                                            {answerBasisItem.original_filename}
-                                                        </div>
-                                                    ) : null}
-                                                    <p className="max-w-4xl text-sm leading-6 text-slate-600">
-                                                        {bodySnippet}
-                                                    </p>
-                                                    <div className="text-xs text-slate-500">
-                                                        {answerBasisItem.created_by ? `Opprettet av ${answerBasisItem.created_by}` : '—'}
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex flex-wrap gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            if (answerBasisItem.delete_url) {
-                                                                if (deletingAnswerBasisItemId !== null) {
-                                                                    return;
-                                                                }
-
-                                                                const confirmed = window.confirm('Slette denne kilden?');
-
-                                                                if (!confirmed) {
-                                                                    return;
-                                                                }
-
-                                                                setDeletingAnswerBasisItemId(answerBasisItem.id);
-
-                                                                router.delete(answerBasisItem.delete_url, {
-                                                                    preserveScroll: true,
-                                                                    preserveState: true,
-                                                                    onFinish: () => {
-                                                                        setDeletingAnswerBasisItemId(null);
-                                                                    },
-                                                                });
-                                                            }
-                                                        }}
-                                                        disabled={isDeleting || deletingAnswerBasisItemId !== null}
-                                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {isDeleting ? 'Sletter...' : 'Slett'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                </section>
-
-                <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Kravkandidater
-                            </div>
-                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                {requirementCountLabel} totalt
-                            </span>
-                        </div>
-                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                            Kravkandidater
-                        </h2>
-                        <p className="text-sm leading-6 text-slate-500">
-                            Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
-                        </p>
-                    </div>
-                </section>
-
                 <div className="grid gap-5 lg:grid-cols-2 lg:items-start">
-                    <section className="lg:col-span-2 rounded-[22px] border border-slate-200 bg-slate-50/70 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="flex flex-wrap items-end justify-between gap-3">
-                            <div className="space-y-1">
-                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Kravoversikt
-                                </div>
-                                <h3 className="text-sm font-semibold tracking-tight text-slate-950">
-                                    Oppsummering av sakskrav
-                                </h3>
-                                <p className="text-xs leading-5 text-slate-500">
-                                    Godkjente krav er arbeidslaget. Utkast og avviste krav forblir i analyse.
-                                </p>
-                            </div>
-                            <div className="text-xs text-slate-500">
-                                Oppdatert fra lagrede kravposter.
-                            </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))]">
-                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                Godkjent
-                            </div>
-                            <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                                    {approvedRequirementsTotal}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-600">
-                                Arbeidskrav
-                            </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    Ikke startet
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                    {notStartedRequirementsTotal}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                    Bare godkjente
-                                </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    Under arbeid
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                    {inProgressRequirementsTotal}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                    Bare godkjente
-                                </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    Ferdig
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                    {doneRequirementsTotal}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                    Bare godkjente
-                                </div>
-                            </div>
-
-                            <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4">
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                    Tildelt
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                                    Tildelt: {assignedApprovedRequirementsTotal} av {requirementCountLabel} krav
-                                </div>
-                                <div className="mt-1 text-xs text-slate-600">
-                                    krav
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                Utkast: {draftRequirementsTotal}
-                            </span>
-                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                Avvist: {rejectedRequirementsTotal}
-                            </span>
-                        </div>
-                    </section>
-
-                    <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+                    <section className="lg:col-span-2 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Krav
+                                    Kravkandidater
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                    Krav
+                                    Kravkandidater
                                 </h2>
                                 <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                    Velg et krav og lag svar. Kilder, scoring og vurderinger ligger i avansert visning.
+                                    Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
                                 </p>
+                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                    {requirementCountLabel} totalt
+                                </span>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
@@ -2499,7 +1839,7 @@ export default function AiShow({
 
                                                                 {answerBasisItems.length === 0 ? (
                                                                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                        Legg til dokumenter eller tekst i kilder-seksjonen for å kunne knytte dem til kravet.
+                                                                        Ingen kilder er tilgjengelige for dette kravet ennå.
                                                                     </div>
                                                                 ) : (
                                                                     <div className="space-y-2">

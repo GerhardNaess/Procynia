@@ -74,12 +74,13 @@ class KnowledgeVocabularyControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-vocabulary.index'));
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($document): bool {
+        $response->assertViewHas('page', function (array $page) use ($document, $term): bool {
             $props = data_get($page, 'props', []);
 
             return data_get($page, 'component') === 'App/AI/KnowledgeVocabulary/Index'
                 && data_get($props, 'pageTitle') === 'Selskapsvokabular'
                 && count(data_get($props, 'approvedVocabularyGroups', [])) === 1
+                && data_get($props, 'approvedVocabularyGroups.0.terms.0.delete_url') === route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => $term->id])
                 && count(data_get($props, 'suggestions', [])) === 1
                 && count(data_get($props, 'recentBatches', [])) === 1
                 && count(data_get($props, 'sourceDocuments', [])) === 1
@@ -254,6 +255,47 @@ class KnowledgeVocabularyControllerTest extends TestCase
         $this->assertTrue($term->approved);
     }
 
+    public function test_it_deletes_an_approved_vocabulary_term_and_detaches_related_suggestions(): void
+    {
+        $context = $this->customerContext('Vocabulary Delete Term AS');
+
+        $term = KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => 'theme_tag',
+            'canonical_name' => 'Slettbart tema',
+            'synonyms' => ['tema'],
+            'description' => 'Skal slettes.',
+            'approved' => true,
+        ]);
+
+        $suggestion = KnowledgeMetadataTermSuggestion::query()->create([
+            'customer_id' => $context['customer']->id,
+            'batch_id' => null,
+            'suggested_term' => 'Relatert forslag',
+            'suggested_canonical_name' => 'Relatert forslag',
+            'suggested_type' => 'theme_tag',
+            'suggested_synonyms' => [],
+            'suggested_description' => null,
+            'suggested_canonical_parent' => null,
+            'related_existing_term_id' => $term->id,
+            'reason' => 'Skal løsne referansen ved sletting.',
+            'confidence_score' => null,
+            'status' => KnowledgeMetadataTermSuggestion::STATUS_PENDING,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->delete(route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => $term->id]));
+
+        $response->assertRedirect(route('app.ai.knowledge-vocabulary.index'));
+
+        $this->assertDatabaseMissing('knowledge_metadata_terms', [
+            'id' => $term->id,
+            'customer_id' => $context['customer']->id,
+        ]);
+
+        $this->assertNull($suggestion->fresh()->related_existing_term_id);
+    }
+
     public function test_it_blocks_foreign_customer_term_update_actions(): void
     {
         $first = $this->customerContext('Vocabulary Term Customer One AS');
@@ -275,6 +317,25 @@ class KnowledgeVocabularyControllerTest extends TestCase
                 'synonyms' => '',
                 'description' => 'Oppdatert beskrivelse.',
             ])
+            ->assertNotFound();
+    }
+
+    public function test_it_blocks_foreign_customer_term_delete_actions(): void
+    {
+        $first = $this->customerContext('Vocabulary Term Delete Customer One AS');
+        $second = $this->customerContext('Vocabulary Term Delete Customer Two AS');
+
+        $term = KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $second['customer']->id,
+            'type' => 'theme_tag',
+            'canonical_name' => 'Utenlandsk term',
+            'synonyms' => [],
+            'description' => 'Beskrivelse.',
+            'approved' => true,
+        ]);
+
+        $this->actingAs($first['user'])
+            ->delete(route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => $term->id]))
             ->assertNotFound();
     }
 

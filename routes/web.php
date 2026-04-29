@@ -51,6 +51,7 @@ Route::prefix('app')
             Route::post('/analysis-batches', [KnowledgeVocabularyController::class, 'storeBatch'])->name('analysis-batches.store');
             Route::delete('/analysis-batches/{batch}', [KnowledgeVocabularyController::class, 'destroyBatch'])->name('analysis-batches.destroy');
             Route::patch('/terms/{term}', [KnowledgeVocabularyController::class, 'updateTerm'])->name('terms.update');
+            Route::delete('/terms/{term}', [KnowledgeVocabularyController::class, 'destroyTerm'])->name('terms.destroy');
             Route::patch('/suggestions/{suggestion}/approve', [KnowledgeVocabularyController::class, 'approveSuggestion'])->name('suggestions.approve');
             Route::patch('/suggestions/{suggestion}/reject', [KnowledgeVocabularyController::class, 'rejectSuggestion'])->name('suggestions.reject');
             Route::patch('/suggestions/{suggestion}/merge', [KnowledgeVocabularyController::class, 'mergeSuggestion'])->name('suggestions.merge');
@@ -60,7 +61,6 @@ Route::prefix('app')
             Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
             Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');
             Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
-            Route::post('/retrieval-test', [KnowledgeBaseController::class, 'retrievalTest'])->name('retrieval-test');
             Route::get('/{knowledgeItem}', [KnowledgeBaseController::class, 'show'])->name('show');
             Route::patch('/{knowledgeItem}/summary', [KnowledgeBaseController::class, 'updateSummary'])->name('summary.update');
             Route::patch('/{knowledgeItem}/chunks/{chunk}/review-status', [KnowledgeBaseController::class, 'updateChunkReviewStatus'])

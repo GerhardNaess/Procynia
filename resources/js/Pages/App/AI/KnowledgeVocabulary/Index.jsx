@@ -468,8 +468,8 @@ export default function KnowledgeVocabularyIndex({
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
                                 Start analyse av representative dokumenter
                             </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt selskapsvokabular.
+                            <p className="text-sm leading-6 text-slate-500 whitespace-nowrap">
+                                Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt selskapsvokabular. Dokumentet forsvinner dersom kunnskapsdokumentet slettes.
                             </p>
                         </div>
 
@@ -637,13 +637,47 @@ export default function KnowledgeVocabularyIndex({
                                                                         </span>
                                                                     </td>
                                                                     <td className="px-5 py-4 text-right">
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={() => setEditingTerm(term)}
-                                                                            className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                                                        >
-                                                                            Rediger
-                                                                        </button>
+                                                                        <div className="flex flex-wrap justify-end gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    if (!window.confirm(`Slette ${term.canonical_name}?`)) {
+                                                                                        return;
+                                                                                    }
+
+                                                                                    router.delete(term.delete_url, {
+                                                                                        preserveScroll: true,
+                                                                                        preserveState: true,
+                                                                                    });
+                                                                                }}
+                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                            >
+                                                                                <svg
+                                                                                    aria-hidden="true"
+                                                                                    viewBox="0 0 24 24"
+                                                                                    fill="none"
+                                                                                    stroke="currentColor"
+                                                                                    strokeWidth="1.8"
+                                                                                    strokeLinecap="round"
+                                                                                    strokeLinejoin="round"
+                                                                                    className="mr-2 h-4 w-4"
+                                                                                >
+                                                                                    <path d="M3 6h18" />
+                                                                                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                                                                                    <path d="M10 11v6" />
+                                                                                    <path d="M14 11v6" />
+                                                                                    <path d="M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14" />
+                                                                                </svg>
+                                                                                Slett
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setEditingTerm(term)}
+                                                                                className="inline-flex rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                            >
+                                                                                Rediger
+                                                                            </button>
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
                                                             ))}

@@ -64,16 +64,6 @@ function formatDateTime(value, locale) {
     }).format(new Date(value));
 }
 
-function formatRetrievalScore(value) {
-    const score = Number(value ?? 0);
-
-    if (!Number.isFinite(score)) {
-        return '—';
-    }
-
-    return score.toFixed(4);
-}
-
 function formatFileSize(bytes) {
     const value = Number(bytes ?? 0);
 
@@ -200,38 +190,6 @@ function getChunkDisplayTitle(chunk, index = 0) {
     return title !== '' ? title : `Chunk ${index + 1}`;
 }
 
-function getNextStep(item, status, readyChunksCount, totalChunksCount) {
-    if (status === 'failed') {
-        return {
-            label: 'Sjekk feilen',
-            text: item?.extraction_error || 'Ekstraksjonen feilet. Last opp dokumentet på nytt eller kontroller filen.',
-        };
-    }
-
-    if (status === 'processing') {
-        return {
-            label: 'Vent på prosessering',
-            text: 'Dokumentet er under behandling. Når chunking er ferdig, kan du gå gjennom tekstbitene.',
-        };
-    }
-
-    if (status === 'review') {
-        return {
-            label: 'Fortsett review',
-            text: totalChunksCount > 0
-                ? `${readyChunksCount} av ${totalChunksCount} chunks er klare for gjennomgang før dokumentet godkjennes.`
-                : 'Dokumentet er klart for gjennomgang, men har ingen tilgjengelige chunks ennå.',
-        };
-    }
-
-    return {
-        label: 'Klar for AI-bruk',
-        text: totalChunksCount > 0
-            ? `Alle ${totalChunksCount} chunks er klare, og dokumentet kan brukes videre i AI-arbeidet.`
-            : 'Dokumentet er aktivt, men har ingen chunks registrert ennå.',
-    };
-}
-
 function buildHistoryEntries(item, locale, status) {
     const entries = [];
 
@@ -301,18 +259,14 @@ export default function KnowledgeBaseShow({
     indexUrl = '/app/ai/knowledge-base',
     summaryUpdateUrl = '/app/ai/knowledge-base',
     editUrl = '/app/ai/knowledge-base',
-    retrievalTestUrl = '/app/ai/knowledge-base/retrieval-test',
 }) {
-    const { locale = 'nb-NO', flash = {} } = usePage().props;
+    const { locale = 'nb-NO' } = usePage().props;
     const [activeTab, setActiveTab] = useState('chunks');
     const [selectedChunkId, setSelectedChunkId] = useState(knowledgeItem?.chunks?.[0]?.id ?? null);
     const [chunkReviewRequest, setChunkReviewRequest] = useState(null);
     const [isChunkMetadataEditing, setIsChunkMetadataEditing] = useState(false);
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
     const tabsRef = useRef(null);
-    const retrievalTestForm = useForm({
-        query: '',
-    });
 
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? 'Kunnskapsdokument';
     const documentStatus = getDocumentStatus(knowledgeItem);
@@ -357,11 +311,7 @@ export default function KnowledgeBaseShow({
         keywords: '',
     });
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
-    const nextStep = getNextStep(knowledgeItem, documentStatus, readyChunksCount, totalChunksCount);
     const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus);
-    const retrievalTestResult = flash?.retrievalTest ?? null;
-    const retrievalTestResults = Array.isArray(retrievalTestResult?.results) ? retrievalTestResult.results : [];
-    const retrievalTestError = String(retrievalTestResult?.error ?? '').trim();
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -409,15 +359,6 @@ export default function KnowledgeBaseShow({
 
         summaryForm.patch(summaryUpdateUrl, {
             preserveScroll: true,
-        });
-    };
-
-    const submitRetrievalTest = (event) => {
-        event.preventDefault();
-
-        retrievalTestForm.post(retrievalTestUrl, {
-            preserveScroll: true,
-            preserveState: true,
         });
     };
 
@@ -524,14 +465,6 @@ export default function KnowledgeBaseShow({
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-4">
-                            <Link
-                                href={indexUrl}
-                                className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900"
-                            >
-                                <span aria-hidden="true">←</span>
-                                Tilbake til dokumenter
-                            </Link>
-
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                                 <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm">
                                     <DocumentIcon className="h-7 w-7" />
@@ -575,6 +508,12 @@ export default function KnowledgeBaseShow({
 
                         <div className="flex flex-wrap gap-3 lg:justify-end">
                             <Link
+                                href={indexUrl}
+                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            >
+                                Tilbake
+                            </Link>
+                            <Link
                                 href={editUrl}
                                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
@@ -592,7 +531,7 @@ export default function KnowledgeBaseShow({
                 </section>
 
                 <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <article className="h-full rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <article className="h-full sm:col-span-2 xl:col-span-2 rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <form onSubmit={submitSummary} className="flex h-full flex-col">
                             <div className="flex items-center justify-between gap-3">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
@@ -651,23 +590,9 @@ export default function KnowledgeBaseShow({
                         </div>
                         <p className="mt-2 text-xs text-slate-500">
                             {totalChunksCount > 0
-                                ? `${progressPercent}% av dokumentets chunks er klare for videre bruk.`
+                                ? `${progressPercent}% av dokumentets chunks er ferdig ekstrahert og klare for gjennomgang.`
                                 : 'Chunking eller review er ikke ferdig enda.'}
                         </p>
-                    </article>
-
-                    <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                            Neste steg
-                        </div>
-                        <div className="mt-3 space-y-2">
-                            <div className="text-base font-semibold text-slate-950">
-                                {nextStep.label}
-                            </div>
-                            <p className="text-sm leading-6 text-slate-600">
-                                {nextStep.text}
-                            </p>
-                        </div>
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -749,7 +674,7 @@ export default function KnowledgeBaseShow({
 
                                     <div className="text-sm font-medium text-slate-600">
                                         {totalChunksCount > 0
-                                            ? `${reviewProgressCount} av ${totalChunksCount} chunks gjennomgått`
+                                            ? `${reviewProgressCount} av ${totalChunksCount} chunks er manuelt godkjent`
                                             : 'Ingen chunks tilgjengelig'}
                                     </div>
                                 </div>
@@ -1291,163 +1216,6 @@ export default function KnowledgeBaseShow({
                     ) : null}
                 </section>
 
-                <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="space-y-2">
-                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Intern retrieval-test
-                            </div>
-                            <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                Test chunk-retrieval
-                            </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                                Skriv et spørsmål og se hvilke chunks som scorer høyest. Ingen AI-svar genereres.
-                            </p>
-                        </div>
-
-                        {retrievalTestResult?.embedding_model ? (
-                            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                                {retrievalTestResult.embedding_model}
-                            </span>
-                        ) : null}
-                    </div>
-
-                    <form onSubmit={submitRetrievalTest} className="mt-5 space-y-3">
-                        <label className="block space-y-2">
-                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Spørsmål
-                            </span>
-                            <textarea
-                                value={retrievalTestForm.data.query}
-                                onChange={(event) => retrievalTestForm.setData('query', event.target.value)}
-                                rows={3}
-                                placeholder="Skriv et spørsmål eller et krav du vil teste mot kunnskapschunks."
-                                className="w-full rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                            />
-                        </label>
-
-                        {retrievalTestForm.errors.query ? (
-                            <p className="text-sm text-rose-600">
-                                {retrievalTestForm.errors.query}
-                            </p>
-                        ) : null}
-
-                        <div className="flex flex-wrap gap-3">
-                            <button
-                                type="submit"
-                                disabled={retrievalTestForm.processing}
-                                className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                {retrievalTestForm.processing ? 'Tester...' : 'Test retrieval'}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => retrievalTestForm.setData('query', '')}
-                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                            >
-                                Tøm
-                            </button>
-                        </div>
-                    </form>
-
-                    {retrievalTestError ? (
-                        <div className="mt-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                            {retrievalTestError}
-                        </div>
-                    ) : null}
-
-                    {retrievalTestResult ? (
-                        <div className="mt-6 space-y-4 rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                        Resultater
-                                    </div>
-                                    <div className="mt-1 text-sm text-slate-500">
-                                        {retrievalTestResult.query ? `Spørring: ${retrievalTestResult.query}` : 'Ingen spørring registrert.'}
-                                    </div>
-                                </div>
-
-                                <div className="text-sm font-medium text-slate-600">
-                                    {retrievalTestResult.result_count !== undefined
-                                        ? `${retrievalTestResult.result_count} av ${retrievalTestResult.candidate_count ?? retrievalTestResults.length} treff vist`
-                                        : `${retrievalTestResults.length} treff vist`}
-                                </div>
-                            </div>
-
-                            {retrievalTestResults.length > 0 ? (
-                                <div className="space-y-3">
-                                    {retrievalTestResults.map((result, index) => (
-                                        <article
-                                            key={`${result.chunk_id}-${index}`}
-                                            className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.03)]"
-                                        >
-                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                <div className="space-y-2">
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <div className="text-sm font-semibold text-slate-950">
-                                                            {result.document_title || 'Ukjent dokument'}
-                                                        </div>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                                                            Score {formatRetrievalScore(result.score)}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            Chunk {Number(result.chunk_index ?? 0) + 1}
-                                                        </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            {result.heading_path || '—'}
-                                                        </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            Chunk ID {result.chunk_id}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            Topic {result.topic || '—'}
-                                                        </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            Sub-topic {result.sub_topic || '—'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-500">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-600">
-                                                            Seksjon {result.section_title || '—'}
-                                                        </span>
-                                                    </div>
-
-                                                    <p className="text-xs leading-5 text-slate-500">
-                                                        Seksjonssti: {result.section_path || '—'}
-                                                    </p>
-
-                                                    <p className="text-xs leading-5 text-slate-500">
-                                                        Keywords: {formatChunkKeywordList(result.keywords)}
-                                                    </p>
-                                                </div>
-
-                                                <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                                                    Knowledge ID {result.knowledge_item_id}
-                                                </span>
-                                            </div>
-
-                                            <p className="mt-3 text-sm leading-6 text-slate-600">
-                                                {result.content_preview || 'Ingen forhåndsvisning tilgjengelig.'}
-                                            </p>
-                                        </article>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="rounded-[18px] border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-slate-500">
-                                    Ingen treff å vise ennå.
-                                </div>
-                            )}
-                        </div>
-                    ) : null}
-                </section>
             </div>
         </CustomerAppLayout>
     );

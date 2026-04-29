@@ -97,123 +97,7 @@ class KnowledgeBaseController extends Controller
             'indexUrl' => route('app.ai.knowledge-base.index'),
             'summaryUpdateUrl' => route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $record->id]),
             'editUrl' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $record->id]),
-            'retrievalTestUrl' => route('app.ai.knowledge-base.retrieval-test'),
         ]);
-    }
-
-    /**
-     * Purpose: Run an internal retrieval test against scoped knowledge chunks.
-     * Inputs: The current frontend request containing a user query.
-     * Returns: A redirect back to the previous page with retrieval debug results in flash state.
-     * Side effects: Embeds the query and scores candidate chunks deterministically.
-     */
-    public function retrievalTest(Request $request): RedirectResponse
-    {
-        [$user, $customerId] = $this->frontendContext($request);
-        $payload = $request->validate([
-            'query' => ['required', 'string', 'max:4000'],
-        ]);
-
-        $query = trim((string) $payload['query']);
-        $queryEmbeddingOutcome = app(EmbeddingService::class)->tryEmbedText($query);
-
-        if (! ($queryEmbeddingOutcome['ok'] ?? false)) {
-            return redirect()
-                ->back()
-                ->with('retrievalTest', [
-                    'query' => $query,
-                    'embedding_model' => $queryEmbeddingOutcome['model'] ?? null,
-                    'error' => (string) ($queryEmbeddingOutcome['error_message'] ?? 'Kunne ikke lage embedding av spørsmålet.'),
-                    'results' => [],
-                    'candidate_count' => 0,
-                ]);
-        }
-
-        $queryEmbedding = is_array($queryEmbeddingOutcome['embedding'] ?? null)
-            ? $queryEmbeddingOutcome['embedding']
-            : [];
-
-        if ($queryEmbedding === []) {
-            return redirect()
-                ->back()
-                ->with('retrievalTest', [
-                    'query' => $query,
-                    'embedding_model' => $queryEmbeddingOutcome['model'] ?? null,
-                    'error' => 'Spørsmålsembedding manglet en gyldig vektor.',
-                    'results' => [],
-                    'candidate_count' => 0,
-                ]);
-        }
-
-        $candidateChunks = $this->retrievalTestChunksForCustomer($customerId);
-        $scoredResults = [];
-
-        foreach ($candidateChunks as $candidate) {
-            $chunkEmbedding = data_get($candidate, 'embedding_vector');
-
-            if (! is_array($chunkEmbedding) || $chunkEmbedding === []) {
-                continue;
-            }
-
-            $score = app(CosineSimilarity::class)->calculate($queryEmbedding, $chunkEmbedding);
-
-            if ($score === null) {
-                continue;
-            }
-
-            $content = trim((string) data_get($candidate, 'content', ''));
-            $title = trim((string) data_get($candidate, 'title', ''));
-            $headingPath = trim((string) data_get($candidate, 'heading_path', ''));
-            $keywords = $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [];
-
-            $scoredResults[] = [
-                'score' => $score,
-                'knowledge_item_id' => (int) data_get($candidate, 'knowledge_item_id'),
-                'chunk_id' => (int) data_get($candidate, 'chunk_id'),
-                'chunk_index' => (int) data_get($candidate, 'chunk_index', 0),
-                'document_title' => (string) data_get($candidate, 'knowledge_item_title', ''),
-                'heading_path' => $headingPath !== ''
-                    ? $headingPath
-                    : ($title !== '' ? $title : sprintf('Chunk %d', ((int) data_get($candidate, 'chunk_index', 0)) + 1)),
-                'topic' => (string) data_get($candidate, 'topic', ''),
-                'sub_topic' => (string) data_get($candidate, 'sub_topic', ''),
-                'keywords' => $keywords,
-                'section_title' => (string) data_get($candidate, 'section_title', ''),
-                'section_path' => (string) data_get($candidate, 'section_path', ''),
-                'content_preview' => Str::limit(Str::squish($content), 800, '...'),
-            ];
-        }
-
-        usort(
-            $scoredResults,
-            static function (array $left, array $right): int {
-                if (abs($left['score'] - $right['score']) > 0.000001) {
-                    return $right['score'] <=> $left['score'];
-                }
-
-                if ($left['knowledge_item_id'] !== $right['knowledge_item_id']) {
-                    return $right['knowledge_item_id'] <=> $left['knowledge_item_id'];
-                }
-
-                if ($left['chunk_index'] !== $right['chunk_index']) {
-                    return $left['chunk_index'] <=> $right['chunk_index'];
-                }
-
-                return $left['chunk_id'] <=> $right['chunk_id'];
-            },
-        );
-
-        $results = array_slice($scoredResults, 0, 5);
-
-        return redirect()
-            ->back()
-            ->with('retrievalTest', [
-                'query' => $query,
-                'embedding_model' => $queryEmbeddingOutcome['model'] ?? null,
-                'candidate_count' => count($scoredResults),
-                'result_count' => count($results),
-                'results' => $results,
-            ]);
     }
 
     /**
@@ -779,33 +663,6 @@ class KnowledgeBaseController extends Controller
                     ->all(),
             ],
         );
-    }
-
-    /**
-     * Purpose: Resolve the candidate chunks that can participate in a retrieval test.
-     * Inputs: The current customer id.
-     * Returns: A collection of active knowledge chunks with embedding vectors.
-     * Side effects: None.
-     */
-    private function retrievalTestChunksForCustomer(int $customerId): Collection
-    {
-        return KnowledgeItemChunk::query()
-            ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
-            ->where('knowledge_items.customer_id', $customerId)
-            ->where('knowledge_items.is_active', true)
-            ->whereNotNull('knowledge_items.storage_path')
-            ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
-            ->whereNotNull('knowledge_item_chunks.embedding_vector')
-            ->orderByDesc('knowledge_items.updated_at')
-            ->orderByDesc('knowledge_items.id')
-            ->orderBy('knowledge_item_chunks.chunk_index')
-            ->orderBy('knowledge_item_chunks.id')
-            ->limit(1000)
-            ->get([
-                'knowledge_item_chunks.*',
-                'knowledge_items.original_filename as knowledge_item_title',
-            ])
-            ->values();
     }
 
     /**
@@ -1622,7 +1479,7 @@ class KnowledgeBaseController extends Controller
         $text = trim(preg_replace('/\s+/u', ' ', (string) $knowledgeDocument->extracted_text) ?? '');
 
         if ($text !== '') {
-            return Str::limit($text, 180, '...');
+            return Str::limit($text, 360, '...');
         }
 
         if ($knowledgeDocument->extraction_status === KnowledgeItem::EXTRACTION_STATUS_FAILED) {

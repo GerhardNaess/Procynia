@@ -67,8 +67,14 @@ export default function KnowledgeItemForm({
     showFileUpload = false,
 }) {
     const [deleting, setDeleting] = useState(false);
+    const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
+    const contentExcerptLimit = 220;
+    const hasLongContentExcerpt = contentExcerpt.length > contentExcerptLimit;
+    const visibleContentExcerpt = hasLongContentExcerpt && !contentExcerptExpanded
+        ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
+        : contentExcerpt;
 
     const deleteKnowledgeItem = () => {
         if (!deleteUrl || deleting) {
@@ -207,7 +213,18 @@ export default function KnowledgeItemForm({
                                 <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     Utdrag
                                 </div>
-                                <div>{contentExcerpt || 'Ingen ekstrahert tekst.'}</div>
+                                <div className="whitespace-pre-wrap break-words leading-6">
+                                    {visibleContentExcerpt || 'Ingen ekstrahert tekst.'}
+                                </div>
+                                {hasLongContentExcerpt ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setContentExcerptExpanded((currentValue) => !currentValue)}
+                                        className="mt-1 text-sm font-semibold text-violet-700 transition hover:text-violet-900"
+                                    >
+                                        {contentExcerptExpanded ? 'Vis mindre' : 'Mer'}
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
 

@@ -182,6 +182,38 @@ class KnowledgeVocabularyController extends Controller
     }
 
     /**
+     * Purpose: Delete one approved vocabulary term.
+     * Inputs: The current frontend request and the route-bound approved term.
+     * Returns: A redirect back to the vocabulary workspace.
+     * Side effects: Deletes the approved term and detaches related suggestions.
+     */
+    public function destroyTerm(Request $request, KnowledgeMetadataTerm $term): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedApprovedTerm($customerId, $term->id);
+
+        DB::transaction(function () use ($record): void {
+            KnowledgeMetadataTermSuggestion::query()
+                ->where('related_existing_term_id', $record->id)
+                ->update([
+                    'related_existing_term_id' => null,
+                ]);
+
+            $record->delete();
+        });
+
+        Log::info('[PROCYNIA][KNOWLEDGE_VOCABULARY] Approved vocabulary term deleted.', [
+            'customer_id' => $customerId,
+            'term_id' => $record->id,
+            'deleted_by' => (int) $user->id,
+        ]);
+
+        return redirect()
+            ->route('app.ai.knowledge-vocabulary.index')
+            ->with('success', 'Godkjent vokabular ble slettet.');
+    }
+
+    /**
      * Purpose: Approve one pending suggestion as a vocabulary term.
      * Inputs: The current frontend request and the route-bound suggestion.
      * Returns: A redirect back to the vocabulary workspace.
@@ -377,11 +409,12 @@ class KnowledgeVocabularyController extends Controller
                         'id' => (int) data_get($term, 'id', 0),
                         'type' => (string) data_get($term, 'type', $type),
                         'canonical_name' => (string) data_get($term, 'canonical_name', ''),
-                        'synonyms' => (array) data_get($term, 'synonyms', []),
-                        'description' => data_get($term, 'description'),
-                        'approved' => (bool) data_get($term, 'approved', true),
-                        'edit_url' => route('app.ai.knowledge-vocabulary.terms.update', ['term' => (int) data_get($term, 'id', 0)]),
-                    ])
+                'synonyms' => (array) data_get($term, 'synonyms', []),
+                'description' => data_get($term, 'description'),
+                'approved' => (bool) data_get($term, 'approved', true),
+                'edit_url' => route('app.ai.knowledge-vocabulary.terms.update', ['term' => (int) data_get($term, 'id', 0)]),
+                'delete_url' => route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => (int) data_get($term, 'id', 0)]),
+            ])
                     ->values()
                     ->all(),
             ];
