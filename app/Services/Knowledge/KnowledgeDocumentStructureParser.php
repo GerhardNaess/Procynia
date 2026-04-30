@@ -30,12 +30,23 @@ class KnowledgeDocumentStructureParser
      *         id: string,
      *         type: string,
      *         heading_path: ?string,
+     *         heading_context: ?string,
      *         text: string,
      *         start_offset: int,
      *         end_offset: int,
      *         order_index: int,
      *         heading_level: ?int,
-     *         relation_hint: ?string
+     *         relation_hint: ?string,
+     *         table_json?: array<string, mixed>,
+     *         table_html?: string,
+     *         table_complexity?: string,
+     *         table_warnings?: array<int, string>,
+     *         table_markdown?: string,
+     *         table_text?: string,
+     *         rows?: array<int, array<int, string>>,
+     *         row_count?: int,
+     *         column_count?: int,
+     *         table_index_in_document?: int
      *     }>,
      *     word_count: int
      * }
@@ -116,9 +127,16 @@ class KnowledgeDocumentStructureParser
      * @return array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }>
      */
     private function parseDocxBodyElements(string $documentXml, ?string $stylesXml = null): array
@@ -138,6 +156,7 @@ class KnowledgeDocumentStructureParser
 
             $rawElements = [];
             $currentHeadings = [];
+            $tableIndexInDocument = 0;
 
             $bodyNodes = $xpath->query('/w:document/w:body/*');
 
@@ -164,10 +183,12 @@ class KnowledgeDocumentStructureParser
                     if ($headingLevel !== null) {
                         $currentHeadings[$headingLevel] = $text;
                         $currentHeadings = $this->trimHeadingStack($currentHeadings, $headingLevel);
+                        $headingPath = $this->currentHeadingPath($currentHeadings);
 
                         $rawElements[] = [
                             'type' => 'heading',
-                            'heading_path' => $this->currentHeadingPath($currentHeadings),
+                            'heading_path' => $headingPath,
+                            'heading_context' => $headingPath,
                             'text' => $text,
                             'heading_level' => $headingLevel,
                             'relation_hint' => null,
@@ -183,6 +204,7 @@ class KnowledgeDocumentStructureParser
                     $rawElements[] = [
                         'type' => $type,
                         'heading_path' => $headingPath,
+                        'heading_context' => $headingPath,
                         'text' => $text,
                         'heading_level' => null,
                         'relation_hint' => $relationHint,
@@ -192,18 +214,45 @@ class KnowledgeDocumentStructureParser
                 }
 
                 if ($node->nodeName === 'w:tbl') {
-                    $text = $this->extractTableText($xpath, $node);
+                    $tableData = $this->extractDocxTableData($xpath, $node);
+                    $text = (string) ($tableData['text'] ?? '');
+                    $rowCount = (int) ($tableData['row_count'] ?? 0);
 
-                    if ($text === '') {
+                    if ($text === '' && $rowCount === 0) {
                         continue;
+                    }
+
+                    $headingPath = $this->currentHeadingPath($currentHeadings);
+                    $tableJson = is_array($tableData['table_json'] ?? null) ? $tableData['table_json'] : [];
+
+                    if ($tableJson !== []) {
+                        $tableJson['table_index_in_document'] = $tableIndexInDocument;
+                        $tableJson['source_metadata'] = array_merge(
+                            is_array($tableJson['source_metadata'] ?? null) ? $tableJson['source_metadata'] : [],
+                            [
+                                'table_index_in_document' => $tableIndexInDocument,
+                            ],
+                        );
+                        $tableData['table_json'] = $tableJson;
                     }
 
                     $rawElements[] = [
                         'type' => 'table',
-                        'heading_path' => $this->currentHeadingPath($currentHeadings),
+                        'heading_path' => $headingPath,
+                        'heading_context' => $headingPath,
                         'text' => $text,
                         'heading_level' => null,
                         'relation_hint' => 'table_group',
+                        'table_json' => $tableData['table_json'] ?? null,
+                        'table_html' => (string) ($tableData['table_html'] ?? ''),
+                        'table_complexity' => (string) ($tableData['table_complexity'] ?? 'complex'),
+                        'table_warnings' => array_values(array_filter((array) ($tableData['table_warnings'] ?? []), static fn ($warning): bool => trim((string) $warning) !== '')),
+                        'table_markdown' => (string) ($tableData['markdown'] ?? ''),
+                        'table_text' => $text,
+                        'rows' => (array) ($tableData['rows'] ?? []),
+                        'row_count' => $rowCount,
+                        'column_count' => (int) ($tableData['column_count'] ?? 0),
+                        'table_index_in_document' => $tableIndexInDocument++,
                     ];
                 }
             }
@@ -369,6 +418,61 @@ class KnowledgeDocumentStructureParser
     }
 
     /**
+     * Purpose: Extract the structured content of one DOCX table.
+     * Inputs: The XML XPath helper and the table node.
+     * Returns: A normalized table payload with structured JSON and derived display formats.
+     * Side effects: None.
+     *
+     * @return array{
+     *     text: string,
+     *     html: string,
+     *     markdown: string,
+     *     rows: array<int, array<string, mixed>>,
+     *     row_count: int,
+     *     column_count: int,
+     *     table_json: array<string, mixed>,
+     *     table_html: string,
+     *     table_complexity: string,
+     *     table_warnings: array<int, string>
+     * }
+     */
+    private function extractDocxTableData(DOMXPath $xpath, DOMElement $table): array
+    {
+        $rows = $this->extractDocxTableRows($xpath, $table);
+
+        if ($rows === []) {
+            return [
+                'text' => '',
+                'html' => '',
+                'markdown' => '',
+                'rows' => [],
+                'row_count' => 0,
+                'column_count' => 0,
+                'table_json' => [],
+                'table_html' => '',
+                'table_complexity' => 'complex',
+                'table_warnings' => [],
+            ];
+        }
+
+        $columnCount = $this->extractDocxTableColumnCount($xpath, $table, $rows);
+        $tablePayload = $this->buildDocxTablePayload($rows, $columnCount);
+
+        return [
+            'text' => (string) ($tablePayload['table_text'] ?? ''),
+            'html' => (string) ($tablePayload['table_html'] ?? ''),
+            'markdown' => (string) ($tablePayload['table_markdown'] ?? ''),
+            'rows' => (array) ($tablePayload['rows'] ?? []),
+            'row_count' => (int) ($tablePayload['row_count'] ?? 0),
+            'column_count' => (int) ($tablePayload['column_count'] ?? 0),
+            'table_json' => (array) ($tablePayload['table_json'] ?? []),
+            'table_html' => (string) ($tablePayload['table_html'] ?? ''),
+            'table_complexity' => (string) ($tablePayload['table_complexity'] ?? 'complex'),
+            'table_warnings' => (array) ($tablePayload['table_warnings'] ?? []),
+        ];
+    }
+
+    /**
      * Purpose: Extract the textual content of one DOCX table.
      * Inputs: The XML XPath helper and the table node.
      * Returns: A normalized table string that preserves row order.
@@ -376,52 +480,879 @@ class KnowledgeDocumentStructureParser
      */
     private function extractTableText(DOMXPath $xpath, DOMElement $table): string
     {
-        $rows = [];
-        $tableRows = $xpath->query('.//w:tr', $table);
+        return (string) $this->extractDocxTableData($xpath, $table)['text'];
+    }
+
+    /**
+     * Purpose: Read raw row and cell data from one DOCX table.
+     * Inputs: The XML XPath helper and the table node.
+     * Returns: Ordered raw table rows with text and merge metadata.
+     * Side effects: None.
+     *
+     * @return array<int, array{
+     *     row_index: int,
+     *     explicit_header: bool,
+     *     cells: array<int, array<string, mixed>>
+     * }>
+     */
+    private function extractDocxTableRows(DOMXPath $xpath, DOMElement $table): array
+    {
+        $tableRows = $xpath->query('./w:tr', $table);
 
         if ($tableRows === false) {
-            return '';
+            return [];
         }
 
-        foreach ($tableRows as $rowNode) {
+        $rows = [];
+        $rowCount = $tableRows->length;
+
+        foreach ($tableRows as $rowIndex => $rowNode) {
             if (! $rowNode instanceof DOMElement) {
                 continue;
             }
 
             $cells = [];
             $cellNodes = $xpath->query('./w:tc', $rowNode);
+            $explicitHeader = $this->hasDocxTableHeaderFlag($xpath, $rowNode);
 
-            if ($cellNodes === false) {
-                continue;
-            }
-
-            foreach ($cellNodes as $cellNode) {
-                if (! $cellNode instanceof DOMElement) {
-                    continue;
-                }
-
-                $cellTextNodes = $xpath->query('.//w:t', $cellNode);
-                $parts = [];
-
-                if ($cellTextNodes !== false) {
-                    foreach ($cellTextNodes as $textNode) {
-                        $parts[] = (string) $textNode->textContent;
+            if ($cellNodes !== false) {
+                foreach ($cellNodes as $cellIndex => $cellNode) {
+                    if (! $cellNode instanceof DOMElement) {
+                        continue;
                     }
-                }
 
-                $cellText = $this->normalizeText(implode(' ', $parts));
-
-                if ($cellText !== '') {
-                    $cells[] = $cellText;
+                    $cells[] = $this->extractDocxTableCell($xpath, $cellNode, (int) $rowIndex, (int) $cellIndex, $explicitHeader, $rowCount);
                 }
             }
 
-            if ($cells !== []) {
-                $rows[] = implode(' | ', $cells);
+            $rows[] = [
+                'row_index' => (int) $rowIndex,
+                'explicit_header' => $explicitHeader,
+                'cells' => $cells,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Purpose: Extract one DOCX table cell with structural metadata.
+     * Inputs: The XML XPath helper, the cell node, and its row and cell indices.
+     * Returns: One normalized table cell record.
+     * Side effects: None.
+     *
+     * @return array<string, mixed>
+     */
+    private function extractDocxTableCell(DOMXPath $xpath, DOMElement $cellNode, int $rowIndex, int $cellIndex, bool $explicitHeader, int $rowCount): array
+    {
+        $cellTextNodes = $xpath->query('.//w:t', $cellNode);
+        $parts = [];
+
+        if ($cellTextNodes !== false) {
+            foreach ($cellTextNodes as $textNode) {
+                $parts[] = (string) $textNode->textContent;
             }
         }
 
-        return trim(implode("\n", $rows));
+        $text = $this->normalizeText(implode(' ', $parts));
+        $colSpan = $this->extractDocxTableGridSpan($xpath, $cellNode);
+        $vMerge = $this->extractDocxTableVMerge($xpath, $cellNode);
+        $styleHints = [];
+
+        if ($colSpan > 1) {
+            $styleHints[] = 'grid_span';
+        }
+
+        if ($vMerge === 'restart') {
+            $styleHints[] = 'vertical_merge_restart';
+        } elseif ($vMerge === 'continue') {
+            $styleHints[] = 'vertical_merge_continue';
+        }
+
+        if ($explicitHeader) {
+            $styleHints[] = 'header_row';
+        }
+
+        return [
+            'row_index' => $rowIndex,
+            'cell_index' => $cellIndex,
+            'column_index' => $cellIndex,
+            'text' => $text,
+            'is_empty' => $text === '',
+            'rowspan' => 1,
+            'colspan' => $colSpan,
+            'is_header' => $explicitHeader,
+            'is_title' => false,
+            'style_hints' => array_values(array_unique($styleHints)),
+            'source_metadata' => [
+                'grid_span' => $colSpan,
+                'v_merge' => $vMerge,
+                'row_index' => $rowIndex,
+                'cell_index' => $cellIndex,
+                'detected_title_row' => false,
+                'detected_header_rows' => [],
+                'column_count' => null,
+                'row_count' => $rowCount,
+            ],
+        ];
+    }
+
+    /**
+     * Purpose: Extract the colspan value from one DOCX table cell.
+     * Inputs: The XML XPath helper and the cell node.
+     * Returns: The logical column span for the cell.
+     * Side effects: None.
+     */
+    private function extractDocxTableGridSpan(DOMXPath $xpath, DOMElement $cellNode): int
+    {
+        $gridSpanNodes = $xpath->query('./w:tcPr/w:gridSpan', $cellNode);
+
+        if ($gridSpanNodes === false || $gridSpanNodes->length === 0) {
+            return 1;
+        }
+
+        $gridSpanNode = $gridSpanNodes->item(0);
+        $gridSpanValue = (int) ($gridSpanNode?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? 1);
+
+        return max(1, $gridSpanValue);
+    }
+
+    /**
+     * Purpose: Extract the vertical merge mode from one DOCX table cell.
+     * Inputs: The XML XPath helper and the cell node.
+     * Returns: restart, continue or null when no vertical merge exists.
+     * Side effects: None.
+     */
+    private function extractDocxTableVMerge(DOMXPath $xpath, DOMElement $cellNode): ?string
+    {
+        $vMergeNodes = $xpath->query('./w:tcPr/w:vMerge', $cellNode);
+
+        if ($vMergeNodes === false || $vMergeNodes->length === 0) {
+            return null;
+        }
+
+        $vMergeNode = $vMergeNodes->item(0);
+        $vMergeValue = Str::lower(trim((string) ($vMergeNode?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/wordprocessingml/2006/main', 'val')?->nodeValue ?? '')));
+
+        if ($vMergeValue === 'restart') {
+            return 'restart';
+        }
+
+        return 'continue';
+    }
+
+    /**
+     * Purpose: Determine the effective number of columns in one DOCX table.
+     * Inputs: The XML XPath helper, the table node, and the raw rows.
+     * Returns: The logical column count for the table.
+     * Side effects: None.
+     *
+     * @param array<int, array{
+     *     row_index: int,
+     *     explicit_header: bool,
+     *     cells: array<int, array<string, mixed>>
+     * }> $rows
+     */
+    private function extractDocxTableColumnCount(DOMXPath $xpath, DOMElement $table, array $rows): int
+    {
+        $tblGridNodes = $xpath->query('./w:tblGrid/w:gridCol', $table);
+
+        if ($tblGridNodes !== false && $tblGridNodes->length > 0) {
+            return max(1, $tblGridNodes->length);
+        }
+
+        $columnCount = 0;
+
+        foreach ($rows as $row) {
+            $rowColumnCount = 0;
+
+            foreach ((array) ($row['cells'] ?? []) as $cell) {
+                $rowColumnCount += max(1, (int) ($cell['colspan'] ?? 1));
+            }
+
+            $columnCount = max($columnCount, $rowColumnCount);
+        }
+
+        return max(1, $columnCount);
+    }
+
+    /**
+     * Purpose: Build the final structured representation and derived display formats for one DOCX table.
+     * Inputs: Raw table rows and the computed column count.
+     * Returns: A complete structured table payload with JSON, HTML, markdown and searchable text.
+     * Side effects: None.
+     *
+     * @param array<int, array{
+     *     row_index: int,
+     *     explicit_header: bool,
+     *     cells: array<int, array<string, mixed>>
+     * }> $rows
+     * @return array{
+     *     table_json: array<string, mixed>,
+     *     table_html: string,
+     *     table_markdown: string,
+     *     table_text: string,
+     *     table_complexity: string,
+     *     table_warnings: array<int, string>,
+     *     rows: array<int, array{
+     *         row_index: int,
+     *         row_type: string,
+     *         is_title: bool,
+     *         is_header: bool,
+     *         is_empty: bool,
+     *         explicit_header: bool,
+     *         cells: array<int, array<string, mixed>>,
+     *         source_metadata: array<string, mixed>
+     *     }>,
+     *     row_count: int,
+     *     column_count: int
+     * }
+     */
+    private function buildDocxTablePayload(array $rows, int $columnCount): array
+    {
+        $rowCount = count($rows);
+        $titleRowIndex = null;
+        $headerRowIndices = [];
+        $hasMergedCells = false;
+        $hasVerticalMerges = false;
+        $hasGroupRows = false;
+        $detectedHeaderRows = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            $rowCells = array_values(array_filter((array) ($row['cells'] ?? []), static fn ($cell): bool => is_array($cell)));
+            $logicalColumnIndex = 0;
+
+            foreach ($rowCells as $cellIndex => $cell) {
+                $colSpan = max(1, (int) ($cell['colspan'] ?? 1));
+                $vMerge = (string) data_get($cell, 'source_metadata.v_merge', '');
+
+                if ($colSpan > 1) {
+                    $hasMergedCells = true;
+                }
+
+                if ($vMerge !== '') {
+                    $hasMergedCells = true;
+                    $hasVerticalMerges = true;
+                }
+
+                $rowCells[$cellIndex]['column_index'] = $logicalColumnIndex;
+                $rowCells[$cellIndex]['colspan'] = $colSpan;
+                $rowCells[$cellIndex]['rowspan'] = max(1, (int) ($rowCells[$cellIndex]['rowspan'] ?? 1));
+                $rowCells[$cellIndex]['source_metadata']['column_count'] = $columnCount;
+                $rowCells[$cellIndex]['source_metadata']['row_count'] = $rowCount;
+                $rowCells[$cellIndex]['style_hints'] = array_values(array_unique(array_filter((array) ($rowCells[$cellIndex]['style_hints'] ?? []), static fn ($hint): bool => trim((string) $hint) !== '')));
+                $logicalColumnIndex += $colSpan;
+            }
+
+            $rows[$rowIndex]['cells'] = $rowCells;
+            $rows[$rowIndex]['row_index'] = $rowIndex;
+            $rows[$rowIndex]['is_empty'] = $this->rowHasVisibleText($rowCells) === false;
+            $rows[$rowIndex]['is_title'] = false;
+            $rows[$rowIndex]['is_header'] = false;
+            $rows[$rowIndex]['row_type'] = 'data';
+            $rows[$rowIndex]['source_metadata'] = [
+                'row_index' => $rowIndex,
+                'explicit_header' => (bool) ($row['explicit_header'] ?? false),
+                'column_count' => $columnCount,
+                'row_count' => $rowCount,
+            ];
+
+            if ($rowIndex === 0 && $this->isDocxTableTitleRow($rowCells, $columnCount)) {
+                $titleRowIndex = 0;
+            }
+
+            if ((bool) ($row['explicit_header'] ?? false)) {
+                $headerRowIndices[] = $rowIndex;
+                $detectedHeaderRows[] = $rowIndex;
+            }
+
+            if ($rows[$rowIndex]['is_empty'] === false && $rowIndex !== $titleRowIndex && ! (bool) ($row['explicit_header'] ?? false) && $this->isDocxTableGroupRow($rowCells, $columnCount)) {
+                $hasGroupRows = true;
+                $rows[$rowIndex]['row_type'] = 'group';
+                continue;
+            }
+        }
+
+        if ($titleRowIndex !== null && isset($rows[$titleRowIndex])) {
+            $rows[$titleRowIndex]['row_type'] = 'title';
+            $rows[$titleRowIndex]['is_title'] = true;
+            $rows[$titleRowIndex]['source_metadata']['detected_title_row'] = true;
+            $rows[$titleRowIndex]['source_metadata']['detected_header_rows'] = $detectedHeaderRows;
+            foreach ($rows[$titleRowIndex]['cells'] as $cellIndex => $cell) {
+                $rows[$titleRowIndex]['cells'][$cellIndex]['is_title'] = true;
+                $rows[$titleRowIndex]['cells'][$cellIndex]['source_metadata']['detected_title_row'] = true;
+                $rows[$titleRowIndex]['cells'][$cellIndex]['source_metadata']['detected_header_rows'] = $detectedHeaderRows;
+            }
+        }
+
+        foreach ($headerRowIndices as $headerRowIndex) {
+            if (! isset($rows[$headerRowIndex])) {
+                continue;
+            }
+
+            $rows[$headerRowIndex]['row_type'] = 'header';
+            $rows[$headerRowIndex]['is_header'] = true;
+            $rows[$headerRowIndex]['source_metadata']['detected_header_rows'] = $detectedHeaderRows;
+
+            foreach ($rows[$headerRowIndex]['cells'] as $cellIndex => $cell) {
+                $rows[$headerRowIndex]['cells'][$cellIndex]['is_header'] = true;
+                $rows[$headerRowIndex]['cells'][$cellIndex]['source_metadata']['detected_header_rows'] = $detectedHeaderRows;
+            }
+        }
+
+        $rows = $this->applyDocxTableRowspans($rows);
+
+        $flatCells = [];
+
+        foreach ($rows as $row) {
+            foreach ((array) ($row['cells'] ?? []) as $cell) {
+                $flatCells[] = $cell;
+            }
+        }
+
+        $tableWarnings = [];
+
+        if ($hasMergedCells) {
+            $tableWarnings[] = 'merged_cells_detected';
+        }
+
+        if ($titleRowIndex !== null) {
+            $tableWarnings[] = 'title_row_detected';
+        }
+
+        if (count($headerRowIndices) > 1) {
+            $tableWarnings[] = 'multiple_header_rows_detected';
+        }
+
+        if ($hasVerticalMerges) {
+            $tableWarnings[] = 'vertical_merge_detected';
+        }
+
+        if ($headerRowIndices === []) {
+            $tableWarnings[] = 'no_explicit_header_detected';
+        }
+
+        $tableComplexity = (! $hasMergedCells && ! $hasVerticalMerges && $titleRowIndex === null && count($headerRowIndices) === 1 && ! $hasGroupRows)
+            ? 'simple'
+            : 'complex';
+
+        $tableWarnings = array_values(array_unique(array_filter($tableWarnings, static fn (string $warning): bool => trim($warning) !== '')));
+        $tableJson = [
+            'source_type' => 'docx_table',
+            'complexity' => $tableComplexity,
+            'warnings' => $tableWarnings,
+            'row_count' => $rowCount,
+            'column_count' => $columnCount,
+            'title_row_index' => $titleRowIndex,
+            'header_row_indices' => array_values($headerRowIndices),
+            'rows' => $rows,
+            'cells' => $flatCells,
+            'source_metadata' => [
+                'source_type' => 'docx_table',
+                'row_count' => $rowCount,
+                'column_count' => $columnCount,
+                'title_row_index' => $titleRowIndex,
+                'header_row_indices' => array_values($headerRowIndices),
+                'has_merged_cells' => $hasMergedCells,
+                'has_vertical_merges' => $hasVerticalMerges,
+                'has_group_rows' => $hasGroupRows,
+            ],
+        ];
+
+        $tableText = $this->buildDocxTableText($tableJson);
+        // Purpose: Keep markdown only as a legacy fallback. table_json is the source of truth.
+        $tableMarkdown = $this->buildDocxTableMarkdown($tableJson);
+        $tableHtml = $this->buildDocxTableHtml($tableJson);
+
+        $tableJson['table_text'] = $tableText;
+        $tableJson['table_markdown'] = $tableMarkdown;
+        $tableJson['table_html'] = $tableHtml;
+
+        return [
+            'table_json' => $tableJson,
+            'table_html' => $tableHtml,
+            'table_markdown' => $tableMarkdown,
+            'table_text' => $tableText,
+            'table_complexity' => $tableComplexity,
+            'table_warnings' => $tableWarnings,
+            'rows' => $rows,
+            'row_count' => $rowCount,
+            'column_count' => $columnCount,
+            'text' => $tableText,
+            'markdown' => $tableMarkdown,
+            'html' => $tableHtml,
+        ];
+    }
+
+    /**
+     * Purpose: Determine whether one DOCX table row should be treated as a title row.
+     * Inputs: The row cells and the logical column count.
+     * Returns: True when the row appears to be a title row rather than a header row.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $rowCells
+     */
+    private function isDocxTableTitleRow(array $rowCells, int $columnCount): bool
+    {
+        $nonEmptyCells = array_values(array_filter(
+            $rowCells,
+            static fn (array $cell): bool => trim((string) ($cell['text'] ?? '')) !== '',
+        ));
+
+        if (count($nonEmptyCells) !== 1) {
+            return false;
+        }
+
+        $firstNonEmptyCell = $nonEmptyCells[0];
+        $colSpan = max(1, (int) ($firstNonEmptyCell['colspan'] ?? 1));
+
+        if ($colSpan >= $columnCount) {
+            return true;
+        }
+
+        if (count($rowCells) === 1 && $columnCount > 1) {
+            return true;
+        }
+
+        return count($rowCells) > 1 && count($nonEmptyCells) === 1;
+    }
+
+    /**
+     * Purpose: Determine whether one DOCX table row behaves like a group row.
+     * Inputs: The row cells and the logical column count.
+     * Returns: True when the row looks like a section divider or grouped label row.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $rowCells
+     */
+    private function isDocxTableGroupRow(array $rowCells, int $columnCount): bool
+    {
+        $nonEmptyCells = array_values(array_filter(
+            $rowCells,
+            static fn (array $cell): bool => trim((string) ($cell['text'] ?? '')) !== '',
+        ));
+
+        if ($nonEmptyCells === []) {
+            return false;
+        }
+
+        if (count($nonEmptyCells) !== 1) {
+            return false;
+        }
+
+        $singleCell = $nonEmptyCells[0];
+        $colSpan = max(1, (int) ($singleCell['colspan'] ?? 1));
+
+        return $columnCount > 1 && $colSpan < $columnCount;
+    }
+
+    /**
+     * Purpose: Check whether one DOCX table row uses the explicit Word header-row marker.
+     * Inputs: The XML XPath helper and the row node.
+     * Returns: True when the table row is explicitly marked as a header.
+     * Side effects: None.
+     */
+    private function hasDocxTableHeaderFlag(DOMXPath $xpath, DOMElement $rowNode): bool
+    {
+        $headerNodes = $xpath->query('./w:trPr/w:tblHeader', $rowNode);
+
+        return $headerNodes !== false && $headerNodes->length > 0;
+    }
+
+    /**
+     * Purpose: Apply vertical merge spans to the parsed table rows.
+     * Inputs: The row matrix with cells and merge metadata.
+     * Returns: The same row matrix with calculated rowspan values where possible.
+     * Side effects: Marks merge continuations in the returned cell metadata.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyDocxTableRowspans(array $rows): array
+    {
+        $rowCount = count($rows);
+
+        for ($rowIndex = 0; $rowIndex < $rowCount; $rowIndex++) {
+            $cells = array_values(array_filter((array) ($rows[$rowIndex]['cells'] ?? []), static fn ($cell): bool => is_array($cell)));
+
+            foreach ($cells as $cellIndex => $cell) {
+                $vMerge = (string) data_get($cell, 'source_metadata.v_merge', '');
+
+                if ($vMerge !== 'restart') {
+                    continue;
+                }
+
+                $columnIndex = (int) ($cell['column_index'] ?? 0);
+                $rowspan = 1;
+
+                for ($nextRowIndex = $rowIndex + 1; $nextRowIndex < $rowCount; $nextRowIndex++) {
+                    $nextCells = array_values(array_filter((array) ($rows[$nextRowIndex]['cells'] ?? []), static fn ($candidate): bool => is_array($candidate)));
+                    $matchedCellIndex = $this->findDocxTableCellIndexAtColumn($nextCells, $columnIndex);
+
+                    if ($matchedCellIndex === null) {
+                        break;
+                    }
+
+                    $nextCell = $nextCells[$matchedCellIndex];
+
+                    if ((string) data_get($nextCell, 'source_metadata.v_merge', '') !== 'continue') {
+                        break;
+                    }
+
+                    $rowspan++;
+                    $rows[$nextRowIndex]['cells'][$matchedCellIndex]['is_vertical_merge_continuation'] = true;
+                    $rows[$nextRowIndex]['cells'][$matchedCellIndex]['source_metadata']['merged_into_row_index'] = $rowIndex;
+                    $rows[$nextRowIndex]['cells'][$matchedCellIndex]['source_metadata']['merged_into_column_index'] = $columnIndex;
+                }
+
+                $rows[$rowIndex]['cells'][$cellIndex]['rowspan'] = $rowspan;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Purpose: Locate a cell at a specific logical column index within one table row.
+     * Inputs: A row's cell list and the target column index.
+     * Returns: The matching cell index or null when no cell starts at that column.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $cells
+     */
+    private function findDocxTableCellIndexAtColumn(array $cells, int $columnIndex): ?int
+    {
+        foreach ($cells as $cellIndex => $cell) {
+            if ((int) ($cell['column_index'] ?? -1) === $columnIndex) {
+                return $cellIndex;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Create searchable plain text from a structured DOCX table.
+     * Inputs: The structured table JSON payload.
+     * Returns: A normalized text representation of the table.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $tableJson
+     */
+    private function buildDocxTableText(array $tableJson): string
+    {
+        $lines = [];
+        $rows = array_values(array_filter((array) ($tableJson['rows'] ?? []), static fn ($row): bool => is_array($row)));
+
+        foreach ($rows as $row) {
+            $rowType = (string) ($row['row_type'] ?? 'data');
+            $rowCells = array_values(array_filter((array) ($row['cells'] ?? []), static fn ($cell): bool => is_array($cell)));
+            $visibleCells = array_values(array_filter(
+                $rowCells,
+                static fn (array $cell): bool => (string) data_get($cell, 'source_metadata.v_merge', '') !== 'continue',
+            ));
+            $cellTexts = array_map(
+                static fn (array $cell): string => trim((string) ($cell['text'] ?? '')),
+                $visibleCells,
+            );
+
+            if ($rowType === 'title') {
+                $title = trim(implode(' ', array_filter($cellTexts, static fn (string $text): bool => $text !== '')));
+
+                if ($title !== '') {
+                    $lines[] = $title;
+                }
+
+                continue;
+            }
+
+            if ($cellTexts === []) {
+                continue;
+            }
+
+            $lines[] = implode(' | ', $cellTexts);
+        }
+
+        return trim(implode("\n", $lines));
+    }
+
+    /**
+     * Purpose: Create a markdown representation from a structured DOCX table for legacy fallback only.
+     * Inputs: The structured table JSON payload.
+     * Returns: A markdown table string that may be simplified for complex tables.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $tableJson
+     */
+    private function buildDocxTableMarkdown(array $tableJson): string
+    {
+        $rows = array_values(array_filter((array) ($tableJson['rows'] ?? []), static fn ($row): bool => is_array($row)));
+        $columnCount = max(1, (int) ($tableJson['column_count'] ?? 0));
+        $titleRowIndex = isset($tableJson['title_row_index']) ? (int) $tableJson['title_row_index'] : null;
+        $headerRowIndices = array_values(array_map(
+            static fn ($value): int => (int) $value,
+            (array) ($tableJson['header_row_indices'] ?? []),
+        ));
+        $headerRowIndex = $headerRowIndices[0] ?? null;
+        $titleLine = null;
+
+        if ($titleRowIndex !== null && isset($rows[$titleRowIndex])) {
+            $titleLine = trim(implode(' ', array_filter(array_map(
+                static fn (array $cell): string => trim((string) ($cell['text'] ?? '')),
+                array_values(array_filter((array) ($rows[$titleRowIndex]['cells'] ?? []), static fn ($cell): bool => is_array($cell))),
+            ), static fn (string $text): bool => $text !== '')));
+        }
+
+        $markdownLines = [];
+
+        if ($titleLine !== null && $titleLine !== '') {
+            $markdownLines[] = '**'.$titleLine.'**';
+        }
+
+        $headerLabels = [];
+
+        if ($headerRowIndex !== null && isset($rows[$headerRowIndex])) {
+            $headerLabels = $this->tableMarkdownLabelsFromRow($rows[$headerRowIndex], $columnCount);
+        } else {
+            $headerLabels = $this->tableMarkdownGenericLabels($columnCount);
+        }
+
+        if ($headerLabels === []) {
+            return implode("\n", $markdownLines);
+        }
+
+        $markdownLines[] = '| '.implode(' | ', $headerLabels).' |';
+        $markdownLines[] = '| '.implode(' | ', array_fill(0, count($headerLabels), '---')).' |';
+
+        foreach ($rows as $rowIndex => $row) {
+            if ((int) ($row['row_index'] ?? $rowIndex) === $titleRowIndex) {
+                continue;
+            }
+
+            if (in_array((int) ($row['row_index'] ?? $rowIndex), $headerRowIndices, true)) {
+                if ($headerRowIndex !== null && (int) ($row['row_index'] ?? $rowIndex) === $headerRowIndex) {
+                    continue;
+                }
+            }
+
+            $rowLabels = $this->tableMarkdownLabelsFromRow($row, $columnCount);
+
+            if ($rowLabels === [] || count(array_filter($rowLabels, static fn (string $value): bool => trim($value) !== '')) === 0) {
+                continue;
+            }
+
+            $markdownLines[] = '| '.implode(' | ', $rowLabels).' |';
+        }
+
+        return implode("\n", $markdownLines);
+    }
+
+    /**
+     * Purpose: Create a minimal HTML table representation from structured DOCX table data.
+     * Inputs: The structured table JSON payload.
+     * Returns: An HTML table string with preserved colspan and rowspan.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $tableJson
+     */
+    private function buildDocxTableHtml(array $tableJson): string
+    {
+        $rows = array_values(array_filter((array) ($tableJson['rows'] ?? []), static fn ($row): bool => is_array($row)));
+        $columnCount = max(1, (int) ($tableJson['column_count'] ?? 1));
+        $titleRowIndex = isset($tableJson['title_row_index']) ? (int) $tableJson['title_row_index'] : null;
+        $headerRowIndices = array_values(array_map(
+            static fn ($value): int => (int) $value,
+            (array) ($tableJson['header_row_indices'] ?? []),
+        ));
+        $titleText = null;
+
+        if ($titleRowIndex !== null && isset($rows[$titleRowIndex])) {
+            $titleText = trim(implode(' ', array_filter(array_map(
+                static fn (array $cell): string => trim((string) ($cell['text'] ?? '')),
+                array_values(array_filter((array) ($rows[$titleRowIndex]['cells'] ?? []), static fn ($cell): bool => is_array($cell))),
+            ), static fn (string $text): bool => $text !== '')));
+        }
+
+        $html = '<table style="width:100%; border-collapse:collapse; border:1px solid #cbd5e1; font-size:14px; line-height:1.4;">';
+        $hasThead = $titleText !== null && $titleText !== '' || $headerRowIndices !== [];
+
+        if ($hasThead) {
+            $html .= '<thead>';
+
+            if ($titleText !== null && $titleText !== '') {
+                $html .= '<tr><th colspan="'.$columnCount.'" scope="colgroup" style="padding:0.7rem 0.85rem; border:1px solid #cbd5e1; background:#f8fafc; font-weight:600; color:#0f172a;">'
+                    .htmlspecialchars($titleText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                    .'</th></tr>';
+            }
+
+            foreach ($headerRowIndices as $headerRowIndex) {
+                if (! isset($rows[$headerRowIndex])) {
+                    continue;
+                }
+
+                $html .= $this->buildDocxTableHtmlRow($rows[$headerRowIndex], $columnCount, true);
+            }
+
+            $html .= '</thead>';
+        }
+
+        $html .= '<tbody>';
+
+        foreach ($rows as $rowIndex => $row) {
+            if ($rowIndex === $titleRowIndex || in_array($rowIndex, $headerRowIndices, true)) {
+                continue;
+            }
+
+            $html .= $this->buildDocxTableHtmlRow($row, $columnCount, false);
+        }
+
+        $html .= '</tbody></table>';
+
+        return $html;
+    }
+
+    /**
+     * Purpose: Build one HTML row for a structured DOCX table.
+     * Inputs: One table row, the logical column count and whether the row is part of the table header.
+     * Returns: One HTML table row string.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function buildDocxTableHtmlRow(array $row, int $columnCount, bool $isHeaderRow): string
+    {
+        $rowType = (string) ($row['row_type'] ?? 'data');
+        $rowCells = array_values(array_filter((array) ($row['cells'] ?? []), static fn ($cell): bool => is_array($cell)));
+        $tagName = $isHeaderRow ? 'th' : 'td';
+        $html = '<tr>';
+        $renderedCellCount = 0;
+
+        foreach ($rowCells as $cellIndex => $cell) {
+            if ((bool) ($cell['is_vertical_merge_continuation'] ?? false)) {
+                continue;
+            }
+
+            $cellText = trim((string) ($cell['text'] ?? ''));
+            $colspan = max(1, (int) ($cell['colspan'] ?? 1));
+            $rowspan = max(1, (int) ($cell['rowspan'] ?? 1));
+            $style = 'padding:0.7rem 0.85rem; border:1px solid #cbd5e1; vertical-align:top;';
+
+            if ($isHeaderRow || $rowType === 'title') {
+                $style .= ' background:#f8fafc; font-weight:600; color:#0f172a;';
+            }
+
+            if ($rowType === 'group') {
+                $style .= ' background:#f8fafc; font-weight:600; color:#0f172a;';
+            }
+
+            $attributes = [
+                'style="'.$style.'"',
+            ];
+
+            if ($colspan > 1) {
+                $attributes[] = 'colspan="'.$colspan.'"';
+            }
+
+            if ($rowspan > 1) {
+                $attributes[] = 'rowspan="'.$rowspan.'"';
+            }
+
+            if ($isHeaderRow) {
+                $attributes[] = 'scope="col"';
+            } elseif ($rowType === 'group' && $renderedCellCount === 0) {
+                $attributes[] = 'scope="row"';
+            }
+
+            $content = $cellText !== ''
+                ? htmlspecialchars($cellText, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                : '&nbsp;';
+
+            if ($isHeaderRow || ($rowType === 'group' && $renderedCellCount === 0)) {
+                $html .= '<th '.implode(' ', $attributes).'>'.$content.'</th>';
+            } else {
+                $html .= '<td '.implode(' ', $attributes).'>'.$content.'</td>';
+            }
+
+            $renderedCellCount++;
+        }
+
+        if ($renderedCellCount === 0) {
+            $html .= '<td style="padding:0.7rem 0.85rem; border:1px solid #cbd5e1;" colspan="'.$columnCount.'">&nbsp;</td>';
+        }
+
+        $html .= '</tr>';
+
+        return $html;
+    }
+
+    /**
+     * Purpose: Build generic markdown header labels for tables without an explicit header row.
+     * Inputs: The logical column count.
+     * Returns: A list of generic column labels.
+     * Side effects: None.
+     */
+    private function tableMarkdownGenericLabels(int $columnCount): array
+    {
+        $labels = [];
+
+        for ($index = 0; $index < max(1, $columnCount); $index++) {
+            $labels[] = 'Column '.($index + 1);
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Purpose: Convert one structured table row into a markdown-friendly label list.
+     * Inputs: The table row and the logical column count.
+     * Returns: One list of cell texts padded to the logical column count.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function tableMarkdownLabelsFromRow(array $row, int $columnCount): array
+    {
+        $labels = [];
+        $rowCells = array_values(array_filter((array) ($row['cells'] ?? []), static fn ($cell): bool => is_array($cell)));
+
+        foreach ($rowCells as $cell) {
+            if ((string) data_get($cell, 'source_metadata.v_merge', '') === 'continue') {
+                continue;
+            }
+
+            $colspan = max(1, (int) ($cell['colspan'] ?? 1));
+            $text = trim((string) ($cell['text'] ?? ''));
+            $labels[] = $text;
+
+            for ($index = 1; $index < $colspan; $index++) {
+                $labels[] = '';
+            }
+        }
+
+        while (count($labels) < max(1, $columnCount)) {
+            $labels[] = '';
+        }
+
+        return array_slice($labels, 0, max(1, $columnCount));
+    }
+
+    /**
+     * Purpose: Determine whether a structured table row has visible text.
+     * Inputs: One table row cell list.
+     * Returns: True when at least one visible cell contains text.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $rowCells
+     */
+    private function rowHasVisibleText(array $rowCells): bool
+    {
+        foreach ($rowCells as $cell) {
+            if (trim((string) ($cell['text'] ?? '')) !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -635,16 +1566,30 @@ class KnowledgeDocumentStructureParser
      * @param array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }> $elements
      * @return array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }>
      */
     private function groupH2Sections(array $elements): array
@@ -663,7 +1608,12 @@ class KnowledgeDocumentStructureParser
 
             if ($type === 'heading' && $headingLevel === 1) {
                 if ($currentSection !== []) {
-                    $grouped[] = $this->buildH2SectionElement($currentSection);
+                    $section = $this->buildH2SectionElement($currentSection);
+
+                    if ($section !== null) {
+                        $grouped[] = $section;
+                    }
+
                     $currentSection = [];
                 }
 
@@ -672,11 +1622,33 @@ class KnowledgeDocumentStructureParser
 
             if ($type === 'heading' && $headingLevel === 2) {
                 if ($currentSection !== []) {
-                    $grouped[] = $this->buildH2SectionElement($currentSection);
+                    $section = $this->buildH2SectionElement($currentSection);
+
+                    if ($section !== null) {
+                        $grouped[] = $section;
+                    }
                 }
 
                 $element['text'] = $text;
                 $currentSection = [$element];
+
+                continue;
+            }
+
+            if ($type === 'table') {
+                if ($currentSection !== []) {
+                    $headingSeed = $currentSection[0] ?? null;
+                    $section = $this->buildH2SectionElement($currentSection);
+
+                    if ($section !== null) {
+                        $grouped[] = $section;
+                    }
+
+                    $currentSection = is_array($headingSeed) ? [$headingSeed] : [];
+                }
+
+                $element['text'] = $text;
+                $grouped[] = $element;
 
                 continue;
             }
@@ -693,7 +1665,11 @@ class KnowledgeDocumentStructureParser
         }
 
         if ($currentSection !== []) {
-            $grouped[] = $this->buildH2SectionElement($currentSection);
+            $section = $this->buildH2SectionElement($currentSection);
+
+            if ($section !== null) {
+                $grouped[] = $section;
+            }
         }
 
         return $grouped;
@@ -708,19 +1684,27 @@ class KnowledgeDocumentStructureParser
      * @param array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }> $sectionElements
      * @return array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
      *     relation_hint: ?string
-     * }
+     * }|null
      */
-    private function buildH2SectionElement(array $sectionElements): array
+    private function buildH2SectionElement(array $sectionElements): ?array
     {
         $firstElement = $sectionElements[0] ?? [];
         $textParts = [];
@@ -733,9 +1717,14 @@ class KnowledgeDocumentStructureParser
             }
         }
 
+        if (count($textParts) <= 1) {
+            return null;
+        }
+
         return [
             'type' => 'h2_section',
             'heading_path' => $this->normalizeNullableString($firstElement['heading_path'] ?? null),
+            'heading_context' => $this->normalizeNullableString($firstElement['heading_context'] ?? null) ?? $this->normalizeNullableString($firstElement['heading_path'] ?? null),
             'text' => trim(implode("\n\n", $textParts)),
             'heading_level' => 2,
             'relation_hint' => 'h2_section',
@@ -751,16 +1740,30 @@ class KnowledgeDocumentStructureParser
      * @param array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }> $elements
      * @return array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }>
      */
     private function mergeContiguousListElements(array $elements): array
@@ -792,6 +1795,7 @@ class KnowledgeDocumentStructureParser
             }
 
             $element['text'] = $text;
+            $element['heading_context'] = $element['heading_context'] ?? $element['heading_path'] ?? null;
             $merged[] = $element;
         }
 
@@ -807,9 +1811,16 @@ class KnowledgeDocumentStructureParser
      * @param array<int, array{
      *     type: string,
      *     heading_path: ?string,
+     *     heading_context: ?string,
      *     text: string,
      *     heading_level: ?int,
-     *     relation_hint: ?string
+     *     relation_hint: ?string,
+     *     table_markdown?: string,
+     *     table_text?: string,
+     *     rows?: array<int, array<int, string>>,
+     *     row_count?: int,
+     *     column_count?: int,
+     *     table_index_in_document?: int
      * }> $elements
      * @return array{
      *     document_format: string,
@@ -818,12 +1829,23 @@ class KnowledgeDocumentStructureParser
      *         id: string,
      *         type: string,
      *         heading_path: ?string,
+     *         heading_context: ?string,
      *         text: string,
      *         start_offset: int,
      *         end_offset: int,
      *         order_index: int,
      *         heading_level: ?int,
-     *         relation_hint: ?string
+     *         relation_hint: ?string,
+     *         table_json?: array<string, mixed>,
+     *         table_html?: string,
+     *         table_complexity?: string,
+     *         table_warnings?: array<int, string>,
+     *         table_markdown?: string,
+     *         table_text?: string,
+     *         rows?: array<int, array<int, string>>,
+     *         row_count?: int,
+     *         column_count?: int,
+     *         table_index_in_document?: int
      *     }>,
      *     word_count: int
      * }
@@ -847,9 +1869,20 @@ class KnowledgeDocumentStructureParser
             $merged[] = [
                 'type' => $type,
                 'heading_path' => $element['heading_path'] ?? null,
+                'heading_context' => $element['heading_context'] ?? $element['heading_path'] ?? null,
                 'text' => trim((string) ($element['text'] ?? '')),
                 'heading_level' => $element['heading_level'] ?? null,
                 'relation_hint' => $element['relation_hint'] ?? null,
+                'table_json' => $element['table_json'] ?? null,
+                'table_html' => $element['table_html'] ?? null,
+                'table_complexity' => $element['table_complexity'] ?? null,
+                'table_warnings' => $element['table_warnings'] ?? null,
+                'table_markdown' => $element['table_markdown'] ?? null,
+                'table_text' => $element['table_text'] ?? null,
+                'rows' => $element['rows'] ?? null,
+                'row_count' => $element['row_count'] ?? null,
+                'column_count' => $element['column_count'] ?? null,
+                'table_index_in_document' => $element['table_index_in_document'] ?? null,
             ];
         }
 
@@ -878,12 +1911,26 @@ class KnowledgeDocumentStructureParser
                 'id' => sprintf('element-%04d', count($finalElements) + 1),
                 'type' => (string) ($element['type'] ?? 'other'),
                 'heading_path' => $this->normalizeNullableString($element['heading_path'] ?? null),
+                'heading_context' => $this->normalizeNullableString($element['heading_context'] ?? $element['heading_path'] ?? null),
                 'text' => $text,
                 'start_offset' => $startOffset,
                 'end_offset' => $endOffset,
                 'order_index' => count($finalElements),
                 'heading_level' => isset($element['heading_level']) ? (int) $element['heading_level'] : null,
                 'relation_hint' => $this->normalizeNullableString($element['relation_hint'] ?? null),
+                'table_json' => is_array($element['table_json'] ?? null) ? $element['table_json'] : null,
+                'table_html' => $this->normalizeNullableString($element['table_html'] ?? null),
+                'table_complexity' => $this->normalizeNullableString($element['table_complexity'] ?? null),
+                'table_warnings' => isset($element['table_warnings']) && is_array($element['table_warnings']) ? array_values(array_filter(array_map(
+                    static fn ($warning): string => trim((string) ($warning ?? '')),
+                    $element['table_warnings'],
+                ), static fn (string $warning): bool => $warning !== '')) : null,
+                'table_markdown' => $this->normalizeNullableString($element['table_markdown'] ?? null),
+                'table_text' => $this->normalizeNullableString($element['table_text'] ?? null),
+                'rows' => isset($element['rows']) && is_array($element['rows']) ? $element['rows'] : null,
+                'row_count' => isset($element['row_count']) ? (int) $element['row_count'] : null,
+                'column_count' => isset($element['column_count']) ? (int) $element['column_count'] : null,
+                'table_index_in_document' => isset($element['table_index_in_document']) ? (int) $element['table_index_in_document'] : null,
             ];
         }
 

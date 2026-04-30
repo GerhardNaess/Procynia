@@ -655,6 +655,13 @@ class KnowledgeBaseController extends Controller
                         'embedding_model' => $chunk->embedding_model,
                         'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
                         'embedding_error' => $chunk->embedding_error,
+                        'table_markdown' => $chunk->table_markdown,
+                        'table_text' => $chunk->table_text,
+                        'table_metadata' => $chunk->table_metadata,
+                        'table_json' => $chunk->table_json,
+                        'table_html' => $chunk->table_html,
+                        'table_complexity' => $chunk->table_complexity,
+                        'table_warnings' => $chunk->table_warnings,
                         'source_filename' => $knowledgeDocument->original_filename,
                         'source_filetype' => $knowledgeDocument->mime_type,
                         'knowledge_item_id' => $knowledgeDocument->id,
@@ -699,7 +706,7 @@ class KnowledgeBaseController extends Controller
                 $candidateContent = trim($rawCandidateContent);
                 $candidateContentLength = mb_strlen($candidateContent, 'UTF-8');
                 $candidateWordCount = count(preg_split('/\s+/u', $candidateContent, -1, PREG_SPLIT_NO_EMPTY) ?: []);
-                $willSplit = $candidateWordCount > self::RULE_BASED_CHUNK_MAX_WORDS;
+                $willSplit = $chunkKind !== 'table' && $candidateWordCount > self::RULE_BASED_CHUNK_MAX_WORDS;
 
                 $chunkRange['candidate_index'] = $candidateIndex;
                 $chunkRange['content_length'] = $candidateContentLength;
@@ -755,6 +762,8 @@ class KnowledgeBaseController extends Controller
             }
         }
 
+        $chunkRanges = $this->subtractTableRangesFromSemanticRanges($chunkRanges);
+
         if ($chunkRanges !== []) {
             usort(
                 $chunkRanges,
@@ -806,6 +815,88 @@ class KnowledgeBaseController extends Controller
 
                 $headingPath = $this->cleanNullableString($chunkRange['heading_path'] ?? null, 255);
                 $chunkKind = (string) ($chunkRange['chunk_kind'] ?? 'h2_section');
+
+                if ($chunkKind === 'table') {
+                    $tableJson = is_array($chunkRange['table_json'] ?? null) ? $chunkRange['table_json'] : [];
+                    $tableText = trim((string) ($chunkRange['table_text'] ?? (string) data_get($tableJson, 'table_text', '')));
+                    // Purpose: Keep markdown only as a legacy fallback. table_json and table_html are the primary table representations.
+                    $tableMarkdown = trim((string) ($chunkRange['table_markdown'] ?? (string) data_get($tableJson, 'table_markdown', '')));
+                    $tableHtml = trim((string) ($chunkRange['table_html'] ?? (string) data_get($tableJson, 'table_html', '')));
+                    $tableComplexity = $this->cleanNullableString($chunkRange['table_complexity'] ?? data_get($tableJson, 'complexity'), 32) ?? 'complex';
+                    $tableWarnings = array_values(array_unique(array_filter(array_map(
+                        static fn ($warning): string => trim((string) ($warning ?? '')),
+                        (array) ($chunkRange['table_warnings'] ?? data_get($tableJson, 'warnings', [])),
+                    ), static fn (string $warning): bool => $warning !== '')));
+                    $tableLabel = $this->cleanNullableString($chunkRange['title'] ?? null, 255) ?? 'Tabell';
+                    $tableSectionPath = $this->cleanNullableString($chunkRange['section_path'] ?? null, 255) ?? $headingPath;
+                    $tableTitleText = $this->tableTitleFromJson($tableJson);
+                    $tableContentParts = [];
+
+                    if ($tableSectionPath !== null && $tableSectionPath !== '') {
+                        $tableContentParts[] = $tableSectionPath;
+                    }
+
+                    if ($tableTitleText !== null && $tableTitleText !== '' && $tableTitleText !== $tableLabel) {
+                        $tableContentParts[] = $tableTitleText;
+                    } else {
+                        $tableContentParts[] = $tableLabel;
+                    }
+
+                    if ($tableText !== '') {
+                        $tableContentParts[] = $tableText;
+                    }
+
+                    $content = trim(implode("\n\n", $tableContentParts));
+                    $wordCount = count(preg_split('/\s+/u', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+                    $contentLength = mb_strlen($content, 'UTF-8');
+
+                    if ($wordCount > self::RULE_BASED_CHUNK_MAX_WORDS && ! in_array('large_table_not_split', $tableWarnings, true)) {
+                        $tableWarnings[] = 'large_table_not_split';
+                    }
+
+                    $coveredCharacterCount += $endOffset - $startOffset;
+                    $lastAcceptedEndOffset = $endOffset;
+
+                    $chunkPayloads[] = [
+                        'content' => $content,
+                        'start_offset' => $startOffset,
+                        'end_offset' => $endOffset,
+                        'section_title' => $headingPath,
+                        'section_path' => $tableSectionPath ?? $headingPath,
+                        'heading_path' => $headingPath,
+                        'chunk_type' => 'table',
+                        'title' => $tableLabel,
+                        'part_index' => $partIndex,
+                        'topic' => null,
+                        'sub_topic' => null,
+                        'keywords' => null,
+                        'table_json' => $tableJson !== [] ? $tableJson : null,
+                        'table_html' => $tableHtml !== '' ? $tableHtml : null,
+                        'table_markdown' => $tableMarkdown !== '' ? $tableMarkdown : null,
+                        'table_text' => $tableText !== '' ? $tableText : null,
+                        'table_complexity' => $tableComplexity !== '' ? $tableComplexity : null,
+                        'table_warnings' => $tableWarnings,
+                        'table_metadata' => [
+                            'source' => 'docx_table',
+                            'heading_path' => $headingPath,
+                            'heading_title' => $this->cleanNullableString($tableTitleText ?? null, 255) ?? $tableLabel,
+                            'section_path' => $tableSectionPath ?? $headingPath,
+                            'row_count' => (int) data_get($tableJson, 'row_count', 0),
+                            'column_count' => (int) data_get($tableJson, 'column_count', 0),
+                            'table_index_in_document' => (int) data_get($tableJson, 'source_metadata.table_index_in_document', data_get($chunkRange, 'table_index_in_document', 0)),
+                            'source_table_start_offset' => $startOffset,
+                            'source_table_end_offset' => $endOffset,
+                            'split_part' => null,
+                            'split_total' => null,
+                            'original_row_count' => (int) data_get($tableJson, 'row_count', 0),
+                            'rows_in_part' => (int) data_get($tableJson, 'row_count', 0),
+                            'table_complexity' => $tableComplexity,
+                            'table_warnings' => $tableWarnings,
+                        ],
+                    ];
+
+                    continue;
+                }
 
                 if ($chunkKind === 'h1_section' && $partIndex === null && $headingPath !== null && $headingPath !== '') {
                     $content = trim($headingPath."\n\n".$content);
@@ -979,8 +1070,16 @@ class KnowledgeBaseController extends Controller
             $groupElements,
             static fn (array $element): bool => (string) data_get($element, 'type', '') === 'h2_section',
         ));
+        $tableElements = array_values(array_filter(
+            $groupElements,
+            static fn (array $element): bool => (string) data_get($element, 'type', '') === 'table',
+        ));
 
         if ($h2Sections === []) {
+            if ($tableElements !== []) {
+                return $this->buildRuleBasedChunkRangesForH1GroupWithTables($groupElements, $primaryHeading);
+            }
+
             $startOffset = null;
             $endOffset = null;
 
@@ -1012,17 +1111,40 @@ class KnowledgeBaseController extends Controller
         }
 
         $ranges = [];
-        $leadingStart = (int) data_get($groupElements[0], 'start_offset', 0);
+        $firstH2Start = (int) data_get($h2Sections[0], 'start_offset', 0);
+        $preH2Elements = array_values(array_filter(
+            $groupElements,
+            static fn (array $element): bool => (int) data_get($element, 'start_offset', 0) < $firstH2Start,
+        ));
+
+        if ($preH2Elements !== []) {
+            $leadingStart = null;
+
+            foreach ($preH2Elements as $element) {
+                $elementStart = (int) data_get($element, 'start_offset', 0);
+
+                if ($leadingStart === null || $elementStart < $leadingStart) {
+                    $leadingStart = $elementStart;
+                }
+            }
+
+            if ($leadingStart !== null && $leadingStart < $firstH2Start) {
+                $ranges[] = [
+                    'start_offset' => $leadingStart,
+                    'end_offset' => $firstH2Start,
+                    'heading_path' => $primaryHeading,
+                    'section_title' => $primaryHeading,
+                    'section_path' => $primaryHeading,
+                    'chunk_kind' => 'h1_section',
+                ];
+            }
+        }
 
         foreach ($h2Sections as $index => $h2Section) {
             $startOffset = (int) data_get($h2Section, 'start_offset', 0);
             $endOffset = (int) data_get($h2Section, 'end_offset', 0);
             $fullHeadingPath = $this->cleanNullableString($h2Section['heading_path'] ?? null, 255) ?? $primaryHeading;
             $headingTitle = $this->headingLeafFromPath($fullHeadingPath) ?? $fullHeadingPath;
-
-            if ($index === 0 && $leadingStart < $startOffset) {
-                $startOffset = $leadingStart;
-            }
 
             if ($endOffset <= $startOffset) {
                 continue;
@@ -1038,7 +1160,494 @@ class KnowledgeBaseController extends Controller
             ];
         }
 
+        foreach ($tableElements as $tableElement) {
+            foreach ($this->buildTableChunkRangesFromElement($tableElement) as $tableRange) {
+                $ranges[] = $tableRange;
+            }
+        }
+
         return $ranges;
+    }
+
+    /**
+     * Purpose: Convert a heading group without H2 sections into text and table chunk ranges.
+     * Inputs: Ordered elements belonging to one primary H1 context and a resolved primary heading.
+     * Returns: Ordered chunk ranges where text runs are semantic chunks and tables are dedicated table chunks.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $groupElements
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildRuleBasedChunkRangesForH1GroupWithTables(array $groupElements, string $primaryHeading): array
+    {
+        $ranges = [];
+        $currentTextElements = [];
+        $headingSeed = null;
+
+        foreach ($groupElements as $element) {
+            if ((string) data_get($element, 'type', '') === 'heading' && (int) data_get($element, 'heading_level', 0) === 1) {
+                $headingSeed = $element;
+
+                break;
+            }
+        }
+
+        if ($headingSeed === null && $groupElements !== []) {
+            $headingSeed = $groupElements[0];
+        }
+
+        $flushTextElements = function () use (&$ranges, &$currentTextElements, $primaryHeading): void {
+            if ($currentTextElements === []) {
+                return;
+            }
+
+            $startOffset = null;
+            $endOffset = null;
+
+            foreach ($currentTextElements as $element) {
+                $elementStart = (int) data_get($element, 'start_offset', 0);
+                $elementEnd = (int) data_get($element, 'end_offset', 0);
+
+                if ($startOffset === null || $elementStart < $startOffset) {
+                    $startOffset = $elementStart;
+                }
+
+                if ($endOffset === null || $elementEnd > $endOffset) {
+                    $endOffset = $elementEnd;
+                }
+            }
+
+            if (count($currentTextElements) === 1) {
+                $onlyElement = $currentTextElements[0] ?? [];
+                $onlyElementType = (string) data_get($onlyElement, 'type', '');
+                $onlyElementHeadingLevel = (int) data_get($onlyElement, 'heading_level', 0);
+
+                if ($onlyElementType === 'heading' && $onlyElementHeadingLevel === 1) {
+                    $currentTextElements = [];
+
+                    return;
+                }
+            }
+
+            if ($startOffset !== null && $endOffset !== null && $endOffset > $startOffset) {
+                $ranges[] = [
+                    'start_offset' => $startOffset,
+                    'end_offset' => $endOffset,
+                    'heading_path' => $primaryHeading,
+                    'section_title' => $primaryHeading,
+                    'section_path' => $primaryHeading,
+                    'chunk_kind' => 'h1_section',
+                ];
+            }
+
+            $currentTextElements = [];
+        };
+
+        foreach ($groupElements as $element) {
+            $type = (string) data_get($element, 'type', '');
+
+            if ($type === 'table') {
+                $flushTextElements();
+
+                foreach ($this->buildTableChunkRangesFromElement($element) as $tableRange) {
+                    $ranges[] = $tableRange;
+                }
+
+                $currentTextElements = is_array($headingSeed) ? [$headingSeed] : [];
+
+                continue;
+            }
+
+            $currentTextElements[] = $element;
+        }
+
+        $flushTextElements();
+
+        return $ranges;
+    }
+
+    /**
+     * Purpose: Convert one parsed table element into one dedicated table chunk range.
+     * Inputs: A parsed table element with structured table metadata.
+     * Returns: One ordered table chunk range that preserves the entire table structure.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $tableElement
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTableChunkRangesFromElement(array $tableElement): array
+    {
+        $tableJson = is_array(data_get($tableElement, 'table_json', null)) ? data_get($tableElement, 'table_json') : [];
+
+        if ($tableJson === []) {
+            return [];
+        }
+
+        $fullHeadingPath = $this->cleanNullableString($tableElement['heading_path'] ?? null, 255);
+        $headingTitle = $this->headingLeafFromPath($fullHeadingPath) ?? $fullHeadingPath;
+        $sectionPath = $fullHeadingPath ?? $headingTitle;
+        $tableIndexInDocument = isset($tableElement['table_index_in_document'])
+            ? (int) $tableElement['table_index_in_document']
+            : (int) data_get($tableJson, 'source_metadata.table_index_in_document', 0);
+        $sourceStartOffset = (int) data_get($tableElement, 'start_offset', 0);
+        $sourceEndOffset = (int) data_get($tableElement, 'end_offset', $sourceStartOffset);
+        $tableText = trim((string) data_get($tableElement, 'table_text', data_get($tableJson, 'table_text', data_get($tableElement, 'text', ''))));
+        // Purpose: Keep markdown only as a legacy fallback. table_json and table_html are the primary table representations.
+        $tableMarkdown = trim((string) data_get($tableElement, 'table_markdown', data_get($tableJson, 'table_markdown', '')));
+        $tableHtml = trim((string) data_get($tableElement, 'table_html', data_get($tableJson, 'table_html', '')));
+        $tableComplexity = $this->cleanNullableString(data_get($tableElement, 'table_complexity', data_get($tableJson, 'complexity')), 32) ?? 'complex';
+        $tableWarnings = array_values(array_unique(array_filter(array_map(
+            static fn ($warning): string => trim((string) ($warning ?? '')),
+            (array) data_get($tableElement, 'table_warnings', data_get($tableJson, 'warnings', [])),
+        ), static fn (string $warning): bool => $warning !== '')));
+        $tableTitleText = $this->tableTitleFromJson($tableJson);
+        $tableLabel = $tableTitleText !== null && $tableTitleText !== ''
+            ? $tableTitleText
+            : 'Tabell';
+        $tableContentParts = [];
+
+        if ($sectionPath !== null && $sectionPath !== '') {
+            $tableContentParts[] = $sectionPath;
+        }
+
+        $tableContentParts[] = $tableLabel;
+
+        if ($tableText !== '') {
+            $tableContentParts[] = $tableText;
+        }
+
+        $content = trim(implode("\n\n", $tableContentParts));
+        $wordCount = count(preg_split('/\s+/u', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
+        if ($wordCount > self::RULE_BASED_CHUNK_MAX_WORDS && ! in_array('large_table_not_split', $tableWarnings, true)) {
+            $tableWarnings[] = 'large_table_not_split';
+        }
+
+        $tableWarnings = array_values(array_unique(array_filter($tableWarnings, static fn (string $warning): bool => trim($warning) !== '')));
+        $rowCount = (int) data_get($tableJson, 'row_count', 0);
+        $columnCount = (int) data_get($tableJson, 'column_count', 0);
+
+        $tableMetadata = [
+            'source' => 'docx_table',
+            'heading_path' => $fullHeadingPath,
+            'heading_title' => $tableTitleText ?? $headingTitle,
+            'section_path' => $sectionPath,
+            'row_count' => $rowCount,
+            'column_count' => $columnCount,
+            'table_index_in_document' => $tableIndexInDocument,
+            'source_table_start_offset' => $sourceStartOffset,
+            'source_table_end_offset' => $sourceEndOffset,
+            'split_part' => null,
+            'split_total' => null,
+            'original_row_count' => $rowCount,
+            'rows_in_part' => $rowCount,
+            'table_complexity' => $tableComplexity,
+            'table_warnings' => $tableWarnings,
+        ];
+
+        return [[
+            'start_offset' => $sourceStartOffset,
+            'end_offset' => $sourceEndOffset,
+            'heading_path' => $headingTitle,
+            'section_title' => $headingTitle,
+            'section_path' => $sectionPath,
+            'chunk_kind' => 'table',
+            'title' => $tableLabel,
+            'table_index_in_document' => $tableIndexInDocument,
+            'part_index' => null,
+            'content' => $content,
+            'table_json' => $tableJson,
+            'table_html' => $tableHtml !== '' ? $tableHtml : null,
+            'table_markdown' => $tableMarkdown !== '' ? $tableMarkdown : null,
+            'table_text' => $tableText !== '' ? $tableText : null,
+            'table_complexity' => $tableComplexity,
+            'table_warnings' => $tableWarnings,
+            'table_metadata' => $tableMetadata,
+        ]];
+    }
+
+    /**
+     * Purpose: Remove any table overlaps from text ranges so table content only lives in table chunks.
+     * Inputs: Ordered chunk ranges that may include both semantic and table ranges.
+     * Returns: Chunk ranges where semantic ranges have been split around table ranges.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $chunkRanges
+     * @return array<int, array<string, mixed>>
+     */
+    private function subtractTableRangesFromSemanticRanges(array $chunkRanges): array
+    {
+        $tableRanges = array_values(array_filter(
+            $chunkRanges,
+            static fn (array $chunkRange): bool => (string) ($chunkRange['chunk_kind'] ?? '') === 'table',
+        ));
+
+        if ($tableRanges === []) {
+            return $chunkRanges;
+        }
+
+        $adjustedRanges = [];
+
+        foreach ($chunkRanges as $chunkRange) {
+            if ((string) ($chunkRange['chunk_kind'] ?? '') === 'table') {
+                $adjustedRanges[] = $chunkRange;
+
+                continue;
+            }
+
+            $segments = [[
+                'start_offset' => (int) ($chunkRange['start_offset'] ?? 0),
+                'end_offset' => (int) ($chunkRange['end_offset'] ?? 0),
+            ]];
+
+            foreach ($tableRanges as $tableRange) {
+                $tableStart = (int) ($tableRange['start_offset'] ?? 0);
+                $tableEnd = (int) ($tableRange['end_offset'] ?? 0);
+                $nextSegments = [];
+
+                foreach ($segments as $segment) {
+                    $segmentStart = (int) ($segment['start_offset'] ?? 0);
+                    $segmentEnd = (int) ($segment['end_offset'] ?? 0);
+
+                    if ($segmentEnd <= $segmentStart) {
+                        continue;
+                    }
+
+                    if ($tableEnd <= $segmentStart || $tableStart >= $segmentEnd) {
+                        $nextSegments[] = $segment;
+
+                        continue;
+                    }
+
+                    if ($tableStart > $segmentStart) {
+                        $nextSegments[] = [
+                            'start_offset' => $segmentStart,
+                            'end_offset' => min($tableStart, $segmentEnd),
+                        ];
+                    }
+
+                    if ($tableEnd < $segmentEnd) {
+                        $nextSegments[] = [
+                            'start_offset' => max($tableEnd, $segmentStart),
+                            'end_offset' => $segmentEnd,
+                        ];
+                    }
+                }
+
+                $segments = array_values(array_filter(
+                    $nextSegments,
+                    static fn (array $segment): bool => (int) ($segment['end_offset'] ?? 0) > (int) ($segment['start_offset'] ?? 0),
+                ));
+
+                if ($segments === []) {
+                    break;
+                }
+            }
+
+            foreach ($segments as $segment) {
+                $adjustedRange = $chunkRange;
+                $adjustedRange['start_offset'] = (int) ($segment['start_offset'] ?? $chunkRange['start_offset'] ?? 0);
+                $adjustedRange['end_offset'] = (int) ($segment['end_offset'] ?? $chunkRange['end_offset'] ?? 0);
+                $adjustedRanges[] = $adjustedRange;
+            }
+        }
+
+        return $adjustedRanges;
+    }
+
+    /**
+     * Purpose: Resolve the visible title text from a structured table payload.
+     * Inputs: The structured table JSON array.
+     * Returns: The title row text or null when no title row exists.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $tableJson
+     */
+    private function tableTitleFromJson(array $tableJson): ?string
+    {
+        $rows = array_values(array_filter((array) data_get($tableJson, 'rows', []), static fn ($row): bool => is_array($row)));
+        $titleRowIndex = isset($tableJson['title_row_index']) ? (int) $tableJson['title_row_index'] : null;
+
+        if ($titleRowIndex === null || ! isset($rows[$titleRowIndex])) {
+            return null;
+        }
+
+        $rowCells = array_values(array_filter((array) data_get($rows[$titleRowIndex], 'cells', []), static fn ($cell): bool => is_array($cell)));
+        $cellTexts = array_values(array_filter(array_map(
+            static fn (array $cell): string => trim((string) ($cell['text'] ?? '')),
+            $rowCells,
+        ), static fn (string $text): bool => $text !== ''));
+
+        return $cellTexts !== [] ? trim(implode(' ', $cellTexts)) : null;
+    }
+
+    /**
+     * Purpose: Split a table row matrix into controlled parts that stay under the configured word limit.
+     * Inputs: The normalized table rows and the maximum permitted word count per part.
+     * Returns: Ordered row parts where each part repeats the header row.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, string>> $rows
+     * @return array<int, array{
+     *     rows: array<int, array<int, string>>
+     * }>
+     */
+    private function splitTableRowsIntoParts(array $rows, int $maxWords): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        $headerRow = array_values((array) array_shift($rows));
+        $bodyRows = array_values(array_filter($rows, static fn ($row): bool => is_array($row)));
+
+        if ($bodyRows === []) {
+            return [[
+                'rows' => [$headerRow],
+            ]];
+        }
+
+        $parts = [];
+        $currentBodyRows = [];
+
+        foreach ($bodyRows as $row) {
+            $candidateRows = array_merge([$headerRow], $currentBodyRows, [$row]);
+            $candidateWordCount = $this->tableRowsWordCount($candidateRows);
+
+            if ($currentBodyRows !== [] && $candidateWordCount > $maxWords) {
+                $parts[] = [
+                    'rows' => array_merge([$headerRow], $currentBodyRows),
+                ];
+                $currentBodyRows = [];
+            }
+
+            $currentBodyRows[] = $row;
+        }
+
+        if ($currentBodyRows !== []) {
+            $parts[] = [
+                'rows' => array_merge([$headerRow], $currentBodyRows),
+            ];
+        }
+
+        if ($parts === []) {
+            $parts[] = [
+                'rows' => [$headerRow],
+            ];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * Purpose: Convert table rows into a searchable plain-text representation.
+     * Inputs: A row matrix with cell values.
+     * Returns: A newline-separated flat text table.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, string>> $rows
+     */
+    private function tableRowsToText(array $rows): string
+    {
+        $lines = [];
+
+        foreach ($rows as $row) {
+            $lines[] = implode(' | ', array_map(
+                static fn (string $cell): string => trim($cell),
+                $row,
+            ));
+        }
+
+        return trim(implode("\n", $lines));
+    }
+
+    /**
+     * Purpose: Convert table rows into markdown.
+     * Inputs: A row matrix with cell values.
+     * Returns: A simple markdown table string.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, string>> $rows
+     */
+    private function tableRowsToMarkdown(array $rows): string
+    {
+        if ($rows === []) {
+            return '';
+        }
+
+        $normalizedRows = array_map(
+            static fn (array $row): array => array_map(
+                static fn ($cell): string => trim((string) ($cell ?? '')),
+                $row,
+            ),
+            $rows,
+        );
+
+        $headerRow = array_shift($normalizedRows);
+
+        if (! is_array($headerRow) || $headerRow === []) {
+            return '';
+        }
+
+        $columnCount = count($headerRow);
+        foreach ($normalizedRows as $row) {
+            $columnCount = max($columnCount, count($row));
+        }
+
+        $padRow = static function (array $row, int $columnCount): array {
+            $normalized = array_map(
+                static fn ($cell): string => trim((string) ($cell ?? '')),
+                $row,
+            );
+
+            while (count($normalized) < $columnCount) {
+                $normalized[] = '';
+            }
+
+            return $normalized;
+        };
+
+        $markdownRows = [];
+        $markdownRows[] = '| '.implode(' | ', $padRow($headerRow, $columnCount)).' |';
+        $markdownRows[] = '| '.implode(' | ', array_fill(0, $columnCount, '---')).' |';
+
+        foreach ($normalizedRows as $row) {
+            $markdownRows[] = '| '.implode(' | ', $padRow($row, $columnCount)).' |';
+        }
+
+        return implode("\n", $markdownRows);
+    }
+
+    /**
+     * Purpose: Count the words in one normalized table row matrix.
+     * Inputs: The table rows that will be rendered into content.
+     * Returns: The approximate total word count.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, string>> $rows
+     */
+    private function tableRowsWordCount(array $rows): int
+    {
+        return count(preg_split('/\s+/u', trim($this->tableRowsToText($rows)), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+    }
+
+    /**
+     * Purpose: Count the widest column count in a normalized table row matrix.
+     * Inputs: The table rows that will be persisted as one chunk or chunk part.
+     * Returns: The maximum number of cells found in any row.
+     * Side effects: None.
+     *
+     * @param array<int, array<int, string>> $rows
+     */
+    private function tableColumnCount(array $rows): int
+    {
+        $columnCount = 0;
+
+        foreach ($rows as $row) {
+            $columnCount = max($columnCount, count($row));
+        }
+
+        return $columnCount;
     }
 
     /**
@@ -1217,6 +1826,13 @@ class KnowledgeBaseController extends Controller
                         'topic' => $chunkPayload['topic'] ?? null,
                         'sub_topic' => $chunkPayload['sub_topic'] ?? null,
                         'keywords' => $chunkPayload['keywords'] ?? null,
+                        'table_json' => $chunkPayload['table_json'] ?? null,
+                        'table_html' => $chunkPayload['table_html'] ?? null,
+                        'table_complexity' => $chunkPayload['table_complexity'] ?? null,
+                        'table_warnings' => $chunkPayload['table_warnings'] ?? null,
+                        'table_markdown' => $chunkPayload['table_markdown'] ?? null,
+                        'table_text' => $chunkPayload['table_text'] ?? null,
+                        'table_metadata' => $chunkPayload['table_metadata'] ?? null,
                     ],
                     $chunkPayloads,
                     array_keys($chunkPayloads),

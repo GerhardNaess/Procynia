@@ -209,6 +209,174 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_rule_based_h2_chunk_payload_builder_emits_dedicated_table_chunks_with_metadata(): void
+    {
+        $structure = $this->ruleBasedTableChunkStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $this->assertCount(4, $payloads);
+        $this->assertSame(
+            ['semantic', 'semantic', 'table', 'semantic'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
+                $payloads,
+            )),
+        );
+
+        $tablePayload = $payloads[2];
+
+        $this->assertSame('table', $tablePayload['chunk_type']);
+        $this->assertSame('docx_table', $tablePayload['table_metadata']['source'] ?? null);
+        $this->assertStringContainsString('| Tabell A | Tabell B |', $tablePayload['table_markdown']);
+        $this->assertStringContainsString('| --- | --- |', $tablePayload['table_markdown']);
+        $this->assertSame("Tabell A | Tabell B\nRad 1 | Rad 2", $tablePayload['table_text']);
+        $this->assertStringContainsString('<table', $tablePayload['table_html']);
+        $this->assertSame('simple', $tablePayload['table_complexity']);
+        $this->assertSame([], $tablePayload['table_warnings']);
+        $this->assertNotContains('markdown_is_simplified', $tablePayload['table_warnings']);
+        $this->assertSame('docx_table', $tablePayload['table_json']['source_type'] ?? null);
+        $this->assertSame('simple', $tablePayload['table_json']['complexity'] ?? null);
+        $this->assertSame([], $tablePayload['table_json']['warnings'] ?? []);
+        $this->assertSame('header', $tablePayload['table_json']['rows'][0]['row_type'] ?? null);
+        $this->assertStringContainsString('Kapittel 2 > Underseksjon A', $tablePayload['content']);
+        $this->assertStringContainsString('Tabell A | Tabell B', $tablePayload['content']);
+
+        $this->assertStringNotContainsString('Tabell A | Tabell B', $payloads[0]['content']);
+        $this->assertStringNotContainsString('Tabell A | Tabell B', $payloads[1]['content']);
+        $this->assertStringNotContainsString('Tabell A | Tabell B', $payloads[3]['content']);
+        $this->assertStringContainsString('Innledning før tabell.', $payloads[1]['content']);
+        $this->assertStringContainsString('Etter tabell.', $payloads[3]['content']);
+    }
+
+    public function test_knowledge_document_upload_persists_table_chunks_separately_from_text_chunks(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Table AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('table-pipeline.docx', [
+                ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
+                ['text' => 'Innledning før tabell.', 'style' => 'Normal'],
+                ['text' => 'Underseksjon A', 'style' => 'Heading2'],
+                ['text' => 'Tekst før tabell.', 'style' => 'Normal'],
+                ['text' => '', 'style' => 'Table'],
+                ['text' => 'Tekst etter tabell.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'table-pipeline.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $tableChunks = $chunks->filter(static fn (KnowledgeItemChunk $chunk): bool => $chunk->chunk_type === 'table');
+        $semanticChunks = $chunks->filter(static fn (KnowledgeItemChunk $chunk): bool => $chunk->chunk_type === 'semantic');
+
+        $this->assertGreaterThanOrEqual(1, $tableChunks->count());
+        $this->assertGreaterThanOrEqual(2, $semanticChunks->count());
+
+        $tableChunk = $tableChunks->first();
+
+        $this->assertNotNull($tableChunk);
+        $this->assertSame('table', $tableChunk->chunk_type);
+        $this->assertSame('docx_table', $tableChunk->table_metadata['source'] ?? null);
+        $this->assertSame(2, $tableChunk->table_metadata['row_count'] ?? null);
+        $this->assertSame(2, $tableChunk->table_metadata['column_count'] ?? null);
+        $this->assertSame('simple', $tableChunk->table_complexity);
+        $this->assertSame([], $tableChunk->table_warnings);
+        $this->assertIsArray($tableChunk->table_json);
+        $this->assertSame('docx_table', $tableChunk->table_json['source_type'] ?? null);
+        $this->assertNotEmpty($tableChunk->table_markdown);
+        $this->assertNotEmpty($tableChunk->table_html);
+        $this->assertNotEmpty($tableChunk->table_text);
+        $this->assertNotContains('markdown_is_simplified', $tableChunk->table_warnings);
+        $this->assertStringContainsString('Tabell A', (string) $tableChunk->content);
+        $this->assertStringContainsString('Rad 1', (string) $tableChunk->content);
+        $this->assertStringContainsString('| Tabell A | Tabell B |', (string) $tableChunk->table_markdown);
+        $this->assertStringContainsString('Tabell A | Tabell B', (string) $tableChunk->table_text);
+        $this->assertStringContainsString('<table', (string) $tableChunk->table_html);
+
+        $semanticContents = $semanticChunks->map(
+            static fn (KnowledgeItemChunk $chunk): string => (string) $chunk->content,
+        )->implode("\n\n");
+
+        $this->assertStringContainsString('Innledning før tabell.', $semanticContents);
+        $this->assertStringContainsString('Tekst før tabell.', $semanticContents);
+        $this->assertStringContainsString('Tekst etter tabell.', $semanticContents);
+        $this->assertStringNotContainsString('Tabell A | Tabell B', $semanticContents);
+        $this->assertStringNotContainsString('Rad 1 | Rad 2', $semanticContents);
+
+        foreach ($semanticChunks as $semanticChunk) {
+            $this->assertStringNotContainsString('Tabell A | Tabell B', (string) $semanticChunk->content);
+            $this->assertStringNotContainsString('Rad 1 | Rad 2', (string) $semanticChunk->content);
+        }
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+            $tableChunk = $chunks->firstWhere('chunk_type', 'table');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && $tableChunk !== null
+                && data_get($tableChunk, 'table_markdown') !== null
+                && data_get($tableChunk, 'table_text') !== null
+                && data_get($tableChunk, 'table_html') !== null
+                && data_get($tableChunk, 'table_complexity') === 'simple'
+                && data_get($tableChunk, 'table_warnings') === []
+                && is_array(data_get($tableChunk, 'table_json'))
+                && data_get($tableChunk, 'table_metadata.source') === 'docx_table';
+        });
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_keeps_pre_h2_text_and_tables_under_the_previous_h1_context(): void
+    {
+        $structure = $this->ruleBasedPreH2TableStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $this->assertCount(3, $payloads);
+        $this->assertSame(
+            ['1 Overskrift test', '1 Overskrift test', '1.1 Dokumentasjonskrav for drift'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['heading_path'] ?? null,
+                $payloads,
+            )),
+        );
+        $this->assertSame(
+            ['semantic', 'table', 'semantic'],
+            array_values(array_map(
+                static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
+                $payloads,
+            )),
+        );
+
+        $this->assertSame('1 Overskrift test', $payloads[0]['section_path']);
+        $this->assertStringContainsString('Tekst før tabell.', (string) $payloads[0]['content']);
+        $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $payloads[0]['content']);
+
+        $this->assertSame('table', $payloads[1]['chunk_type']);
+        $this->assertSame('1 Overskrift test', $payloads[1]['heading_path']);
+        $this->assertSame('1 Overskrift test', $payloads[1]['section_path']);
+        $this->assertStringContainsString('Tabell A | Tabell B', (string) $payloads[1]['content']);
+        $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $payloads[1]['content']);
+
+        $this->assertSame('1 Overskrift test > 1.1 Dokumentasjonskrav for drift', $payloads[2]['section_path']);
+        $this->assertSame('1.1 Dokumentasjonskrav for drift', $payloads[2]['heading_path']);
+        $this->assertStringContainsString('Tekst etter H2.', (string) $payloads[2]['content']);
+        $this->assertStringNotContainsString('Tekst før tabell.', (string) $payloads[2]['content']);
+    }
+
     public function test_rule_based_h2_chunk_payload_builder_includes_h1_only_sections_without_duplication(): void
     {
         $structure = $this->ruleBasedChunkStructureFixture();
@@ -1634,6 +1802,397 @@ class KnowledgeBaseControllerTest extends TestCase
     }
 
     /**
+     * Purpose: Build a synthetic fixture where a table appears before the first H2 section.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array that keeps the table under the parent H1 context.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedPreH2TableStructureFixture(): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'paragraph',
+                'heading_path' => '1 Overskrift test',
+                'text' => 'Tekst før tabell.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'table',
+                'heading_path' => '1 Overskrift test',
+                'heading_context' => '1 Overskrift test',
+                'text' => "Tabell A | Tabell B\nRad 1 | Rad 2",
+                'table_json' => [
+                    'source_type' => 'docx_table',
+                    'complexity' => 'simple',
+                    'warnings' => [],
+                    'row_count' => 2,
+                    'column_count' => 2,
+                    'title_row_index' => null,
+                    'header_row_indices' => [0],
+                    'table_index_in_document' => 0,
+                    'rows' => [
+                        [
+                            'row_index' => 0,
+                            'row_type' => 'header',
+                            'is_title' => false,
+                            'is_header' => true,
+                            'is_empty' => false,
+                            'explicit_header' => true,
+                            'cells' => [
+                                [
+                                    'row_index' => 0,
+                                    'cell_index' => 0,
+                                    'column_index' => 0,
+                                    'text' => 'Tabell A',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => true,
+                                    'is_title' => false,
+                                    'style_hints' => ['header_row'],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 0,
+                                        'cell_index' => 0,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                                [
+                                    'row_index' => 0,
+                                    'cell_index' => 1,
+                                    'column_index' => 1,
+                                    'text' => 'Tabell B',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => true,
+                                    'is_title' => false,
+                                    'style_hints' => ['header_row'],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 0,
+                                        'cell_index' => 1,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                            ],
+                            'source_metadata' => [
+                                'row_index' => 0,
+                                'explicit_header' => true,
+                                'column_count' => 2,
+                                'row_count' => 2,
+                                'detected_header_rows' => [0],
+                            ],
+                        ],
+                        [
+                            'row_index' => 1,
+                            'row_type' => 'data',
+                            'is_title' => false,
+                            'is_header' => false,
+                            'is_empty' => false,
+                            'explicit_header' => false,
+                            'cells' => [
+                                [
+                                    'row_index' => 1,
+                                    'cell_index' => 0,
+                                    'column_index' => 0,
+                                    'text' => 'Rad 1',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => false,
+                                    'is_title' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 1,
+                                        'cell_index' => 0,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                                [
+                                    'row_index' => 1,
+                                    'cell_index' => 1,
+                                    'column_index' => 1,
+                                    'text' => 'Rad 2',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => false,
+                                    'is_title' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 1,
+                                        'cell_index' => 1,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                            ],
+                            'source_metadata' => [
+                                'row_index' => 1,
+                                'explicit_header' => false,
+                                'column_count' => 2,
+                                'row_count' => 2,
+                            ],
+                        ],
+                    ],
+                    'cells' => [],
+                    'source_metadata' => [
+                        'source_type' => 'docx_table',
+                        'row_count' => 2,
+                        'column_count' => 2,
+                        'title_row_index' => null,
+                        'header_row_indices' => [0],
+                        'table_index_in_document' => 0,
+                        'has_merged_cells' => false,
+                        'has_vertical_merges' => false,
+                        'has_group_rows' => false,
+                    ],
+                ],
+                'table_html' => '<table><thead><tr><th scope="col">Tabell A</th><th scope="col">Tabell B</th></tr></thead><tbody><tr><td>Rad 1</td><td>Rad 2</td></tr></tbody></table>',
+                'row_count' => 2,
+                'column_count' => 2,
+                'table_markdown' => "| Tabell A | Tabell B |\n| --- | --- |\n| Rad 1 | Rad 2 |",
+                'table_text' => "Tabell A | Tabell B\nRad 1 | Rad 2",
+                'table_complexity' => 'simple',
+                'table_warnings' => [],
+                'table_index_in_document' => 0,
+                'heading_level' => null,
+                'relation_hint' => 'table_group',
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => '1 Overskrift test > 1.1 Dokumentasjonskrav for drift',
+                'text' => "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2.",
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a synthetic fixture with one H2 section that contains a table between text blocks.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with a dedicated table element.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedTableChunkStructureFixture(): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'Kapittel 2',
+                'text' => 'Kapittel 2 tekst.',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > Underseksjon A',
+                'text' => 'Innledning før tabell.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'table',
+                'heading_path' => 'Kapittel 2 > Underseksjon A',
+                'heading_context' => 'Kapittel 2 > Underseksjon A',
+                'text' => "Tabell A | Tabell B\nRad 1 | Rad 2",
+                'table_json' => [
+                    'source_type' => 'docx_table',
+                    'complexity' => 'simple',
+                    'warnings' => [],
+                    'row_count' => 2,
+                    'column_count' => 2,
+                    'title_row_index' => null,
+                    'header_row_indices' => [0],
+                    'table_index_in_document' => 0,
+                    'rows' => [
+                        [
+                            'row_index' => 0,
+                            'row_type' => 'header',
+                            'is_title' => false,
+                            'is_header' => true,
+                            'is_empty' => false,
+                            'explicit_header' => true,
+                            'cells' => [
+                                [
+                                    'row_index' => 0,
+                                    'cell_index' => 0,
+                                    'column_index' => 0,
+                                    'text' => 'Tabell A',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => true,
+                                    'is_title' => false,
+                                    'style_hints' => ['header_row'],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 0,
+                                        'cell_index' => 0,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                                [
+                                    'row_index' => 0,
+                                    'cell_index' => 1,
+                                    'column_index' => 1,
+                                    'text' => 'Tabell B',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => true,
+                                    'is_title' => false,
+                                    'style_hints' => ['header_row'],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 0,
+                                        'cell_index' => 1,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                            ],
+                            'source_metadata' => [
+                                'row_index' => 0,
+                                'explicit_header' => true,
+                                'column_count' => 2,
+                                'row_count' => 2,
+                                'detected_header_rows' => [0],
+                            ],
+                        ],
+                        [
+                            'row_index' => 1,
+                            'row_type' => 'data',
+                            'is_title' => false,
+                            'is_header' => false,
+                            'is_empty' => false,
+                            'explicit_header' => false,
+                            'cells' => [
+                                [
+                                    'row_index' => 1,
+                                    'cell_index' => 0,
+                                    'column_index' => 0,
+                                    'text' => 'Rad 1',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => false,
+                                    'is_title' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 1,
+                                        'cell_index' => 0,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                                [
+                                    'row_index' => 1,
+                                    'cell_index' => 1,
+                                    'column_index' => 1,
+                                    'text' => 'Rad 2',
+                                    'is_empty' => false,
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_header' => false,
+                                    'is_title' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [
+                                        'grid_span' => 1,
+                                        'v_merge' => null,
+                                        'row_index' => 1,
+                                        'cell_index' => 1,
+                                        'detected_title_row' => false,
+                                        'detected_header_rows' => [0],
+                                        'column_count' => 2,
+                                        'row_count' => 2,
+                                    ],
+                                ],
+                            ],
+                            'source_metadata' => [
+                                'row_index' => 1,
+                                'explicit_header' => false,
+                                'column_count' => 2,
+                                'row_count' => 2,
+                            ],
+                        ],
+                    ],
+                    'cells' => [],
+                    'source_metadata' => [
+                        'source_type' => 'docx_table',
+                        'row_count' => 2,
+                        'column_count' => 2,
+                        'title_row_index' => null,
+                        'header_row_indices' => [0],
+                        'table_index_in_document' => 0,
+                        'has_merged_cells' => false,
+                        'has_vertical_merges' => false,
+                        'has_group_rows' => false,
+                    ],
+                ],
+                'table_html' => '<table><thead><tr><th scope="col">Tabell A</th><th scope="col">Tabell B</th></tr></thead><tbody><tr><td>Rad 1</td><td>Rad 2</td></tr></tbody></table>',
+                'row_count' => 2,
+                'column_count' => 2,
+                'table_markdown' => "| Tabell A | Tabell B |\n| --- | --- |\n| Rad 1 | Rad 2 |",
+                'table_text' => "Tabell A | Tabell B\nRad 1 | Rad 2",
+                'table_complexity' => 'simple',
+                'table_warnings' => [],
+                'table_index_in_document' => 0,
+                'heading_level' => null,
+                'relation_hint' => 'table_group',
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'Kapittel 2 > Underseksjon A',
+                'text' => 'Etter tabell.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+    }
+
+    /**
      * Purpose: Build a synthetic H2 section fixture that straddles the chunk threshold with two paragraph blocks.
      * Inputs: Word counts for the first and second paragraph blocks.
      * Returns: A parsed-structure shaped array with one H2 section.
@@ -1696,6 +2255,24 @@ class KnowledgeBaseControllerTest extends TestCase
                 'relation_hint' => $section['relation_hint'],
             ];
 
+            foreach ([
+                'heading_context',
+                'table_json',
+                'table_html',
+                'table_complexity',
+                'table_warnings',
+                'table_markdown',
+                'table_text',
+                'rows',
+                'row_count',
+                'column_count',
+                'table_index_in_document',
+            ] as $optionalKey) {
+                if (array_key_exists($optionalKey, $section)) {
+                    $elements[$index][$optionalKey] = $section[$optionalKey];
+                }
+            }
+
             if ($index < $lastIndex) {
                 $cursor += 2;
             }
@@ -1747,7 +2324,12 @@ class KnowledgeBaseControllerTest extends TestCase
         if ($style === 'Table') {
             return <<<'XML'
 <w:tbl>
+    <w:tblGrid>
+        <w:gridCol w:w="2400"/>
+        <w:gridCol w:w="2400"/>
+    </w:tblGrid>
     <w:tr>
+        <w:trPr><w:tblHeader/></w:trPr>
         <w:tc><w:p><w:r><w:t>Tabell A</w:t></w:r></w:p></w:tc>
         <w:tc><w:p><w:r><w:t>Tabell B</w:t></w:r></w:p></w:tc>
     </w:tr>

@@ -190,6 +190,159 @@ function getChunkDisplayTitle(chunk, index = 0) {
     return title !== '' ? title : `Chunk ${index + 1}`;
 }
 
+function getChunkTypeLabel(chunk) {
+    if (chunk?.chunk_type === 'table') {
+        return 'Tabell';
+    }
+
+    if (chunk?.chunk_type === 'document') {
+        return 'Dokument';
+    }
+
+    return 'Tekst';
+}
+
+/**
+ * Purpose: Remove markdown-only table warnings from the user-facing warning list.
+ * Inputs: Raw warning values from a selected knowledge chunk.
+ * Returns: A filtered list of displayable warnings.
+ * Side effects: None.
+ */
+function normalizeTableWarningsForDisplay(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((warning) => String(warning ?? '').trim())
+        .filter((warning) => warning !== '' && warning !== 'markdown_is_simplified');
+}
+
+/**
+ * Purpose: Render a structured table preview from the structured table model.
+ * Inputs: A knowledge chunk table_json payload.
+ * Returns: A React table preview or null when no structured rows are available.
+ * Side effects: None.
+ */
+function StructuredTablePreview({ tableJson }) {
+    const rows = Array.isArray(tableJson?.rows) ? tableJson.rows.filter((row) => row && typeof row === 'object') : [];
+
+    if (rows.length === 0) {
+        return null;
+    }
+
+    const columnCount = Math.max(1, Number(tableJson?.column_count ?? 0));
+    const titleRowIndex = Number.isInteger(tableJson?.title_row_index) ? tableJson.title_row_index : null;
+    const headerRowIndices = Array.isArray(tableJson?.header_row_indices)
+        ? tableJson.header_row_indices
+            .map((index) => Number(index))
+            .filter((index) => Number.isInteger(index) && index >= 0)
+        : [];
+    const headerRowIndexSet = new Set(headerRowIndices);
+    const titleRow = titleRowIndex !== null ? rows[titleRowIndex] ?? null : null;
+    const bodyRows = rows.filter((_, index) => index !== titleRowIndex && !headerRowIndexSet.has(index));
+
+    const renderRowCell = (cell, rowType, rowIndex, cellIndex, isHeaderRow) => {
+        const cellText = String(cell?.text ?? '').trim();
+        const colspan = Math.max(1, Number(cell?.colspan ?? 1));
+        const rowspan = Math.max(1, Number(cell?.rowspan ?? 1));
+        const isGroupLead = rowType === 'group' && cellIndex === 0;
+        const CellTag = isHeaderRow || rowType === 'title' || isGroupLead ? 'th' : 'td';
+        const cellProps = {
+            key: `cell-${rowIndex}-${cellIndex}`,
+            className: classNames(
+                'border border-slate-200 px-3 py-2 align-top text-slate-700',
+                isHeaderRow || rowType === 'title' || rowType === 'group'
+                    ? 'bg-slate-50 font-semibold text-slate-950'
+                    : 'bg-white',
+            ),
+        };
+
+        if (colspan > 1) {
+            cellProps.colSpan = colspan;
+        }
+
+        if (rowspan > 1) {
+            cellProps.rowSpan = rowspan;
+        }
+
+        if (isHeaderRow || rowType === 'title') {
+            cellProps.scope = 'col';
+        } else if (isGroupLead) {
+            cellProps.scope = 'row';
+        }
+
+        return (
+            <CellTag {...cellProps}>
+                {cellText !== '' ? cellText : '\u00A0'}
+            </CellTag>
+        );
+    };
+
+    const renderRow = (row, rowIndex, isHeaderRow = false) => {
+        const rowCells = Array.isArray(row?.cells) ? row.cells.filter((cell) => cell && typeof cell === 'object') : [];
+        const visibleCells = rowCells.filter((cell) => String(cell?.source_metadata?.v_merge ?? '').trim() !== 'continue');
+        const rowType = String(row?.row_type ?? 'data');
+
+        if (rowType === 'title') {
+            const titleText = visibleCells
+                .map((cell) => String(cell?.text ?? '').trim())
+                .filter((text) => text !== '')
+                .join(' ');
+
+            return (
+                <tr key={`row-${rowIndex}`}>
+                    <th
+                        colSpan={columnCount}
+                        scope="colgroup"
+                        className="border border-slate-200 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-950"
+                    >
+                        {titleText !== '' ? titleText : '\u00A0'}
+                    </th>
+                </tr>
+            );
+        }
+
+        if (visibleCells.length === 0) {
+            return (
+                <tr key={`row-${rowIndex}`}>
+                    <td className="border border-slate-200 px-3 py-2 text-slate-700" colSpan={columnCount}>
+                        &nbsp;
+                    </td>
+                </tr>
+            );
+        }
+
+        return (
+            <tr key={`row-${rowIndex}`}>
+                {visibleCells.map((cell, cellIndex) => renderRowCell(cell, rowType, rowIndex, cellIndex, isHeaderRow))}
+            </tr>
+        );
+    };
+
+    return (
+        <div className="mt-4 overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
+            <table className="min-w-full border-collapse text-sm">
+                {(titleRow || headerRowIndices.length > 0) ? (
+                    <thead>
+                        {titleRow ? renderRow(titleRow, titleRowIndex, false) : null}
+                        {headerRowIndices.map((headerRowIndex) => {
+                            if (!rows[headerRowIndex]) {
+                                return null;
+                            }
+
+                            return renderRow(rows[headerRowIndex], headerRowIndex, true);
+                        })}
+                    </thead>
+                ) : null}
+                <tbody>
+                    {bodyRows.map((row, rowIndex) => renderRow(row, rowIndex, false))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 function buildHistoryEntries(item, locale, status) {
     const entries = [];
 
@@ -290,6 +443,7 @@ export default function KnowledgeBaseShow({
     const selectedChunkReviewStatus = selectedChunk ? getChunkReviewStatus(selectedChunk) : 'pending_review';
     const selectedChunkReviewStatusMeta = CHUNK_REVIEW_STATUS_META[selectedChunkReviewStatus] ?? CHUNK_REVIEW_STATUS_META.pending_review;
     const selectedChunkDisplayTitle = selectedChunk ? getChunkDisplayTitle(selectedChunk, selectedChunkIndex) : 'Chunk';
+    const selectedChunkTableWarnings = normalizeTableWarningsForDisplay(selectedChunk?.table_warnings);
     const progressPercent = totalChunksCount > 0
         ? Math.round((readyChunksCount / totalChunksCount) * 100)
         : 0;
@@ -738,6 +892,9 @@ export default function KnowledgeBaseShow({
                                                                     <div className="text-sm font-medium text-slate-950">
                                                                         {getChunkDisplayTitle(chunk, index)}
                                                                     </div>
+                                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                                                        {getChunkTypeLabel(chunk)}
+                                                                    </span>
                                                                     {isSelected ? (
                                                                         <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
                                                                             Valgt
@@ -794,6 +951,9 @@ export default function KnowledgeBaseShow({
                                                             </span>
                                                             <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
                                                                 {selectedChunkIndex >= 0 ? `Chunk ${selectedChunkIndex + 1}` : 'Chunk'}
+                                                            </span>
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                                                {getChunkTypeLabel(selectedChunk)}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -869,11 +1029,52 @@ export default function KnowledgeBaseShow({
                                                         ) : null}
                                                     </div>
 
-                                                    <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                        <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
-                                                            {selectedChunk.content || selectedChunk.content_preview || 'Ingen forhåndsvisning tilgjengelig.'}
-                                                        </p>
-                                                    </div>
+                                                    {selectedChunk.chunk_type === 'table' ? (
+                                                        <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
+                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                Tabell
+                                                            </div>
+                                                            {selectedChunk.table_complexity === 'complex' ? (
+                                                                <div className="mt-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                                                    Kompleks tabell – struktur er bevart og bør kvalitetssikres.
+                                                                </div>
+                                                            ) : null}
+                                                            {selectedChunkTableWarnings.length > 0 ? (
+                                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                                    {selectedChunkTableWarnings.map((warning) => (
+                                                                        <span
+                                                                            key={warning}
+                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                                                                        >
+                                                                            {warning}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ) : null}
+                                                            {selectedChunk.table_html ? (
+                                                                <div
+                                                                    className="mt-4 overflow-x-auto rounded-[14px]"
+                                                                    dangerouslySetInnerHTML={{ __html: selectedChunk.table_html }}
+                                                                />
+                                                            ) : selectedChunk.table_json ? (
+                                                                <StructuredTablePreview tableJson={selectedChunk.table_json} />
+                                                            ) : selectedChunk.table_text ? (
+                                                                <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                    {selectedChunk.table_text}
+                                                                </pre>
+                                                            ) : (
+                                                                <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                    {selectedChunk.table_markdown || 'Ingen tabellvisning tilgjengelig.'}
+                                                                </pre>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
+                                                            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                                                                {selectedChunk.content || selectedChunk.content_preview || 'Ingen forhåndsvisning tilgjengelig.'}
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                 </div>
 
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">
