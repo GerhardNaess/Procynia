@@ -281,7 +281,60 @@ function normalizeAnswerDraftPayload(answerDraft) {
         knowledge_grounding: normalizeKnowledgeGroundingPayload(answerDraft?.knowledge_grounding ?? null),
         generation_state: typeof answerDraft?.generation_state === 'string' ? answerDraft.generation_state : null,
         missing_knowledge: normalizeMissingKnowledgePayload(answerDraft?.missing_knowledge ?? null),
+        retrieval_sources: normalizeRetrievalSourcesPayload(answerDraft?.retrieval_sources ?? []),
     };
+}
+
+function normalizeRetrievalSourcesPayload(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((source) => {
+            if (!source || typeof source !== 'object') {
+                return null;
+            }
+
+            const chunkId = Number(source?.chunk_id ?? source?.id ?? 0);
+            const knowledgeItemId = Number(source?.knowledge_item_id ?? 0);
+            const chunkIndex = Number(source?.chunk_index ?? 0);
+
+            if (!Number.isInteger(chunkId) || chunkId <= 0) {
+                return null;
+            }
+
+            return {
+                id: chunkId,
+                chunk_id: chunkId,
+                knowledge_item_id: Number.isInteger(knowledgeItemId) && knowledgeItemId > 0
+                    ? knowledgeItemId
+                    : null,
+                document_title: typeof source?.document_title === 'string' ? source.document_title.trim() : '',
+                knowledge_item_title: typeof source?.knowledge_item_title === 'string' ? source.knowledge_item_title.trim() : '',
+                content_type: typeof source?.content_type === 'string' ? source.content_type.trim() : '',
+                knowledge_item_summary: typeof source?.knowledge_item_summary === 'string' ? source.knowledge_item_summary.trim() : '',
+                chunk_index: Number.isInteger(chunkIndex) && chunkIndex >= 0 ? chunkIndex : 0,
+                chunk_type: typeof source?.chunk_type === 'string' ? source.chunk_type.trim() : 'semantic',
+                heading_path: typeof source?.heading_path === 'string' ? source.heading_path.trim() : '',
+                summary_for_retrieval: typeof source?.summary_for_retrieval === 'string' ? source.summary_for_retrieval.trim() : '',
+                table_text: typeof source?.table_text === 'string' ? source.table_text.trim() : '',
+                table_html: typeof source?.table_html === 'string' ? source.table_html : '',
+                table_json: source?.table_json && typeof source.table_json === 'object' ? source.table_json : null,
+                topic: typeof source?.topic === 'string' ? source.topic.trim() : '',
+                sub_topic: typeof source?.sub_topic === 'string' ? source.sub_topic.trim() : '',
+                keywords: Array.isArray(source?.keywords)
+                    ? source.keywords
+                        .map((keyword) => String(keyword ?? '').replace(/\s+/g, ' ').trim())
+                        .filter((keyword) => keyword !== '')
+                    : [],
+                section_title: typeof source?.section_title === 'string' ? source.section_title.trim() : '',
+                section_path: typeof source?.section_path === 'string' ? source.section_path.trim() : '',
+                content: typeof source?.content === 'string' ? source.content : '',
+                content_preview: typeof source?.content_preview === 'string' ? source.content_preview : '',
+            };
+        })
+        .filter(Boolean);
 }
 
 function normalizeMissingKnowledgePayload(missingKnowledge) {
@@ -661,6 +714,124 @@ function normalizeAnswerDraftText(value) {
     return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
+/**
+ * Purpose: Render a structured table preview from the structured table model.
+ * Inputs: A retrieval source table_json payload.
+ * Returns: A React table preview or null when no structured rows are available.
+ * Side effects: None.
+ */
+function StructuredTablePreview({ tableJson }) {
+    const rows = Array.isArray(tableJson?.rows) ? tableJson.rows.filter((row) => row && typeof row === 'object') : [];
+
+    if (rows.length === 0) {
+        return null;
+    }
+
+    const columnCount = Math.max(1, Number(tableJson?.column_count ?? 0));
+    const titleRowIndex = Number.isInteger(tableJson?.title_row_index) ? tableJson.title_row_index : null;
+    const headerRowIndices = Array.isArray(tableJson?.header_row_indices)
+        ? tableJson.header_row_indices
+            .map((index) => Number(index))
+            .filter((index) => Number.isInteger(index) && index >= 0)
+        : [];
+    const headerRowIndexSet = new Set(headerRowIndices);
+    const titleRow = titleRowIndex !== null ? rows[titleRowIndex] ?? null : null;
+    const bodyRows = rows.filter((_, index) => index !== titleRowIndex && !headerRowIndexSet.has(index));
+
+    const renderRowCell = (cell, rowType, rowIndex, cellIndex, isHeaderRow) => {
+        const cellText = String(cell?.text ?? '').trim();
+        const colspan = Math.max(1, Number(cell?.colspan ?? 1));
+        const rowspan = Math.max(1, Number(cell?.rowspan ?? 1));
+        const isGroupLead = rowType === 'group' && cellIndex === 0;
+        const CellTag = isHeaderRow || rowType === 'title' || isGroupLead ? 'th' : 'td';
+        const cellProps = {
+            key: `cell-${rowIndex}-${cellIndex}`,
+            className: `border border-slate-200 px-3 py-2 align-top ${
+                isHeaderRow || rowType === 'title' || rowType === 'group'
+                    ? 'bg-slate-50 font-semibold text-slate-950'
+                    : 'bg-white text-slate-700'
+            }`,
+        };
+
+        if (colspan > 1) {
+            cellProps.colSpan = colspan;
+        }
+
+        if (rowspan > 1) {
+            cellProps.rowSpan = rowspan;
+        }
+
+        if (isHeaderRow || rowType === 'title') {
+            cellProps.scope = 'col';
+        } else if (isGroupLead) {
+            cellProps.scope = 'row';
+        }
+
+        return (
+            <CellTag {...cellProps}>
+                {cellText !== '' ? cellText : '\u00A0'}
+            </CellTag>
+        );
+    };
+
+    const renderRow = (row, rowIndex, isHeaderRow = false) => {
+        const rowCells = Array.isArray(row?.cells) ? row.cells.filter((cell) => cell && typeof cell === 'object') : [];
+        const visibleCells = rowCells.filter((cell) => String(cell?.source_metadata?.v_merge ?? '').trim() !== 'continue');
+        const rowType = String(row?.row_type ?? 'data');
+
+        if (rowType === 'title') {
+            const titleText = visibleCells
+                .map((cell) => String(cell?.text ?? '').trim())
+                .filter((text) => text !== '')
+                .join(' ');
+
+            return (
+                <tr key={`row-${rowIndex}`}>
+                    <th
+                        colSpan={columnCount}
+                        scope="colgroup"
+                        className="border border-slate-200 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-950"
+                    >
+                        {titleText !== '' ? titleText : '\u00A0'}
+                    </th>
+                </tr>
+            );
+        }
+
+        if (visibleCells.length === 0) {
+            return (
+                <tr key={`row-${rowIndex}`}>
+                    <td className="border border-slate-200 px-3 py-2 text-slate-700" colSpan={columnCount}>
+                        &nbsp;
+                    </td>
+                </tr>
+            );
+        }
+
+        return (
+            <tr key={`row-${rowIndex}`}>
+                {visibleCells.map((cell, cellIndex) => renderRowCell(cell, rowType, rowIndex, cellIndex, isHeaderRow))}
+            </tr>
+        );
+    };
+
+    return (
+        <div className="overflow-x-auto rounded-[14px] border border-slate-200">
+            <table className="min-w-full border-collapse text-sm">
+                <tbody>
+                    {titleRow ? renderRow(titleRow, titleRowIndex, false) : null}
+                    {bodyRows.map((row, index) => {
+                        const originalIndex = rows.indexOf(row);
+                        const isHeaderRow = headerRowIndexSet.has(originalIndex);
+
+                        return renderRow(row, originalIndex, isHeaderRow);
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 function buildRequirementAnswerDraftState(requirement) {
     const normalizedDraft = normalizeAnswerDraftPayload(requirement?.answer_draft ?? null);
     const normalizedText = normalizeAnswerDraftText(normalizedDraft.text);
@@ -672,6 +843,7 @@ function buildRequirementAnswerDraftState(requirement) {
         knowledgeGrounding: normalizedDraft.knowledge_grounding,
         generationState: normalizedDraft.generation_state ?? (normalizedText !== '' || normalizedDraft.generated_at !== null ? 'generated' : null),
         missingKnowledge: normalizedDraft.missing_knowledge,
+        retrievalSources: normalizedDraft.retrieval_sources,
         isDirty: false,
     };
 }
@@ -858,6 +1030,7 @@ export default function AiShow({
                         persistedText: serverDraftState.persistedText,
                         generatedAt: serverDraftState.generatedAt,
                         knowledgeGrounding: serverDraftState.knowledgeGrounding ?? currentDraftState.knowledgeGrounding ?? null,
+                        retrievalSources: currentDraftState.retrievalSources ?? serverDraftState.retrievalSources ?? [],
                         isDirty: false,
                     };
                 }
@@ -984,6 +1157,10 @@ export default function AiShow({
     const activeRequirementSelectedAnswerBasisItems = activeRequirementAnswerBasisItemIds
         .map((answerBasisItemId) => answerBasisItemsById[String(answerBasisItemId)])
         .filter(Boolean);
+    const activeRequirementRetrievalSources = Array.isArray(activeRequirementDraft?.retrievalSources)
+        ? activeRequirementDraft.retrievalSources
+        : [];
+    const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '') === 'table');
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -1113,6 +1290,7 @@ export default function AiShow({
             const responseAnswerBasisItemIds = normalizeAnswerBasisItemIds(
                 response?.data?.answer_basis_item_ids ?? selectedAnswerBasisItemIds,
             );
+            const retrievalSources = normalizeRetrievalSourcesPayload(response?.data?.retrieval_sources ?? []);
 
             setAnswerBasisSelectionsByRequirementId((currentState) => ({
                 ...currentState,
@@ -1128,6 +1306,7 @@ export default function AiShow({
                     knowledgeGrounding,
                     generationState: answerDraft.generation_state ?? (normalizedText !== '' || answerDraft.generated_at !== null ? 'generated' : null),
                     missingKnowledge: answerDraft.missing_knowledge ?? null,
+                    retrievalSources,
                     isDirty: false,
                 },
             }));
@@ -1287,6 +1466,7 @@ export default function AiShow({
             const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
             const savedText = normalizeAnswerDraftText(answerDraft.text);
             const currentKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
+            const currentRetrievalSources = activeRequirementDraft?.retrievalSources ?? [];
 
             setAnswerDraftsByRequirementId((currentState) => ({
                 ...currentState,
@@ -1297,6 +1477,7 @@ export default function AiShow({
                     knowledgeGrounding: currentKnowledgeGrounding,
                     generationState: answerDraft.generation_state ?? 'generated',
                     missingKnowledge: activeRequirementDraft?.missingKnowledge ?? null,
+                    retrievalSources: currentRetrievalSources,
                     isDirty: false,
                 },
             }));
@@ -1467,7 +1648,7 @@ export default function AiShow({
                                 <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
                                     Velg filer
                                 </label>
-                                <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                                     <label
                                         htmlFor="ai-documents"
                                         className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
@@ -1477,6 +1658,17 @@ export default function AiShow({
                                     <span className="min-w-0 flex-1 text-sm text-slate-500">
                                         {selectedDocumentsLabel}
                                     </span>
+                                    <button
+                                        type="submit"
+                                        disabled={
+                                            documentUploadForm.processing
+                                            || !documentsUploadUrl
+                                            || documentUploadForm.data.documents.length === 0
+                                        }
+                                        className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {documentUploadForm.processing ? 'Laster opp...' : 'Last opp og ekstraher krav'}
+                                    </button>
                                     <input
                                         id="ai-documents"
                                         ref={fileInputRef}
@@ -1494,18 +1686,6 @@ export default function AiShow({
                                     <p className="text-sm text-rose-600">{documentError}</p>
                                 ) : null}
                             </div>
-
-                            <button
-                                type="submit"
-                                disabled={
-                                    documentUploadForm.processing
-                                    || !documentsUploadUrl
-                                    || documentUploadForm.data.documents.length === 0
-                                }
-                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                {documentUploadForm.processing ? 'Laster opp...' : 'Last opp og ekstraher krav'}
-                            </button>
                         </form>
                     </div>
                 </section>
@@ -2364,7 +2544,7 @@ export default function AiShow({
                         )}
                     </section>
 
-                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col">
                         <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
@@ -2388,7 +2568,7 @@ export default function AiShow({
                                     </p>
                                 </div>
                             ) : (
-                                <div className={`flex min-h-0 flex-1 flex-col gap-4 rounded-[22px] border p-4 ${
+                                <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-3 ${
                                     activeRequirementBlockedMissingKnowledge
                                         ? 'border-rose-200 bg-rose-50/40'
                                         : 'border-violet-200 bg-violet-50/40'
@@ -2561,33 +2741,108 @@ export default function AiShow({
                                             ) : null}
                                         </div>
                                     ) : activeRequirementHasDraft ? (
-                                        <div className="flex min-h-0 flex-1 flex-col gap-4">
-                                            <label className="flex min-h-0 flex-1 flex-col gap-2">
+                                        <div className="flex min-h-0 flex-col gap-5">
+                                            <label className="flex flex-col gap-2">
                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                     Svarutkast for krav {activeRequirementDisplayIdentifier}
                                                 </span>
                                                 <textarea
                                                     value={activeRequirementDraft?.text ?? ''}
                                                     onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
-                                                    rows={16}
+                                                    rows={10}
                                                     disabled={
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="min-h-0 w-full flex-1 resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="min-h-[240px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </label>
 
+                                            {activeRequirementTableRetrievalSources.length > 0 ? (
+                                                <div className="flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
+                                                            Brukt tabellgrunnlag
+                                                        </div>
+                                                        <p className="text-sm leading-6 text-slate-600">
+                                                            Tabellen under er brukt som grunnlag for svarutkastet.
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="flex flex-col gap-3">
+                                                        {activeRequirementTableRetrievalSources.map((source) => {
+                                                            const sourceTitle = String(source?.title ?? '').trim()
+                                                                || String(source?.heading_path ?? '').trim()
+                                                                || String(source?.document_title ?? source?.knowledge_item_title ?? '').trim()
+                                                                || 'Tabellgrunnlag';
+                                                            const sourceDocumentTitle = String(source?.document_title ?? source?.knowledge_item_title ?? '').trim();
+                                                            const summaryForRetrieval = String(source?.summary_for_retrieval ?? '').trim();
+                                                            const tableText = String(source?.table_text ?? '').trim();
+                                                            const hasRenderableTableJson = Array.isArray(source?.table_json?.rows)
+                                                                && source.table_json.rows.length > 0;
+
+                                                            return (
+                                                                <div key={source.id ?? source.chunk_id} className="min-w-0 rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                                        <div className="space-y-1">
+                                                                            <div className="text-sm font-semibold text-slate-950">
+                                                                                {sourceTitle}
+                                                                            </div>
+                                                                            {sourceDocumentTitle !== '' ? (
+                                                                                <div className="text-xs text-slate-500">
+                                                                                    {sourceDocumentTitle}
+                                                                                </div>
+                                                                            ) : null}
+                                                                        </div>
+
+                                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                                                                            Tabell
+                                                                        </span>
+                                                                    </div>
+
+                                                                    {summaryForRetrieval !== '' ? (
+                                                                        <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                                                                            {summaryForRetrieval}
+                                                                        </div>
+                                                                    ) : null}
+
+                                                                    {source.table_html ? (
+                                                                        <div className="mt-4 max-w-full overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
+                                                                            <div
+                                                                                className="min-w-max max-w-none"
+                                                                                dangerouslySetInnerHTML={{ __html: source.table_html }}
+                                                                            />
+                                                                        </div>
+                                                                    ) : hasRenderableTableJson ? (
+                                                                        <div className="mt-4">
+                                                                            <StructuredTablePreview tableJson={source.table_json} />
+                                                                        </div>
+                                                                    ) : tableText !== '' ? (
+                                                                        <pre className="mt-4 max-w-full overflow-x-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                            {tableText}
+                                                                        </pre>
+                                                                    ) : (
+                                                                        <p className="mt-4 text-sm leading-6 text-slate-500">
+                                                                            Ingen tabellvisning tilgjengelig.
+                                                                        </p>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ) : null}
+
                                             {activeRequirementKnowledgeGrounding ? (
-                                                <div className="flex justify-end">
+                                                <div className="mt-4 flex justify-end">
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
                                                         {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
                                                     </span>
                                                 </div>
                                             ) : null}
 
-                                            <div className="mt-auto flex flex-wrap items-center justify-between gap-3">
+                                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                                                 <div className="text-xs text-slate-500">
                                                     {activeRequirementDraft?.generatedAt ? (
                                                         <>
