@@ -321,19 +321,6 @@ function normalizeRetrievalSourcesPayload(value) {
                 table_text: typeof source?.table_text === 'string' ? source.table_text.trim() : '',
                 table_html: typeof source?.table_html === 'string' ? source.table_html : '',
                 table_json: source?.table_json && typeof source.table_json === 'object' ? source.table_json : null,
-                image_path: typeof source?.image_path === 'string' ? source.image_path.trim() : '',
-                image_disk: typeof source?.image_disk === 'string' ? source.image_disk.trim() : '',
-                image_mime_type: typeof source?.image_mime_type === 'string' ? source.image_mime_type.trim() : '',
-                image_original_filename: typeof source?.image_original_filename === 'string' ? source.image_original_filename.trim() : '',
-                image_width: Number.isFinite(Number(source?.image_width)) ? Number(source.image_width) : null,
-                image_height: Number.isFinite(Number(source?.image_height)) ? Number(source.image_height) : null,
-                image_hash: typeof source?.image_hash === 'string' ? source.image_hash.trim() : '',
-                image_metadata: source?.image_metadata && typeof source.image_metadata === 'object' ? source.image_metadata : null,
-                image_alt_text: typeof source?.image_alt_text === 'string' ? source.image_alt_text.trim() : '',
-                image_caption: typeof source?.image_caption === 'string' ? source.image_caption.trim() : '',
-                ocr_text: typeof source?.ocr_text === 'string' ? source.ocr_text.trim() : '',
-                image_description: typeof source?.image_description === 'string' ? source.image_description.trim() : '',
-                image_url: typeof source?.image_url === 'string' ? source.image_url.trim() : '',
                 topic: typeof source?.topic === 'string' ? source.topic.trim() : '',
                 sub_topic: typeof source?.sub_topic === 'string' ? source.sub_topic.trim() : '',
                 keywords: Array.isArray(source?.keywords)
@@ -845,286 +832,6 @@ function StructuredTablePreview({ tableJson }) {
     );
 }
 
-/**
- * Purpose: Decide whether an evidence image can be previewed directly in the browser.
- * Inputs: One normalized retrieval source row.
- * Returns: True when the image uses a browser-friendly format.
- * Side effects: None.
- */
-function canPreviewEvidenceImage(source) {
-    const mimeType = String(source?.image_mime_type ?? '').toLowerCase().trim();
-
-    if (['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mimeType)) {
-        return true;
-    }
-
-    const fileName = String(source?.image_original_filename ?? source?.image_path ?? '').trim().toLowerCase();
-    const match = fileName.match(/\.([a-z0-9]+)(?:[?#].*)?$/);
-    const extension = match?.[1] ?? '';
-
-    return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension);
-}
-
-/**
- * Purpose: Render an image evidence preview from the retrieval source payload.
- * Inputs: One normalized retrieval source row.
- * Returns: A React evidence card or null when the row is invalid.
- * Side effects: None.
- */
-function ImageEvidencePreview({ source }) {
-    if (!source || typeof source !== 'object') {
-        return null;
-    }
-
-    const imageAltText = String(source?.image_alt_text ?? '').trim();
-    const imageCaption = String(source?.image_caption ?? '').trim();
-    const imageUrl = String(source?.image_url ?? '').trim();
-    const canPreviewImage = imageUrl !== '' && canPreviewEvidenceImage(source);
-
-    return (
-        <div className="flex flex-col gap-2">
-            {canPreviewImage ? (
-                <div className="overflow-hidden rounded-[16px]">
-                    <img
-                        src={imageUrl}
-                        alt={imageAltText || imageCaption || 'Bilde'}
-                        className="block h-auto w-full max-w-full object-contain"
-                    />
-                </div>
-            ) : (
-                <div className="text-sm text-slate-500">
-                    {imageUrl !== ''
-                        ? 'Bildet er ekstrahert, men formatet kan ikke forhåndsvises direkte.'
-                        : (imageCaption !== ''
-                            ? imageCaption
-                            : (imageAltText !== '' ? imageAltText : 'Ingen forhåndsvisning tilgjengelig.'))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-/**
- * Purpose: Escape arbitrary text for safe insertion into clipboard HTML fragments.
- * Inputs: A raw string or any value that should be treated as text.
- * Returns: An HTML-escaped string.
- * Side effects: None.
- */
-function escapeClipboardHtml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-/**
- * Purpose: Convert a clipboard image URL into an absolute URL when possible.
- * Inputs: The image URL from a retrieval source row.
- * Returns: An absolute URL when resolvable, otherwise the trimmed original value.
- * Side effects: None.
- */
-function normalizeClipboardImageUrl(imageUrl) {
-    const normalizedUrl = String(imageUrl ?? '').trim();
-
-    if (normalizedUrl === '') {
-        return '';
-    }
-
-    try {
-        return new URL(normalizedUrl, window.location.origin).href;
-    } catch (_error) {
-        return normalizedUrl;
-    }
-}
-
-/**
- * Purpose: Build a clipboard-ready payload from answer draft content.
- * Inputs: The answer text and the retrieval sources used by the active requirement.
- * Returns: An object with `html` and `text` clipboard payload strings.
- * Side effects: None.
- */
-function buildAnswerDraftClipboardPayload(answerDraftText, retrievalSources) {
-    const normalizedSources = Array.isArray(retrievalSources)
-        ? retrievalSources.filter((source) => source && typeof source === 'object')
-        : [];
-    const tableSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
-    const imageSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
-
-    if (tableSources.length === 0 && imageSources.length === 0) {
-        const normalizedText = normalizeAnswerDraftText(answerDraftText).trim();
-
-        return {
-            html: '',
-            text: normalizedText,
-        };
-    }
-
-    const htmlBlocks = [];
-    const textBlocks = [];
-
-    const buildTableHtmlFromJson = (tableJson) => {
-        const rows = Array.isArray(tableJson?.rows) ? tableJson.rows.filter((row) => row && typeof row === 'object') : [];
-
-        if (rows.length === 0) {
-            return '';
-        }
-
-        const columnCount = Math.max(1, Number(tableJson?.column_count ?? 0));
-        const titleRowIndex = Number.isInteger(tableJson?.title_row_index) ? tableJson.title_row_index : null;
-        const headerRowIndices = new Set(
-            Array.isArray(tableJson?.header_row_indices)
-                ? tableJson.header_row_indices.filter((index) => Number.isInteger(index))
-                : [],
-        );
-
-        const renderCell = (cell, rowType, isHeaderRow) => {
-            const cellText = String(cell?.text ?? '').trim();
-            const colspan = Math.max(1, Number(cell?.colspan ?? 1));
-            const rowspan = Math.max(1, Number(cell?.rowspan ?? 1));
-            const isTitleCell = rowType === 'title' || Boolean(cell?.is_title);
-            const isHeaderCell = isHeaderRow || Boolean(cell?.is_header) || rowType === 'header' || rowType === 'group';
-            const tagName = isTitleCell || isHeaderCell ? 'th' : 'td';
-            const attributes = [];
-
-            if (colspan > 1) {
-                attributes.push(`colspan="${colspan}"`);
-            }
-
-            if (rowspan > 1) {
-                attributes.push(`rowspan="${rowspan}"`);
-            }
-
-            if (isTitleCell) {
-                attributes.push('scope="colgroup"');
-            } else if (isHeaderCell) {
-                attributes.push('scope="col"');
-            }
-
-            return `<${tagName}${attributes.length > 0 ? ` ${attributes.join(' ')}` : ''}>${
-                cellText !== '' ? escapeClipboardHtml(cellText) : '&nbsp;'
-            }</${tagName}>`;
-        };
-
-        const renderRow = (row, rowIndex) => {
-            const rowType = String(row?.row_type ?? 'data');
-            const rowCells = Array.isArray(row?.cells) ? row.cells.filter((cell) => cell && typeof cell === 'object') : [];
-            const visibleCells = rowCells.filter((cell) => String(cell?.source_metadata?.v_merge ?? '').trim() !== 'continue');
-
-            if (rowType === 'title') {
-                const titleText = visibleCells
-                    .map((cell) => String(cell?.text ?? '').trim())
-                    .filter((text) => text !== '')
-                    .join(' ');
-
-                return `<tr><th colspan="${columnCount}" scope="colgroup">${
-                    titleText !== '' ? escapeClipboardHtml(titleText) : '&nbsp;'
-                }</th></tr>`;
-            }
-
-            if (visibleCells.length === 0) {
-                return `<tr><td colspan="${columnCount}">&nbsp;</td></tr>`;
-            }
-
-            const isHeaderRow = headerRowIndices.has(rowIndex);
-
-            return `<tr>${visibleCells.map((cell) => renderCell(cell, rowType, isHeaderRow)).join('')}</tr>`;
-        };
-
-        const bodyRows = rows
-            .map((row, rowIndex) => {
-                if (rowIndex === titleRowIndex) {
-                    return '';
-                }
-
-                return renderRow(row, rowIndex);
-            })
-            .join('');
-
-        const titleRow = titleRowIndex !== null && rows[titleRowIndex]
-            ? renderRow(rows[titleRowIndex], titleRowIndex)
-            : '';
-
-        return `<table><tbody>${titleRow}${bodyRows}</tbody></table>`;
-    };
-
-    const buildTablePlainTextFromJson = (tableJson) => {
-        const rows = Array.isArray(tableJson?.rows) ? tableJson.rows.filter((row) => row && typeof row === 'object') : [];
-
-        if (rows.length === 0) {
-            return '';
-        }
-
-        return rows
-            .map((row) => {
-                const rowType = String(row?.row_type ?? 'data');
-                const rowCells = Array.isArray(row?.cells) ? row.cells.filter((cell) => cell && typeof cell === 'object') : [];
-                const visibleCells = rowCells.filter((cell) => String(cell?.source_metadata?.v_merge ?? '').trim() !== 'continue');
-                const cellTexts = visibleCells
-                    .map((cell) => String(cell?.text ?? '').trim())
-                    .filter((text) => text !== '');
-
-                if (cellTexts.length === 0) {
-                    return '';
-                }
-
-                if (rowType === 'title') {
-                    return cellTexts.join(' ');
-                }
-
-                return cellTexts.join(' | ');
-            })
-            .filter((line) => line !== '')
-            .join('\n');
-    };
-
-    tableSources.forEach((source) => {
-        const tableHtml = String(source?.table_html ?? '').trim();
-        const tableJson = source?.table_json ?? null;
-        const tableText = String(source?.table_text ?? '').trim();
-        const renderedTableHtml = tableHtml !== ''
-            ? tableHtml
-            : buildTableHtmlFromJson(tableJson);
-        const renderedTableText = tableText !== ''
-            ? tableText
-            : buildTablePlainTextFromJson(tableJson);
-
-        if (renderedTableHtml !== '') {
-            htmlBlocks.push(`<div style="margin-top:12px;">${renderedTableHtml}</div>`);
-        }
-
-        if (renderedTableText !== '') {
-            textBlocks.push(renderedTableText);
-        }
-    });
-
-    imageSources.forEach((source) => {
-        const imageSource = normalizeClipboardImageUrl(source?.image_url);
-
-        if (imageSource !== '') {
-            htmlBlocks.push(
-                `<div style="margin-top:12px;"><img src="${escapeClipboardHtml(imageSource)}" style="display:block;max-width:100%;height:auto;" /></div>`,
-            );
-            textBlocks.push(imageSource);
-        } else {
-            textBlocks.push('Bilde');
-        }
-    });
-
-    if (htmlBlocks.length === 0 && textBlocks.length === 0) {
-        return {
-            html: '',
-            text: '',
-        };
-    }
-
-    return {
-        html: htmlBlocks.length > 0 ? `<!doctype html><html><body>${htmlBlocks.join('')}</body></html>` : '',
-        text: textBlocks.join('\n\n'),
-    };
-}
-
 function buildRequirementAnswerDraftState(requirement) {
     const normalizedDraft = normalizeAnswerDraftPayload(requirement?.answer_draft ?? null);
     const normalizedText = normalizeAnswerDraftText(normalizedDraft.text);
@@ -1241,7 +948,6 @@ export default function AiShow({
     const [answerDraftGeneratingRequirementId, setAnswerDraftGeneratingRequirementId] = useState(null);
     const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
-    const [answerDraftCopyFeedback, setAnswerDraftCopyFeedback] = useState(null);
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
     const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
     const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
@@ -1250,7 +956,6 @@ export default function AiShow({
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
-    const answerWorkspaceRef = useRef(null);
     const documentUploadForm = useForm({
         documents: [],
     });
@@ -1422,18 +1127,7 @@ export default function AiShow({
         });
 
         return undefined;
-        }, [documentNeedsRefresh, documentRows, requirementRows.length]);
-
-    useEffect(() => {
-        if (activeRequirementId === null || answerWorkspaceRef.current === null) {
-            return;
-        }
-
-        answerWorkspaceRef.current.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-        });
-    }, [activeRequirementId]);
+    }, [documentNeedsRefresh, documentRows, requirementRows.length]);
 
     const activeRequirement = activeRequirementId !== null
         ? requirementRows.find((requirement) => String(requirement.id) === String(activeRequirementId)) ?? null
@@ -1467,11 +1161,6 @@ export default function AiShow({
         ? activeRequirementDraft.retrievalSources
         : [];
     const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '') === 'table');
-    const activeRequirementImageRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '') === 'image');
-    const activeRequirementCopyFeedback = answerDraftCopyFeedback?.requirementId !== undefined
-        && String(answerDraftCopyFeedback.requirementId) === String(activeRequirement?.id ?? '')
-        ? answerDraftCopyFeedback
-        : null;
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -1588,7 +1277,6 @@ export default function AiShow({
             return;
         }
 
-        setAnswerDraftCopyFeedback(null);
         setAnswerDraftGeneratingRequirementId(requirement.id);
 
         try {
@@ -1627,13 +1315,6 @@ export default function AiShow({
         } finally {
             setAnswerDraftGeneratingRequirementId(null);
         }
-    };
-
-    const handleGenerateAnswerDraftClick = (requirement, event, force = true) => {
-        event?.stopPropagation?.();
-        openRequirementAnswerWorkspace(requirement);
-
-        void requestAnswerDraftGeneration(requirement, { force });
     };
 
     const openRequirementAnswerWorkspace = (requirement) => {
@@ -1720,7 +1401,6 @@ export default function AiShow({
         }
 
         const normalizedText = normalizeAnswerDraftText(text);
-        setAnswerDraftCopyFeedback(null);
 
         setAnswerDraftsByRequirementId((currentState) => {
             const existingDraft = currentState[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement);
@@ -1754,10 +1434,6 @@ export default function AiShow({
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [selectedEvidence]);
-
-    useEffect(() => {
-        setAnswerDraftCopyFeedback(null);
-    }, [activeRequirementKey]);
 
     const saveActiveAnswerDraft = async () => {
         if (activeRequirement === null || activeRequirementDraft === null) {
@@ -1809,129 +1485,6 @@ export default function AiShow({
             setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke lagre svarutkast.'));
         } finally {
             setAnswerDraftSavingRequirementId(null);
-        }
-    };
-
-    /**
-     * Purpose: Copy the active answer draft content, including grounding tables and images, to the clipboard.
-     * Inputs: None. Uses the currently active requirement draft and its retrieval sources.
-     * Returns: None.
-     * Side effects: Writes to the browser clipboard and updates the copy feedback state.
-     */
-    const copyActiveAnswerDraftContent = () => {
-        if (activeRequirement === null || activeRequirementDraft === null) {
-            return;
-        }
-
-        const clipboardPayload = buildAnswerDraftClipboardPayload(
-            activeRequirementDraft.text,
-            activeRequirementRetrievalSources,
-        );
-
-        if (clipboardPayload.html === '' && clipboardPayload.text.trim() === '') {
-            setAnswerDraftCopyFeedback({
-                requirementId: activeRequirement.id,
-                message: 'Innhold å kopiere mangler.',
-                tone: 'error',
-            });
-            return;
-        }
-
-        const copyTextWithLegacyFallback = (text) => {
-            if (typeof document === 'undefined' || text.trim() === '') {
-                return false;
-            }
-
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            textarea.setAttribute('readonly', '');
-            textarea.style.position = 'fixed';
-            textarea.style.top = '-9999px';
-            textarea.style.left = '-9999px';
-            textarea.style.opacity = '0';
-
-            document.body.appendChild(textarea);
-            textarea.focus();
-            textarea.select();
-
-            let copied = false;
-
-            try {
-                copied = document.execCommand('copy');
-            } catch (_error) {
-                copied = false;
-            }
-
-            document.body.removeChild(textarea);
-
-            return copied;
-        };
-
-        const copyRichContentWithLegacyFallback = (html, text) => {
-            if (typeof document === 'undefined') {
-                return false;
-            }
-
-            const container = document.createElement('div');
-            container.setAttribute('contenteditable', 'true');
-            container.setAttribute('aria-hidden', 'true');
-            container.style.position = 'fixed';
-            container.style.top = '0';
-            container.style.left = '-9999px';
-            container.style.opacity = '0';
-            container.style.pointerEvents = 'none';
-            container.style.width = '1px';
-            container.style.height = '1px';
-            container.style.overflow = 'hidden';
-
-            if (html.trim() !== '') {
-                container.innerHTML = html;
-            } else {
-                container.textContent = text;
-            }
-
-            document.body.appendChild(container);
-
-            const selection = window.getSelection?.() ?? null;
-            const range = document.createRange();
-
-            range.selectNodeContents(container);
-            selection?.removeAllRanges?.();
-            selection?.addRange?.(range);
-
-            let copied = false;
-
-            try {
-                copied = document.execCommand('copy');
-            } catch (_error) {
-                copied = false;
-            } finally {
-                selection?.removeAllRanges?.();
-                document.body.removeChild(container);
-            }
-
-            return copied;
-        };
-
-        try {
-            const copied = copyRichContentWithLegacyFallback(clipboardPayload.html, clipboardPayload.text)
-                || copyTextWithLegacyFallback(clipboardPayload.text);
-
-            if (!copied) {
-                throw new Error('Clipboard copy failed.');
-            }
-
-            setAnswerDraftCopyFeedback({
-                requirementId: activeRequirement.id,
-                message: 'Kopiert',
-                tone: 'success',
-            });
-        } catch (error) {
-            setAnswerDraftCopyFeedback({
-                requirementId: activeRequirement.id,
-                message: 'Kunne ikke kopiere innholdet.',
-                tone: 'error',
-            });
         }
     };
 
@@ -2410,7 +1963,9 @@ export default function AiShow({
                                                         {canOpenAnswerWorkspace ? (
                                                             <button
                                                                 type="button"
-                                                                onClick={(event) => handleGenerateAnswerDraftClick(requirement, event, true)}
+                                                                onClick={() => {
+                                                                    void requestAnswerDraftGeneration(requirement, { force: true });
+                                                                }}
                                                                 disabled={requirementUpdatesLocked || answerDraftGeneratingRequirementId === requirement.id}
                                                                 aria-pressed={isActiveRequirement}
                                                                 title="Generer svarutkast for dette kravet"
@@ -2484,7 +2039,9 @@ export default function AiShow({
                                                                 </div>
                                                                 <button
                                                                     type="button"
-                                                                    onClick={(event) => handleGenerateAnswerDraftClick(activeRequirement, event, true)}
+                                                                    onClick={() => {
+                                                                        void requestAnswerDraftGeneration(activeRequirement, { force: true });
+                                                                    }}
                                                                     disabled={
                                                                         !activeRequirement.answer_draft_generate_url
                                                                         || answerDraftGeneratingRequirementId === activeRequirement.id
@@ -2987,10 +2544,7 @@ export default function AiShow({
                         )}
                     </section>
 
-                    <section
-                        ref={answerWorkspaceRef}
-                        className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col"
-                    >
+                    <section className="h-full rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] lg:flex lg:max-h-[calc(100vh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
                         <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
@@ -3014,7 +2568,7 @@ export default function AiShow({
                                     </p>
                                 </div>
                             ) : (
-                                <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-3 ${
+                                <div className={`flex min-h-0 flex-1 flex-col gap-4 rounded-[22px] border p-4 ${
                                     activeRequirementBlockedMissingKnowledge
                                         ? 'border-rose-200 bg-rose-50/40'
                                         : 'border-violet-200 bg-violet-50/40'
@@ -3187,39 +2741,24 @@ export default function AiShow({
                                             ) : null}
                                         </div>
                                     ) : activeRequirementHasDraft ? (
-                                        <div className="flex min-h-0 flex-col gap-5">
-                                            <div className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm">
-                                                <label className="flex flex-col gap-2">
-                                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                        Svarutkast for krav {activeRequirementDisplayIdentifier}
-                                                    </span>
-                                                    <textarea
-                                                        value={activeRequirementDraft?.text ?? ''}
-                                                        onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
-                                                        rows={10}
-                                                        disabled={
-                                                            answerDraftGeneratingRequirementId === activeRequirement.id
-                                                            || answerDraftSavingRequirementId === activeRequirement.id
-                                                        }
-                                                        className="h-[130px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                        placeholder="Svarutkastet vises her og kan redigeres direkte."
-                                                    />
-                                                </label>
-
-                                                {activeRequirementImageRetrievalSources.length > 0 ? (
-                                                    <div className="mt-4 flex flex-col gap-4">
-                                                        {activeRequirementImageRetrievalSources.map((source) => (
-                                                            <ImageEvidencePreview
-                                                                key={source.id ?? source.chunk_id}
-                                                                source={source}
-                                                            />
-                                                        ))}
-                                                    </div>
-                                                ) : null}
+                                        <div className="flex flex-col gap-5">
+                                            <div className="flex flex-col gap-2">
+                                                <textarea
+                                                    aria-label={`Svarutkast for krav ${activeRequirementDisplayIdentifier}`}
+                                                    value={activeRequirementDraft?.text ?? ''}
+                                                    onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
+                                                    rows={16}
+                                                    disabled={
+                                                        answerDraftGeneratingRequirementId === activeRequirement.id
+                                                        || answerDraftSavingRequirementId === activeRequirement.id
+                                                    }
+                                                    className="min-h-[320px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    placeholder="Svarutkastet vises her og kan redigeres direkte."
+                                                />
                                             </div>
 
                                             {activeRequirementTableRetrievalSources.length > 0 ? (
-                                                <div className="flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
+                                                <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
                                                     <div className="flex flex-col gap-1">
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
                                                             Brukt tabellgrunnlag
@@ -3242,7 +2781,7 @@ export default function AiShow({
                                                                 && source.table_json.rows.length > 0;
 
                                                             return (
-                                                                <div key={source.id ?? source.chunk_id} className="min-w-0 rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm">
+                                                                <div key={source.id ?? source.chunk_id} className="rounded-[18px] border border-slate-200 bg-white p-4 shadow-sm">
                                                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                                                         <div className="space-y-1">
                                                                             <div className="text-sm font-semibold text-slate-950">
@@ -3267,9 +2806,9 @@ export default function AiShow({
                                                                     ) : null}
 
                                                                     {source.table_html ? (
-                                                                        <div className="mt-4 max-w-full overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
+                                                                        <div className="mt-4 overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
                                                                             <div
-                                                                                className="min-w-max max-w-none"
+                                                                                className="min-w-max"
                                                                                 dangerouslySetInnerHTML={{ __html: source.table_html }}
                                                                             />
                                                                         </div>
@@ -3278,7 +2817,7 @@ export default function AiShow({
                                                                             <StructuredTablePreview tableJson={source.table_json} />
                                                                         </div>
                                                                     ) : tableText !== '' ? (
-                                                                        <pre className="mt-4 max-w-full overflow-x-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                        <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
                                                                             {tableText}
                                                                         </pre>
                                                                     ) : (
@@ -3302,63 +2841,38 @@ export default function AiShow({
                                             ) : null}
 
                                             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={copyActiveAnswerDraftContent}
-                                                        disabled={!activeRequirementDraft}
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        Kopier innhold
-                                                    </button>
-
-                                                    {activeRequirementCopyFeedback ? (
-                                                        <span
-                                                            className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${
-                                                                activeRequirementCopyFeedback.tone === 'success'
-                                                                    ? 'bg-emerald-100 text-emerald-700 ring-emerald-200'
-                                                                    : 'bg-rose-100 text-rose-700 ring-rose-200'
-                                                            }`}
-                                                        >
-                                                            {activeRequirementCopyFeedback.message}
-                                                        </span>
-                                                    ) : null}
+                                                <div className="text-xs text-slate-500">
+                                                    {activeRequirementDraft?.generatedAt ? (
+                                                        <>
+                                                            Generert{' '}
+                                                            {new Intl.DateTimeFormat(locale, {
+                                                                day: '2-digit',
+                                                                month: 'short',
+                                                                year: 'numeric',
+                                                                hour: '2-digit',
+                                                                minute: '2-digit',
+                                                            }).format(new Date(activeRequirementDraft.generatedAt))}
+                                                        </>
+                                                    ) : (
+                                                        'Svarutkast er ikke generert ennå.'
+                                                    )}
+                                                    {activeRequirementDraft?.isDirty ? ' Ulagrede endringer.' : ''}
                                                 </div>
 
-                                                <div className="flex flex-wrap items-center gap-3">
-                                                    <div className="text-xs text-slate-500">
-                                                        {activeRequirementDraft?.generatedAt ? (
-                                                            <>
-                                                                Generert{' '}
-                                                                {new Intl.DateTimeFormat(locale, {
-                                                                    day: '2-digit',
-                                                                    month: 'short',
-                                                                    year: 'numeric',
-                                                                    hour: '2-digit',
-                                                                    minute: '2-digit',
-                                                                }).format(new Date(activeRequirementDraft.generatedAt))}
-                                                            </>
-                                                        ) : (
-                                                            'Svarutkast er ikke generert ennå.'
-                                                        )}
-                                                        {activeRequirementDraft?.isDirty ? ' Ulagrede endringer.' : ''}
-                                                    </div>
-
-                                                    <button
-                                                        type="button"
-                                                        onClick={saveActiveAnswerDraft}
-                                                        disabled={
-                                                            !activeRequirementDraft
-                                                            || normalizeAnswerDraftText(activeRequirementDraft.text).trim() === ''
-                                                            || !activeRequirement.answer_draft_save_url
-                                                            || answerDraftGeneratingRequirementId === activeRequirement.id
-                                                            || answerDraftSavingRequirementId === activeRequirement.id
-                                                        }
-                                                        className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
-                                                    </button>
-                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={saveActiveAnswerDraft}
+                                                    disabled={
+                                                        !activeRequirementDraft
+                                                        || normalizeAnswerDraftText(activeRequirementDraft.text).trim() === ''
+                                                        || !activeRequirement.answer_draft_save_url
+                                                        || answerDraftGeneratingRequirementId === activeRequirement.id
+                                                        || answerDraftSavingRequirementId === activeRequirement.id
+                                                    }
+                                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
+                                                </button>
                                             </div>
                                         </div>
                                     ) : (
