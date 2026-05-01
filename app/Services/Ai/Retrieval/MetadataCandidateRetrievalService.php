@@ -19,6 +19,59 @@ class MetadataCandidateRetrievalService
 
     private const MAX_METADATA_SCORE = 5.0;
 
+    private const MAX_DIRECT_EVIDENCE_SCORE = 2.5;
+
+    /**
+     * @var array<string, float>
+     */
+    private const DIRECT_EVIDENCE_FIELD_WEIGHTS = [
+        'title' => 0.9,
+        'content' => 0.6,
+        'summary_for_retrieval' => 1.0,
+        'table_text' => 1.2,
+        'keywords' => 0.8,
+    ];
+
+    /**
+     * @var array<int, string>
+     */
+    private const SEARCH_STOPWORDS = [
+        'and',
+        'are',
+        'av',
+        'be',
+        'den',
+        'det',
+        'en',
+        'er',
+        'et',
+        'for',
+        'from',
+        'had',
+        'has',
+        'ha',
+        'har',
+        'i',
+        'in',
+        'is',
+        'it',
+        'kan',
+        'med',
+        'må',
+        'og',
+        'of',
+        'on',
+        'over',
+        'på',
+        'skal',
+        'som',
+        'the',
+        'til',
+        'to',
+        'we',
+        'you',
+    ];
+
     /**
      * @var array<string, float>
      */
@@ -46,33 +99,70 @@ class MetadataCandidateRetrievalService
     public function retrieveForCustomer(int $customerId, array $validatedPlan): Collection
     {
         $selectedMetadata = $this->selectedMetadataFromPlan($validatedPlan);
+        $searchText = $this->searchTextFromPlan($validatedPlan);
+        $searchTerms = $this->searchTermsFromText($searchText);
 
-        if ($selectedMetadata === []) {
+        if ($selectedMetadata === [] && $searchTerms === []) {
             return collect();
         }
 
         $query = $this->baseQuery($customerId)
-            ->where(function (Builder $metadataQuery) use ($selectedMetadata): void {
-                foreach ($selectedMetadata as $field => $values) {
-                    if (! $this->isSupportedField($field) || $values === []) {
-                        continue;
-                    }
+            ->where(function (Builder $candidateQuery) use ($selectedMetadata, $searchTerms): void {
+                $hasMetadataFilter = $selectedMetadata !== [];
+                $hasSearchFilter = $searchTerms !== [];
 
-                    $metadataQuery->orWhere(function (Builder $fieldQuery) use ($field, $values): void {
-                        if ($field === 'keywords') {
-                            foreach (array_values($values) as $index => $value) {
-                                if ($index === 0) {
-                                    $fieldQuery->whereJsonContains('knowledge_item_chunks.keywords', $value);
-                                } else {
-                                    $fieldQuery->orWhereJsonContains('knowledge_item_chunks.keywords', $value);
-                                }
+                if ($hasMetadataFilter) {
+                    $candidateQuery->where(function (Builder $metadataQuery) use ($selectedMetadata): void {
+                        foreach ($selectedMetadata as $field => $values) {
+                            if (! $this->isSupportedField($field) || $values === []) {
+                                continue;
                             }
 
-                            return;
-                        }
+                            $metadataQuery->orWhere(function (Builder $fieldQuery) use ($field, $values): void {
+                                if ($field === 'keywords') {
+                                    foreach (array_values($values) as $index => $value) {
+                                        if ($index === 0) {
+                                            $fieldQuery->whereJsonContains('knowledge_item_chunks.keywords', $value);
+                                        } else {
+                                            $fieldQuery->orWhereJsonContains('knowledge_item_chunks.keywords', $value);
+                                        }
+                                    }
 
-                        $fieldQuery->whereIn('knowledge_item_chunks.'.$field, $values);
+                                    return;
+                                }
+
+                                $fieldQuery->whereIn('knowledge_item_chunks.'.$field, $values);
+                            });
+                        }
                     });
+                }
+
+                if ($hasSearchFilter) {
+                    $searchQuery = function (Builder $textQuery) use ($searchTerms): void {
+                        $textQuery
+                            ->where('knowledge_item_chunks.chunk_type', 'table')
+                            ->where(function (Builder $termQuery) use ($searchTerms): void {
+                                foreach (array_values($searchTerms) as $index => $term) {
+                                    $likeTerm = '%'.mb_strtolower($term, 'UTF-8').'%';
+
+                                    if ($index === 0) {
+                                        $termQuery->where(function (Builder $fieldQuery) use ($likeTerm): void {
+                                            $this->applyDirectEvidenceFilters($fieldQuery, $likeTerm);
+                                        });
+                                    } else {
+                                        $termQuery->orWhere(function (Builder $fieldQuery) use ($likeTerm): void {
+                                            $this->applyDirectEvidenceFilters($fieldQuery, $likeTerm);
+                                        });
+                                    }
+                                }
+                            });
+                    };
+
+                    if ($hasMetadataFilter) {
+                        $candidateQuery->orWhere($searchQuery);
+                    } else {
+                        $candidateQuery->where($searchQuery);
+                    }
                 }
             });
 
@@ -93,11 +183,14 @@ class MetadataCandidateRetrievalService
         }
 
         $rankedRows = $rawRows
-            ->map(function (array $row) use ($selectedMetadata): array {
+            ->map(function (array $row) use ($selectedMetadata, $searchTerms): array {
                 [$metadataScore, $metadataMatches] = $this->metadataScoreForRow($row, $selectedMetadata);
+                [$directEvidenceScore, $directEvidenceMatches] = $this->directEvidenceScoreForRow($row, $searchTerms);
 
-                $row['metadata_score'] = $metadataScore;
-                $row['metadata_matches'] = $metadataMatches;
+                $row['metadata_score'] = min(self::MAX_METADATA_SCORE, $metadataScore + $directEvidenceScore);
+                $row['metadata_matches'] = array_merge($metadataMatches, $directEvidenceMatches);
+                $row['direct_evidence_score'] = $directEvidenceScore;
+                $row['direct_evidence_matches'] = $directEvidenceMatches;
 
                 return $row;
             })
@@ -128,6 +221,8 @@ class MetadataCandidateRetrievalService
             'customer_id' => $customerId,
             'selected_field_count' => count($selectedMetadata),
             'selected_value_count' => $this->countSelectedValues($selectedMetadata),
+            'search_text' => $searchText,
+            'search_term_count' => count($searchTerms),
             'candidate_count_before_metadata_score' => $rawRows->count(),
             'candidate_count_after_metadata_score' => $rankedRows->count(),
             'top_candidate_ids_before_metadata_score' => $rawRows->take(10)->pluck('chunk_id')->all(),
@@ -192,8 +287,25 @@ class MetadataCandidateRetrievalService
             'content_type' => (string) $chunk->getAttribute('content_type'),
             'knowledge_item_summary' => (string) $chunk->getAttribute('knowledge_item_summary'),
             'chunk_index' => (int) $chunk->chunk_index,
+            'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),
             'content' => $content,
             'title' => (string) ($chunk->title ?? ''),
+            'summary_for_retrieval' => (string) ($chunk->summary_for_retrieval ?? ''),
+            'table_text' => (string) ($chunk->table_text ?? ''),
+            'table_html' => (string) ($chunk->table_html ?? ''),
+            'table_json' => is_array($chunk->table_json) ? $chunk->table_json : null,
+            'image_path' => (string) ($chunk->image_path ?? ''),
+            'image_disk' => (string) ($chunk->image_disk ?? ''),
+            'image_mime_type' => (string) ($chunk->image_mime_type ?? ''),
+            'image_original_filename' => (string) ($chunk->image_original_filename ?? ''),
+            'image_width' => is_numeric($chunk->image_width ?? null) ? (int) $chunk->image_width : null,
+            'image_height' => is_numeric($chunk->image_height ?? null) ? (int) $chunk->image_height : null,
+            'image_hash' => (string) ($chunk->image_hash ?? ''),
+            'image_metadata' => is_array($chunk->image_metadata) ? $chunk->image_metadata : null,
+            'image_alt_text' => (string) ($chunk->image_alt_text ?? ''),
+            'image_caption' => (string) ($chunk->image_caption ?? ''),
+            'ocr_text' => (string) ($chunk->ocr_text ?? ''),
+            'image_description' => (string) ($chunk->image_description ?? ''),
             'topic' => (string) ($chunk->topic ?? ''),
             'sub_topic' => (string) ($chunk->sub_topic ?? ''),
             'service_product_tag' => (string) ($chunk->service_product_tag ?? ''),
@@ -257,6 +369,83 @@ class MetadataCandidateRetrievalService
     }
 
     /**
+     * Purpose: Resolve the free-text retrieval hint from the validated plan.
+     * Inputs: The validated plan payload.
+     * Returns: A trimmed search string or an empty string.
+     * Side effects: None.
+     */
+    private function searchTextFromPlan(array $validatedPlan): string
+    {
+        $searchText = data_get($validatedPlan, 'search_text', '');
+
+        if (! is_string($searchText)) {
+            return '';
+        }
+
+        return trim(Str::squish($searchText));
+    }
+
+    /**
+     * Purpose: Split a search hint into stable tokens for direct evidence matching.
+     * Inputs: A free-text search string.
+     * Returns: A deduplicated list of normalized search terms.
+     * Side effects: None.
+     */
+    private function searchTermsFromText(string $searchText): array
+    {
+        $searchText = mb_strtolower($searchText, 'UTF-8');
+        $searchText = preg_replace('/[^\pL\pN\s]+/u', ' ', $searchText) ?? $searchText;
+        $searchText = preg_replace('/\s+/u', ' ', $searchText) ?? $searchText;
+        $searchText = trim($searchText);
+
+        if ($searchText === '') {
+            return [];
+        }
+
+        $tokens = preg_split('/\s+/u', $searchText, -1, PREG_SPLIT_NO_EMPTY);
+
+        if (! is_array($tokens)) {
+            return [];
+        }
+
+        $seen = [];
+        $filtered = [];
+
+        foreach ($tokens as $token) {
+            $token = trim($token);
+
+            if ($token === '' || mb_strlen($token, 'UTF-8') < 3 || in_array($token, self::SEARCH_STOPWORDS, true)) {
+                continue;
+            }
+
+            if (isset($seen[$token])) {
+                continue;
+            }
+
+            $seen[$token] = true;
+            $filtered[] = $token;
+        }
+
+        return $filtered;
+    }
+
+    /**
+     * Purpose: Apply direct searchable-evidence filters for one search term.
+     * Inputs: The query builder, the normalized LIKE pattern, and the normalized search term.
+     * Returns: None.
+     * Side effects: Adds an OR group that matches visible chunk text fields or keyword JSON text.
+     */
+    private function applyDirectEvidenceFilters(Builder $fieldQuery, string $likeTerm): void
+    {
+        $fieldQuery
+            ->whereRaw('LOWER(COALESCE(knowledge_item_chunks.title, \'\')) LIKE ?', [$likeTerm])
+            ->orWhereRaw('LOWER(COALESCE(knowledge_item_chunks.content, \'\')) LIKE ?', [$likeTerm])
+            ->orWhereRaw('LOWER(COALESCE(knowledge_item_chunks.summary_for_retrieval, \'\')) LIKE ?', [$likeTerm])
+            ->orWhereRaw('LOWER(COALESCE(knowledge_item_chunks.table_text, \'\')) LIKE ?', [$likeTerm])
+            ->orWhereRaw("LOWER(COALESCE(knowledge_item_chunks.keywords::text, '[]')) LIKE ?", [$likeTerm]);
+    }
+
+    /**
      * Purpose: Decide whether a metadata field is supported by the current chunk schema.
      * Inputs: The candidate field name.
      * Returns: True when the field can safely be used for retrieval.
@@ -301,6 +490,44 @@ class MetadataCandidateRetrievalService
         $metadataScore = min($metadataScore, self::MAX_METADATA_SCORE);
 
         return [$metadataScore, $metadataMatches];
+    }
+
+    /**
+     * Purpose: Compute a small direct-evidence score for searchable chunk text.
+     * Inputs: The candidate row and the free-text search terms from the plan.
+     * Returns: The direct evidence score and the matched direct-evidence values.
+     * Side effects: None.
+     */
+    private function directEvidenceScoreForRow(array $row, array $searchTerms): array
+    {
+        if ($searchTerms === []) {
+            return [0.0, []];
+        }
+
+        $searchLookup = $this->normalizeValueLookup($searchTerms);
+        $directEvidenceScore = 0.0;
+        $directEvidenceMatches = [];
+
+        foreach (self::DIRECT_EVIDENCE_FIELD_WEIGHTS as $field => $fieldWeight) {
+            $fieldTerms = $this->searchableTermsFromValue(data_get($row, $field));
+            $fieldLookup = $this->normalizeValueLookup($fieldTerms);
+
+            if ($fieldLookup === []) {
+                continue;
+            }
+
+            $matchedTerms = array_values(array_intersect_key($searchLookup, $fieldLookup));
+
+            if ($matchedTerms === []) {
+                continue;
+            }
+
+            $directEvidenceMatches[$field] = $matchedTerms;
+            $matchRatio = min(1.0, count($matchedTerms) / max(1, count($searchLookup)));
+            $directEvidenceScore += $fieldWeight * $matchRatio;
+        }
+
+        return [min($directEvidenceScore, self::MAX_DIRECT_EVIDENCE_SCORE), $directEvidenceMatches];
     }
 
     /**
@@ -354,6 +581,27 @@ class MetadataCandidateRetrievalService
     }
 
     /**
+     * Purpose: Resolve searchable terms from one chunk field for direct evidence matching.
+     * Inputs: The raw row field value.
+     * Returns: A list of normalized searchable terms.
+     * Side effects: None.
+     */
+    private function searchableTermsFromValue(mixed $value): array
+    {
+        if (is_array($value)) {
+            $terms = [];
+
+            foreach ($value as $item) {
+                $terms = array_merge($terms, $this->searchTermsFromText((string) $item));
+            }
+
+            return $this->uniqueTerms($terms);
+        }
+
+        return $this->searchTermsFromText((string) $value);
+    }
+
+    /**
      * Purpose: Normalize a value for case-insensitive metadata comparison.
      * Inputs: A raw scalar value.
      * Returns: A lowercased comparison token.
@@ -362,6 +610,17 @@ class MetadataCandidateRetrievalService
     private function normalizeComparableValue(mixed $value): string
     {
         return mb_strtolower(trim(Str::squish((string) $value)), 'UTF-8');
+    }
+
+    /**
+     * Purpose: Normalize a token list into unique non-empty terms.
+     * Inputs: A list of candidate terms.
+     * Returns: A deduplicated list of terms.
+     * Side effects: None.
+     */
+    private function uniqueTerms(array $terms): array
+    {
+        return array_values(array_unique(array_filter($terms, static fn (string $term): bool => $term !== '')));
     }
 
     /**

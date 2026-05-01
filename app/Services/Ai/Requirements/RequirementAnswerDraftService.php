@@ -871,7 +871,10 @@ class RequirementAnswerDraftService
                     'knowledge_chunk' => [
                         'id' => $knowledgeChunk?->id,
                         'chunk_index' => $knowledgeChunk?->chunk_index,
+                        'chunk_type' => $knowledgeChunk?->chunk_type,
                         'content' => $knowledgeChunk?->content,
+                        'summary_for_retrieval' => $knowledgeChunk?->summary_for_retrieval,
+                        'table_text' => $knowledgeChunk?->table_text,
                         'start_offset' => $knowledgeChunk?->start_offset,
                         'end_offset' => $knowledgeChunk?->end_offset,
                     ],
@@ -912,7 +915,7 @@ class RequirementAnswerDraftService
      */
     private function promptRetrievedKnowledgeRows(Collection $retrievedKnowledgeRows): array
     {
-        return $retrievedKnowledgeRows
+        $promptRows = $retrievedKnowledgeRows
             ->map(function (array $retrievalRow): array {
                 $content = trim((string) data_get($retrievalRow, 'content_preview', data_get($retrievalRow, 'content', '')));
                 $headingPath = trim((string) data_get($retrievalRow, 'heading_path', ''));
@@ -925,17 +928,21 @@ class RequirementAnswerDraftService
                     'knowledge_item_summary' => $this->normalizeNullableString(data_get($retrievalRow, 'knowledge_item_summary')),
                     'chunk_id' => (int) data_get($retrievalRow, 'chunk_id', 0),
                     'chunk_index' => (int) data_get($retrievalRow, 'chunk_index', 0),
+                    'chunk_type' => $this->normalizeNullableString(data_get($retrievalRow, 'chunk_type')),
                     'heading_path' => $headingPath !== '' ? $headingPath : null,
                     'topic' => $this->normalizeNullableString(data_get($retrievalRow, 'topic')),
                     'sub_topic' => $this->normalizeNullableString(data_get($retrievalRow, 'sub_topic')),
+                    'summary_for_retrieval' => $this->normalizeNullableString(data_get($retrievalRow, 'summary_for_retrieval')),
+                    'table_text' => $this->normalizeNullableString(data_get($retrievalRow, 'table_text')),
                     'keywords' => $this->normalizeStringList((array) data_get($retrievalRow, 'keywords', [])),
                     'section_title' => $this->normalizeNullableString(data_get($retrievalRow, 'section_title')),
                     'section_path' => $this->normalizeNullableString(data_get($retrievalRow, 'section_path')),
                     'content_preview' => Str::limit(Str::squish($content), 4000, '...'),
                 ];
             })
-            ->values()
-            ->all();
+            ->values();
+
+        return $promptRows->all();
     }
 
     /**

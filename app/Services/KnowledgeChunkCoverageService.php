@@ -98,6 +98,15 @@ class KnowledgeChunkCoverageService
     public function evaluateKnowledgeGrounding(Collection|array|null $retrievedChunks, ?string $requirementText = null): array
     {
         $chunks = $this->normalizeChunks($retrievedChunks);
+        $tableChunks = $chunks
+            ->filter(static fn (array $chunk): bool => (string) data_get($chunk, 'chunk_type', 'semantic') === 'table')
+            ->values();
+        $chunkContextMatches = [];
+        $sectionContextMatches = [];
+        $documentContextMatches = [];
+        $hasChunkContext = false;
+        $hasSectionContext = false;
+        $hasDocumentContext = false;
 
         if ($chunks->isEmpty()) {
             return $this->groundingPayload('red', 0.0, 0);
@@ -194,6 +203,8 @@ class KnowledgeChunkCoverageService
         foreach ($chunks as $chunk) {
             $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'content', '')));
             $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'title', '')));
+            $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'summary_for_retrieval', '')));
+            $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'table_text', '')));
             $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'topic', '')));
             $terms = array_merge($terms, $this->extractTerms((string) data_get($chunk, 'sub_topic', '')));
 
@@ -374,4 +385,5 @@ class KnowledgeChunkCoverageService
             'sources_count' => $sourcesCount,
         ];
     }
+
 }

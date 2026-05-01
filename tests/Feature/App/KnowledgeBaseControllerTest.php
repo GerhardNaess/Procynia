@@ -209,6 +209,368 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_document_upload_persists_image_chunks_separately_from_text_chunks(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Image AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-pipeline.docx', [
+                ['type' => 'paragraph', 'text' => '1 Overskrift test', 'style' => 'Heading1'],
+                ['type' => 'paragraph', 'text' => 'Tekst før bilde.', 'style' => 'Normal'],
+                [
+                    'type' => 'image',
+                    'alt_text' => 'Arkitekturdiagram med integrasjoner',
+                    'title' => 'Figure 1',
+                    'relationship_id' => 'rId1',
+                    'media_filename' => 'image1.png',
+                    'media_bytes' => $this->docxSampleImageBytes(),
+                ],
+                ['type' => 'paragraph', 'text' => 'Figur 1: Overordnet arkitektur', 'style' => 'Caption'],
+                ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Tekst etter H2.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'image-pipeline.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $imageChunk = $chunks->firstWhere('chunk_type', 'image');
+
+        $this->assertNotNull($imageChunk);
+        $this->assertNotEmpty($imageChunk->image_path);
+        $this->assertSame('local', $imageChunk->image_disk);
+        $this->assertSame('image/png', $imageChunk->image_mime_type);
+        $this->assertNotEmpty($imageChunk->image_hash);
+        $this->assertIsArray($imageChunk->image_metadata);
+        $this->assertSame('png', $imageChunk->image_metadata['extension'] ?? null);
+        $this->assertSame('unknown', $imageChunk->image_metadata['image_kind'] ?? null);
+        $this->assertNotEmpty($imageChunk->content);
+        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringContainsString('Arkitekturdiagram med integrasjoner', (string) $imageChunk->content);
+        $this->assertStringContainsString('Figur 1: Overordnet arkitektur', (string) $imageChunk->content);
+        $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
+        $this->assertSame('1 Overskrift test', $imageChunk->section_path);
+        $this->assertTrue(Storage::disk('local')->exists($imageChunk->image_path));
+
+        $semanticChunks = $chunks->where('chunk_type', 'semantic');
+        $this->assertGreaterThan(0, $semanticChunks->count());
+
+        foreach ($semanticChunks as $semanticChunk) {
+            $this->assertStringNotContainsString('Figur 1: Overordnet arkitektur', (string) $semanticChunk->content);
+            $this->assertStringNotContainsString('Arkitekturdiagram med integrasjoner', (string) $semanticChunk->content);
+        }
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+            $imageChunk = $chunks->firstWhere('chunk_type', 'image');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && $imageChunk !== null
+                && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
+                    'knowledgeItem' => $document->id,
+                    'chunk' => $imageChunk['id'],
+                ])
+                && ! empty($imageChunk['image_metadata'])
+                && data_get($imageChunk, 'image_metadata.extension') === 'png'
+                && data_get($imageChunk, 'image_metadata.image_kind') === 'unknown'
+                && $imageChunk['image_caption'] === 'Figur 1: Overordnet arkitektur'
+                && $imageChunk['image_alt_text'] === 'Arkitekturdiagram med integrasjoner';
+        });
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $imageChunk->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_knowledge_document_upload_keeps_images_before_h2_under_the_previous_h1_context_even_when_tables_precede_them(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Image H2 Context AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-h2-context.docx', [
+                ['text' => '1 Overskrift test', 'style' => 'Heading1'],
+                ['text' => 'Tekst før tabell.', 'style' => 'Normal'],
+                ['text' => '', 'style' => 'Table'],
+                [
+                    'type' => 'image',
+                    'alt_text' => 'Arkitekturdiagram med integrasjoner',
+                    'title' => 'Figure 1',
+                    'relationship_id' => 'rId1',
+                    'media_filename' => 'image1.png',
+                    'media_bytes' => $this->docxSampleImageBytes(),
+                ],
+                ['text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['text' => 'Tekst etter H2.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'image-h2-context.docx')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $imageChunk = $chunks->firstWhere('chunk_type', 'image');
+        $tableChunk = $chunks->firstWhere('chunk_type', 'table');
+        $postH2Chunk = $chunks->firstWhere('heading_path', '1.1 Dokumentasjonskrav for drift');
+
+        $this->assertNotNull($imageChunk);
+        $this->assertNotNull($tableChunk);
+        $this->assertNotNull($postH2Chunk);
+
+        $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
+        $this->assertSame('1 Overskrift test', $imageChunk->section_path);
+        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $imageChunk->content);
+
+        $this->assertSame('1 Overskrift test', $tableChunk->heading_path);
+        $this->assertSame('1 Overskrift test', $tableChunk->section_path);
+        $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $tableChunk->content);
+
+        $this->assertSame('1.1 Dokumentasjonskrav for drift', $postH2Chunk->heading_path);
+        $this->assertStringContainsString('Tekst etter H2.', (string) $postH2Chunk->content);
+        $this->assertStringNotContainsString('Bilde i seksjon: 1 Overskrift test', (string) $postH2Chunk->content);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+            $imageChunk = $chunks->firstWhere('chunk_type', 'image');
+            $postH2Chunk = $chunks->firstWhere('heading_path', '1.1 Dokumentasjonskrav for drift');
+
+            return $imageChunk !== null
+                && data_get($imageChunk, 'section_path') === '1 Overskrift test'
+                && str_contains((string) data_get($imageChunk, 'content', ''), 'Bilde i seksjon: 1 Overskrift test')
+                && ! str_contains((string) data_get($imageChunk, 'content', ''), '1.1 Dokumentasjonskrav for drift')
+                && $postH2Chunk !== null
+                && data_get($postH2Chunk, 'heading_path') === '1.1 Dokumentasjonskrav for drift'
+                && str_contains((string) data_get($postH2Chunk, 'content', ''), 'Tekst etter H2.');
+        });
+    }
+
+    public function test_knowledge_document_upload_preserves_unpreviewable_image_extensions_without_skipping_image_chunks(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Four B AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-unpreviewable.docx', [
+                ['type' => 'paragraph', 'text' => '1 Overskrift test', 'style' => 'Heading1'],
+                ['type' => 'paragraph', 'text' => 'Tekst før bilde.', 'style' => 'Normal'],
+                [
+                    'type' => 'image',
+                    'media_filename' => 'image1.svg',
+                    'media_bytes' => $this->docxSampleImageBytes(),
+                    'title' => 'Figure 2',
+                    'alt_text' => 'Illustrasjon av prosessflyt',
+                ],
+                ['type' => 'paragraph', 'text' => 'Figur 2: Prosessflyt', 'style' => 'Caption'],
+                ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Tekst etter bilde.', 'style' => 'Normal'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'image-unpreviewable.docx')
+            ->firstOrFail();
+
+        $imageChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'image')
+            ->firstOrFail();
+
+        $this->assertSame('svg', $imageChunk->image_metadata['extension'] ?? null);
+        $this->assertSame('unknown', $imageChunk->image_metadata['image_kind'] ?? null);
+        $this->assertStringEndsWith('.svg', (string) $imageChunk->image_path);
+        $this->assertTrue(Storage::disk('local')->exists($imageChunk->image_path));
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+            $imageChunk = $chunks->firstWhere('chunk_type', 'image');
+
+            return $imageChunk !== null
+                && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
+                    'knowledgeItem' => data_get($page, 'props.knowledgeItem.id'),
+                    'chunk' => $imageChunk['id'],
+                ])
+                && data_get($imageChunk, 'image_metadata.extension') === 'svg'
+                && data_get($imageChunk, 'image_metadata.image_kind') === 'unknown'
+                && ! empty($imageChunk['image_url']);
+        });
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $imageChunk->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_knowledge_document_image_route_returns_not_found_when_file_is_missing(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Four C AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-missing.docx', [
+                ['type' => 'paragraph', 'text' => '1 Overskrift test', 'style' => 'Heading1'],
+                ['type' => 'image', 'title' => 'Figure 3', 'alt_text' => 'Diagram', 'relationship_id' => 'rId1', 'media_filename' => 'image1.png', 'media_bytes' => $this->docxSampleImageBytes()],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'image-missing.docx')
+            ->firstOrFail();
+
+        $imageChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'image')
+            ->firstOrFail();
+
+        Storage::disk('local')->delete($imageChunk->image_path);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $imageChunk->id,
+            ]))
+            ->assertNotFound();
+    }
+
+    public function test_knowledge_document_image_route_returns_forbidden_for_foreign_documents_and_rejects_non_image_chunks(): void
+    {
+        Storage::fake('local');
+
+        $this->bindKnowledgeChunkBoundaryService(true);
+
+        $context = $this->customerContext('Customer Four D AS');
+        $foreignContext = $this->customerContext('Customer Four E AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-access.docx', [
+                ['type' => 'paragraph', 'text' => '1 Overskrift test', 'style' => 'Heading1'],
+                ['type' => 'paragraph', 'text' => 'Tekst før bilde.', 'style' => 'Normal'],
+                [
+                    'type' => 'image',
+                    'media_filename' => 'image1.png',
+                    'media_bytes' => $this->docxSampleImageBytes(),
+                    'title' => 'Figure 4',
+                    'alt_text' => 'Arkitekturdiagram med integrasjoner',
+                ],
+                ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($foreignContext['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('image-access-foreign.docx', [
+                ['type' => 'paragraph', 'text' => '1 Overskrift test', 'style' => 'Heading1'],
+                [
+                    'type' => 'image',
+                    'media_filename' => 'image1.png',
+                    'media_bytes' => $this->docxSampleImageBytes(),
+                    'title' => 'Figure 5',
+                    'alt_text' => 'Eksempelbilde',
+                ],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'image-access.docx')
+            ->firstOrFail();
+
+        $imageChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'image')
+            ->firstOrFail();
+
+        $textChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'semantic')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $textChunk->id,
+            ]))
+            ->assertNotFound();
+
+        $foreignDocument = KnowledgeItem::query()
+            ->where('customer_id', $foreignContext['customer']->id)
+            ->where('original_filename', 'image-access-foreign.docx')
+            ->firstOrFail();
+
+        $foreignImageChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $foreignDocument->id)
+            ->where('chunk_type', 'image')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $foreignDocument->id,
+                'chunk' => $foreignImageChunk->id,
+            ]))
+            ->assertForbidden();
+    }
+
     public function test_rule_based_h2_chunk_payload_builder_emits_dedicated_table_chunks_with_metadata(): void
     {
         $structure = $this->ruleBasedTableChunkStructureFixture();
@@ -1628,22 +1990,63 @@ class KnowledgeBaseControllerTest extends TestCase
         }
 
         $bodyXml = [];
+        $relationshipsXml = [];
+        $mediaFiles = [];
+        $hasImages = false;
 
         foreach ($blocks as $block) {
+            $type = (string) data_get($block, 'type', 'paragraph');
+
+            if ($type === 'image') {
+                $hasImages = true;
+                $relationshipId = (string) data_get($block, 'relationship_id', 'rId'.(count($relationshipsXml) + 1));
+                $mediaFilename = (string) data_get($block, 'media_filename', 'image'.(count($relationshipsXml) + 1).'.png');
+                $mediaPath = 'word/media/'.$mediaFilename;
+                $mediaBytes = (string) data_get($block, 'media_bytes', $this->docxSampleImageBytes());
+
+                $relationshipsXml[] = $this->docxRelationshipXml($relationshipId, 'media/'.$mediaFilename);
+                $mediaFiles[$mediaPath] = $mediaBytes;
+                $bodyXml[] = $this->docxImageBodyXml(
+                    $relationshipId,
+                    (string) data_get($block, 'title', 'Figure 1'),
+                    (string) data_get($block, 'alt_text', 'Image alt text'),
+                );
+
+                continue;
+            }
+
             $text = (string) data_get($block, 'text', '');
             $style = data_get($block, 'style');
 
             $bodyXml[] = $this->docxBodyBlockXml($text, is_string($style) ? $style : null);
         }
 
+        $namespaceTail = $hasImages
+            ? ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+            : '';
+
         $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            .'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'.$namespaceTail.'>'
             .'<w:body>'
             .implode("\n", $bodyXml)
             .'</w:body>'
             .'</w:document>';
 
         $zip->addFromString('word/document.xml', $xml);
+
+        if ($hasImages) {
+            $relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                .implode("\n", $relationshipsXml)
+                .'</Relationships>';
+
+            $zip->addFromString('word/_rels/document.xml.rels', $relsXml);
+
+            foreach ($mediaFiles as $mediaPath => $mediaBytes) {
+                $zip->addFromString($mediaPath, $mediaBytes);
+            }
+        }
+
         $zip->close();
 
         return new UploadedFile(
@@ -2347,6 +2750,72 @@ XML;
             : '';
 
         return '<w:p>'.$styleXml.'<w:r><w:t>'.$escapedText.'</w:t></w:r></w:p>';
+    }
+
+    /**
+     * Purpose: Build one DOCX image paragraph for a structured fixture.
+     * Inputs: The relationship id, image title, and alt text.
+     * Returns: A WordprocessingML paragraph with an embedded drawing reference.
+     * Side effects: None.
+     */
+    private function docxImageBodyXml(string $relationshipId, string $title, string $altText): string
+    {
+        $relationshipId = htmlspecialchars($relationshipId, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $title = htmlspecialchars($title, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $altText = htmlspecialchars($altText, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+
+        return <<<XML
+<w:p>
+    <w:r>
+        <w:drawing>
+            <wp:inline>
+                <wp:extent cx="952500" cy="952500"/>
+                <wp:docPr id="1" name="{$title}" title="{$title}" descr="{$altText}"/>
+                <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                        <pic:pic>
+                            <pic:blipFill>
+                                <a:blip r:embed="{$relationshipId}"/>
+                            </pic:blipFill>
+                        </pic:pic>
+                    </a:graphicData>
+                </a:graphic>
+            </wp:inline>
+        </w:drawing>
+    </w:r>
+</w:p>
+XML;
+    }
+
+    /**
+     * Purpose: Build one DOCX image relationship entry for a structured fixture.
+     * Inputs: The relationship id and the media target path.
+     * Returns: A WordprocessingML relationship entry.
+     * Side effects: None.
+     */
+    private function docxRelationshipXml(string $relationshipId, string $targetPath): string
+    {
+        $relationshipId = htmlspecialchars($relationshipId, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $targetPath = htmlspecialchars($targetPath, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+
+        return '<Relationship Id="'.$relationshipId.'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="'.$targetPath.'"/>';
+    }
+
+    /**
+     * Purpose: Return a compact PNG image fixture for embedded image uploads.
+     * Inputs: None.
+     * Returns: Binary PNG bytes suitable for a DOCX media entry.
+     * Side effects: None.
+     */
+    private function docxSampleImageBytes(): string
+    {
+        $bytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2X3b8AAAAASUVORK5CYII=', true);
+
+        if (! is_string($bytes) || $bytes === '') {
+            throw new RuntimeException('Unable to build a DOCX image fixture.');
+        }
+
+        return $bytes;
     }
 
     /**

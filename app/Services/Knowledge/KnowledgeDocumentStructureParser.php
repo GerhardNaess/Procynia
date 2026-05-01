@@ -46,7 +46,22 @@ class KnowledgeDocumentStructureParser
      *         rows?: array<int, array<int, string>>,
      *         row_count?: int,
      *         column_count?: int,
-     *         table_index_in_document?: int
+     *         table_index_in_document?: int,
+     *         image_bytes?: string,
+     *         image_path?: ?string,
+     *         image_disk?: ?string,
+     *         image_mime_type?: ?string,
+     *         image_original_filename?: ?string,
+     *         image_width?: ?int,
+     *         image_height?: ?int,
+     *         image_hash?: ?string,
+     *         image_metadata?: array<string, mixed>,
+     *         image_alt_text?: ?string,
+     *         image_caption?: ?string,
+     *         ocr_text?: ?string,
+     *         image_description?: ?string,
+     *         source_metadata?: array<string, mixed>,
+     *         image_index_in_document?: int
      *     }>,
      *     word_count: int
      * }
@@ -103,13 +118,20 @@ class KnowledgeDocumentStructureParser
 
         $documentXml = $zip->getFromName('word/document.xml');
         $stylesXml = $zip->getFromName('word/styles.xml');
+        $relationshipsXml = $zip->getFromName('word/_rels/document.xml.rels');
+        $mediaFiles = $this->extractDocxMediaFiles($zip);
         $zip->close();
 
         if (! is_string($documentXml) || trim($documentXml) === '') {
             return $this->parsePlainText($path);
         }
 
-        $elements = $this->parseDocxBodyElements($documentXml, is_string($stylesXml) ? $stylesXml : null);
+        $elements = $this->parseDocxBodyElements(
+            $documentXml,
+            is_string($stylesXml) ? $stylesXml : null,
+            is_string($relationshipsXml) ? $relationshipsXml : null,
+            $mediaFiles,
+        );
 
         if ($elements === []) {
             return $this->parsePlainText($path);
@@ -120,7 +142,7 @@ class KnowledgeDocumentStructureParser
 
     /**
      * Purpose: Parse a DOCX document body into ordered raw structural elements.
-     * Inputs: Raw DOCX XML content and optional styles XML content.
+     * Inputs: Raw DOCX XML content, optional styles XML content, optional document relationships XML content, and extracted DOCX media files.
      * Returns: Ordered raw elements with lightweight structural metadata.
      * Side effects: Parses XML in memory.
      *
@@ -136,10 +158,30 @@ class KnowledgeDocumentStructureParser
      *     rows?: array<int, array<int, string>>,
      *     row_count?: int,
      *     column_count?: int,
-     *     table_index_in_document?: int
+     *     table_index_in_document?: int,
+     *     image_bytes?: string,
+     *     image_path?: ?string,
+     *     image_disk?: ?string,
+     *     image_mime_type?: ?string,
+     *     image_original_filename?: ?string,
+     *     image_width?: ?int,
+     *     image_height?: ?int,
+     *     image_hash?: ?string,
+     *     image_metadata?: array<string, mixed>,
+     *     image_alt_text?: ?string,
+     *     image_caption?: ?string,
+     *     ocr_text?: ?string,
+     *     image_description?: ?string,
+     *     source_metadata?: array<string, mixed>,
+     *     image_index_in_document?: int
      * }>
      */
-    private function parseDocxBodyElements(string $documentXml, ?string $stylesXml = null): array
+    private function parseDocxBodyElements(
+        string $documentXml,
+        ?string $stylesXml = null,
+        ?string $relationshipsXml = null,
+        array $mediaFiles = [],
+    ): array
     {
         $previousLibxmlState = libxml_use_internal_errors(true);
 
@@ -151,12 +193,17 @@ class KnowledgeDocumentStructureParser
             }
 
             $styleMap = $this->extractDocxStyleMap($stylesXml);
+            $relationshipMap = $this->extractDocxRelationshipMap($relationshipsXml);
             $xpath = new DOMXPath($dom);
             $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+            $xpath->registerNamespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+            $xpath->registerNamespace('a', 'http://schemas.openxmlformats.org/drawingml/2006/main');
+            $xpath->registerNamespace('wp', 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing');
 
             $rawElements = [];
             $currentHeadings = [];
             $tableIndexInDocument = 0;
+            $documentOrderIndex = 0;
 
             $bodyNodes = $xpath->query('/w:document/w:body/*');
 
@@ -171,14 +218,36 @@ class KnowledgeDocumentStructureParser
 
                 if ($node->nodeName === 'w:p') {
                     $text = $this->extractParagraphText($xpath, $node);
-
-                    if ($text === '') {
-                        continue;
-                    }
-
                     $styleId = $this->paragraphStyleId($xpath, $node);
                     $styleName = $styleMap[$styleId] ?? $styleId;
                     $headingLevel = $this->resolveHeadingLevel($styleId, $styleName);
+                    $headingPath = $this->currentHeadingPath($currentHeadings);
+                    $imageElements = $this->extractDocxImageElements(
+                        $xpath,
+                        $node,
+                        $relationshipMap,
+                        $mediaFiles,
+                        $headingPath,
+                        $documentOrderIndex,
+                        $text,
+                        $styleName,
+                    );
+
+                    foreach ($imageElements as $imageElement) {
+                        $rawElements[] = $imageElement;
+                    }
+
+                    if ($text === '' && $imageElements !== []) {
+                        $documentOrderIndex++;
+
+                        continue;
+                    }
+
+                    if ($text === '') {
+                        $documentOrderIndex++;
+
+                        continue;
+                    }
 
                     if ($headingLevel !== null) {
                         $currentHeadings[$headingLevel] = $text;
@@ -209,6 +278,8 @@ class KnowledgeDocumentStructureParser
                         'heading_level' => null,
                         'relation_hint' => $relationHint,
                     ];
+
+                    $documentOrderIndex++;
 
                     continue;
                 }
@@ -254,9 +325,12 @@ class KnowledgeDocumentStructureParser
                         'column_count' => (int) ($tableData['column_count'] ?? 0),
                         'table_index_in_document' => $tableIndexInDocument++,
                     ];
+
+                    $documentOrderIndex++;
                 }
             }
 
+            $rawElements = $this->linkDocxImageCaptions($rawElements);
             $mergedElements = $this->mergeContiguousListElements($rawElements);
 
             return $this->groupH2Sections($mergedElements);
@@ -317,6 +391,555 @@ class KnowledgeDocumentStructureParser
             libxml_clear_errors();
             libxml_use_internal_errors($previousLibxmlState);
         }
+    }
+
+    /**
+     * Purpose: Read the DOCX relationships file and resolve media relationships for embedded images.
+     * Inputs: Raw document relationships XML content, if available.
+     * Returns: A map from relationship id to normalized relationship metadata.
+     * Side effects: Parses XML in memory.
+     *
+     * @return array<string, array{target: string, type: string, target_mode: ?string}>
+     */
+    private function extractDocxRelationshipMap(?string $relationshipsXml): array
+    {
+        if (! is_string($relationshipsXml) || trim($relationshipsXml) === '') {
+            return [];
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+
+        try {
+            $dom = new DOMDocument();
+
+            if (! $dom->loadXML($relationshipsXml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) {
+                return [];
+            }
+
+            $xpath = new DOMXPath($dom);
+            $xpath->registerNamespace('rel', 'http://schemas.openxmlformats.org/package/2006/relationships');
+
+            $map = [];
+
+            foreach ($xpath->query('/rel:Relationships/rel:Relationship') as $relationshipNode) {
+                if (! $relationshipNode instanceof DOMElement) {
+                    continue;
+                }
+
+                $id = (string) ($relationshipNode->attributes?->getNamedItem('Id')?->nodeValue ?? '');
+                $type = (string) ($relationshipNode->attributes?->getNamedItem('Type')?->nodeValue ?? '');
+                $target = (string) ($relationshipNode->attributes?->getNamedItem('Target')?->nodeValue ?? '');
+                $targetMode = (string) ($relationshipNode->attributes?->getNamedItem('TargetMode')?->nodeValue ?? '');
+
+                if ($id === '' || $target === '' || ! Str::contains(Str::lower($type), '/image')) {
+                    continue;
+                }
+
+                $map[$id] = [
+                    'target' => $this->normalizeDocxRelationshipTarget($target),
+                    'type' => $type,
+                    'target_mode' => $targetMode !== '' ? $targetMode : null,
+                ];
+            }
+
+            return $map;
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousLibxmlState);
+        }
+    }
+
+    /**
+     * Purpose: Extract all DOCX media files from the archive into an in-memory lookup map.
+     * Inputs: An open DOCX ZIP archive.
+     * Returns: A map from media path to raw file bytes.
+     * Side effects: Reads ZIP entries into memory.
+     *
+     * @return array<string, string>
+     */
+    private function extractDocxMediaFiles(ZipArchive $zip): array
+    {
+        $mediaFiles = [];
+
+        for ($index = 0; $index < $zip->numFiles; $index++) {
+            $entryName = $zip->getNameIndex($index);
+
+            if (! is_string($entryName) || ! Str::startsWith($entryName, 'word/media/')) {
+                continue;
+            }
+
+            $contents = $zip->getFromIndex($index);
+
+            if (! is_string($contents) || $contents === '') {
+                continue;
+            }
+
+            $mediaFiles[$entryName] = $contents;
+        }
+
+        return $mediaFiles;
+    }
+
+    /**
+     * Purpose: Extract embedded DOCX images from one paragraph in document order.
+     * Inputs: The XML XPath helper, the paragraph node, document relationships, media file bytes, the active heading path, the document order index, the paragraph text, and the resolved style name.
+     * Returns: Ordered image elements that belong to the paragraph.
+     * Side effects: None.
+     *
+     * @param array<string, array{target: string, type: string, target_mode: ?string}> $relationshipMap
+     * @param array<string, string> $mediaFiles
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractDocxImageElements(
+        DOMXPath $xpath,
+        DOMElement $paragraph,
+        array $relationshipMap,
+        array $mediaFiles,
+        ?string $headingPath,
+        int $documentOrderIndex,
+        string $paragraphText,
+        ?string $styleName,
+    ): array {
+        $drawingNodes = $xpath->query('.//w:drawing', $paragraph);
+
+        if ($drawingNodes === false || $drawingNodes->length === 0) {
+            return [];
+        }
+
+        $paragraphText = trim($paragraphText);
+        $captionText = $this->isFigureText($paragraphText, $styleName) ? $paragraphText : null;
+        $results = [];
+        $imageIndex = 0;
+
+        foreach ($drawingNodes as $drawingNode) {
+            if (! $drawingNode instanceof DOMElement) {
+                continue;
+            }
+
+            $blipNode = $xpath->query('.//a:blip', $drawingNode);
+            $docPrNode = $xpath->query('.//wp:docPr', $drawingNode);
+            $extentNode = $xpath->query('.//wp:extent', $drawingNode);
+
+            $relationshipId = null;
+
+            if ($blipNode !== false && $blipNode->length > 0) {
+                $relationshipId = (string) ($blipNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed')?->nodeValue
+                    ?? $blipNode->item(0)?->attributes?->getNamedItemNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'link')?->nodeValue
+                    ?? '');
+            }
+
+            if (! is_string($relationshipId) || $relationshipId === '' || ! isset($relationshipMap[$relationshipId])) {
+                continue;
+            }
+
+            $relationship = $relationshipMap[$relationshipId];
+            $targetPath = (string) ($relationship['target'] ?? '');
+            $mediaPath = $this->normalizeDocxMediaPath($targetPath);
+            $imageBytes = $mediaPath !== '' && isset($mediaFiles[$mediaPath])
+                ? $mediaFiles[$mediaPath]
+                : null;
+
+            if (! is_string($imageBytes) || $imageBytes === '') {
+                continue;
+            }
+
+            $originalFilename = basename($mediaPath !== '' ? $mediaPath : $targetPath);
+            $extension = Str::lower((string) pathinfo($originalFilename, PATHINFO_EXTENSION));
+            $dimensions = $this->extractDocxImageDimensions($imageBytes, $extentNode !== false ? $extentNode->item(0) : null);
+            $mimeType = $dimensions['mime_type'] ?? $this->mimeTypeForImageExtension($extension);
+            $resolvedExtension = $extension !== '' ? $extension : $this->imageExtensionForMimeType($mimeType);
+            $imageHash = hash('sha256', $imageBytes);
+            $altText = $this->normalizeNullableString(
+                (string) (
+                    $docPrNode !== false && $docPrNode->length > 0
+                        ? (
+                            $docPrNode->item(0)?->attributes?->getNamedItem('descr')?->nodeValue
+                            ?: $docPrNode->item(0)?->attributes?->getNamedItem('title')?->nodeValue
+                            ?: $docPrNode->item(0)?->attributes?->getNamedItem('name')?->nodeValue
+                        )
+                        : null
+                ),
+            );
+            $caption = $captionText !== null ? $captionText : null;
+            $searchText = $this->buildDocxImageSearchText($headingPath, $caption, $altText);
+
+            $results[] = [
+                'type' => 'image',
+                'heading_path' => $headingPath,
+                'heading_context' => $headingPath,
+                'text' => $searchText,
+                'heading_level' => null,
+                'relation_hint' => 'image',
+                'image_bytes' => $imageBytes,
+                'image_path' => null,
+                'image_disk' => null,
+                'image_mime_type' => $mimeType,
+                'image_original_filename' => $originalFilename,
+                'image_width' => $dimensions['width'] ?? null,
+                'image_height' => $dimensions['height'] ?? null,
+                'image_hash' => $imageHash,
+                'image_metadata' => [
+                    'source_type' => 'docx_image',
+                    'image_kind' => 'unknown',
+                    'detected_type' => 'unknown',
+                    'relationship_id' => $relationshipId,
+                    'media_path' => $mediaPath !== '' ? $mediaPath : $targetPath,
+                    'document_order_index' => $documentOrderIndex,
+                    'heading_path' => $headingPath,
+                    'extension' => $resolvedExtension,
+                    'nearby_text_before' => null,
+                    'nearby_text_after' => null,
+                    'caption_detected' => $caption !== null,
+                    'alt_text_detected' => $altText !== null,
+                    'mime_type' => $mimeType,
+                    'width' => $dimensions['width'] ?? null,
+                    'height' => $dimensions['height'] ?? null,
+                    'image_hash' => $imageHash,
+                    'docpr_title' => $this->normalizeNullableString((string) ($docPrNode !== false && $docPrNode->length > 0 ? ($docPrNode->item(0)?->attributes?->getNamedItem('title')?->nodeValue ?? '') : '')),
+                    'docpr_descr' => $this->normalizeNullableString((string) ($docPrNode !== false && $docPrNode->length > 0 ? ($docPrNode->item(0)?->attributes?->getNamedItem('descr')?->nodeValue ?? '') : '')),
+                    'docpr_name' => $this->normalizeNullableString((string) ($docPrNode !== false && $docPrNode->length > 0 ? ($docPrNode->item(0)?->attributes?->getNamedItem('name')?->nodeValue ?? '') : '')),
+                ],
+                'image_alt_text' => $altText,
+                'image_caption' => $caption,
+                'ocr_text' => null,
+                'image_description' => null,
+                'source_metadata' => [
+                    'source_type' => 'docx_image',
+                    'image_kind' => 'unknown',
+                    'detected_type' => 'unknown',
+                    'relationship_id' => $relationshipId,
+                    'media_path' => $mediaPath !== '' ? $mediaPath : $targetPath,
+                    'document_order_index' => $documentOrderIndex,
+                    'heading_path' => $headingPath,
+                    'extension' => $resolvedExtension,
+                    'nearby_text_before' => null,
+                    'nearby_text_after' => null,
+                    'caption_detected' => $caption !== null,
+                    'alt_text_detected' => $altText !== null,
+                    'mime_type' => $mimeType,
+                    'width' => $dimensions['width'] ?? null,
+                    'height' => $dimensions['height'] ?? null,
+                    'image_hash' => $imageHash,
+                ],
+                'image_index_in_document' => $imageIndex++,
+            ];
+        }
+
+        return $results;
+    }
+
+    /**
+     * Purpose: Link nearby caption paragraphs to image elements and optionally suppress duplicate caption text.
+     * Inputs: The ordered raw elements extracted from the DOCX body.
+     * Returns: The same element list with image caption metadata attached where possible.
+     * Side effects: Mutates the supplied element array in place.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @return array<int, array<string, mixed>>
+     */
+    private function linkDocxImageCaptions(array $elements): array
+    {
+        $count = count($elements);
+
+        for ($index = 0; $index < $count; $index++) {
+            if ((string) data_get($elements[$index], 'type', '') !== 'image') {
+                continue;
+            }
+
+            $captionIndex = null;
+            $currentHeadingPath = $this->normalizeNullableString($elements[$index]['heading_path'] ?? null);
+
+            $previousIndex = $this->previousVisibleElementIndex($elements, $index);
+            if ($previousIndex !== null && $this->isDocxImageCaptionCandidate($elements[$previousIndex], $currentHeadingPath)) {
+                $captionIndex = $previousIndex;
+            } else {
+                $nextIndex = $this->nextVisibleElementIndex($elements, $index);
+                if ($nextIndex !== null && $this->isDocxImageCaptionCandidate($elements[$nextIndex], $currentHeadingPath)) {
+                    $captionIndex = $nextIndex;
+                }
+            }
+
+            $nearbyBefore = $previousIndex !== null ? trim((string) data_get($elements[$previousIndex], 'text', '')) : null;
+            $nearbyAfter = $this->nextVisibleText($elements, $index);
+
+            if ($captionIndex !== null) {
+                $captionText = trim((string) data_get($elements[$captionIndex], 'text', ''));
+                $elements[$index]['image_caption'] = $captionText !== '' ? $captionText : null;
+                $elements[$index]['image_metadata']['caption_detected'] = true;
+                $elements[$index]['source_metadata']['caption_detected'] = true;
+                $elements[$index]['source_metadata']['nearby_text_before'] = $nearbyBefore !== '' ? $nearbyBefore : null;
+                $elements[$index]['source_metadata']['nearby_text_after'] = $nearbyAfter !== '' ? $nearbyAfter : null;
+                $elements[$index]['image_metadata']['nearby_text_before'] = $nearbyBefore !== '' ? $nearbyBefore : null;
+                $elements[$index]['image_metadata']['nearby_text_after'] = $nearbyAfter !== '' ? $nearbyAfter : null;
+                $elements[$index]['text'] = $this->buildDocxImageSearchText(
+                    $currentHeadingPath,
+                    $elements[$index]['image_caption'] ?? null,
+                    $this->normalizeNullableString($elements[$index]['image_alt_text'] ?? null),
+                );
+                $elements[$captionIndex]['text'] = '';
+                $elements[$captionIndex]['relation_hint'] = 'image_caption';
+            } else {
+                $elements[$index]['source_metadata']['nearby_text_before'] = $nearbyBefore !== '' ? $nearbyBefore : null;
+                $elements[$index]['source_metadata']['nearby_text_after'] = $nearbyAfter !== '' ? $nearbyAfter : null;
+                $elements[$index]['image_metadata']['nearby_text_before'] = $nearbyBefore !== '' ? $nearbyBefore : null;
+                $elements[$index]['image_metadata']['nearby_text_after'] = $nearbyAfter !== '' ? $nearbyAfter : null;
+                $elements[$index]['text'] = $this->buildDocxImageSearchText(
+                    $currentHeadingPath,
+                    $this->normalizeNullableString($elements[$index]['image_caption'] ?? null),
+                    $this->normalizeNullableString($elements[$index]['image_alt_text'] ?? null),
+                );
+            }
+        }
+
+        return $elements;
+    }
+
+    /**
+     * Purpose: Determine whether one raw DOCX element should be treated as a caption candidate for a nearby image.
+     * Inputs: One parsed raw element and the active heading path.
+     * Returns: True when the element looks like a caption and belongs to the same section context.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function isDocxImageCaptionCandidate(array $element, ?string $headingPath): bool
+    {
+        $text = trim((string) data_get($element, 'text', ''));
+
+        if ($text === '') {
+            return false;
+        }
+
+        $elementType = (string) data_get($element, 'type', '');
+
+        if ($elementType !== 'figure_text' && $elementType !== 'paragraph') {
+            return false;
+        }
+
+        $elementHeadingPath = $this->normalizeNullableString($element['heading_path'] ?? null);
+
+        if ($headingPath !== null && $elementHeadingPath !== null && $headingPath !== $elementHeadingPath) {
+            return false;
+        }
+
+        return $this->isFigureText($text, $this->normalizeNullableString($element['heading_context'] ?? null));
+    }
+
+    /**
+     * Purpose: Locate the previous visible element index in an ordered element list.
+     * Inputs: The raw element list and the current index.
+     * Returns: The previous non-empty element index or null when none exists.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     */
+    private function previousVisibleElementIndex(array $elements, int $currentIndex): ?int
+    {
+        for ($index = $currentIndex - 1; $index >= 0; $index--) {
+            if (trim((string) data_get($elements[$index], 'text', '')) !== '') {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Locate the next visible element index in an ordered element list.
+     * Inputs: The raw element list and the current index.
+     * Returns: The next non-empty element index or null when none exists.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     */
+    private function nextVisibleElementIndex(array $elements, int $currentIndex): ?int
+    {
+        $count = count($elements);
+
+        for ($index = $currentIndex + 1; $index < $count; $index++) {
+            if (trim((string) data_get($elements[$index], 'text', '')) !== '') {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Resolve the next visible text from an element list for image context linking.
+     * Inputs: The raw element list and the current index.
+     * Returns: The next visible text string or null.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $elements
+     */
+    private function nextVisibleText(array $elements, int $currentIndex): ?string
+    {
+        $nextIndex = $this->nextVisibleElementIndex($elements, $currentIndex);
+
+        return $nextIndex !== null
+            ? trim((string) data_get($elements[$nextIndex], 'text', ''))
+            : null;
+    }
+
+    /**
+     * Purpose: Build a searchable text representation for one DOCX image element.
+     * Inputs: The active heading path, an optional caption, and an optional alt text.
+     * Returns: A compact search string that can be embedded and chunked.
+     * Side effects: None.
+     */
+    private function buildDocxImageSearchText(?string $headingPath, ?string $caption, ?string $altText): string
+    {
+        $lines = [];
+
+        if ($headingPath !== null && trim($headingPath) !== '') {
+            $lines[] = 'Bilde i seksjon: '.trim($headingPath);
+        } else {
+            $lines[] = 'Bilde';
+        }
+
+        $caption = $this->normalizeNullableString($caption);
+        $altText = $this->normalizeNullableString($altText);
+
+        if ($caption !== null) {
+            $lines[] = 'Bildetekst: '.$caption;
+        }
+
+        if ($altText !== null) {
+            $lines[] = 'Alternativ tekst: '.$altText;
+        }
+
+        if ($caption === null && $altText === null) {
+            $lines[] = 'Ingen bildetekst eller alternativ tekst er registrert.';
+        }
+
+        return trim(implode("\n", $lines));
+    }
+
+    /**
+     * Purpose: Normalize a DOCX relationship target into a ZIP entry path.
+     * Inputs: A raw relationship target string.
+     * Returns: A normalized media path.
+     * Side effects: None.
+     */
+    private function normalizeDocxRelationshipTarget(string $target): string
+    {
+        $target = ltrim(trim($target), '/');
+
+        if ($target === '') {
+            return '';
+        }
+
+        if (Str::startsWith($target, 'word/')) {
+            return $target;
+        }
+
+        return 'word/'.ltrim($target, '/');
+    }
+
+    /**
+     * Purpose: Normalize a media path for a DOCX embedded image.
+     * Inputs: A relationship target or media path.
+     * Returns: A normalized media path inside the DOCX archive.
+     * Side effects: None.
+     */
+    private function normalizeDocxMediaPath(string $targetPath): string
+    {
+        $targetPath = ltrim(trim($targetPath), '/');
+
+        if ($targetPath === '') {
+            return '';
+        }
+
+        if (Str::startsWith($targetPath, 'word/media/')) {
+            return $targetPath;
+        }
+
+        return 'word/'.ltrim($targetPath, '/');
+    }
+
+    /**
+     * Purpose: Resolve a MIME type for a DOCX image extension.
+     * Inputs: An image file extension.
+     * Returns: A best-effort image MIME type string.
+     * Side effects: None.
+     */
+    private function mimeTypeForImageExtension(string $extension): string
+    {
+        return match (Str::lower(trim($extension))) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'bmp' => 'image/bmp',
+            'webp' => 'image/webp',
+            'tif', 'tiff' => 'image/tiff',
+            'svg' => 'image/svg+xml',
+            default => 'application/octet-stream',
+        };
+    }
+
+    /**
+     * Purpose: Resolve a stable image extension for a DOCX embedded image.
+     * Inputs: An image MIME type string.
+     * Returns: A lower-case file extension or "bin" when the MIME type is unknown.
+     * Side effects: None.
+     */
+    private function imageExtensionForMimeType(string $mimeType): string
+    {
+        return match (Str::lower(trim($mimeType))) {
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/bmp' => 'bmp',
+            'image/webp' => 'webp',
+            'image/tiff' => 'tiff',
+            'image/svg+xml' => 'svg',
+            default => 'bin',
+        };
+    }
+
+    /**
+     * Purpose: Derive width, height, and MIME type metadata for one embedded image.
+     * Inputs: Raw image bytes and the optional WordprocessingML extent node.
+     * Returns: A compact dimension and MIME metadata array.
+     * Side effects: None.
+     *
+     * @return array{width: ?int, height: ?int, mime_type: ?string}
+     */
+    private function extractDocxImageDimensions(string $imageBytes, ?DOMElement $extentNode = null): array
+    {
+        $width = null;
+        $height = null;
+        $mimeType = null;
+
+        if (function_exists('getimagesizefromstring')) {
+            $size = @getimagesizefromstring($imageBytes);
+
+            if (is_array($size)) {
+                $width = isset($size[0]) ? (int) $size[0] : null;
+                $height = isset($size[1]) ? (int) $size[1] : null;
+                $mimeType = isset($size['mime']) ? (string) $size['mime'] : null;
+            }
+        }
+
+        if (($width === null || $height === null) && $extentNode instanceof DOMElement) {
+            $cx = (int) ($extentNode->attributes?->getNamedItem('cx')?->nodeValue ?? 0);
+            $cy = (int) ($extentNode->attributes?->getNamedItem('cy')?->nodeValue ?? 0);
+
+            if ($width === null && $cx > 0) {
+                $width = (int) round($cx / 9525);
+            }
+
+            if ($height === null && $cy > 0) {
+                $height = (int) round($cy / 9525);
+            }
+        }
+
+        return [
+            'width' => $width,
+            'height' => $height,
+            'mime_type' => $mimeType,
+        ];
     }
 
     /**
@@ -1459,11 +2082,15 @@ class KnowledgeDocumentStructureParser
             Str::contains($normalizedStyle, 'caption')
             || Str::contains($normalizedStyle, 'figure')
             || Str::contains($normalizedStyle, 'illustration')
+            || Str::contains($normalizedStyle, 'image')
+            || Str::contains($normalizedStyle, 'diagram')
+            || Str::contains($normalizedStyle, 'bilde')
+            || Str::contains($normalizedStyle, 'illustrasjon')
         )) {
             return true;
         }
 
-        return Str::startsWith($normalizedText, ['figur ', 'figure ', 'tabell ', 'table ']);
+        return Str::startsWith($normalizedText, ['figur ', 'figure ', 'bilde ', 'image ', 'illustrasjon ', 'diagram ', 'tabell ', 'table ']);
     }
 
     /**
@@ -1589,7 +2216,22 @@ class KnowledgeDocumentStructureParser
      *     rows?: array<int, array<int, string>>,
      *     row_count?: int,
      *     column_count?: int,
-     *     table_index_in_document?: int
+     *     table_index_in_document?: int,
+     *     image_bytes?: string,
+     *     image_path?: ?string,
+     *     image_disk?: ?string,
+     *     image_mime_type?: ?string,
+     *     image_original_filename?: ?string,
+     *     image_width?: ?int,
+     *     image_height?: ?int,
+     *     image_hash?: ?string,
+     *     image_metadata?: array<string, mixed>,
+     *     image_alt_text?: ?string,
+     *     image_caption?: ?string,
+     *     ocr_text?: ?string,
+     *     image_description?: ?string,
+     *     source_metadata?: array<string, mixed>,
+     *     image_index_in_document?: int
      * }>
      */
     private function groupH2Sections(array $elements): array
@@ -1635,7 +2277,7 @@ class KnowledgeDocumentStructureParser
                 continue;
             }
 
-            if ($type === 'table') {
+            if ($type === 'table' || $type === 'image') {
                 if ($currentSection !== []) {
                     $headingSeed = $currentSection[0] ?? null;
                     $section = $this->buildH2SectionElement($currentSection);
@@ -1693,7 +2335,22 @@ class KnowledgeDocumentStructureParser
      *     rows?: array<int, array<int, string>>,
      *     row_count?: int,
      *     column_count?: int,
-     *     table_index_in_document?: int
+     *     table_index_in_document?: int,
+     *     image_bytes?: string,
+     *     image_path?: ?string,
+     *     image_disk?: ?string,
+     *     image_mime_type?: ?string,
+     *     image_original_filename?: ?string,
+     *     image_width?: ?int,
+     *     image_height?: ?int,
+     *     image_hash?: ?string,
+     *     image_metadata?: array<string, mixed>,
+     *     image_alt_text?: ?string,
+     *     image_caption?: ?string,
+     *     ocr_text?: ?string,
+     *     image_description?: ?string,
+     *     source_metadata?: array<string, mixed>,
+     *     image_index_in_document?: int
      * }> $sectionElements
      * @return array{
      *     type: string,
@@ -1883,6 +2540,21 @@ class KnowledgeDocumentStructureParser
                 'row_count' => $element['row_count'] ?? null,
                 'column_count' => $element['column_count'] ?? null,
                 'table_index_in_document' => $element['table_index_in_document'] ?? null,
+                'image_bytes' => $element['image_bytes'] ?? null,
+                'image_path' => $element['image_path'] ?? null,
+                'image_disk' => $element['image_disk'] ?? null,
+                'image_mime_type' => $element['image_mime_type'] ?? null,
+                'image_original_filename' => $element['image_original_filename'] ?? null,
+                'image_width' => $element['image_width'] ?? null,
+                'image_height' => $element['image_height'] ?? null,
+                'image_hash' => $element['image_hash'] ?? null,
+                'image_metadata' => $element['image_metadata'] ?? null,
+                'image_alt_text' => $element['image_alt_text'] ?? null,
+                'image_caption' => $element['image_caption'] ?? null,
+                'ocr_text' => $element['ocr_text'] ?? null,
+                'image_description' => $element['image_description'] ?? null,
+                'source_metadata' => $element['source_metadata'] ?? null,
+                'image_index_in_document' => $element['image_index_in_document'] ?? null,
             ];
         }
 
@@ -1931,6 +2603,21 @@ class KnowledgeDocumentStructureParser
                 'row_count' => isset($element['row_count']) ? (int) $element['row_count'] : null,
                 'column_count' => isset($element['column_count']) ? (int) $element['column_count'] : null,
                 'table_index_in_document' => isset($element['table_index_in_document']) ? (int) $element['table_index_in_document'] : null,
+                'image_bytes' => is_string($element['image_bytes'] ?? null) && trim((string) $element['image_bytes']) !== '' ? (string) $element['image_bytes'] : null,
+                'image_path' => $this->normalizeNullableString($element['image_path'] ?? null),
+                'image_disk' => $this->normalizeNullableString($element['image_disk'] ?? null),
+                'image_mime_type' => $this->normalizeNullableString($element['image_mime_type'] ?? null),
+                'image_original_filename' => $this->normalizeNullableString($element['image_original_filename'] ?? null),
+                'image_width' => isset($element['image_width']) ? (int) $element['image_width'] : null,
+                'image_height' => isset($element['image_height']) ? (int) $element['image_height'] : null,
+                'image_hash' => $this->normalizeNullableString($element['image_hash'] ?? null),
+                'image_metadata' => isset($element['image_metadata']) && is_array($element['image_metadata']) ? $element['image_metadata'] : null,
+                'image_alt_text' => $this->normalizeNullableString($element['image_alt_text'] ?? null),
+                'image_caption' => $this->normalizeNullableString($element['image_caption'] ?? null),
+                'ocr_text' => $this->normalizeNullableString($element['ocr_text'] ?? null),
+                'image_description' => $this->normalizeNullableString($element['image_description'] ?? null),
+                'source_metadata' => isset($element['source_metadata']) && is_array($element['source_metadata']) ? $element['source_metadata'] : null,
+                'image_index_in_document' => isset($element['image_index_in_document']) ? (int) $element['image_index_in_document'] : null,
             ];
         }
 

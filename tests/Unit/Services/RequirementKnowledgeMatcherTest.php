@@ -51,6 +51,41 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertGreaterThan($matches->get(1)['score'], $matches->first()['score']);
     }
 
+    public function test_it_uses_table_summary_and_table_text_when_matching_table_evidence(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'Beskriv sikkerhetsparametrene for SOC tjenesten i en tabell.',
+            collect([
+                $this->chunkPayload(
+                    1,
+                    'Tabell over sikkerhetsparametere',
+                    'Oversikt',
+                    '2026-04-06 10:00:00',
+                    null,
+                    [
+                        'chunk_type' => 'table',
+                        'summary_for_retrieval' => 'Tabellen viser sikkerhetsparametere for SOC tjenesten.',
+                        'table_text' => 'Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.',
+                        'section_title' => 'SOC-tjenesten',
+                        'section_path' => 'Sikkerhet > SOC-tjenesten',
+                    ],
+                ),
+                $this->chunkPayload(
+                    2,
+                    'Urelevant tekst',
+                    'Oversikt',
+                    '2026-04-06 10:01:00',
+                    null,
+                ),
+            ]),
+        );
+
+        $this->assertSame([1], $matches->pluck('chunk_id')->all());
+        $this->assertGreaterThan(0, $matches->first()['score']);
+    }
+
     public function test_it_does_not_give_a_strong_boost_from_generic_metadata_words_alone(): void
     {
         $matcher = app(RequirementKnowledgeMatcher::class);
@@ -167,6 +202,7 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'knowledge_item_updated_at' => $updatedAt,
             'metadata_score' => null,
             'metadata_matches' => [],
+            'chunk_type' => 'semantic',
             'topic' => '',
             'sub_topic' => '',
             'service_product_tag' => '',
@@ -175,6 +211,8 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'section_title' => '',
             'section_path' => '',
             'knowledge_item_summary' => '',
+            'summary_for_retrieval' => '',
+            'table_text' => '',
         ], $metadata);
     }
 }

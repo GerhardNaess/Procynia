@@ -234,6 +234,180 @@ XML,
         $this->assertStringNotContainsString('Tekst før tabell.', $h2Element['text']);
     }
 
+    public function test_it_extracts_images_as_dedicated_elements_with_caption_and_heading_context(): void
+    {
+        $documentXml = $this->buildDocxDocumentXml([
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+    <w:r><w:t>1 Overskrift test</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
+    <w:r><w:t>Tekst før bilde.</w:t></w:r>
+</w:p>
+XML,
+            $this->docxImageParagraphXml('rId1', 'Figure 1', 'Arkitekturdiagram med integrasjoner'),
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Caption"/></w:pPr>
+    <w:r><w:t>Figur 1: Overordnet arkitektur</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+    <w:r><w:t>1.1 Dokumentasjonskrav for drift</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
+    <w:r><w:t>Tekst etter H2.</w:t></w:r>
+</w:p>
+XML,
+        ]);
+
+        $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+        $mediaFiles = [
+            'word/media/image1.png' => $this->docxSampleImageBytes(),
+        ];
+
+        $result = $this->parseDocxFixture($documentXml, null, $relationshipsXml, $mediaFiles);
+
+        $this->assertSame('docx', $result['document_format']);
+        $this->assertCount(3, $result['elements']);
+
+        $paragraphElement = $result['elements'][0];
+        $imageElement = $result['elements'][1];
+        $h2Element = $result['elements'][2];
+
+        $this->assertSame('paragraph', $paragraphElement['type']);
+        $this->assertSame('1 Overskrift test', $paragraphElement['heading_path']);
+        $this->assertStringContainsString('Tekst før bilde.', $paragraphElement['text']);
+
+        $this->assertSame('image', $imageElement['type']);
+        $this->assertSame('1 Overskrift test', $imageElement['heading_path']);
+        $this->assertSame('1 Overskrift test', $imageElement['heading_context']);
+        $this->assertSame('Arkitekturdiagram med integrasjoner', $imageElement['image_alt_text']);
+        $this->assertSame('Figur 1: Overordnet arkitektur', $imageElement['image_caption']);
+        $this->assertSame('image/png', $imageElement['image_metadata']['mime_type']);
+        $this->assertSame('png', $imageElement['image_metadata']['extension']);
+        $this->assertSame('unknown', $imageElement['image_metadata']['image_kind']);
+        $this->assertSame(1, $imageElement['image_metadata']['width']);
+        $this->assertSame(1, $imageElement['image_metadata']['height']);
+        $this->assertSame('rId1', $imageElement['image_metadata']['relationship_id']);
+        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', $imageElement['text']);
+        $this->assertStringContainsString('Figur 1: Overordnet arkitektur', $imageElement['text']);
+        $this->assertStringContainsString('Arkitekturdiagram med integrasjoner', $imageElement['text']);
+
+        $this->assertSame('h2_section', $h2Element['type']);
+        $this->assertSame('1 Overskrift test > 1.1 Dokumentasjonskrav for drift', $h2Element['heading_path']);
+        $this->assertStringContainsString('Tekst etter H2.', $h2Element['text']);
+        $this->assertStringNotContainsString('Tekst før bilde.', $h2Element['text']);
+        $this->assertStringNotContainsString('Figur 1: Overordnet arkitektur', $h2Element['text']);
+    }
+
+    public function test_it_keeps_images_before_h2_under_the_previous_h1_context_even_when_tables_precede_them(): void
+    {
+        $documentXml = $this->buildDocxDocumentXml([
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+    <w:r><w:t>1 Overskrift test</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
+    <w:r><w:t>Tekst før tabell.</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:tbl>
+    <w:tblGrid>
+        <w:gridCol w:w="2400"/>
+        <w:gridCol w:w="2400"/>
+    </w:tblGrid>
+    <w:tr>
+        <w:tc>
+            <w:tcPr><w:gridSpan w:val="2"/></w:tcPr>
+            <w:p><w:r><w:t>Heading</w:t></w:r></w:p>
+        </w:tc>
+    </w:tr>
+    <w:tr>
+        <w:trPr><w:tblHeader/></w:trPr>
+        <w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc>
+    </w:tr>
+</w:tbl>
+XML,
+            $this->docxImageParagraphXml('rId1', 'Figure 1', 'Arkitekturdiagram med integrasjoner'),
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+    <w:r><w:t>1.1 Dokumentasjonskrav for drift</w:t></w:r>
+</w:p>
+XML,
+            <<<'XML'
+<w:p>
+    <w:pPr><w:pStyle w:val="Normal"/></w:pPr>
+    <w:r><w:t>Tekst etter H2.</w:t></w:r>
+</w:p>
+XML,
+        ]);
+
+        $relationshipsXml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+XML;
+        $mediaFiles = [
+            'word/media/image1.png' => $this->docxSampleImageBytes(),
+        ];
+
+        $result = $this->parseDocxFixture($documentXml, null, $relationshipsXml, $mediaFiles);
+
+        $this->assertSame('docx', $result['document_format']);
+        $this->assertCount(4, $result['elements']);
+
+        $paragraphElement = $result['elements'][0];
+        $tableElement = $result['elements'][1];
+        $imageElement = $result['elements'][2];
+        $h2Element = $result['elements'][3];
+
+        $this->assertSame('paragraph', $paragraphElement['type']);
+        $this->assertSame('1 Overskrift test', $paragraphElement['heading_path']);
+        $this->assertStringContainsString('Tekst før tabell.', $paragraphElement['text']);
+
+        $this->assertSame('table', $tableElement['type']);
+        $this->assertSame('1 Overskrift test', $tableElement['heading_path']);
+        $this->assertSame('1 Overskrift test', $tableElement['heading_context']);
+        $this->assertStringContainsString('Heading', $tableElement['text']);
+        $this->assertStringContainsString('A | B', $tableElement['text']);
+
+        $this->assertSame('image', $imageElement['type']);
+        $this->assertSame('1 Overskrift test', $imageElement['heading_path']);
+        $this->assertSame('1 Overskrift test', $imageElement['heading_context']);
+        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', $imageElement['text']);
+        $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', $imageElement['text']);
+
+        $this->assertSame('h2_section', $h2Element['type']);
+        $this->assertSame('1 Overskrift test > 1.1 Dokumentasjonskrav for drift', $h2Element['heading_path']);
+        $this->assertSame('1 Overskrift test > 1.1 Dokumentasjonskrav for drift', $h2Element['heading_context']);
+        $this->assertStringContainsString('Tekst etter H2.', $h2Element['text']);
+        $this->assertStringNotContainsString('Tekst før tabell.', $h2Element['text']);
+        $this->assertStringNotContainsString('Bilde i seksjon: 1 Overskrift test', $h2Element['text']);
+    }
+
     public function test_it_preserves_grid_span_cells_in_table_json_and_html(): void
     {
         $documentXml = $this->buildDocxDocumentXml([
@@ -396,7 +570,7 @@ XML,
      *
      * @return array<string, mixed>
      */
-    private function parseDocxFixture(string $documentXml, ?string $stylesXml = null): array
+    private function parseDocxFixture(string $documentXml, ?string $stylesXml = null, ?string $relationshipsXml = null, array $mediaFiles = []): array
     {
         $path = $this->tempDocumentPath('docx');
 
@@ -407,6 +581,14 @@ XML,
 
             if (is_string($stylesXml) && trim($stylesXml) !== '') {
                 $zip->addFromString('word/styles.xml', $stylesXml);
+            }
+
+            if (is_string($relationshipsXml) && trim($relationshipsXml) !== '') {
+                $zip->addFromString('word/_rels/document.xml.rels', $relationshipsXml);
+            }
+
+            foreach ($mediaFiles as $mediaPath => $mediaBytes) {
+                $zip->addFromString((string) $mediaPath, (string) $mediaBytes);
             }
 
             $zip->close();
@@ -433,5 +615,57 @@ XML,
             .implode("\n", $blocks)
             .'</w:body>'
             .'</w:document>';
+    }
+
+    /**
+     * Purpose: Build one DOCX image paragraph for a parser fixture.
+     * Inputs: The relationship id, image title, and alt text.
+     * Returns: A WordprocessingML paragraph with an embedded drawing reference.
+     * Side effects: None.
+     */
+    private function docxImageParagraphXml(string $relationshipId, string $title, string $altText): string
+    {
+        $relationshipId = htmlspecialchars($relationshipId, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $title = htmlspecialchars($title, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+        $altText = htmlspecialchars($altText, ENT_XML1 | ENT_COMPAT, 'UTF-8');
+
+        return <<<XML
+<w:p xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+    <w:r>
+        <w:drawing>
+            <wp:inline>
+                <wp:extent cx="952500" cy="952500"/>
+                <wp:docPr id="1" name="{$title}" title="{$title}" descr="{$altText}"/>
+                <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                        <pic:pic>
+                            <pic:blipFill>
+                                <a:blip r:embed="{$relationshipId}"/>
+                            </pic:blipFill>
+                        </pic:pic>
+                    </a:graphicData>
+                </a:graphic>
+            </wp:inline>
+        </w:drawing>
+    </w:r>
+</w:p>
+XML;
+    }
+
+    /**
+     * Purpose: Return a compact PNG image fixture for parser tests.
+     * Inputs: None.
+     * Returns: Binary PNG bytes suitable for a DOCX media entry.
+     * Side effects: None.
+     */
+    private function docxSampleImageBytes(): string
+    {
+        $bytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2X3b8AAAAASUVORK5CYII=', true);
+
+        if (! is_string($bytes) || $bytes === '') {
+            throw new RuntimeException('Unable to build a DOCX image fixture.');
+        }
+
+        return $bytes;
     }
 }

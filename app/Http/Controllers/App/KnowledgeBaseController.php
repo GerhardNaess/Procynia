@@ -29,6 +29,7 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class KnowledgeBaseController extends Controller
 {
@@ -662,6 +663,24 @@ class KnowledgeBaseController extends Controller
                         'table_html' => $chunk->table_html,
                         'table_complexity' => $chunk->table_complexity,
                         'table_warnings' => $chunk->table_warnings,
+                        'image_path' => $chunk->image_path,
+                        'image_disk' => $chunk->image_disk,
+                        'image_mime_type' => $chunk->image_mime_type,
+                        'image_original_filename' => $chunk->image_original_filename,
+                        'image_width' => $chunk->image_width,
+                        'image_height' => $chunk->image_height,
+                        'image_hash' => $chunk->image_hash,
+                        'image_metadata' => $chunk->image_metadata,
+                        'image_alt_text' => $chunk->image_alt_text,
+                        'image_caption' => $chunk->image_caption,
+                        'ocr_text' => $chunk->ocr_text,
+                        'image_description' => $chunk->image_description,
+                        'image_url' => $chunk->chunk_type === 'image' && $chunk->image_path !== null
+                            ? route('app.ai.knowledge-base.chunks.image', [
+                                'knowledgeItem' => $knowledgeDocument->id,
+                                'chunk' => $chunk->id,
+                            ])
+                            : null,
                         'source_filename' => $knowledgeDocument->original_filename,
                         'source_filetype' => $knowledgeDocument->mime_type,
                         'knowledge_item_id' => $knowledgeDocument->id,
@@ -670,6 +689,39 @@ class KnowledgeBaseController extends Controller
                     ->all(),
             ],
         );
+    }
+
+    /**
+     * Purpose: Stream one stored knowledge image back to an authorized frontend user.
+     * Inputs: The current frontend request, the parent knowledge document, and the image chunk.
+     * Returns: A binary file response with the image content and MIME type.
+     * Side effects: Reads the stored image file from disk.
+     */
+    public function showChunkImage(Request $request, KnowledgeItem $knowledgeItem, KnowledgeItemChunk $chunk): BinaryFileResponse
+    {
+        [, $customerId] = $this->frontendContext($request);
+
+        abort_unless((int) $knowledgeItem->customer_id === $customerId, 403);
+
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $chunkRecord = $this->scopedChunk($record->id, $chunk->id);
+
+        abort_unless((string) $chunkRecord->chunk_type === 'image', 404);
+
+        $imagePath = $this->cleanNullableString($chunkRecord->image_path, 1024);
+        abort_unless($imagePath !== null, 404);
+
+        $imageDisk = $this->cleanNullableString($chunkRecord->image_disk, 64) ?? 'local';
+        $storage = Storage::disk($imageDisk);
+
+        abort_unless($storage->exists($imagePath), 404);
+
+        $mimeType = $this->cleanNullableString($chunkRecord->image_mime_type, 191) ?? 'application/octet-stream';
+        $absolutePath = $storage->path($imagePath);
+
+        return response()->file($absolutePath, [
+            'Content-Type' => $mimeType,
+        ]);
     }
 
     /**
@@ -706,7 +758,7 @@ class KnowledgeBaseController extends Controller
                 $candidateContent = trim($rawCandidateContent);
                 $candidateContentLength = mb_strlen($candidateContent, 'UTF-8');
                 $candidateWordCount = count(preg_split('/\s+/u', $candidateContent, -1, PREG_SPLIT_NO_EMPTY) ?: []);
-                $willSplit = $chunkKind !== 'table' && $candidateWordCount > self::RULE_BASED_CHUNK_MAX_WORDS;
+                $willSplit = ! in_array($chunkKind, ['table', 'image'], true) && $candidateWordCount > self::RULE_BASED_CHUNK_MAX_WORDS;
 
                 $chunkRange['candidate_index'] = $candidateIndex;
                 $chunkRange['content_length'] = $candidateContentLength;
@@ -898,6 +950,47 @@ class KnowledgeBaseController extends Controller
                     continue;
                 }
 
+                if ($chunkKind === 'image') {
+                    $imageAltText = $this->cleanNullableString($chunkRange['image_alt_text'] ?? null, 2000);
+                    $imageCaption = $this->cleanNullableString($chunkRange['image_caption'] ?? null, 2000);
+                    $imageLabel = $this->cleanNullableString($chunkRange['title'] ?? null, 255) ?? ($imageCaption ?? $imageAltText ?? 'Bilde');
+                    $imageContent = trim((string) ($chunkRange['content'] ?? ''));
+                    $imageMetadata = is_array($chunkRange['image_metadata'] ?? null) ? $chunkRange['image_metadata'] : [];
+
+                    $coveredCharacterCount += $endOffset - $startOffset;
+                    $lastAcceptedEndOffset = $endOffset;
+
+                    $chunkPayloads[] = [
+                        'content' => $imageContent,
+                        'start_offset' => $startOffset,
+                        'end_offset' => $endOffset,
+                        'section_title' => $headingPath,
+                        'section_path' => $this->cleanNullableString($chunkRange['section_path'] ?? null, 255) ?? $headingPath,
+                        'heading_path' => $headingPath,
+                        'chunk_type' => 'image',
+                        'title' => $imageLabel,
+                        'part_index' => $partIndex,
+                        'topic' => null,
+                        'sub_topic' => null,
+                        'keywords' => null,
+                        'image_bytes' => $chunkRange['image_bytes'] ?? null,
+                        'image_path' => $chunkRange['image_path'] ?? null,
+                        'image_disk' => $chunkRange['image_disk'] ?? null,
+                        'image_mime_type' => $chunkRange['image_mime_type'] ?? null,
+                        'image_original_filename' => $chunkRange['image_original_filename'] ?? null,
+                        'image_width' => $chunkRange['image_width'] ?? null,
+                        'image_height' => $chunkRange['image_height'] ?? null,
+                        'image_hash' => $chunkRange['image_hash'] ?? null,
+                        'image_metadata' => $imageMetadata,
+                        'image_alt_text' => $imageAltText,
+                        'image_caption' => $imageCaption,
+                        'ocr_text' => $chunkRange['ocr_text'] ?? null,
+                        'image_description' => $chunkRange['image_description'] ?? null,
+                    ];
+
+                    continue;
+                }
+
                 if ($chunkKind === 'h1_section' && $partIndex === null && $headingPath !== null && $headingPath !== '') {
                     $content = trim($headingPath."\n\n".$content);
                 }
@@ -1074,9 +1167,13 @@ class KnowledgeBaseController extends Controller
             $groupElements,
             static fn (array $element): bool => (string) data_get($element, 'type', '') === 'table',
         ));
+        $imageElements = array_values(array_filter(
+            $groupElements,
+            static fn (array $element): bool => (string) data_get($element, 'type', '') === 'image',
+        ));
 
         if ($h2Sections === []) {
-            if ($tableElements !== []) {
+            if ($tableElements !== [] || $imageElements !== []) {
                 return $this->buildRuleBasedChunkRangesForH1GroupWithTables($groupElements, $primaryHeading);
             }
 
@@ -1166,13 +1263,19 @@ class KnowledgeBaseController extends Controller
             }
         }
 
+        foreach ($imageElements as $imageElement) {
+            foreach ($this->buildImageChunkRangesFromElement($imageElement) as $imageRange) {
+                $ranges[] = $imageRange;
+            }
+        }
+
         return $ranges;
     }
 
     /**
-     * Purpose: Convert a heading group without H2 sections into text and table chunk ranges.
+     * Purpose: Convert a heading group without H2 sections into text, table, and image chunk ranges.
      * Inputs: Ordered elements belonging to one primary H1 context and a resolved primary heading.
-     * Returns: Ordered chunk ranges where text runs are semantic chunks and tables are dedicated table chunks.
+     * Returns: Ordered chunk ranges where text runs are semantic chunks and structural elements are dedicated chunks.
      * Side effects: None.
      *
      * @param array<int, array<string, mixed>> $groupElements
@@ -1246,11 +1349,15 @@ class KnowledgeBaseController extends Controller
         foreach ($groupElements as $element) {
             $type = (string) data_get($element, 'type', '');
 
-            if ($type === 'table') {
+            if ($type === 'table' || $type === 'image') {
                 $flushTextElements();
 
-                foreach ($this->buildTableChunkRangesFromElement($element) as $tableRange) {
-                    $ranges[] = $tableRange;
+                $structuralRanges = $type === 'table'
+                    ? $this->buildTableChunkRangesFromElement($element)
+                    : $this->buildImageChunkRangesFromElement($element);
+
+                foreach ($structuralRanges as $structuralRange) {
+                    $ranges[] = $structuralRange;
                 }
 
                 $currentTextElements = is_array($headingSeed) ? [$headingSeed] : [];
@@ -1367,9 +1474,82 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Convert one parsed image element into one dedicated image chunk range.
+     * Inputs: A parsed image element with stored image metadata.
+     * Returns: One ordered image chunk range that preserves the image context and file reference.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $imageElement
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildImageChunkRangesFromElement(array $imageElement): array
+    {
+        $fullHeadingPath = $this->cleanNullableString($imageElement['heading_path'] ?? null, 255);
+        $headingTitle = $this->headingLeafFromPath($fullHeadingPath) ?? $fullHeadingPath;
+        $sectionPath = $fullHeadingPath ?? $headingTitle;
+        $imageIndexInDocument = isset($imageElement['image_index_in_document'])
+            ? (int) $imageElement['image_index_in_document']
+            : (int) data_get($imageElement, 'source_metadata.document_order_index', 0);
+        $sourceStartOffset = (int) data_get($imageElement, 'start_offset', 0);
+        $sourceEndOffset = (int) data_get($imageElement, 'end_offset', $sourceStartOffset);
+        $imageAltText = $this->cleanNullableString(data_get($imageElement, 'image_alt_text'), 2000);
+        $imageCaption = $this->cleanNullableString(data_get($imageElement, 'image_caption'), 2000);
+        $imageLabel = $imageCaption ?? $imageAltText ?? 'Bilde';
+        $imageContentParts = [];
+
+        if ($sectionPath !== null && $sectionPath !== '') {
+            $imageContentParts[] = 'Bilde i seksjon: '.$sectionPath;
+        } else {
+            $imageContentParts[] = 'Bilde';
+        }
+
+        if ($imageCaption !== null) {
+            $imageContentParts[] = 'Bildetekst: '.$imageCaption;
+        }
+
+        if ($imageAltText !== null) {
+            $imageContentParts[] = 'Alternativ tekst: '.$imageAltText;
+        }
+
+        if ($imageCaption === null && $imageAltText === null) {
+            $imageContentParts[] = 'Ingen bildetekst eller alternativ tekst er registrert.';
+        }
+
+        $content = trim(implode("\n\n", $imageContentParts));
+        $imageMetadata = is_array(data_get($imageElement, 'image_metadata', null)) ? data_get($imageElement, 'image_metadata') : [];
+
+        return [[
+            'start_offset' => $sourceStartOffset,
+            'end_offset' => $sourceEndOffset,
+            'heading_path' => $headingTitle ?? $imageLabel,
+            'section_title' => $headingTitle ?? $imageLabel,
+            'section_path' => $sectionPath ?? $headingTitle ?? $imageLabel,
+            'chunk_kind' => 'image',
+            'title' => $imageLabel,
+            'part_index' => null,
+            'content' => $content,
+            'image_bytes' => $imageElement['image_bytes'] ?? null,
+            'image_path' => $imageElement['image_path'] ?? null,
+            'image_disk' => $imageElement['image_disk'] ?? null,
+            'image_mime_type' => $imageElement['image_mime_type'] ?? null,
+            'image_original_filename' => $imageElement['image_original_filename'] ?? null,
+            'image_width' => $imageElement['image_width'] ?? null,
+            'image_height' => $imageElement['image_height'] ?? null,
+            'image_hash' => $imageElement['image_hash'] ?? null,
+            'image_metadata' => $imageMetadata,
+            'image_alt_text' => $imageAltText,
+            'image_caption' => $imageCaption,
+            'ocr_text' => $imageElement['ocr_text'] ?? null,
+            'image_description' => $imageElement['image_description'] ?? null,
+            'source_metadata' => is_array(data_get($imageElement, 'source_metadata', null)) ? data_get($imageElement, 'source_metadata') : null,
+            'image_index_in_document' => $imageIndexInDocument,
+        ]];
+    }
+
+    /**
      * Purpose: Remove any table overlaps from text ranges so table content only lives in table chunks.
-     * Inputs: Ordered chunk ranges that may include both semantic and table ranges.
-     * Returns: Chunk ranges where semantic ranges have been split around table ranges.
+     * Inputs: Ordered chunk ranges that may include semantic, table, and image ranges.
+     * Returns: Chunk ranges where semantic ranges have been split around structural ranges.
      * Side effects: None.
      *
      * @param array<int, array<string, mixed>> $chunkRanges
@@ -1379,7 +1559,7 @@ class KnowledgeBaseController extends Controller
     {
         $tableRanges = array_values(array_filter(
             $chunkRanges,
-            static fn (array $chunkRange): bool => (string) ($chunkRange['chunk_kind'] ?? '') === 'table',
+            static fn (array $chunkRange): bool => in_array((string) ($chunkRange['chunk_kind'] ?? ''), ['table', 'image'], true),
         ));
 
         if ($tableRanges === []) {
@@ -1389,7 +1569,7 @@ class KnowledgeBaseController extends Controller
         $adjustedRanges = [];
 
         foreach ($chunkRanges as $chunkRange) {
-            if ((string) ($chunkRange['chunk_kind'] ?? '') === 'table') {
+            if (in_array((string) ($chunkRange['chunk_kind'] ?? ''), ['table', 'image'], true)) {
                 $adjustedRanges[] = $chunkRange;
 
                 continue;
@@ -1810,34 +1990,89 @@ class KnowledgeBaseController extends Controller
             return collect();
         }
 
-        return collect($knowledgeDocument->chunks()->createMany(
-                array_map(
-                    static fn (array $chunkPayload, int $chunkIndex): array => [
-                        'chunk_index' => $chunkIndex,
-                        'content' => (string) ($chunkPayload['content'] ?? ''),
-                        'start_offset' => (int) ($chunkPayload['start_offset'] ?? 0),
-                        'end_offset' => (int) ($chunkPayload['end_offset'] ?? 0),
-                        'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
-                        'section_title' => $chunkPayload['section_title'] ?? null,
-                        'section_path' => $chunkPayload['section_path'] ?? null,
-                        'heading_path' => $chunkPayload['heading_path'] ?? null,
-                        'chunk_type' => $chunkPayload['chunk_type'] ?? null,
-                        'title' => $chunkPayload['title'] ?? null,
-                        'topic' => $chunkPayload['topic'] ?? null,
-                        'sub_topic' => $chunkPayload['sub_topic'] ?? null,
-                        'keywords' => $chunkPayload['keywords'] ?? null,
-                        'table_json' => $chunkPayload['table_json'] ?? null,
-                        'table_html' => $chunkPayload['table_html'] ?? null,
-                        'table_complexity' => $chunkPayload['table_complexity'] ?? null,
-                        'table_warnings' => $chunkPayload['table_warnings'] ?? null,
-                        'table_markdown' => $chunkPayload['table_markdown'] ?? null,
-                        'table_text' => $chunkPayload['table_text'] ?? null,
-                        'table_metadata' => $chunkPayload['table_metadata'] ?? null,
-                    ],
-                    $chunkPayloads,
-                    array_keys($chunkPayloads),
-                ),
-            ));
+        $chunkAttributes = array_map(
+            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument): array {
+                $chunkType = (string) ($chunkPayload['chunk_type'] ?? '');
+                $attributes = [
+                    'chunk_index' => $chunkIndex,
+                    'content' => (string) ($chunkPayload['content'] ?? ''),
+                    'start_offset' => (int) ($chunkPayload['start_offset'] ?? 0),
+                    'end_offset' => (int) ($chunkPayload['end_offset'] ?? 0),
+                    'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+                    'section_title' => $chunkPayload['section_title'] ?? null,
+                    'section_path' => $chunkPayload['section_path'] ?? null,
+                    'heading_path' => $chunkPayload['heading_path'] ?? null,
+                    'chunk_type' => $chunkType !== '' ? $chunkType : null,
+                    'title' => $chunkPayload['title'] ?? null,
+                    'topic' => $chunkPayload['topic'] ?? null,
+                    'sub_topic' => $chunkPayload['sub_topic'] ?? null,
+                    'keywords' => $chunkPayload['keywords'] ?? null,
+                    'table_json' => $chunkPayload['table_json'] ?? null,
+                    'table_html' => $chunkPayload['table_html'] ?? null,
+                    'table_complexity' => $chunkPayload['table_complexity'] ?? null,
+                    'table_warnings' => $chunkPayload['table_warnings'] ?? null,
+                    'table_markdown' => $chunkPayload['table_markdown'] ?? null,
+                    'table_text' => $chunkPayload['table_text'] ?? null,
+                    'table_metadata' => $chunkPayload['table_metadata'] ?? null,
+                    'image_path' => $chunkPayload['image_path'] ?? null,
+                    'image_disk' => $chunkPayload['image_disk'] ?? null,
+                    'image_mime_type' => $chunkPayload['image_mime_type'] ?? null,
+                    'image_original_filename' => $chunkPayload['image_original_filename'] ?? null,
+                    'image_width' => $chunkPayload['image_width'] ?? null,
+                    'image_height' => $chunkPayload['image_height'] ?? null,
+                    'image_hash' => $chunkPayload['image_hash'] ?? null,
+                    'image_metadata' => $chunkPayload['image_metadata'] ?? null,
+                    'image_alt_text' => $chunkPayload['image_alt_text'] ?? null,
+                    'image_caption' => $chunkPayload['image_caption'] ?? null,
+                    'ocr_text' => $chunkPayload['ocr_text'] ?? null,
+                    'image_description' => $chunkPayload['image_description'] ?? null,
+                ];
+
+                if ($chunkType === 'image') {
+                    $imageBytes = $chunkPayload['image_bytes'] ?? null;
+                    $imageDisk = 'local';
+                    $imageMimeType = $this->cleanNullableString($attributes['image_mime_type'] ?? null, 191);
+                    $imageOriginalFilename = $this->cleanNullableString($attributes['image_original_filename'] ?? null, 255) ?? 'image';
+                    $imageHash = $this->cleanNullableString($attributes['image_hash'] ?? null, 128);
+
+                    if (is_string($imageBytes) && trim($imageBytes) !== '') {
+                        $imageHash = $imageHash ?? hash('sha256', $imageBytes);
+                        $imageExtension = Str::lower((string) pathinfo($imageOriginalFilename, PATHINFO_EXTENSION));
+
+                        if ($imageExtension === '') {
+                            $imageExtension = match ($imageMimeType) {
+                                'image/jpeg' => 'jpg',
+                                'image/png' => 'png',
+                                'image/gif' => 'gif',
+                                'image/bmp' => 'bmp',
+                                'image/webp' => 'webp',
+                                'image/tiff' => 'tiff',
+                                'image/svg+xml' => 'svg',
+                                default => 'bin',
+                            };
+                        }
+
+                        $imagePath = sprintf('knowledge-images/%d/%s.%s', $knowledgeDocument->id, $imageHash, $imageExtension);
+
+                        abort_unless(Storage::disk($imageDisk)->put($imagePath, $imageBytes), 500, 'Failed to store the knowledge image.');
+
+                        $attributes['image_path'] = $imagePath;
+                        $attributes['image_disk'] = $imageDisk;
+                        $attributes['image_mime_type'] = $imageMimeType;
+                        $attributes['image_original_filename'] = $imageOriginalFilename;
+                        $attributes['image_hash'] = $imageHash;
+                    }
+
+                    unset($attributes['image_bytes']);
+                }
+
+                return $attributes;
+            },
+            $chunkPayloads,
+            array_keys($chunkPayloads),
+        );
+
+        return collect($knowledgeDocument->chunks()->createMany($chunkAttributes));
     }
 
     /**

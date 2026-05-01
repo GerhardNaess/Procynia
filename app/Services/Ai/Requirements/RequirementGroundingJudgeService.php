@@ -401,9 +401,12 @@ class RequirementGroundingJudgeService
                     'knowledge_item_summary' => $this->normalizeNullableString(data_get($retrievalRow, 'knowledge_item_summary')),
                     'chunk_id' => (int) data_get($retrievalRow, 'chunk_id', 0),
                     'chunk_index' => (int) data_get($retrievalRow, 'chunk_index', 0),
+                    'chunk_type' => $this->normalizeNullableString(data_get($retrievalRow, 'chunk_type')),
                     'heading_path' => $headingPath !== '' ? $headingPath : null,
                     'topic' => $this->normalizeNullableString(data_get($retrievalRow, 'topic')),
                     'sub_topic' => $this->normalizeNullableString(data_get($retrievalRow, 'sub_topic')),
+                    'summary_for_retrieval' => $this->normalizeNullableString(data_get($retrievalRow, 'summary_for_retrieval')),
+                    'table_text' => $this->normalizeNullableString(data_get($retrievalRow, 'table_text')),
                     'keywords' => array_values(array_filter(array_map(
                         static fn (mixed $keyword): string => trim((string) $keyword),
                         (array) data_get($retrievalRow, 'keywords', []),

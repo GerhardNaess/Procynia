@@ -7,7 +7,7 @@ const AI_STATUS_META = {
         className: 'bg-slate-100 text-slate-700 ring-slate-200',
     },
     ready: {
-        label: 'Klar',
+        label: 'Påbegynt',
         className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     },
     in_review: {

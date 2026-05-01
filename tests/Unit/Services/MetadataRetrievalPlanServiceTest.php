@@ -23,14 +23,28 @@ class MetadataRetrievalPlanServiceTest extends TestCase
             ->once()
             ->with(Mockery::on(function (array $payload): bool {
                 $inputPayload = json_decode((string) data_get($payload, 'input.1.content.0.text', ''), true);
+                $schema = data_get($payload, 'text.format.schema', []);
+                $selectedMetadataSchema = data_get($schema, 'properties.selected_metadata', []);
+                $selectedMetadataProperties = data_get($selectedMetadataSchema, 'properties', []);
+                $selectedMetadataRequired = data_get($selectedMetadataSchema, 'required', []);
+                $selectedMetadataPropertyKeys = array_values(array_filter(
+                    array_keys(is_array($selectedMetadataProperties) ? $selectedMetadataProperties : []),
+                    static fn (string|int $field): bool => is_string($field) && trim($field) !== '',
+                ));
 
                 return data_get($payload, 'text.format.name') === 'metadata_retrieval_plan'
-                    && data_get($payload, 'text.format.schema.properties.selected_metadata.properties.topic.type') === 'array'
-                    && data_get($payload, 'text.format.schema.properties.selected_metadata.properties.topic.items.type') === 'string'
-                    && data_get($payload, 'text.format.schema.properties.selected_metadata.properties.keywords.type') === 'array'
+                    && data_get($selectedMetadataSchema, 'type') === 'object'
+                    && $selectedMetadataRequired === $selectedMetadataPropertyKeys
+                    && data_get($selectedMetadataProperties, 'topic.anyOf.0.type') === 'array'
+                    && data_get($selectedMetadataProperties, 'topic.anyOf.1.type') === 'null'
+                    && data_get($selectedMetadataProperties, 'sub_topic.anyOf.0.type') === 'array'
+                    && data_get($selectedMetadataProperties, 'sub_topic.anyOf.1.type') === 'null'
+                    && data_get($selectedMetadataProperties, 'keywords.anyOf.0.type') === 'array'
+                    && data_get($selectedMetadataProperties, 'keywords.anyOf.1.type') === 'null'
                     && is_array($inputPayload)
                     && data_get($inputPayload, 'question') === 'Hvilke metadata passer best?'
                     && data_get($inputPayload, 'metadata_map.fields.topic.0') === 'Tema A'
+                    && data_get($inputPayload, 'metadata_map.fields.sub_topic.0') === 'Underemne A'
                     && data_get($inputPayload, 'metadata_map.fields.keywords.0') === 'Nøkkelord A'
                     && str_contains((string) data_get($inputPayload, 'instructions.0', ''), 'Choose only values that appear in metadata_map.fields.');
             }))
@@ -39,6 +53,7 @@ class MetadataRetrievalPlanServiceTest extends TestCase
                 'output_text' => json_encode([
                     'selected_metadata' => [
                         'topic' => ['Tema A'],
+                        'sub_topic' => ['Underemne A'],
                         'keywords' => ['Nøkkelord A'],
                     ],
                     'search_text' => 'tema a nøkkelord a',
@@ -52,10 +67,12 @@ class MetadataRetrievalPlanServiceTest extends TestCase
         $plan = $service->buildPlan('Hvilke metadata passer best?', [
             'fields' => [
                 'topic' => ['Tema A', 'Tema B'],
+                'sub_topic' => ['Underemne A', 'Underemne B'],
                 'keywords' => ['Nøkkelord A', 'Nøkkelord B'],
             ],
             'field_counts' => [
                 'topic' => 2,
+                'sub_topic' => 2,
                 'keywords' => 2,
             ],
         ]);
@@ -63,6 +80,7 @@ class MetadataRetrievalPlanServiceTest extends TestCase
         $this->assertSame([
             'selected_metadata' => [
                 'topic' => ['Tema A'],
+                'sub_topic' => ['Underemne A'],
                 'keywords' => ['Nøkkelord A'],
             ],
             'search_text' => 'tema a nøkkelord a',

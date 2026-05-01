@@ -67,6 +67,8 @@ Route::prefix('app')
                 ->name('chunks.review-status.update');
             Route::patch('/{knowledgeItem}/chunks/{chunk}/metadata', [KnowledgeBaseController::class, 'updateChunkMetadata'])
                 ->name('chunks.metadata.update');
+            Route::get('/{knowledgeItem}/chunks/{chunk}/image', [KnowledgeBaseController::class, 'showChunkImage'])
+                ->name('chunks.image');
             Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
             Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
             Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');

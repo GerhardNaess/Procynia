@@ -19,6 +19,8 @@ class RequirementKnowledgeMatcher
         'keywords' => 1.2,
         'topic' => 1.0,
         'sub_topic' => 0.85,
+        'summary_for_retrieval' => 0.95,
+        'table_text' => 0.75,
         'service_product_tag' => 0.9,
         'theme_tag' => 0.8,
         'section_title' => 0.75,
@@ -80,9 +82,10 @@ class RequirementKnowledgeMatcher
         }
 
         $heuristicBoosts = $this->heuristicBoosts($normalizedRequirementText);
+        $tableCandidateDiagnostics = [];
 
         $rankedCandidates = $knowledgeChunks
-            ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts): ?array {
+            ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts, &$tableCandidateDiagnostics): ?array {
                 $chunkContent = (string) data_get($chunk, 'content', '');
                 $normalizedChunkContent = $this->normalizeText($chunkContent);
 
@@ -91,12 +94,13 @@ class RequirementKnowledgeMatcher
                 }
 
                 $chunkTokens = $this->tokenize($normalizedChunkContent);
+                $contentMatches = array_values(array_intersect($requirementTokens, $chunkTokens));
 
                 if ($chunkTokens === []) {
                     return null;
                 }
 
-                $score = count(array_intersect($requirementTokens, $chunkTokens));
+                $score = count($contentMatches);
                 $metadataScore = data_get($chunk, 'metadata_score');
                 $chunkMetadataScore = is_numeric($metadataScore)
                     ? (float) $metadataScore
@@ -111,6 +115,27 @@ class RequirementKnowledgeMatcher
 
                 if ($score <= 0) {
                     return null;
+                }
+
+                if ((string) data_get($chunk, 'chunk_type', '') === 'table') {
+                    $chunkId = (int) data_get($chunk, 'chunk_id', 0);
+                    $summaryTerms = $this->metadataTermsFromValue(data_get($chunk, 'summary_for_retrieval'));
+                    $tableTextTerms = $this->metadataTermsFromValue(data_get($chunk, 'table_text'));
+
+                    $tableCandidateDiagnostics[$chunkId] = [
+                        'chunk_id' => $chunkId,
+                        'knowledge_item_id' => (int) data_get($chunk, 'knowledge_item_id', 0),
+                        'title' => (string) data_get($chunk, 'title', data_get($chunk, 'heading_path', '')),
+                        'chunk_type' => (string) data_get($chunk, 'chunk_type', ''),
+                        'content_length' => mb_strlen($chunkContent, 'UTF-8'),
+                        'summary_for_retrieval_length' => mb_strlen((string) data_get($chunk, 'summary_for_retrieval', ''), 'UTF-8'),
+                        'table_text_length' => mb_strlen((string) data_get($chunk, 'table_text', ''), 'UTF-8'),
+                        'content_matches' => $contentMatches,
+                        'summary_for_retrieval_matches' => array_values(array_intersect($requirementTokens, $summaryTerms)),
+                        'table_text_matches' => array_values(array_intersect($requirementTokens, $tableTextTerms)),
+                        'metadata_score' => $chunkMetadataScore,
+                        'score_before_embedding' => (float) $score,
+                    ];
                 }
 
                 return [
@@ -153,17 +178,15 @@ class RequirementKnowledgeMatcher
             ->take(self::MAX_RESULTS)
             ->values();
 
-        if (! is_array($requirementEmbedding) || $requirementEmbedding === []) {
-            return $rankedCandidates->map(function (array $candidate): array {
-                $candidate['embedding_similarity'] = null;
-                $candidate['final_score'] = (float) $candidate['base_score'];
-
-                return $candidate;
-            });
-        }
-
-        return $rankedCandidates
+        $finalRankedCandidates = $rankedCandidates
             ->map(function (array $candidate) use ($requirementEmbedding): array {
+                if (! is_array($requirementEmbedding) || $requirementEmbedding === []) {
+                    $candidate['embedding_similarity'] = null;
+                    $candidate['final_score'] = (float) $candidate['base_score'];
+
+                    return $candidate;
+                }
+
                 $chunkEmbedding = data_get($candidate, 'embedding_vector');
 
                 if (! is_array($chunkEmbedding) || $chunkEmbedding === []) {
@@ -218,6 +241,20 @@ class RequirementKnowledgeMatcher
                 return $left['chunk_id'] <=> $right['chunk_id'];
             })
             ->values();
+
+        $finalRankedCandidates->values()->each(static function (array $candidate, int $index) use (&$tableCandidateDiagnostics): void {
+            $chunkId = (int) data_get($candidate, 'chunk_id', 0);
+
+            if (! isset($tableCandidateDiagnostics[$chunkId])) {
+                return;
+            }
+
+            $tableCandidateDiagnostics[$chunkId]['final_rank'] = $index + 1;
+            $tableCandidateDiagnostics[$chunkId]['final_score'] = (float) data_get($candidate, 'final_score', data_get($candidate, 'score', 0));
+            $tableCandidateDiagnostics[$chunkId]['embedding_similarity'] = data_get($candidate, 'embedding_similarity');
+        });
+
+        return $finalRankedCandidates;
     }
 
     /**

@@ -177,9 +177,16 @@ class MetadataRetrievalPlanService
 
         foreach ($this->metadataFieldsFromMap($metadataMap) as $field) {
             $selectedMetadataProperties[$field] = [
-                'type' => 'array',
-                'items' => [
-                    'type' => 'string',
+                'anyOf' => [
+                    [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'string',
+                        ],
+                    ],
+                    [
+                        'type' => 'null',
+                    ],
                 ],
             ];
         }
@@ -190,6 +197,7 @@ class MetadataRetrievalPlanService
                 'selected_metadata' => [
                     'type' => 'object',
                     'properties' => $selectedMetadataProperties,
+                    'required' => array_values(array_keys($selectedMetadataProperties)),
                     'additionalProperties' => false,
                 ],
                 'search_text' => [

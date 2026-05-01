@@ -191,6 +191,10 @@ function getChunkDisplayTitle(chunk, index = 0) {
 }
 
 function getChunkTypeLabel(chunk) {
+    if (chunk?.chunk_type === 'image') {
+        return 'Bilde';
+    }
+
     if (chunk?.chunk_type === 'table') {
         return 'Tabell';
     }
@@ -200,6 +204,48 @@ function getChunkTypeLabel(chunk) {
     }
 
     return 'Tekst';
+}
+
+/**
+ * Purpose: Resolve a stable image file extension for preview decisions.
+ * Inputs: A knowledge chunk that may contain image metadata.
+ * Returns: A normalized lower-case extension or null when no extension is available.
+ * Side effects: None.
+ */
+function getImageChunkExtension(chunk) {
+    const fromMetadata = String(chunk?.image_metadata?.extension ?? '').trim().toLowerCase();
+
+    if (fromMetadata !== '') {
+        return fromMetadata;
+    }
+
+    const fromFilename = String(chunk?.image_original_filename ?? '').trim();
+    const filenameMatch = fromFilename.match(/\.([A-Za-z0-9]+)$/);
+
+    if (filenameMatch?.[1]) {
+        return filenameMatch[1].toLowerCase();
+    }
+
+    const fromPath = String(chunk?.image_path ?? '').trim();
+    const pathMatch = fromPath.match(/\.([A-Za-z0-9]+)$/);
+
+    return pathMatch?.[1] ? pathMatch[1].toLowerCase() : null;
+}
+
+/**
+ * Purpose: Determine whether a chunk image can be previewed directly in the browser.
+ * Inputs: A knowledge chunk that may contain image metadata and a stored image URL.
+ * Returns: True when the image format is browser-friendly for direct preview.
+ * Side effects: None.
+ */
+function canPreviewImageChunk(chunk) {
+    const extension = getImageChunkExtension(chunk);
+
+    if (!extension) {
+        return false;
+    }
+
+    return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(extension);
 }
 
 /**
@@ -443,6 +489,8 @@ export default function KnowledgeBaseShow({
     const selectedChunkReviewStatus = selectedChunk ? getChunkReviewStatus(selectedChunk) : 'pending_review';
     const selectedChunkReviewStatusMeta = CHUNK_REVIEW_STATUS_META[selectedChunkReviewStatus] ?? CHUNK_REVIEW_STATUS_META.pending_review;
     const selectedChunkDisplayTitle = selectedChunk ? getChunkDisplayTitle(selectedChunk, selectedChunkIndex) : 'Chunk';
+    const selectedChunkImageExtension = selectedChunk ? getImageChunkExtension(selectedChunk) : null;
+    const selectedChunkImageCanPreview = selectedChunk ? canPreviewImageChunk(selectedChunk) : false;
     const selectedChunkTableWarnings = normalizeTableWarningsForDisplay(selectedChunk?.table_warnings);
     const progressPercent = totalChunksCount > 0
         ? Math.round((readyChunksCount / totalChunksCount) * 100)
@@ -611,6 +659,19 @@ export default function KnowledgeBaseShow({
         { label: 'Review-status', value: selectedChunk.review_status_label ?? selectedChunk.review_status ?? '—' },
         { label: 'Embeddingmodell', value: selectedChunk.embedding_model ?? '—' },
         { label: 'Embedding generert', value: selectedChunk.embedding_generated_at ? formatDateTime(selectedChunk.embedding_generated_at, locale) : '—' },
+        ...(selectedChunk.chunk_type === 'image' ? [
+            { label: 'Bilde-URL', value: selectedChunk.image_url || '—' },
+            { label: 'Bildefil', value: selectedChunk.image_original_filename || '—' },
+            { label: 'Bildefilsti', value: selectedChunk.image_path || '—' },
+            { label: 'Lagringsdisk', value: selectedChunk.image_disk || '—' },
+            { label: 'MIME-type', value: selectedChunk.image_mime_type || '—' },
+            { label: 'Filtype', value: selectedChunkImageExtension || '—' },
+            { label: 'Bildetype', value: selectedChunk.image_metadata?.image_kind || selectedChunk.image_metadata?.detected_type || 'unknown' },
+            { label: 'Bredde', value: selectedChunk.image_width ?? '—' },
+            { label: 'Høyde', value: selectedChunk.image_height ?? '—' },
+            { label: 'Hash', value: selectedChunk.image_hash || '—' },
+            { label: 'Bildemetadata', value: selectedChunk.image_metadata ? 'Tilgjengelig' : '—' },
+        ] : []),
     ] : [];
 
     return (
@@ -1029,7 +1090,83 @@ export default function KnowledgeBaseShow({
                                                         ) : null}
                                                     </div>
 
-                                                    {selectedChunk.chunk_type === 'table' ? (
+                                                    {selectedChunk.chunk_type === 'image' ? (
+                                                        <div className="mt-4 max-h-[32rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
+                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                Bilde
+                                                            </div>
+                                                            {selectedChunk.image_url && selectedChunkImageCanPreview ? (
+                                                                <div className="mt-4 overflow-hidden rounded-[16px] border border-slate-200 bg-slate-50">
+                                                                    <img
+                                                                        src={selectedChunk.image_url}
+                                                                        alt={selectedChunk.image_alt_text || selectedChunk.image_caption || selectedChunk.title || 'Bilde'}
+                                                                        className="block max-h-[22rem] w-full object-contain"
+                                                                    />
+                                                                </div>
+                                                            ) : (
+                                                                <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                                                                    {selectedChunk.image_url && !selectedChunkImageCanPreview
+                                                                        ? 'Bildet er ekstrahert, men formatet kan ikke forhåndsvises direkte.'
+                                                                        : 'Ingen forhåndsvisning tilgjengelig.'}
+                                                                </div>
+                                                            )}
+
+                                                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                                <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
+                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Bildetekst
+                                                                    </div>
+                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                        {selectedChunk.image_caption || 'Ingen bildetekst registrert.'}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
+                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Alt-tekst
+                                                                    </div>
+                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                        {selectedChunk.image_alt_text || 'Ingen alternativ tekst registrert.'}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
+                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        OCR
+                                                                    </div>
+                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                        {selectedChunk.ocr_text ? 'OCR kjørt' : 'OCR ikke kjørt'}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
+                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Beskrivelse
+                                                                    </div>
+                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                        {selectedChunk.image_description ? 'Bildebeskrivelse generert' : 'Bildebeskrivelse ikke generert'}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
+                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    Søkbar tekst
+                                                                </div>
+                                                                <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                    {selectedChunk.content || selectedChunk.content_preview || 'Ingen søkbar tekst tilgjengelig.'}
+                                                                </pre>
+                                                            </div>
+
+                                                            {selectedChunk.image_metadata ? (
+                                                                <details className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
+                                                                    <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Bildemetadata
+                                                                    </summary>
+                                                                    <pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
+                                                                        {JSON.stringify(selectedChunk.image_metadata, null, 2)}
+                                                                    </pre>
+                                                                </details>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : selectedChunk.chunk_type === 'table' ? (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 Tabell

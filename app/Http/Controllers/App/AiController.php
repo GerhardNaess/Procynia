@@ -676,6 +676,15 @@ class AiController extends Controller
             ->whereKey($requirement->id)
             ->firstOrFail();
 
+        Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.', [
+            'route_name' => $request->route()?->getName(),
+            'request_url' => $request->fullUrl(),
+            'controller_method' => __METHOD__,
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $ownedRequirement->id,
+            'customer_id' => $record->customer_id,
+        ]);
+
         $validated = $request->validate([
             'answer_basis_item_ids' => ['present', 'array'],
             'answer_basis_item_ids.*' => ['integer'],
@@ -688,7 +697,7 @@ class AiController extends Controller
             $validated['answer_basis_item_ids'],
         );
 
-        $retrievedKnowledgeChunks = $this->retrievedKnowledgeChunksForRequirement($record, $ownedRequirement);
+        $retrievedKnowledgeChunks = $this->retrievedKnowledgeChunksForRequirement($request, $record, $ownedRequirement);
         $knowledgeGrounding = $this->calculateKnowledgeGroundingLevel($retrievedKnowledgeChunks, $ownedRequirement->requirement_text);
 
         if ($this->shouldBlockAnswerDraftGeneration($knowledgeGrounding)) {
@@ -1543,7 +1552,7 @@ class AiController extends Controller
      */
     protected function knowledgeChunksForMatching(int $customerId): Collection
     {
-        return KnowledgeItemChunk::query()
+        $knowledgeChunks = KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.is_active', true)
@@ -1562,16 +1571,33 @@ class AiController extends Controller
                 'knowledge_items.updated_at as knowledge_item_updated_at',
             ])
             ->map(fn (KnowledgeItemChunk $chunk): array => [
+                'id' => (int) $chunk->id,
                 'chunk_id' => (int) $chunk->id,
                 'knowledge_item_id' => (int) $chunk->knowledge_item_id,
                 'knowledge_item_title' => (string) $chunk->getAttribute('knowledge_item_title'),
                 'content_type' => (string) $chunk->getAttribute('content_type'),
                 'knowledge_item_summary' => (string) $chunk->getAttribute('knowledge_item_summary'),
                 'chunk_index' => (int) $chunk->chunk_index,
+                'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),
                 'content' => (string) $chunk->content,
                 'title' => (string) ($chunk->title ?? ''),
                 'heading_path' => (string) ($chunk->heading_path ?? $chunk->section_path ?? $chunk->title ?? ''),
-                'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),
+                'summary_for_retrieval' => (string) ($chunk->summary_for_retrieval ?? ''),
+                'table_text' => (string) ($chunk->table_text ?? ''),
+                'table_html' => (string) ($chunk->table_html ?? ''),
+                'table_json' => is_array($chunk->table_json) ? $chunk->table_json : null,
+                'image_path' => (string) ($chunk->image_path ?? ''),
+                'image_disk' => (string) ($chunk->image_disk ?? ''),
+                'image_mime_type' => (string) ($chunk->image_mime_type ?? ''),
+                'image_original_filename' => (string) ($chunk->image_original_filename ?? ''),
+                'image_width' => is_numeric($chunk->image_width ?? null) ? (int) $chunk->image_width : null,
+                'image_height' => is_numeric($chunk->image_height ?? null) ? (int) $chunk->image_height : null,
+                'image_hash' => (string) ($chunk->image_hash ?? ''),
+                'image_metadata' => is_array($chunk->image_metadata) ? $chunk->image_metadata : null,
+                'image_alt_text' => (string) ($chunk->image_alt_text ?? ''),
+                'image_caption' => (string) ($chunk->image_caption ?? ''),
+                'ocr_text' => (string) ($chunk->ocr_text ?? ''),
+                'image_description' => (string) ($chunk->image_description ?? ''),
                 'topic' => (string) ($chunk->topic ?? ''),
                 'sub_topic' => (string) ($chunk->sub_topic ?? ''),
                 'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords($chunk->keywords) ?? [],
@@ -1584,6 +1610,8 @@ class AiController extends Controller
                 'knowledge_item_updated_at' => (string) $chunk->getAttribute('knowledge_item_updated_at'),
             ])
             ->values();
+
+        return $knowledgeChunks;
     }
 
     /**
@@ -1592,7 +1620,11 @@ class AiController extends Controller
      * Returns: A small ranked collection of retrieval source rows ready for answer drafting.
      * Side effects: May generate a temporary requirement embedding and logs failures through the existing embedding flow.
      */
-    private function retrievedKnowledgeChunksForRequirement(SavedNotice $record, SavedNoticeAiRequirement $requirement): Collection
+    private function retrievedKnowledgeChunksForRequirement(
+        Request $request,
+        SavedNotice $record,
+        SavedNoticeAiRequirement $requirement,
+    ): Collection
     {
         $requirementText = trim((string) $requirement->requirement_text);
 
@@ -1640,6 +1672,27 @@ class AiController extends Controller
                     'selected_value_count' => $this->selectedMetadataValueCount($selectedMetadata),
                 ]);
             }
+
+            Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] retrievedKnowledgeChunksForRequirement stage metadata_candidates.', array_merge([
+                'route_name' => request()->route()?->getName(),
+                'request_url' => request()->fullUrl(),
+                'controller_method' => __METHOD__,
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $requirement->id,
+                'customer_id' => $record->customer_id,
+                'stage' => 'metadata_candidates',
+                'selected_field_count' => count($selectedMetadata),
+                'selected_value_count' => $this->selectedMetadataValueCount($selectedMetadata),
+                'candidate_count' => $metadataCandidateChunks->count(),
+                'knowledge_item_ids' => $metadataCandidateChunks
+                    ->pluck('knowledge_item_id')
+                    ->filter(static fn (mixed $value): bool => is_int($value) || ctype_digit((string) $value))
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->unique()
+                    ->values()
+                    ->all(),
+            ], $this->realRetrievalPathDebugSummary($metadataCandidateChunks)));
+
         } else {
             Log::info('[PROCYNIA][METADATA_RETRIEVAL] Validated retrieval plan contained no selected metadata; using the base retrieval pool.', [
                 'saved_notice_id' => $record->id,
@@ -1673,6 +1726,26 @@ class AiController extends Controller
                 'base_candidate_count' => $baseCandidateCount,
                 'metadata_candidate_count' => $metadataCandidateCount,
             ]);
+
+            Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] retrievedKnowledgeChunksForRequirement stage base_pool.', array_merge([
+                'route_name' => request()->route()?->getName(),
+                'request_url' => request()->fullUrl(),
+                'controller_method' => __METHOD__,
+                'saved_notice_id' => $record->id,
+                'requirement_id' => $requirement->id,
+                'customer_id' => $record->customer_id,
+                'stage' => 'base_pool',
+                'base_candidate_count' => $baseCandidateCount,
+                'metadata_candidate_count' => $metadataCandidateCount,
+                'knowledge_item_ids' => $baseCandidateChunks
+                    ->pluck('knowledge_item_id')
+                    ->filter(static fn (mixed $value): bool => is_int($value) || ctype_digit((string) $value))
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->unique()
+                    ->values()
+                    ->all(),
+            ], $this->realRetrievalPathDebugSummary($baseCandidateChunks)));
+
         }
 
         $requirementEmbedding = $this->requirementEmbeddingFor($requirement);
@@ -1693,7 +1766,7 @@ class AiController extends Controller
             'ranked_chunk_ids' => $rankedMatches->take(10)->pluck('chunk_id')->all(),
         ]);
 
-        return $rankedMatches
+        $retrievedKnowledgeChunks = $rankedMatches
             ->map(function (array $match) use ($candidateChunksById): array {
                 $chunkId = (int) data_get($match, 'chunk_id', 0);
                 $candidate = $candidateChunksById->get($chunkId, []);
@@ -1704,6 +1777,7 @@ class AiController extends Controller
                 $chunkIndex = (int) data_get($match, 'chunk_index', 0);
 
                 return [
+                    'id' => $chunkId,
                     'score' => (float) data_get($match, 'final_score', data_get($match, 'score', 0)),
                     'base_score' => (float) data_get($match, 'base_score', data_get($match, 'score', 0)),
                     'embedding_similarity' => data_get($match, 'embedding_similarity'),
@@ -1714,9 +1788,26 @@ class AiController extends Controller
                     'knowledge_item_summary' => (string) data_get($candidate, 'knowledge_item_summary', ''),
                     'chunk_id' => $chunkId,
                     'chunk_index' => $chunkIndex,
+                    'chunk_type' => (string) data_get($candidate, 'chunk_type', 'semantic'),
                     'heading_path' => $chunkHeadingPath !== ''
                         ? $chunkHeadingPath
                         : ($chunkTitle !== '' ? $chunkTitle : sprintf('Chunk %d', $chunkIndex + 1)),
+                    'summary_for_retrieval' => (string) data_get($candidate, 'summary_for_retrieval', ''),
+                    'table_text' => (string) data_get($candidate, 'table_text', ''),
+                    'table_html' => (string) data_get($candidate, 'table_html', ''),
+                    'table_json' => data_get($candidate, 'table_json'),
+                    'image_path' => (string) data_get($candidate, 'image_path', ''),
+                    'image_disk' => (string) data_get($candidate, 'image_disk', ''),
+                    'image_mime_type' => (string) data_get($candidate, 'image_mime_type', ''),
+                    'image_original_filename' => (string) data_get($candidate, 'image_original_filename', ''),
+                    'image_width' => is_numeric(data_get($candidate, 'image_width')) ? (int) data_get($candidate, 'image_width') : null,
+                    'image_height' => is_numeric(data_get($candidate, 'image_height')) ? (int) data_get($candidate, 'image_height') : null,
+                    'image_hash' => (string) data_get($candidate, 'image_hash', ''),
+                    'image_metadata' => is_array(data_get($candidate, 'image_metadata')) ? data_get($candidate, 'image_metadata') : null,
+                    'image_alt_text' => (string) data_get($candidate, 'image_alt_text', ''),
+                    'image_caption' => (string) data_get($candidate, 'image_caption', ''),
+                    'ocr_text' => (string) data_get($candidate, 'ocr_text', ''),
+                    'image_description' => (string) data_get($candidate, 'image_description', ''),
                     'topic' => (string) data_get($candidate, 'topic', ''),
                     'sub_topic' => (string) data_get($candidate, 'sub_topic', ''),
                     'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords(data_get($candidate, 'keywords')) ?? [],
@@ -1724,9 +1815,42 @@ class AiController extends Controller
                     'section_path' => (string) data_get($candidate, 'section_path', ''),
                     'content' => $content,
                     'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
+                    'image_url' => (string) data_get($candidate, 'chunk_type', 'semantic') === 'image'
+                        && (int) data_get($candidate, 'knowledge_item_id', 0) > 0
+                        && (int) data_get($candidate, 'chunk_id', 0) > 0
+                        ? route('app.ai.knowledge-base.chunks.image', [
+                            'knowledgeItem' => (int) data_get($candidate, 'knowledge_item_id', 0),
+                            'chunk' => (int) data_get($candidate, 'chunk_id', 0),
+                        ])
+                        : null,
                 ];
             })
             ->values();
+
+        $rankedTableMatches = $retrievedKnowledgeChunks
+            ->filter(static fn (array $match): bool => (string) data_get($match, 'chunk_type', '') === 'table')
+            ->values();
+
+        Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] retrievedKnowledgeChunksForRequirement stage ranked_matches.', array_merge([
+            'route_name' => request()->route()?->getName(),
+            'request_url' => request()->fullUrl(),
+            'controller_method' => __METHOD__,
+            'saved_notice_id' => $record->id,
+            'requirement_id' => $requirement->id,
+            'customer_id' => $record->customer_id,
+            'stage' => 'ranked_matches',
+            'candidate_source' => $usedMetadataCandidates ? 'metadata' : ($usedBasePoolFallback ? 'base' : 'unknown'),
+            'candidate_count' => $candidateChunks->count(),
+            'ranked_count' => $retrievedKnowledgeChunks->count(),
+            'table_ranked_count' => $rankedTableMatches->count(),
+            'table_ranked_ids' => $rankedTableMatches
+                ->pluck('chunk_id')
+                ->map(static fn (mixed $value): int => (int) $value)
+                ->values()
+                ->all(),
+        ], $this->realRetrievalPathDebugSummary($retrievedKnowledgeChunks)));
+
+        return $retrievedKnowledgeChunks;
     }
 
     /**
@@ -1817,6 +1941,49 @@ class AiController extends Controller
             'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
             'supported_points' => $this->normalizeGroundingPointRequirementPoints($directlySupportedPoints),
         ], $recommendation);
+    }
+
+    /**
+     * Purpose: Build a compact debug snapshot for the real retrieval path.
+     * Inputs: A collection of retrieval rows.
+     * Returns: A count-by-type summary and compact table chunk snapshots.
+     * Side effects: None.
+     */
+    private function realRetrievalPathDebugSummary(Collection $chunks): array
+    {
+        $countByChunkType = $chunks
+            ->countBy(static fn (array $chunk): string => (string) data_get($chunk, 'chunk_type', 'semantic'))
+            ->all();
+
+        return [
+            'total_chunk_count' => $chunks->count(),
+            'count_by_chunk_type' => $countByChunkType,
+            'total_table_chunk_count' => (int) data_get($countByChunkType, 'table', 0),
+            'knowledge_item_ids' => $chunks
+                ->pluck('knowledge_item_id')
+                ->filter(static fn (mixed $value): bool => is_int($value) || ctype_digit((string) $value))
+                ->map(static fn (mixed $value): int => (int) $value)
+                ->unique()
+                ->values()
+                ->all(),
+            'table_chunks' => $chunks
+                ->filter(static fn (array $chunk): bool => (string) data_get($chunk, 'chunk_type', 'semantic') === 'table')
+                ->map(static function (array $chunk): array {
+                    return [
+                        'chunk_id' => (int) data_get($chunk, 'chunk_id', 0),
+                        'knowledge_item_id' => (int) data_get($chunk, 'knowledge_item_id', 0),
+                        'title' => (string) data_get($chunk, 'title', ''),
+                        'chunk_type' => (string) data_get($chunk, 'chunk_type', ''),
+                        'content_length' => mb_strlen((string) data_get($chunk, 'content', ''), 'UTF-8'),
+                        'summary_for_retrieval_length' => mb_strlen((string) data_get($chunk, 'summary_for_retrieval', ''), 'UTF-8'),
+                        'table_text_length' => mb_strlen((string) data_get($chunk, 'table_text', ''), 'UTF-8'),
+                        'heading_path' => (string) data_get($chunk, 'heading_path', ''),
+                        'section_path' => (string) data_get($chunk, 'section_path', ''),
+                    ];
+                })
+                ->values()
+                ->all(),
+        ];
     }
 
     /**

@@ -36,6 +36,7 @@ use App\Models\User;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
@@ -1212,15 +1213,780 @@ class AiControllerTest extends TestCase
         $response->assertJsonPath('retrieval_sources.0.section_title', 'SIEM');
         $response->assertJsonPath('retrieval_sources.0.section_path', 'SOC-tjenester > SIEM');
         $response->assertJsonPath('retrieval_sources.0.chunk_id', $retrievalChunk->id);
+        $response->assertJsonPath('retrieval_sources.0.id', $retrievalChunk->id);
         $response->assertJsonPath('retrieval_sources.0.topic', 'Løsning');
         $response->assertJsonPath('retrieval_sources.0.sub_topic', 'Dokumentasjon');
         $response->assertJsonPath('retrieval_sources.0.keywords.0', 'løsningen');
+        $response->assertJsonPath('retrieval_sources.0.table_html', '');
+        $response->assertJsonPath('retrieval_sources.0.table_json', null);
         $response->assertJsonPath('knowledge_grounding.level', 'amber');
         $response->assertJsonPath('knowledge_grounding.sources_count', 1);
         $this->assertGreaterThanOrEqual(0.45, (float) $response->json('knowledge_grounding.max_score'));
 
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_uses_table_chunk_summary_and_text_as_grounding_evidence(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-TABLE-RAG', 'Table RAG target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:45:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'table-requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/table-requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Beskriv sikkerhetsparametere for SOC tjenesten i en tabell.',
+            'text_extracted_at' => '2026-04-06 12:46:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Beskriv sikkerhetsparametere for SOC tjenesten i en tabell.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.4',
+            'requirement_text' => 'Beskriv sikkerhetsparametere for SOC tjenesten i en tabell.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => false,
+                'embedding' => null,
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => 'embedding_unavailable',
+                'error_message' => 'Embedding unavailable for test.',
+                'upstream_status' => 503,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [],
+                'search_text' => 'sikkerhetsparametere soc tjenesten tabell',
+                'intent_summary' => 'Leter etter tabell med sikkerhetsparametere for SOC-tjenesten.',
+                'confidence' => 0.0,
+            ];
+        });
+
+        $this->bindAiControllerKnowledgeChunksForMatching(collect([
+            [
+                'chunk_id' => 9801,
+                'knowledge_item_id' => 6601,
+                'knowledge_item_title' => 'SOC-tjeneste',
+                'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+                'knowledge_item_summary' => 'Generell oversikt over SOC-dokumentasjon.',
+                'chunk_index' => 0,
+                'chunk_type' => 'table',
+                'content' => 'Oversikt',
+                'title' => 'Tabell',
+                'heading_path' => '1 Overskrift test',
+                'summary_for_retrieval' => 'Tabellen viser sikkerhetsparametere for SOC tjenesten.',
+                'table_text' => 'Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.',
+                'table_html' => '<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>',
+                'table_json' => [
+                    'source_type' => 'docx_table',
+                    'column_count' => 2,
+                    'row_count' => 3,
+                    'title_row_index' => 0,
+                    'header_row_indices' => [1],
+                    'rows' => [
+                        [
+                            'row_type' => 'title',
+                            'cells' => [
+                                [
+                                    'text' => 'Sikkerhetsparametere for SOC tjenesten',
+                                    'rowspan' => 1,
+                                    'colspan' => 2,
+                                    'is_title' => true,
+                                    'is_header' => false,
+                                    'is_empty' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [],
+                                ],
+                            ],
+                        ],
+                        [
+                            'row_type' => 'header',
+                            'cells' => [
+                                [
+                                    'text' => 'Parameter',
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_title' => false,
+                                    'is_header' => true,
+                                    'is_empty' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [],
+                                ],
+                                [
+                                    'text' => 'Verdi',
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_title' => false,
+                                    'is_header' => true,
+                                    'is_empty' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [],
+                                ],
+                            ],
+                        ],
+                        [
+                            'row_type' => 'data',
+                            'cells' => [
+                                [
+                                    'text' => 'Overvåkning',
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_title' => false,
+                                    'is_header' => false,
+                                    'is_empty' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [],
+                                ],
+                                [
+                                    'text' => '24/7',
+                                    'rowspan' => 1,
+                                    'colspan' => 1,
+                                    'is_title' => false,
+                                    'is_header' => false,
+                                    'is_empty' => false,
+                                    'style_hints' => [],
+                                    'source_metadata' => [],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'topic' => '',
+                'sub_topic' => '',
+                'keywords' => [],
+                'section_title' => '1 Overskrift test',
+                'section_path' => '1 Overskrift test',
+                'embedding_vector' => null,
+                'embedding_model' => '',
+                'embedding_generated_at' => null,
+                'embedding_error' => null,
+                'knowledge_item_updated_at' => '2026-04-06 12:47:00',
+            ],
+        ]));
+
+        Http::fake(function (Request $request) use ($requirement) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            if (data_get($requestPayload, 'text.format.name') === 'requirement_grounding_judge') {
+                $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+                $this->assertCount(1, $retrievedKnowledgeChunks);
+                $this->assertSame('table', $retrievedKnowledgeChunks->first()['chunk_type']);
+                $this->assertSame('Tabellen viser sikkerhetsparametere for SOC tjenesten.', $retrievedKnowledgeChunks->first()['summary_for_retrieval']);
+                $this->assertSame('Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.', $retrievedKnowledgeChunks->first()['table_text']);
+                $this->assertSame('<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>', $retrievedKnowledgeChunks->first()['table_html']);
+                $this->assertSame(2, data_get($retrievedKnowledgeChunks->first(), 'table_json.column_count'));
+
+                return Http::response(
+                    $this->openAiStructuredResponse([
+                        'status' => 'supported',
+                        'can_generate_answer' => true,
+                        'directly_supported_points' => [
+                            [
+                                'requirement_point' => 'Sikkerhetsparametere for SOC tjenesten.',
+                                'support_summary' => 'Tabellen dokumenterer sikkerhetsparametere for SOC-tjenesten.',
+                                'evidence_reference' => 'Chunk 1 · 1 Overskrift test',
+                                'evidence_quote' => null,
+                            ],
+                        ],
+                        'related_but_insufficient_points' => [],
+                        'unsupported_points' => [],
+                        'missing_knowledge_summary' => 'Grunnlaget er tilstrekkelig.',
+                        'recommended_document_title' => 'SOC-sikkerhetsparametere',
+                        'suggested_filename' => 'soc-sikkerhetsparametere.docx',
+                        'reasoning_summary' => 'Tabellgrunnlaget er tilstrekkelig.',
+                    ], 58, 16),
+                    200,
+                    ['x-request-id' => 'req_table_grounding_judge'],
+                );
+            }
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Svarutkastet beskriver sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_table_answer_draft'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.text', 'Svarutkastet beskriver sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.');
+        $response->assertJsonPath('knowledge_grounding.level', 'amber');
+        $response->assertJsonPath('knowledge_grounding.sources_count', 1);
+        $this->assertGreaterThanOrEqual(0.45, (float) $response->json('knowledge_grounding.max_score'));
+
+        $requirement->refresh();
+        $this->assertSame('Svarutkastet beskriver sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_ai_requirement_answer_draft_generation_keeps_table_chunks_when_table_text_matches_even_if_metadata_topic_does_not_match(): void
+    {
+        Log::spy();
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-TABLE-DIAG', 'Table retrieval diagnostic target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:55:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'table-retrieval-diagnostic.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/table-retrieval-diagnostic.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal ha en tabell som viser sikkerhetsparametere i SOC tjenesten.',
+            'text_extracted_at' => '2026-04-06 12:56:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal ha en tabell som viser sikkerhetsparametere i SOC tjenesten.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.4',
+            'requirement_text' => 'Leverandøren skal ha en tabell som viser sikkerhetsparametere i SOC tjenesten.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $tableKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'SOC table knowledge',
+            'original_filename' => 'soc-table-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Tabellgrunnlag for sikkerhetsparametere.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($tableKnowledge);
+        $tableChunk = $tableKnowledge->chunks()->firstOrFail();
+        $tableChunk->forceFill([
+            'title' => 'Sikkerhetsparametere for SOC tjenesten',
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+            'chunk_type' => 'table',
+            'content' => 'Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.',
+            'summary_for_retrieval' => 'Tabellen viser sikkerhetsparametere for SOC tjenesten.',
+            'table_text' => 'Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.',
+            'table_html' => '<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>',
+            'table_json' => [
+                'source_type' => 'docx_table',
+                'column_count' => 2,
+                'row_count' => 3,
+                'title_row_index' => 0,
+                'header_row_indices' => [1],
+                'rows' => [
+                    [
+                        'row_type' => 'title',
+                        'cells' => [
+                            [
+                                'text' => 'Sikkerhetsparametere for SOC tjenesten',
+                                'rowspan' => 1,
+                                'colspan' => 2,
+                                'is_title' => true,
+                                'is_header' => false,
+                                'is_empty' => false,
+                                'style_hints' => [],
+                                'source_metadata' => [],
+                            ],
+                        ],
+                    ],
+                    [
+                        'row_type' => 'header',
+                        'cells' => [
+                            [
+                                'text' => 'Parameter',
+                                'rowspan' => 1,
+                                'colspan' => 1,
+                                'is_title' => false,
+                                'is_header' => true,
+                                'is_empty' => false,
+                                'style_hints' => [],
+                                'source_metadata' => [],
+                            ],
+                            [
+                                'text' => 'Verdi',
+                                'rowspan' => 1,
+                                'colspan' => 1,
+                                'is_title' => false,
+                                'is_header' => true,
+                                'is_empty' => false,
+                                'style_hints' => [],
+                                'source_metadata' => [],
+                            ],
+                        ],
+                    ],
+                    [
+                        'row_type' => 'data',
+                        'cells' => [
+                            [
+                                'text' => 'Overvåkning',
+                                'rowspan' => 1,
+                                'colspan' => 1,
+                                'is_title' => false,
+                                'is_header' => false,
+                                'is_empty' => false,
+                                'style_hints' => [],
+                                'source_metadata' => [],
+                            ],
+                            [
+                                'text' => '24/7',
+                                'rowspan' => 1,
+                                'colspan' => 1,
+                                'is_title' => false,
+                                'is_header' => false,
+                                'is_empty' => false,
+                                'style_hints' => [],
+                                'source_metadata' => [],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'topic' => '',
+            'sub_topic' => '',
+            'keywords' => [],
+            'section_title' => '1 Overskrift test',
+            'section_path' => '1 Overskrift test',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+            'embedding_vector' => null,
+            'embedding_model' => null,
+            'embedding_generated_at' => null,
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($tableKnowledge, '2026-04-06 12:57:00');
+
+        $tableChunk->refresh();
+        $this->assertDatabaseHas('knowledge_items', [
+            'id' => $tableKnowledge->id,
+            'customer_id' => $context['customer']->id,
+            'original_filename' => 'soc-table-knowledge.docx',
+            'is_active' => true,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+        $this->assertDatabaseHas('knowledge_item_chunks', [
+            'id' => $tableChunk->id,
+            'knowledge_item_id' => $tableKnowledge->id,
+            'chunk_type' => 'table',
+            'title' => 'Sikkerhetsparametere for SOC tjenesten',
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+        $this->assertSame($tableKnowledge->id, (int) $tableChunk->knowledge_item_id);
+        $this->assertSame('table', $tableChunk->chunk_type);
+        $this->assertSame('Sikkerhetsparametere for SOC tjenesten', $tableChunk->title);
+        $this->assertSame('approved', $tableChunk->review_status);
+        $this->assertSame('pending_review', $tableChunk->metadata_status);
+        $this->assertSame('Tabellen viser sikkerhetsparametere for SOC tjenesten.', $tableChunk->summary_for_retrieval);
+        $this->assertSame('Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.', $tableChunk->table_text);
+        $this->assertSame('', (string) $tableChunk->topic);
+        $this->assertSame('', (string) $tableChunk->sub_topic);
+        $this->assertSame([], $tableChunk->keywords);
+        $this->assertSame(mb_strlen('Tabellen viser sikkerhetsparametere for SOC tjenesten.', 'UTF-8'), mb_strlen((string) $tableChunk->summary_for_retrieval, 'UTF-8'));
+        $this->assertSame(mb_strlen('Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.', 'UTF-8'), mb_strlen((string) $tableChunk->table_text, 'UTF-8'));
+
+        $semanticKnowledge = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Semantic metadata knowledge',
+            'original_filename' => 'semantic-metadata-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Beskriv prioritet og oppfølging.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($semanticKnowledge);
+        $semanticChunk = $semanticKnowledge->chunks()->firstOrFail();
+        $semanticChunk->forceFill([
+            'title' => 'Utvalgt seksjon',
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+            'topic' => 'Tema A',
+            'sub_topic' => 'Underemne A',
+            'keywords' => ['Nøkkelord A'],
+            'section_title' => 'Del A',
+            'section_path' => 'Kapittel > Del A',
+            'embedding_vector' => [0.9, 0.1],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 12:58:00',
+            'embedding_error' => null,
+        ])->save();
+        $this->touchKnowledgeItem($semanticKnowledge, '2026-04-06 12:58:00');
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        $this->bindMetadataRetrievalPlanService(function (...$ignored): array {
+            return [
+                'selected_metadata' => [
+                    'topic' => ['Tema A'],
+                ],
+                'search_text' => 'Leverandøren skal ha en tabell som viser sikkerhetsparametere i SOC tjenesten.',
+                'intent_summary' => 'Leter etter tabell med sikkerhetsparametere for SOC-tjenesten.',
+                'confidence' => 0.94,
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement, $tableChunk, $semanticChunk, $tableKnowledge, $semanticKnowledge) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            if (data_get($requestPayload, 'text.format.name') === 'requirement_grounding_judge') {
+                $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+                $this->assertNotEmpty($retrievedKnowledgeChunks);
+
+                $tableRow = $retrievedKnowledgeChunks->firstWhere('chunk_id', $tableChunk->id);
+                $semanticRow = $retrievedKnowledgeChunks->firstWhere('chunk_id', $semanticChunk->id);
+
+                $this->assertNotNull($tableRow);
+                $this->assertNotNull($semanticRow);
+                $this->assertSame('table', $tableRow['chunk_type']);
+                $this->assertSame($tableKnowledge->original_filename, $tableRow['document_title']);
+                $this->assertSame('Sikkerhetsparametere for SOC tjenesten', $tableRow['heading_path']);
+                $this->assertSame('Tabellen viser sikkerhetsparametere for SOC tjenesten.', $tableRow['summary_for_retrieval']);
+                $this->assertSame('Sikkerhetsparametere for SOC tjenesten: overvåkning, responstid og eskalering.', $tableRow['table_text']);
+                $this->assertSame('<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>', $tableRow['table_html']);
+                $this->assertSame(2, data_get($tableRow, 'table_json.column_count'));
+
+                return Http::response(
+                    $this->openAiStructuredResponse([
+                        'status' => 'supported',
+                        'can_generate_answer' => true,
+                        'directly_supported_points' => [
+                            [
+                                'requirement_point' => 'Sikkerhetsparametere for SOC tjenesten.',
+                                'support_summary' => 'Tabellen dokumenterer sikkerhetsparametere for SOC-tjenesten.',
+                                'evidence_reference' => 'Chunk 1 · Sikkerhetsparametere for SOC tjenesten',
+                                'evidence_quote' => null,
+                            ],
+                        ],
+                        'related_but_insufficient_points' => [],
+                        'unsupported_points' => [],
+                        'missing_knowledge_summary' => null,
+                        'recommended_document_title' => null,
+                        'suggested_filename' => null,
+                        'reasoning_summary' => 'Grunnlaget er tilstrekkelig.',
+                    ], 58, 16),
+                    200,
+                    ['x-request-id' => 'req_table_metadata_grounding_judge'],
+                );
+            }
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertNotEmpty($retrievedKnowledgeChunks);
+
+            $tableRow = $retrievedKnowledgeChunks->firstWhere('chunk_id', $tableChunk->id);
+            $semanticRow = $retrievedKnowledgeChunks->firstWhere('chunk_id', $semanticChunk->id);
+
+            $this->assertNotNull($tableRow);
+            $this->assertNotNull($semanticRow);
+            $this->assertSame('table', $tableRow['chunk_type']);
+            $this->assertSame($tableKnowledge->original_filename, $tableRow['document_title']);
+            $this->assertStringContainsString('Tabellen viser sikkerhetsparametere for SOC tjenesten.', $tableRow['summary_for_retrieval']);
+            $this->assertStringContainsString('Sikkerhetsparametere for SOC tjenesten', $tableRow['table_text']);
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_table_metadata_answer_draft'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.');
+        $response->assertJsonPath('retrieval_sources.0.id', $tableChunk->id);
+        $response->assertJsonPath('retrieval_sources.0.chunk_type', 'table');
+        $response->assertJsonPath('retrieval_sources.0.table_html', '<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>');
+        $response->assertJsonPath('retrieval_sources.0.table_json.column_count', 2);
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal beskrive sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+
+        Log::shouldHaveReceived('info')->withArgs(function (string $message, array $logContext) use ($savedNotice, $requirement, $context): bool {
+            return $message === '[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.'
+                && data_get($logContext, 'route_name') === 'app.ai.requirements.answer-draft.generate'
+                && (int) data_get($logContext, 'saved_notice_id', 0) === (int) $savedNotice->id
+                && (int) data_get($logContext, 'requirement_id', 0) === (int) $requirement->id
+                && (int) data_get($logContext, 'customer_id', 0) === (int) $context['customer']->id;
+        });
+
+        Log::shouldHaveReceived('info')->withArgs(function (string $message, array $logContext) use ($tableChunk): bool {
+            return $message === '[PROCYNIA][REAL_RETRIEVAL_PATH] retrievedKnowledgeChunksForRequirement stage metadata_candidates.'
+                && collect((array) data_get($logContext, 'table_chunks', []))
+                    ->contains(static function (array $row) use ($tableChunk): bool {
+                        return (int) data_get($row, 'chunk_id', 0) === (int) $tableChunk->id;
+                    });
+        });
+
+        Log::shouldHaveReceived('info')->withArgs(function (string $message, array $logContext) use ($tableChunk): bool {
+            return $message === '[PROCYNIA][REAL_RETRIEVAL_PATH] retrievedKnowledgeChunksForRequirement stage ranked_matches.'
+                && collect((array) data_get($logContext, 'table_chunks', []))
+                    ->contains(static function (array $row) use ($tableChunk): bool {
+                        return (int) data_get($row, 'chunk_id', 0) === (int) $tableChunk->id;
+                    });
+        });
+
+    }
+
+    public function test_ai_requirement_answer_draft_generation_exposes_image_chunk_evidence_and_image_url(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-IMAGE-RAG', 'Image RAG target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:05:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'image-requirement.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/image-requirement.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal ha et bilde som viser sikkerhetsparametere i SOC tjenesten.',
+            'text_extracted_at' => '2026-04-06 13:06:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal ha et bilde som viser sikkerhetsparametere i SOC tjenesten.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.5',
+            'requirement_text' => 'Leverandøren skal ha et bilde som viser sikkerhetsparametere i SOC tjenesten.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Sikkerhetsparametere for SOC tjenesten',
+            'original_filename' => 'soc-image-knowledge.docx',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'content' => 'Bilde i seksjon: 1 Overskrift test. Bildet viser sikkerhetsparametere for SOC tjenesten.',
+            'is_active' => true,
+        ]);
+
+        $imageBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5r7uQAAAAASUVORK5CYII=');
+        $imageHash = hash('sha256', $imageBytes);
+        $imagePath = sprintf('knowledge-images/%d/%s.png', $knowledgeItem->id, $imageHash);
+        Storage::disk('local')->put($imagePath, $imageBytes);
+
+        $imageChunk = KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'chunk_index' => 0,
+            'chunk_type' => 'image',
+            'start_offset' => 0,
+            'end_offset' => mb_strlen('Bilde i seksjon: 1 Overskrift test. Bildet viser sikkerhetsparametere for SOC tjenesten.', 'UTF-8'),
+            'content' => 'Bilde i seksjon: 1 Overskrift test. Bildet viser sikkerhetsparametere for SOC tjenesten.',
+            'title' => 'Sikkerhetsparametere for SOC tjenesten',
+            'heading_path' => '1 Overskrift test',
+            'section_title' => '1 Overskrift test',
+            'section_path' => '1 Overskrift test',
+            'summary_for_retrieval' => 'Bildet viser sikkerhetsparametere for SOC tjenesten.',
+            'image_path' => $imagePath,
+            'image_disk' => 'local',
+            'image_mime_type' => 'image/png',
+            'image_original_filename' => 'soc-image.png',
+            'image_width' => 1,
+            'image_height' => 1,
+            'image_hash' => $imageHash,
+            'image_metadata' => [
+                'source_type' => 'docx_image',
+                'relationship_id' => 'rId1',
+                'media_path' => 'word/media/image1.png',
+                'document_order_index' => 1,
+                'heading_path' => '1 Overskrift test',
+                'image_kind' => 'unknown',
+                'detected_type' => 'unknown',
+                'extension' => 'png',
+                'mime_type' => 'image/png',
+            ],
+            'image_alt_text' => 'Arkitekturdiagram med integrasjoner',
+            'image_caption' => 'Figur 1: Overordnet arkitektur',
+            'ocr_text' => null,
+            'image_description' => null,
+            'topic' => '',
+            'sub_topic' => '',
+            'keywords' => [],
+            'embedding_vector' => [1.0, 0.0],
+            'embedding_model' => 'text-embedding-3-small',
+            'embedding_generated_at' => '2026-04-06 13:04:00',
+            'embedding_error' => null,
+        ]);
+
+        $this->bindAiControllerKnowledgeChunksForMatching(collect([
+            [
+                'id' => $imageChunk->id,
+                'chunk_id' => $imageChunk->id,
+                'knowledge_item_id' => $knowledgeItem->id,
+                'knowledge_item_title' => $knowledgeItem->original_filename,
+                'content_type' => $knowledgeItem->document_type,
+                'knowledge_item_summary' => $knowledgeItem->summary ?? '',
+                'chunk_index' => 0,
+                'chunk_type' => 'image',
+                'content' => (string) $imageChunk->content,
+                'title' => (string) $imageChunk->title,
+                'heading_path' => (string) $imageChunk->heading_path,
+                'summary_for_retrieval' => (string) $imageChunk->summary_for_retrieval,
+                'table_text' => '',
+                'table_html' => '',
+                'table_json' => null,
+                'image_path' => $imageChunk->image_path,
+                'image_disk' => $imageChunk->image_disk,
+                'image_mime_type' => $imageChunk->image_mime_type,
+                'image_original_filename' => $imageChunk->image_original_filename,
+                'image_width' => $imageChunk->image_width,
+                'image_height' => $imageChunk->image_height,
+                'image_hash' => $imageChunk->image_hash,
+                'image_metadata' => $imageChunk->image_metadata,
+                'image_alt_text' => $imageChunk->image_alt_text,
+                'image_caption' => $imageChunk->image_caption,
+                'ocr_text' => $imageChunk->ocr_text,
+                'image_description' => $imageChunk->image_description,
+                'topic' => '',
+                'sub_topic' => '',
+                'keywords' => [],
+                'section_title' => (string) $imageChunk->section_title,
+                'section_path' => (string) $imageChunk->section_path,
+                'embedding_vector' => [1.0, 0.0],
+                'embedding_model' => 'text-embedding-3-small',
+                'embedding_generated_at' => '2026-04-06 13:04:00',
+                'embedding_error' => null,
+                'knowledge_item_updated_at' => $knowledgeItem->updated_at->toIso8601String(),
+                'image_url' => route('app.ai.knowledge-base.chunks.image', [
+                    'knowledgeItem' => $knowledgeItem->id,
+                    'chunk' => $imageChunk->id,
+                ]),
+            ],
+        ]));
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(function (Request $request) use ($requirement, $imageChunk, $knowledgeItem) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            $inputPayload = json_decode((string) data_get($requestPayload, 'input.1.content.0.text', ''), true);
+
+            $this->assertSame('requirement_answer_draft', data_get($requestPayload, 'text.format.name'));
+            $this->assertIsArray($inputPayload);
+            $this->assertSame($requirement->requirement_text, data_get($inputPayload, 'requirement.text'));
+
+            $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
+            $this->assertNotEmpty($retrievedKnowledgeChunks);
+
+            $imageRow = $retrievedKnowledgeChunks->firstWhere('chunk_id', $imageChunk->id);
+            $this->assertNotNull($imageRow);
+            $this->assertSame('image', $imageRow['chunk_type']);
+            $this->assertStringContainsString('sikkerhetsparametere for SOC tjenesten', $imageRow['content_preview']);
+
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal vise sikkerhetsparametere i et bilde som grunnlag for svaret.',
+                ], 58, 16),
+                200,
+                ['x-request-id' => 'req_image_answer_draft'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.text', 'Leverandøren skal vise sikkerhetsparametere i et bilde som grunnlag for svaret.');
+        $response->assertJsonPath('retrieval_sources.0.id', $imageChunk->id);
+        $response->assertJsonPath('retrieval_sources.0.chunk_type', 'image');
+        $response->assertJsonPath('retrieval_sources.0.image_url', route('app.ai.knowledge-base.chunks.image', [
+            'knowledgeItem' => $knowledgeItem->id,
+            'chunk' => $imageChunk->id,
+        ]));
+        $response->assertJsonPath('retrieval_sources.0.image_mime_type', 'image/png');
+        $response->assertJsonPath('retrieval_sources.0.image_alt_text', 'Arkitekturdiagram med integrasjoner');
+        $response->assertJsonPath('retrieval_sources.0.image_caption', 'Figur 1: Overordnet arkitektur');
+        $response->assertJsonPath('retrieval_sources.0.image_metadata.extension', 'png');
+        $response->assertJsonPath('knowledge_grounding.level', 'amber');
+        $response->assertJsonPath('knowledge_grounding.sources_count', 1);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $knowledgeItem->id,
+                'chunk' => $imageChunk->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+
+        $requirement->refresh();
+        $this->assertSame('Leverandøren skal vise sikkerhetsparametere i et bilde som grunnlag for svaret.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 

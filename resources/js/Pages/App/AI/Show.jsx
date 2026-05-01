@@ -940,37 +940,29 @@ function normalizeClipboardImageUrl(imageUrl) {
 }
 
 /**
- * Purpose: Build a clipboard-ready rich HTML and plain-text payload from answer draft content.
+ * Purpose: Build a clipboard-ready payload from answer draft content.
  * Inputs: The answer text and the retrieval sources used by the active requirement.
  * Returns: An object with `html` and `text` clipboard payload strings.
  * Side effects: None.
  */
 function buildAnswerDraftClipboardPayload(answerDraftText, retrievalSources) {
-    const htmlBlocks = [];
-    const textBlocks = [];
-
-    const normalizedText = normalizeAnswerDraftText(answerDraftText).trim();
-
-    if (normalizedText !== '') {
-        const textParagraphs = normalizedText
-            .split(/\n{2,}/)
-            .map((paragraph) => paragraph.trim())
-            .filter((paragraph) => paragraph !== '');
-
-        if (textParagraphs.length > 0) {
-            htmlBlocks.push(
-                textParagraphs
-                    .map((paragraph) => `<p>${escapeClipboardHtml(paragraph).replace(/\n/g, '<br />')}</p>`)
-                    .join(''),
-            );
-        }
-
-        textBlocks.push(normalizedText);
-    }
-
     const normalizedSources = Array.isArray(retrievalSources)
         ? retrievalSources.filter((source) => source && typeof source === 'object')
         : [];
+    const tableSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
+    const imageSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
+
+    if (tableSources.length === 0 && imageSources.length === 0) {
+        const normalizedText = normalizeAnswerDraftText(answerDraftText).trim();
+
+        return {
+            html: '',
+            text: normalizedText,
+        };
+    }
+
+    const htmlBlocks = [];
+    const textBlocks = [];
 
     const buildTableHtmlFromJson = (tableJson) => {
         const rows = Array.isArray(tableJson?.rows) ? tableJson.rows.filter((row) => row && typeof row === 'object') : [];
@@ -1087,45 +1079,44 @@ function buildAnswerDraftClipboardPayload(answerDraftText, retrievalSources) {
             .join('\n');
     };
 
-    for (const source of normalizedSources) {
-        const chunkType = String(source?.chunk_type ?? '').trim().toLowerCase();
+    tableSources.forEach((source) => {
+        const tableHtml = String(source?.table_html ?? '').trim();
+        const tableJson = source?.table_json ?? null;
+        const tableText = String(source?.table_text ?? '').trim();
+        const renderedTableHtml = tableHtml !== ''
+            ? tableHtml
+            : buildTableHtmlFromJson(tableJson);
+        const renderedTableText = tableText !== ''
+            ? tableText
+            : buildTablePlainTextFromJson(tableJson);
 
-        if (chunkType === 'table') {
-            const tableHtml = String(source?.table_html ?? '').trim();
-            const tableJson = source?.table_json ?? null;
-            const tableText = String(source?.table_text ?? '').trim();
-            const renderedTableHtml = tableHtml !== ''
-                ? tableHtml
-                : buildTableHtmlFromJson(tableJson);
-            const renderedTableText = tableText !== ''
-                ? tableText
-                : buildTablePlainTextFromJson(tableJson);
-
-            if (renderedTableHtml !== '') {
-                htmlBlocks.push(`<div style="margin-top:12px;">${renderedTableHtml}</div>`);
-            }
-
-            if (renderedTableText !== '') {
-                textBlocks.push(renderedTableText);
-            }
-
-            continue;
+        if (renderedTableHtml !== '') {
+            htmlBlocks.push(`<div style="margin-top:12px;">${renderedTableHtml}</div>`);
         }
 
-        if (chunkType === 'image') {
-            const imageAltText = String(source?.image_alt_text ?? '').trim();
-            const imageCaption = String(source?.image_caption ?? '').trim();
-            const imageLabel = imageAltText !== '' ? imageAltText : (imageCaption !== '' ? imageCaption : 'Bilde');
-            const imageSource = normalizeClipboardImageUrl(source?.image_url);
+        if (renderedTableText !== '') {
+            textBlocks.push(renderedTableText);
+        }
+    });
 
-            if (imageSource !== '') {
-                htmlBlocks.push(
-                    `<div style="margin-top:12px;"><img src="${escapeClipboardHtml(imageSource)}" alt="${escapeClipboardHtml(imageLabel)}" style="display:block;max-width:100%;height:auto;border-radius:16px;" /></div>`,
-                );
-            }
+    imageSources.forEach((source) => {
+        const imageSource = normalizeClipboardImageUrl(source?.image_url);
 
+        if (imageSource !== '') {
+            htmlBlocks.push(
+                `<div style="margin-top:12px;"><img src="${escapeClipboardHtml(imageSource)}" style="display:block;max-width:100%;height:auto;" /></div>`,
+            );
+            textBlocks.push(imageSource);
+        } else {
             textBlocks.push('Bilde');
         }
+    });
+
+    if (htmlBlocks.length === 0 && textBlocks.length === 0) {
+        return {
+            html: '',
+            text: '',
+        };
     }
 
     return {
@@ -1827,7 +1818,7 @@ export default function AiShow({
      * Returns: None.
      * Side effects: Writes to the browser clipboard and updates the copy feedback state.
      */
-    const copyActiveAnswerDraftContent = async () => {
+    const copyActiveAnswerDraftContent = () => {
         if (activeRequirement === null || activeRequirementDraft === null) {
             return;
         }
