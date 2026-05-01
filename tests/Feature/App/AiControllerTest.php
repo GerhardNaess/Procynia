@@ -1755,6 +1755,27 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive sikkerhetsparametere for SOC-tjenesten med utgangspunkt i tabellen.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+        $this->assertIsArray($requirement->answer_draft_retrieval_sources);
+        $this->assertNotEmpty($requirement->answer_draft_retrieval_sources);
+        $persistedTableSource = collect($requirement->answer_draft_retrieval_sources)->firstWhere('id', $tableChunk->id);
+        $this->assertNotNull($persistedTableSource);
+        $this->assertSame('table', data_get($persistedTableSource, 'chunk_type'));
+
+        $refreshResponse = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $refreshResponse->assertOk();
+        $refreshPage = $this->inertiaPageFromResponse($refreshResponse);
+        $refreshRequirements = collect(data_get($refreshPage, 'props.requirements', []));
+        $refreshRequirementRow = $refreshRequirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($refreshRequirementRow);
+        $refreshTableSource = collect(data_get($refreshRequirementRow, 'answer_draft.retrieval_sources', []))
+            ->firstWhere('id', $tableChunk->id);
+        $this->assertNotNull($refreshTableSource);
+        $this->assertSame('table', data_get($refreshTableSource, 'chunk_type'));
+        $this->assertSame(
+            '<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>',
+            data_get($refreshTableSource, 'table_html'),
+        );
 
         Log::shouldHaveReceived('info')->withArgs(function (string $message, array $logContext) use ($savedNotice, $requirement, $context): bool {
             return $message === '[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.'
@@ -1988,6 +2009,27 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal vise sikkerhetsparametere i et bilde som grunnlag for svaret.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+        $this->assertIsArray($requirement->answer_draft_retrieval_sources);
+        $this->assertCount(1, $requirement->answer_draft_retrieval_sources);
+        $this->assertSame($imageChunk->id, data_get($requirement->answer_draft_retrieval_sources, '0.id'));
+        $this->assertSame('image', data_get($requirement->answer_draft_retrieval_sources, '0.chunk_type'));
+
+        $refreshResponse = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $refreshResponse->assertOk();
+        $refreshPage = $this->inertiaPageFromResponse($refreshResponse);
+        $refreshRequirements = collect(data_get($refreshPage, 'props.requirements', []));
+        $refreshRequirementRow = $refreshRequirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($refreshRequirementRow);
+        $this->assertSame($imageChunk->id, data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.id'));
+        $this->assertSame('image', data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.chunk_type'));
+        $this->assertSame(
+            route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $knowledgeItem->id,
+                'chunk' => $imageChunk->id,
+            ]),
+            data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.image_url'),
+        );
     }
 
     public function test_ai_requirement_answer_draft_generation_uses_metadata_selected_chunks_before_a_stronger_text_only_match(): void

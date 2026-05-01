@@ -49,7 +49,7 @@ class KnowledgeChunkMetadataValidator
         );
         $keywords = $this->normalizeDescriptiveKeywordList(data_get($rawPayload, 'keywords'), $chunk->keywords);
         $matchedTerms = $this->normalizeMatchedTerms(data_get($rawPayload, 'matched_terms'), $chunkContent, $vocabularyMap);
-        $summaryForRetrieval = $this->normalizeSummary(data_get($rawPayload, 'summary_for_retrieval'), $chunkContent);
+        $summaryForRetrieval = $this->normalizeSummary(data_get($rawPayload, 'summary_for_retrieval'), $chunk);
         $confidenceScore = $this->normalizeConfidenceScore(data_get($rawPayload, 'confidence_score'));
         $suggestions = $this->normalizeSuggestions(data_get($rawPayload, 'new_term_suggestions'), $chunkContent, $vocabularyMap, [
             'service_product_tag' => $serviceProductTag,
@@ -217,15 +217,36 @@ class KnowledgeChunkMetadataValidator
      * Returns: A short concrete summary string.
      * Side effects: None.
      */
-    private function normalizeSummary(mixed $rawValue, string $chunkContent): string
+    private function normalizeSummary(mixed $rawValue, KnowledgeItemChunk $chunk): string
     {
         $summary = trim((string) ($rawValue ?? ''));
 
         if ($summary === '') {
-            $summary = $this->fallbackSummary($chunkContent);
+            $fallbackSourceText = $this->summarySourceText($chunk);
+
+            if ($fallbackSourceText === '') {
+                return '';
+            }
+
+            $summary = $this->fallbackSummary($fallbackSourceText);
         }
 
         return Str::limit(Str::squish($summary), 280, '...');
+    }
+
+    /**
+     * Purpose: Resolve the best source text for summary fallback generation.
+     * Inputs: The chunk being validated.
+     * Returns: Table text for table chunks, or regular chunk content for all other chunks.
+     * Side effects: None.
+     */
+    private function summarySourceText(KnowledgeItemChunk $chunk): string
+    {
+        if (($chunk->chunk_type ?? null) === 'table') {
+            return trim((string) ($chunk->table_text ?? ''));
+        }
+
+        return trim((string) $chunk->content);
     }
 
     /**

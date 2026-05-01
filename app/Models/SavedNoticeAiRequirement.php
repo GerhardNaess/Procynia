@@ -154,6 +154,7 @@ class SavedNoticeAiRequirement extends Model
         'current_requirement_snapshot',
         'answer_draft_text',
         'answer_draft_generated_at',
+        'answer_draft_retrieval_sources',
         'requirement_type',
         'extraction_method',
         'source_reference',
@@ -185,6 +186,7 @@ class SavedNoticeAiRequirement extends Model
             'original_candidate_snapshot' => 'array',
             'current_requirement_snapshot' => 'array',
             'answer_draft_generated_at' => 'datetime',
+            'answer_draft_retrieval_sources' => 'array',
             'source_reference' => 'array',
             'extraction_metadata' => 'array',
         ];

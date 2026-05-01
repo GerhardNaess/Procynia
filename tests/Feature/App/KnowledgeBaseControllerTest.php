@@ -1350,10 +1350,94 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(['stikkord a', 'stikkord b'], $chunk->keywords);
         $this->assertSame(['term a'], $chunk->matched_terms);
         $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->summary_for_retrieval);
+        $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->ai_summary);
         $this->assertSame(0.91, $chunk->confidence_score);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
         $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
+    }
+
+    public function test_knowledge_document_upload_generates_ai_summary_for_table_chunks_from_table_text(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Four E AS');
+
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->once()
+            ->with(Mockery::on(function (array $payload): bool {
+                $promptText = (string) data_get($payload, 'input.1.content.0.text', '');
+
+                return str_contains($promptText, '"chunk_type":"table"')
+                    && str_contains($promptText, 'Tabell A | Tabell B')
+                    && str_contains($promptText, 'source_text');
+            }))
+            ->andReturn([
+                'id' => 'resp_table_summary',
+                'output_text' => json_encode([
+                    'service_product_tag' => 'samhandling',
+                    'theme_tag' => 'driftsmodell',
+                    'topic' => 'sikkerhetsparametere',
+                    'sub_topic' => 'SOC-tjeneste',
+                    'keywords' => ['SOC', 'sikkerhetsparametere'],
+                    'matched_terms' => ['SOC'],
+                    'summary_for_retrieval' => 'Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.',
+                    'new_term_suggestions' => [],
+                    'confidence_score' => 0.92,
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ]);
+        $this->app->instance(OpenAiClient::class, $openAiClient);
+
+        $metadataService = new KnowledgeChunkMetadataGenerationService(
+            $openAiClient,
+            app(KnowledgeMetadataVocabularyService::class),
+            app(KnowledgeChunkMetadataValidator::class),
+        );
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
+
+        $embeddingService = Mockery::mock(EmbeddingService::class);
+        $embeddingService->shouldReceive('tryEmbedText')
+            ->once()
+            ->andReturn([
+                'ok' => true,
+                'embedding' => [0.11, 0.22, 0.33],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ]);
+        $this->app->instance(EmbeddingService::class, $embeddingService);
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUploadWithBlocks('table-summary.docx', [
+                ['text' => 'Tabelloppsummering', 'style' => 'Heading1'],
+                ['text' => '', 'style' => 'Table'],
+            ]),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'table-summary.docx')
+            ->firstOrFail();
+
+        $tableChunk = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'table')
+            ->firstOrFail();
+
+        $this->assertSame('Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.', $tableChunk->summary_for_retrieval);
+        $this->assertSame($tableChunk->summary_for_retrieval, $tableChunk->ai_summary);
+        $this->assertSame('docx_table', $tableChunk->table_metadata['source'] ?? null);
+        $this->assertIsArray($tableChunk->table_json);
+        $this->assertStringContainsString('<table', (string) $tableChunk->table_html);
     }
 
     public function test_knowledge_document_upload_persists_embedding_error_when_generation_fails(): void

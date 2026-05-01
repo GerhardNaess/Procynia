@@ -105,6 +105,7 @@ class KnowledgeChunkMetadataGenerationService
     {
         $lines = [];
         $title = trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title ?: $document->original_filename));
+        $content = $this->sourceTextForSummary($chunk);
 
         if ($title !== '') {
             $lines[] = 'Title: '.$title;
@@ -129,7 +130,6 @@ class KnowledgeChunkMetadataGenerationService
             (array) data_get($metadata, 'matched_terms', []),
         ), static fn (string $term): bool => $term !== ''));
         $summary = trim((string) data_get($metadata, 'summary_for_retrieval', ''));
-        $content = trim((string) $chunk->content);
 
         if ($serviceProductTag !== '') {
             $lines[] = 'Service/product tag: '.$serviceProductTag;
@@ -226,6 +226,7 @@ class KnowledgeChunkMetadataGenerationService
             'Keywords must be concrete and relevant to the chunk content.',
             'Matched terms must be terms that truly appear in the chunk or clearly match an approved synonym.',
             'summary_for_retrieval must be short, concrete and useful for later retrieval.',
+            'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
         ]);
@@ -239,6 +240,8 @@ class KnowledgeChunkMetadataGenerationService
      */
     private function userPrompt(KnowledgeItem $document, KnowledgeItemChunk $chunk, array $vocabularyMap): string
     {
+        $sourceText = $this->sourceTextForSummary($chunk);
+
         $payload = [
             'document' => [
                 'id' => $document->id,
@@ -248,31 +251,37 @@ class KnowledgeChunkMetadataGenerationService
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],
-                'chunk' => [
-                    'id' => $chunk->id,
-                    'chunk_index' => $chunk->chunk_index,
-                    'title' => $chunk->title,
-                    'heading_path' => $chunk->heading_path,
-                    'section_title' => $chunk->section_title,
-                    'section_path' => $chunk->section_path,
-                    'content' => $chunk->content,
-                ],
-                'allowed_metadata_fields' => data_get($vocabularyMap, 'available_fields', []),
-                'approved_vocabulary' => data_get($vocabularyMap, 'terms', []),
-                'instructions' => [
-                    'Use existing approved values when they fit the chunk.',
-                    'Return canonical names for approved values.',
-                    'Topic is the short main theme for the chunk, and sub_topic is a narrower descriptive theme within that topic.',
-                    'Topic and sub_topic are descriptive chunk metadata, not controlled vocabulary fields.',
-                    'Fill topic and sub_topic for every chunk with meaningful content.',
-                    'Leave topic and sub_topic empty only when the chunk has no meaningful content.',
-                    'Use the same language as the chunk content for topic and sub_topic.',
-                    'Service/product tag and theme tag are the controlled vocabulary fields.',
-                    'Put genuinely new or unknown concepts in new_term_suggestions.',
-                    'summary_for_retrieval must be short and concrete.',
-                    'confidence_score must be a number between 0 and 1.',
-                ],
-            ];
+            'chunk' => [
+                'id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'chunk_type' => $chunk->chunk_type,
+                'title' => $chunk->title,
+                'heading_path' => $chunk->heading_path,
+                'section_title' => $chunk->section_title,
+                'section_path' => $chunk->section_path,
+                'content' => $sourceText,
+                'source_text' => $sourceText,
+                'table_text' => $chunk->table_text,
+                'table_html' => $chunk->table_html,
+                'table_json' => $chunk->table_json,
+            ],
+            'allowed_metadata_fields' => data_get($vocabularyMap, 'available_fields', []),
+            'approved_vocabulary' => data_get($vocabularyMap, 'terms', []),
+            'instructions' => [
+                'Use existing approved values when they fit the chunk.',
+                'Return canonical names for approved values.',
+                'Topic is the short main theme for the chunk, and sub_topic is a narrower descriptive theme within that topic.',
+                'Topic and sub_topic are descriptive chunk metadata, not controlled vocabulary fields.',
+                'Fill topic and sub_topic for every chunk with meaningful content.',
+                'Leave topic and sub_topic empty only when the chunk has no meaningful content.',
+                'Use the same language as the chunk content for topic and sub_topic.',
+                'Service/product tag and theme tag are the controlled vocabulary fields.',
+                'Put genuinely new or unknown concepts in new_term_suggestions.',
+                'summary_for_retrieval must be short and concrete.',
+                'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
+                'confidence_score must be a number between 0 and 1.',
+            ],
+        ];
 
         try {
             return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -502,6 +511,8 @@ class KnowledgeChunkMetadataGenerationService
      */
     private function failedValidationResult(KnowledgeItemChunk $chunk): array
     {
+        $fallbackSourceText = $this->sourceTextForSummary($chunk);
+
         return [
             'service_product_tag' => null,
             'theme_tag' => null,
@@ -509,7 +520,9 @@ class KnowledgeChunkMetadataGenerationService
             'sub_topic' => null,
             'keywords' => [],
             'matched_terms' => [],
-            'summary_for_retrieval' => Str::limit(Str::squish((string) $chunk->content), 280, '...'),
+            'summary_for_retrieval' => $fallbackSourceText !== ''
+                ? Str::limit(Str::squish($fallbackSourceText), 280, '...')
+                : '',
             'confidence_score' => 0.0,
             'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_FAILED,
             'new_term_suggestions' => [],
@@ -712,6 +725,21 @@ class KnowledgeChunkMetadataGenerationService
         }
 
         return Str::limit($normalized, $maxLength, '');
+    }
+
+    /**
+     * Purpose: Resolve the best source text for summary generation for one chunk.
+     * Inputs: The chunk being analyzed.
+     * Returns: Table text for table chunks, or regular chunk content for all other chunks.
+     * Side effects: None.
+     */
+    private function sourceTextForSummary(KnowledgeItemChunk $chunk): string
+    {
+        if (($chunk->chunk_type ?? null) === 'table') {
+            return trim((string) ($chunk->table_text ?? ''));
+        }
+
+        return trim((string) $chunk->content);
     }
 
     /**

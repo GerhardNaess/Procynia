@@ -208,6 +208,37 @@ class KnowledgeChunkMetadataValidatorTest extends TestCase
         $this->assertNull($result['sub_topic']);
     }
 
+    public function test_it_does_not_invent_a_summary_for_table_chunks_without_table_text(): void
+    {
+        [$document, $chunk, $vocabularyMap] = $this->fixtureBundle();
+
+        $chunk->forceFill([
+            'chunk_type' => 'table',
+            'table_text' => '',
+            'table_html' => '<table><tr><td>Blank</td></tr></table>',
+            'table_json' => [
+                'source_type' => 'docx_table',
+                'rows' => [],
+            ],
+        ])->save();
+
+        $validator = app(KnowledgeChunkMetadataValidator::class);
+        $result = $validator->validate($document, $chunk, [
+            'service_product_tag' => 'samhandling',
+            'theme_tag' => 'driftsmodell',
+            'topic' => '',
+            'sub_topic' => '',
+            'keywords' => [],
+            'matched_terms' => [],
+            'summary_for_retrieval' => '',
+            'confidence_score' => 0.94,
+            'new_term_suggestions' => [],
+        ], $vocabularyMap);
+
+        $this->assertSame('', $result['summary_for_retrieval']);
+        $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_FAILED, $result['metadata_status']);
+    }
+
     private function fixtureBundle(): array
     {
         $customer = $this->createCustomer('Validator Customer AS');

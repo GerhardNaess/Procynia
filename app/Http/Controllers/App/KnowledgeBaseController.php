@@ -2129,6 +2129,8 @@ class KnowledgeBaseController extends Controller
             ]);
 
             $metadataUpdates = [
+                'ai_summary' => $this->cleanNullableString($chunk->ai_summary, 20000)
+                    ?? $this->cleanNullableString(data_get($metadataOutcome, 'summary_for_retrieval'), 20000),
                 'service_product_tag' => $this->cleanNullableString(data_get($metadataOutcome, 'service_product_tag'), 191)
                     ?? $this->cleanNullableString($chunk->service_product_tag, 191),
                 'theme_tag' => $this->cleanNullableString(data_get($metadataOutcome, 'theme_tag'), 191)

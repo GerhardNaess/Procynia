@@ -846,6 +846,16 @@ class AiController extends Controller
             $groundingJudge,
         );
 
+        DB::table('saved_notice_ai_requirements')
+            ->where('id', $persistedRequirement->id)
+            ->update([
+                'answer_draft_retrieval_sources' => json_encode(
+                    $retrievedKnowledgeChunks->all(),
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+                ),
+            ]);
+        $persistedRequirement->refresh();
+
         Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge allowed answer generation.', [
             'saved_notice_id' => $record->id,
             'requirement_id' => $ownedRequirement->id,
@@ -1469,12 +1479,16 @@ class AiController extends Controller
     private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement): array
     {
         $hasAnswerDraftText = filled(trim((string) ($requirement->answer_draft_text ?? '')));
+        $retrievalSources = is_array($requirement->answer_draft_retrieval_sources ?? null)
+            ? $requirement->answer_draft_retrieval_sources
+            : [];
 
         return [
             'text' => (string) ($requirement->answer_draft_text ?? ''),
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
             'generation_state' => $hasAnswerDraftText ? 'generated' : null,
             'missing_knowledge' => null,
+            'retrieval_sources' => $retrievalSources,
         ];
     }
 
