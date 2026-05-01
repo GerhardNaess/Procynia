@@ -310,9 +310,15 @@ function normalizeRetrievalSourcesPayload(value) {
                 knowledge_item_id: Number.isInteger(knowledgeItemId) && knowledgeItemId > 0
                     ? knowledgeItemId
                     : null,
+                title: typeof source?.title === 'string' ? source.title.trim() : '',
                 document_title: typeof source?.document_title === 'string' ? source.document_title.trim() : '',
                 knowledge_item_title: typeof source?.knowledge_item_title === 'string' ? source.knowledge_item_title.trim() : '',
                 content_type: typeof source?.content_type === 'string' ? source.content_type.trim() : '',
+                image_url: typeof source?.image_url === 'string' ? source.image_url.trim() : '',
+                image_src: typeof source?.image_src === 'string' ? source.image_src.trim() : '',
+                image_path: typeof source?.image_path === 'string' ? source.image_path.trim() : '',
+                image_alt_text: typeof source?.image_alt_text === 'string' ? source.image_alt_text.trim() : '',
+                image_caption: typeof source?.image_caption === 'string' ? source.image_caption.trim() : '',
                 knowledge_item_summary: typeof source?.knowledge_item_summary === 'string' ? source.knowledge_item_summary.trim() : '',
                 chunk_index: Number.isInteger(chunkIndex) && chunkIndex >= 0 ? chunkIndex : 0,
                 chunk_type: typeof source?.chunk_type === 'string' ? source.chunk_type.trim() : 'semantic',
@@ -714,6 +720,303 @@ function normalizeAnswerDraftText(value) {
     return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
+function escapeClipboardHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function normalizeClipboardImageUrl(imageUrl) {
+    const normalizedImageUrl = String(imageUrl ?? '').trim();
+
+    if (normalizedImageUrl === '') {
+        return '';
+    }
+
+    if (/^https?:\/\//i.test(normalizedImageUrl)) {
+        return normalizedImageUrl;
+    }
+
+    if (typeof window === 'undefined' || !window.location?.origin) {
+        return normalizedImageUrl;
+    }
+
+    try {
+        return new URL(normalizedImageUrl, window.location.origin).href;
+    } catch (error) {
+        return normalizedImageUrl;
+    }
+}
+
+function tableJsonToClipboardRows(tableJson) {
+    const rows = Array.isArray(tableJson?.rows) ? tableJson.rows : [];
+
+    return rows
+        .map((row) => {
+            const cells = Array.isArray(row?.cells) ? row.cells : [];
+
+            return cells.map((cell) => String(cell?.text ?? '').trim());
+        })
+        .filter((cells) => cells.some((cellText) => cellText !== ''));
+}
+
+function tableJsonToClipboardHtml(tableJson) {
+    const rows = tableJsonToClipboardRows(tableJson);
+
+    if (rows.length === 0) {
+        return '';
+    }
+
+    return `<table><tbody>${rows
+        .map((cells) => `<tr>${cells
+            .map((cellText) => `<td>${escapeClipboardHtml(cellText)}</td>`)
+            .join('')}</tr>`)
+        .join('')}</tbody></table>`;
+}
+
+function tableJsonToClipboardText(tableJson) {
+    return tableJsonToClipboardRows(tableJson)
+        .map((cells) => cells.join('\t'))
+        .join('\n')
+        .trim();
+}
+
+function resolveClipboardImageUrl(source) {
+    return normalizeClipboardImageUrl(
+        source?.image_url
+        || source?.image_src
+        || source?.image_path
+        || source?.url
+        || '',
+    );
+}
+
+function copyHtmlSelectionToClipboard(html) {
+    if (typeof document === 'undefined' || !document.body || typeof window === 'undefined') {
+        return false;
+    }
+
+    const selection = window.getSelection?.();
+
+    if (!selection) {
+        return false;
+    }
+
+    const container = document.createElement('div');
+    container.setAttribute('contenteditable', 'true');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '900px';
+    container.style.height = 'auto';
+    container.style.overflow = 'visible';
+    container.style.background = '#ffffff';
+    container.style.color = '#000000';
+    container.style.padding = '16px';
+    container.innerHTML = html;
+
+    document.body.appendChild(container);
+
+    const range = document.createRange();
+    range.selectNodeContents(container);
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+    container.focus();
+
+    let copied = false;
+
+    try {
+        copied = document.execCommand('copy');
+    } catch (error) {
+        copied = false;
+    } finally {
+        selection.removeAllRanges();
+        document.body.removeChild(container);
+    }
+
+    return copied;
+}
+
+async function writeHtmlClipboardPayload(html, text) {
+    if (html === '') {
+        return false;
+    }
+
+    if (copyHtmlSelectionToClipboard(html)) {
+        return true;
+    }
+
+    if (
+        typeof window !== 'undefined'
+        && typeof window.ClipboardItem !== 'undefined'
+        && navigator.clipboard?.write
+    ) {
+        try {
+            await navigator.clipboard.write([
+                new window.ClipboardItem({
+                    'text/html': new Blob([html], { type: 'text/html' }),
+                    'text/plain': new Blob([text], { type: 'text/plain' }),
+                }),
+            ]);
+
+            return true;
+        } catch (error) {
+        }
+    }
+
+    if (text !== '' && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+
+            return true;
+        } catch (error) {
+        }
+    }
+
+    return false;
+}
+
+async function imageSourceToPngClipboardBlob(source) {
+    const imageUrl = resolveClipboardImageUrl(source);
+
+    if (imageUrl === '') {
+        return null;
+    }
+
+    const response = await fetch(imageUrl, { credentials: 'same-origin' });
+
+    if (!response.ok) {
+        return null;
+    }
+
+    const imageBlob = await response.blob();
+
+    if (imageBlob.type === 'image/png') {
+        return imageBlob;
+    }
+
+    return new Promise((resolve) => {
+        const objectUrl = URL.createObjectURL(imageBlob);
+        const image = new Image();
+
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.naturalWidth || image.width;
+            canvas.height = image.naturalHeight || image.height;
+
+            const context = canvas.getContext('2d');
+
+            if (!context) {
+                URL.revokeObjectURL(objectUrl);
+                resolve(null);
+                return;
+            }
+
+            context.drawImage(image, 0, 0);
+            canvas.toBlob((pngBlob) => {
+                URL.revokeObjectURL(objectUrl);
+                resolve(pngBlob);
+            }, 'image/png');
+        };
+
+        image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(null);
+        };
+
+        image.src = objectUrl;
+    });
+}
+
+async function writeSingleImageClipboardPayload(source) {
+    if (
+        typeof window === 'undefined'
+        || typeof window.ClipboardItem === 'undefined'
+        || !navigator.clipboard?.write
+    ) {
+        return false;
+    }
+
+    try {
+        const pngBlob = await imageSourceToPngClipboardBlob(source);
+
+        if (!pngBlob) {
+            return false;
+        }
+
+        await navigator.clipboard.write([
+            new window.ClipboardItem({
+                'image/png': pngBlob,
+            }),
+        ]);
+
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function buildAnswerDraftClipboardPayload(answerDraftText, retrievalSources) {
+    const normalizedSources = Array.isArray(retrievalSources)
+        ? retrievalSources.filter((source) => source && typeof source === 'object')
+        : [];
+    const tableSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
+    const imageSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
+
+    if (tableSources.length === 0 && imageSources.length === 0) {
+        const normalizedText = normalizeAnswerDraftText(answerDraftText).trim();
+
+        return {
+            html: '',
+            text: normalizedText,
+        };
+    }
+
+    const htmlBlocks = [];
+    const textBlocks = [];
+
+    tableSources.forEach((source) => {
+        const tableHtml = String(source?.table_html ?? '').trim();
+        const tableText = String(source?.table_text ?? '').trim();
+        const tableJsonHtml = tableHtml === '' ? tableJsonToClipboardHtml(source?.table_json) : '';
+        const tableJsonText = tableText === '' ? tableJsonToClipboardText(source?.table_json) : '';
+
+        if (tableHtml !== '') {
+            htmlBlocks.push(tableHtml);
+        } else if (tableJsonHtml !== '') {
+            htmlBlocks.push(tableJsonHtml);
+        } else if (tableText !== '') {
+            htmlBlocks.push(`<pre>${escapeClipboardHtml(tableText)}</pre>`);
+        }
+
+        if (tableText !== '') {
+            textBlocks.push(tableText);
+        } else if (tableJsonText !== '') {
+            textBlocks.push(tableJsonText);
+        }
+    });
+
+    imageSources.forEach((source) => {
+        const imageUrl = resolveClipboardImageUrl(source);
+
+        if (imageUrl === '') {
+            return;
+        }
+
+        htmlBlocks.push(`<img src="${escapeClipboardHtml(imageUrl)}" style="max-width: 100%; height: auto;" />`);
+        textBlocks.push(imageUrl);
+    });
+
+    return {
+        html: htmlBlocks.join('\n'),
+        text: textBlocks.join('\n\n').trim(),
+    };
+}
+
 /**
  * Purpose: Render a structured table preview from the structured table model.
  * Inputs: A retrieval source table_json payload.
@@ -947,6 +1250,7 @@ export default function AiShow({
     const [answerBasisSelectionsByRequirementId, setAnswerBasisSelectionsByRequirementId] = useState({});
     const [answerDraftGeneratingRequirementId, setAnswerDraftGeneratingRequirementId] = useState(null);
     const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
+    const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
     const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
@@ -1160,7 +1464,12 @@ export default function AiShow({
     const activeRequirementRetrievalSources = Array.isArray(activeRequirementDraft?.retrievalSources)
         ? activeRequirementDraft.retrievalSources
         : [];
-    const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '') === 'table');
+    const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
+    const activeRequirementImageRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
+
+    useEffect(() => {
+        setAnswerDraftCopyStatus(null);
+    }, [activeRequirementKey]);
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -1434,6 +1743,40 @@ export default function AiShow({
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, [selectedEvidence]);
+
+    const copyActiveAnswerDraftContent = async () => {
+        if (activeRequirement === null || activeRequirementDraft === null) {
+            return;
+        }
+
+        const payload = buildAnswerDraftClipboardPayload(activeRequirementDraft.text, activeRequirementRetrievalSources);
+
+        if (payload.html === '' && payload.text === '') {
+            setAnswerDraftCopyStatus('empty');
+            return;
+        }
+
+        setAnswerDraftCopyStatus(null);
+
+        try {
+            if (payload.html !== '') {
+                const copiedHtml = await writeHtmlClipboardPayload(payload.html, payload.text);
+
+                if (!copiedHtml) {
+                    throw new Error('Could not copy rich content.');
+                }
+            } else if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(payload.text);
+            } else if (copyHtmlSelectionToClipboard(escapeClipboardHtml(payload.text).replace(/\n/g, '<br />'))) {
+            } else {
+                throw new Error('Clipboard API is not available.');
+            }
+
+            setAnswerDraftCopyStatus('copied');
+        } catch (error) {
+            setAnswerDraftCopyStatus('failed');
+        }
+    };
 
     const saveActiveAnswerDraft = async () => {
         if (activeRequirement === null || activeRequirementDraft === null) {
@@ -1851,7 +2194,6 @@ export default function AiShow({
                                 {requirementRows.map((requirement) => {
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
-                                    const approvalStatusMeta = REQUIREMENT_APPROVAL_STATUS_META[approvalStatus] ?? REQUIREMENT_APPROVAL_STATUS_META.draft;
                                     const approvalActions = REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft;
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
@@ -1980,9 +2322,6 @@ export default function AiShow({
                                                                 {requirement.source_type_label ?? sourceTypeMeta.label}
                                                             </span>
                                                         )}
-                                                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${approvalStatusMeta.className}`}>
-                                                            {requirement.approval_status_label ?? approvalStatusMeta.label}
-                                                        </span>
                                                     </div>
                                                 </div>
 
@@ -2568,7 +2907,7 @@ export default function AiShow({
                                     </p>
                                 </div>
                             ) : (
-                                <div className={`flex min-h-0 flex-1 flex-col gap-4 rounded-[22px] border p-4 ${
+                                <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-2 ${
                                     activeRequirementBlockedMissingKnowledge
                                         ? 'border-rose-200 bg-rose-50/40'
                                         : 'border-violet-200 bg-violet-50/40'
@@ -2577,9 +2916,6 @@ export default function AiShow({
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             Svarutkast for krav {activeRequirementDisplayIdentifier}
                                         </div>
-                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                            {activeRequirement.approval_status_label ?? 'Utkast'}
-                                        </span>
                                     </div>
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
@@ -2752,10 +3088,31 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="min-h-[320px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="h-[130px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </div>
+
+                                            {activeRequirementImageRetrievalSources.length > 0 ? (
+                                                <div className="flex flex-col gap-3">
+                                                    {activeRequirementImageRetrievalSources.map((source, index) => {
+                                                        const imageUrl = resolveClipboardImageUrl(source);
+
+                                                        if (imageUrl === '') {
+                                                            return null;
+                                                        }
+
+                                                        return (
+                                                            <img
+                                                                key={source.id ?? source.chunk_id ?? `answer-image-${index}`}
+                                                                src={imageUrl}
+                                                                alt=""
+                                                                className="max-w-full rounded-2xl border border-slate-200 bg-white shadow-sm"
+                                                            />
+                                                        );
+                                                    })}
+                                                </div>
+                                            ) : null}
 
                                             {activeRequirementTableRetrievalSources.length > 0 ? (
                                                 <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
@@ -2859,7 +3216,33 @@ export default function AiShow({
                                                     {activeRequirementDraft?.isDirty ? ' Ulagrede endringer.' : ''}
                                                 </div>
 
-                                                <button
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    {answerDraftCopyStatus === 'failed' ? (
+                                                        <span className="text-xs font-semibold text-rose-600">
+                                                            Kunne ikke kopiere
+                                                        </span>
+                                                    ) : null}
+
+                                                    {answerDraftCopyStatus === 'empty' ? (
+                                                        <span className="text-xs font-semibold text-slate-500">
+                                                            Ingenting å kopiere
+                                                        </span>
+                                                    ) : null}
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={copyActiveAnswerDraftContent}
+                                                        disabled={
+                                                            !activeRequirementDraft
+                                                            || answerDraftGeneratingRequirementId === activeRequirement.id
+                                                            || answerDraftSavingRequirementId === activeRequirement.id
+                                                        }
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {answerDraftCopyStatus === 'copied' ? 'Kopiert' : 'Kopier innhold'}
+                                                    </button>
+
+                                                    <button
                                                     type="button"
                                                     onClick={saveActiveAnswerDraft}
                                                     disabled={
@@ -2872,7 +3255,8 @@ export default function AiShow({
                                                     className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
-                                                </button>
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ) : (
