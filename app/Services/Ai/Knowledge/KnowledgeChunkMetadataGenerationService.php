@@ -105,7 +105,7 @@ class KnowledgeChunkMetadataGenerationService
     {
         $lines = [];
         $title = trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title ?: $document->original_filename));
-        $content = $this->sourceTextForSummary($chunk);
+        $content = trim((string) $chunk->content);
 
         if ($title !== '') {
             $lines[] = 'Title: '.$title;
