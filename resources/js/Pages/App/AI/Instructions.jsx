@@ -80,7 +80,7 @@ export default function AiInstructions({
                                 <button
                                     type="submit"
                                     disabled={!aiInstructionsUpdateUrl || form.processing}
-                                    className="inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {form.processing ? 'Lagrer...' : 'Lagre endring'}
                                 </button>

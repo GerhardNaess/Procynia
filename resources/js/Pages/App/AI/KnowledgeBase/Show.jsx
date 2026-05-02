@@ -913,8 +913,8 @@ export default function KnowledgeBaseShow({
                                 </div>
                             ) : (
                                 <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-                                    <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
-                                        <div className="flex items-center justify-between gap-3">
+                                    <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 xl:flex xl:max-h-[calc(100vh-14rem)] xl:flex-col xl:overflow-hidden">
+                                        <div className="flex items-center justify-between gap-3 xl:shrink-0">
                                             <div>
                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                                     Chunk-liste
@@ -928,7 +928,7 @@ export default function KnowledgeBaseShow({
                                             </div>
                                         </div>
 
-                                        <div className="mt-4 space-y-3">
+                                        <div className="mt-4 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
                                             {chunks.map((chunk, index) => {
                                                 const isSelected = selectedChunk?.id === chunk.id;
                                                 const reviewStatusMeta = getChunkReviewStatusMeta(chunk);

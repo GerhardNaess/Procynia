@@ -51,11 +51,6 @@ class DashboardController extends Controller
     {
         $cockpitScopeNotices = $this->cockpitScopeSavedNotices($user, $customerId);
         $archivedNotices = $this->cockpitScopeArchivedSavedNotices($user, $customerId);
-        $trendArchivedNotices = $this->cockpitScopeArchivedSavedNotices(
-            $user,
-            $customerId,
-            now()->startOfMonth()->subMonthsNoOverflow(11),
-        );
         $deadlineItems = $this->buildDeadlineItems($cockpitScopeNotices);
 
         return [
@@ -73,7 +68,7 @@ class DashboardController extends Controller
                 'items' => $deadlineItems,
                 'upcoming' => array_slice($deadlineItems, 0, 6),
             ],
-            'bid_quality' => $this->resolveBidQualitySummary($cockpitScopeNotices, $archivedNotices, $trendArchivedNotices),
+            'bid_quality' => $this->resolveBidQualitySummary($cockpitScopeNotices, $archivedNotices),
             'responsibility_activity' => $this->resolveResponsibilityActivitySummary($user, $customerId, $cockpitScopeNotices),
             'outcomes' => $pipeline['outcomes'],
             'pipeline' => $pipeline,
@@ -559,10 +554,9 @@ class DashboardController extends Controller
     /**
      * @param  Collection<int, SavedNotice>  $activeNotices
      * @param  Collection<int, SavedNotice>  $archivedNotices
-     * @param  Collection<int, SavedNotice>  $trendArchivedNotices
      * @return array<string, mixed>
      */
-    private function resolveBidQualitySummary(Collection $activeNotices, Collection $archivedNotices, Collection $trendArchivedNotices): array
+    private function resolveBidQualitySummary(Collection $activeNotices, Collection $archivedNotices): array
     {
         $activeCount = $activeNotices->count();
         $activeWithBidManager = $activeNotices->whereNotNull('bid_manager_user_id')->count();
@@ -574,21 +568,9 @@ class DashboardController extends Controller
         })->count();
 
         $recentClosedNotices = $archivedNotices->values();
-        $recentClosedCount = $recentClosedNotices->count();
         $wonCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_WON)->count();
         $lostCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_LOST)->count();
-        $abortedCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_ABORTED)->count();
-        $noGoCount = $recentClosedNotices->where('history_type', SavedNotice::HISTORY_TYPE_NO_GO)->count();
         $winLossCount = $wonCount + $lostCount;
-        $medianCycleTrendSeries = $this->buildMedianCycleTrendSeries($trendArchivedNotices);
-
-        $outcomeSubtitle = sprintf(
-            'Vunnet %d · Tapt %d · Avbrutt %d · NoGo %d',
-            $wonCount,
-            $lostCount,
-            $abortedCount,
-            $noGoCount,
-        );
 
         return [
             'title' => 'Bid-kvalitet og styring',
@@ -657,16 +639,6 @@ class DashboardController extends Controller
                         'denominator' => $activeCount,
                     ],
                 ),
-                $this->buildBidQualityTrendMetric(
-                    'median_cycle_time_trend_12m',
-                    'Varighet på avsluttede saker',
-                    'Utvikling siste 12 måneder',
-                    'Median antall dager fra created_at til archived_at per måned for avsluttede saker med gyldige datoer.',
-                    ['bid_manager', 'commercial_owner', 'management'],
-                    'siste 12 måneder',
-                    'neutral',
-                    $medianCycleTrendSeries,
-                ),
                 $this->buildBidQualityMetric(
                     'win_rate_90d',
                     'Win rate blant vunnet og tapt',
@@ -686,45 +658,6 @@ class DashboardController extends Controller
                     [
                         'numerator' => $wonCount,
                         'denominator' => $winLossCount,
-                    ],
-                ),
-                $this->buildBidQualityMetric(
-                    'outcome_distribution_90d',
-                    'Utfallsfordeling siste 90 dager',
-                    $recentClosedCount,
-                    'saker',
-                    $outcomeSubtitle,
-                    'Fordeling av avsluttede saker etter history_type de siste 90 dagene.',
-                    ['commercial_owner', 'management'],
-                    'siste 90 dager',
-                    'neutral',
-                    [
-                        'breakdown' => [
-                            [
-                                'key' => SavedNotice::HISTORY_TYPE_WON,
-                                'label' => 'Vunnet',
-                                'count' => $wonCount,
-                                'share' => $recentClosedCount > 0 ? round(($wonCount / $recentClosedCount) * 100, 1) : null,
-                            ],
-                            [
-                                'key' => SavedNotice::HISTORY_TYPE_LOST,
-                                'label' => 'Tapt',
-                                'count' => $lostCount,
-                                'share' => $recentClosedCount > 0 ? round(($lostCount / $recentClosedCount) * 100, 1) : null,
-                            ],
-                            [
-                                'key' => SavedNotice::HISTORY_TYPE_ABORTED,
-                                'label' => 'Avbrutt',
-                                'count' => $abortedCount,
-                                'share' => $recentClosedCount > 0 ? round(($abortedCount / $recentClosedCount) * 100, 1) : null,
-                            ],
-                            [
-                                'key' => SavedNotice::HISTORY_TYPE_NO_GO,
-                                'label' => 'NoGo',
-                                'count' => $noGoCount,
-                                'share' => $recentClosedCount > 0 ? round(($noGoCount / $recentClosedCount) * 100, 1) : null,
-                            ],
-                        ],
                     ],
                 ),
             ],
@@ -760,35 +693,6 @@ class DashboardController extends Controller
         ], $extra);
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $series
-     * @param  array<int, string>  $audience
-     * @param  array<string, mixed>  $extra
-     * @return array<string, mixed>
-     */
-    private function buildBidQualityTrendMetric(
-        string $key,
-        string $title,
-        string $subtitle,
-        string $definition,
-        array $audience,
-        string $period,
-        string $severity,
-        array $series,
-        array $extra = [],
-    ): array {
-        return array_merge([
-            'key' => $key,
-            'title' => $title,
-            'subtitle' => $subtitle,
-            'definition' => $definition,
-            'audience' => $audience,
-            'period' => $period,
-            'severity' => $severity,
-            'series' => $series,
-        ], $extra);
-    }
-
     private function qualitySeverityForHigherIsBetter(?float $value, float $goodThreshold, float $warningThreshold): string
     {
         if ($value === null) {
@@ -821,67 +725,6 @@ class DashboardController extends Controller
         }
 
         return 'danger';
-    }
-
-    /**
-     * @param  array<int, float|int>  $values
-     */
-    private function median(array $values): ?float
-    {
-        $values = array_values(array_filter($values, static fn ($value): bool => $value !== null));
-
-        if ($values === []) {
-            return null;
-        }
-
-        sort($values, SORT_NUMERIC);
-
-        $count = count($values);
-        $middleIndex = intdiv($count, 2);
-
-        if ($count % 2 === 1) {
-            return round((float) $values[$middleIndex], 1);
-        }
-
-        return round(((float) $values[$middleIndex - 1] + (float) $values[$middleIndex]) / 2, 1);
-    }
-
-    /**
-     * @param  Collection<int, SavedNotice>  $archivedNotices
-     * @return array<int, array<string, mixed>>
-     */
-    private function buildMedianCycleTrendSeries(Collection $archivedNotices): array
-    {
-        return $archivedNotices
-            ->filter(function (SavedNotice $notice): bool {
-                return $notice->created_at instanceof CarbonInterface && $notice->archived_at instanceof CarbonInterface;
-            })
-            ->groupBy(function (SavedNotice $notice): string {
-                return $notice->archived_at->format('Y-m');
-            })
-            ->sortKeys()
-            ->map(function (Collection $monthNotices, string $monthKey): array {
-                $durations = $monthNotices
-                    ->map(fn (SavedNotice $notice): float => round($notice->created_at->diffInMinutes($notice->archived_at) / 1440, 1))
-                    ->values()
-                    ->all();
-                $median = $this->median($durations);
-                $month = Carbon::parse($monthKey.'-01 00:00:00');
-
-                return [
-                    'month' => $month->format('Y-m'),
-                    'label' => $this->qualityMonthLabel($month),
-                    'median_days' => $median,
-                    'sample_size' => count($durations),
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
-    private function qualityMonthLabel(CarbonInterface $date): string
-    {
-        return ucfirst(rtrim($date->format('M'), '.'));
     }
 
     /**

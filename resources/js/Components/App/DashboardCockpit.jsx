@@ -918,7 +918,6 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         locale={locale}
                                         openInfoKey={openInfoKey}
                                         setOpenInfoKey={setOpenInfoKey}
-                                        spanFullWidth={metric.key === 'outcome_distribution_90d'}
                                     />
                                 )
                             ))}

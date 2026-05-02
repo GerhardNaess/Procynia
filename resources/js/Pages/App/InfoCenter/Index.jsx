@@ -36,10 +36,8 @@ function formatUser(user) {
     return user?.name ?? '—';
 }
 
-function heroToneClassName(persona) {
-    return persona === 'operational'
-        ? 'border-violet-200 bg-gradient-to-br from-violet-50 via-white to-slate-50'
-        : 'border-amber-200 bg-gradient-to-br from-amber-50 via-white to-slate-50';
+function heroToneClassName() {
+    return 'border-slate-200 bg-white';
 }
 
 function summaryToneClassName(tone) {
@@ -189,7 +187,7 @@ export default function InfoCenterIndex({ infoCenter = null }) {
     const items = infoCenter?.items ?? [];
     const pagination = infoCenter?.pagination ?? {};
     const activeOption = viewOptions.find((option) => option.value === activeView) ?? viewOptions[0] ?? null;
-    const heroClassName = heroToneClassName(roleContext.persona ?? '');
+    const heroClassName = heroToneClassName();
     const [countLabelSingular, countLabelPlural] = infoCenterCountLabels(activeView);
     const emptyState = infoCenterEmptyState(activeView);
     const [openHelpKey, setOpenHelpKey] = useState(null);
