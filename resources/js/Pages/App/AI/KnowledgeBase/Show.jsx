@@ -464,6 +464,8 @@ export default function KnowledgeBaseShow({
     const [selectedChunkId, setSelectedChunkId] = useState(knowledgeItem?.chunks?.[0]?.id ?? null);
     const [chunkReviewRequest, setChunkReviewRequest] = useState(null);
     const [isChunkMetadataEditing, setIsChunkMetadataEditing] = useState(false);
+    const [isChunkContentEditing, setIsChunkContentEditing] = useState(false);
+    const [isChunkContentSaving, setIsChunkContentSaving] = useState(false);
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
     const tabsRef = useRef(null);
 
@@ -512,6 +514,17 @@ export default function KnowledgeBaseShow({
         sub_topic: '',
         keywords: '',
     });
+    const chunkContentForm = useForm({
+        content: '',
+        table_text: '',
+        table_markdown: '',
+        table_html: '',
+        image: null,
+        image_alt_text: '',
+        image_caption: '',
+        ocr_text: '',
+        image_description: '',
+    });
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
     const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus);
 
@@ -532,6 +545,7 @@ export default function KnowledgeBaseShow({
     useEffect(() => {
         if (!selectedChunk) {
             setIsChunkMetadataEditing(false);
+            setIsChunkContentEditing(false);
             setShowChunkSystemMetadata(false);
             return;
         }
@@ -543,7 +557,19 @@ export default function KnowledgeBaseShow({
         chunkMetadataForm.setData('topic', selectedChunk.topic ?? '');
         chunkMetadataForm.setData('sub_topic', selectedChunk.sub_topic ?? '');
         chunkMetadataForm.setData('keywords', normalizeChunkKeywordList(selectedChunk.keywords).join(', '));
+        chunkContentForm.setData({
+            content: selectedChunk.content ?? '',
+            table_text: selectedChunk.table_text ?? '',
+            table_markdown: selectedChunk.table_markdown ?? '',
+            table_html: selectedChunk.table_html ?? '',
+            image: null,
+            image_alt_text: selectedChunk.image_alt_text ?? '',
+            image_caption: selectedChunk.image_caption ?? '',
+            ocr_text: selectedChunk.ocr_text ?? '',
+            image_description: selectedChunk.image_description ?? '',
+        });
         setIsChunkMetadataEditing(false);
+        setIsChunkContentEditing(false);
         setShowChunkSystemMetadata(false);
     }, [
         selectedChunk?.id,
@@ -554,6 +580,14 @@ export default function KnowledgeBaseShow({
         selectedChunk?.topic,
         selectedChunk?.sub_topic,
         selectedChunk?.keywords,
+        selectedChunk?.content,
+        selectedChunk?.table_text,
+        selectedChunk?.table_markdown,
+        selectedChunk?.table_html,
+        selectedChunk?.image_alt_text,
+        selectedChunk?.image_caption,
+        selectedChunk?.ocr_text,
+        selectedChunk?.image_description,
     ]);
 
     const submitSummary = (event) => {
@@ -598,6 +632,86 @@ export default function KnowledgeBaseShow({
         chunkMetadataForm.setData('keywords', normalizeChunkKeywordList(selectedChunk.keywords).join(', '));
         chunkMetadataForm.clearErrors();
         setIsChunkMetadataEditing(false);
+    };
+
+    const beginChunkContentEdit = () => {
+        if (!selectedChunk) {
+            return;
+        }
+
+        setIsChunkContentEditing(true);
+    };
+
+    const cancelChunkContentEdit = () => {
+        if (!selectedChunk) {
+            return;
+        }
+
+        chunkContentForm.setData({
+            content: selectedChunk.content ?? '',
+            table_text: selectedChunk.table_text ?? '',
+            table_markdown: selectedChunk.table_markdown ?? '',
+            table_html: selectedChunk.table_html ?? '',
+            image: null,
+            image_alt_text: selectedChunk.image_alt_text ?? '',
+            image_caption: selectedChunk.image_caption ?? '',
+            ocr_text: selectedChunk.ocr_text ?? '',
+            image_description: selectedChunk.image_description ?? '',
+        });
+        chunkContentForm.clearErrors();
+        setIsChunkContentEditing(false);
+    };
+
+    const submitChunkContent = (event) => {
+        event.preventDefault();
+
+        const updateUrl = selectedChunk?.content_update_url ?? selectedChunk?.metadata_update_url;
+
+        if (!selectedChunk || !updateUrl || isChunkContentSaving) {
+            return;
+        }
+
+        let payload = {
+            _method: 'patch',
+        };
+
+        if (selectedChunk.chunk_type === 'image') {
+            payload = {
+                ...payload,
+                image: chunkContentForm.data.image,
+                image_alt_text: chunkContentForm.data.image_alt_text,
+                image_caption: chunkContentForm.data.image_caption,
+                ocr_text: chunkContentForm.data.ocr_text,
+                image_description: chunkContentForm.data.image_description,
+            };
+
+            if (String(chunkContentForm.data.content ?? '').trim() !== String(selectedChunk.content ?? '').trim()) {
+                payload.content = chunkContentForm.data.content;
+            }
+        } else if (selectedChunk.chunk_type === 'table') {
+            payload.table_text = chunkContentForm.data.table_text;
+        } else {
+            payload.content = chunkContentForm.data.content;
+        }
+
+        chunkContentForm.clearErrors();
+        setIsChunkContentSaving(true);
+
+        router.post(updateUrl, payload, {
+            preserveScroll: true,
+            forceFormData: true,
+            onSuccess: () => {
+                chunkContentForm.setData('image', null);
+                setIsChunkContentEditing(false);
+                router.reload({ only: ['knowledgeItem'] });
+            },
+            onError: (errors) => {
+                chunkContentForm.setError(errors);
+            },
+            onFinish: () => {
+                setIsChunkContentSaving(false);
+            },
+        });
     };
 
     const submitChunkMetadata = (event) => {
@@ -1212,6 +1326,132 @@ export default function KnowledgeBaseShow({
                                                             </p>
                                                         </div>
                                                     )}
+                                                </div>
+
+                                                <div className="rounded-[20px] border border-slate-200 bg-white p-5">
+                                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                                        <div>
+                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                Chunk-innhold
+                                                            </div>
+                                                            <p className="mt-1 text-sm text-slate-500">
+                                                                Endringer reindekserer kun denne chunken og regenererer metadata i bakgrunnen.
+                                                            </p>
+                                                        </div>
+
+                                                        {!isChunkContentEditing ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={beginChunkContentEdit}
+                                                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            >
+                                                                Rediger innhold
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
+
+                                                    {isChunkContentEditing ? (
+                                                        <form onSubmit={submitChunkContent} className="mt-4 space-y-4">
+                                                            {selectedChunk.chunk_type === 'image' ? (
+                                                                <div className="grid gap-4 sm:grid-cols-2">
+                                                                    <label className="space-y-2 sm:col-span-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Bytt bilde
+                                                                        </span>
+                                                                        <input
+                                                                            type="file"
+                                                                            accept="image/jpeg,image/png,image/webp,image/gif"
+                                                                            onChange={(event) => chunkContentForm.setData('image', event.target.files?.[0] ?? null)}
+                                                                            className="block w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition file:mr-4 file:rounded-xl file:border-0 file:bg-violet-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-violet-700 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {chunkContentForm.errors.image ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.image}</p>
+                                                                        ) : null}
+                                                                    </label>
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Bildetekst
+                                                                        </span>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={chunkContentForm.data.image_caption}
+                                                                            onChange={(event) => chunkContentForm.setData('image_caption', event.target.value)}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                    </label>
+                                                                    <label className="space-y-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Alt-tekst
+                                                                        </span>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={chunkContentForm.data.image_alt_text}
+                                                                            onChange={(event) => chunkContentForm.setData('image_alt_text', event.target.value)}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                    </label>
+                                                                    <label className="space-y-2 sm:col-span-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Søkbar tekst
+                                                                        </span>
+                                                                        <textarea
+                                                                            value={chunkContentForm.data.content}
+                                                                            onChange={(event) => chunkContentForm.setData('content', event.target.value)}
+                                                                            rows={6}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                    </label>
+                                                                </div>
+                                                            ) : selectedChunk.chunk_type === 'table' ? (
+                                                                <label className="block space-y-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Tabelltekst
+                                                                    </span>
+                                                                    <textarea
+                                                                        value={chunkContentForm.data.table_text}
+                                                                        onChange={(event) => chunkContentForm.setData('table_text', event.target.value)}
+                                                                        rows={10}
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                    {chunkContentForm.errors.table_text ? (
+                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
+                                                                    ) : null}
+                                                                </label>
+                                                            ) : (
+                                                                <label className="block space-y-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Tekstinnhold
+                                                                    </span>
+                                                                    <textarea
+                                                                        value={chunkContentForm.data.content}
+                                                                        onChange={(event) => chunkContentForm.setData('content', event.target.value)}
+                                                                        rows={10}
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                    {chunkContentForm.errors.content ? (
+                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.content}</p>
+                                                                    ) : null}
+                                                                </label>
+                                                            )}
+
+                                                            <div className="flex flex-wrap gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={cancelChunkContentEdit}
+                                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                >
+                                                                    Avbryt
+                                                                </button>
+                                                                <button
+                                                                    type="submit"
+                                                                    disabled={isChunkContentSaving}
+                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                >
+                                                                    {isChunkContentSaving ? 'Lagrer...' : 'Lagre innhold'}
+                                                                </button>
+                                                            </div>
+                                                        </form>
+                                                    ) : null}
                                                 </div>
 
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">

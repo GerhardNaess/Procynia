@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
+use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\User;
@@ -21,6 +22,7 @@ use App\Support\CosineSimilarity;
 use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -150,10 +152,10 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
-     * Purpose: Update the product metadata for one knowledge chunk.
+     * Purpose: Update editable metadata or manually maintained content for one knowledge chunk.
      * Inputs: The current frontend request, the parent knowledge document, and the chunk.
      * Returns: A redirect back to the detailed view of the document.
-     * Side effects: Updates only the editable chunk metadata fields in the database.
+     * Side effects: Updates one chunk only; content changes regenerate only that chunk embedding and queue metadata for that chunk.
      */
     public function updateChunkMetadata(
         Request $request,
@@ -164,6 +166,18 @@ class KnowledgeBaseController extends Controller
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $chunkRecord = $this->scopedChunk($record->id, $chunk->id);
         $payload = $this->validatedChunkMetadataPayload($request);
+        $contentChanged = $this->applyManualChunkContentUpdate($request, $record, $chunkRecord, $payload);
+
+        if ($contentChanged) {
+            $chunkRecord->refresh();
+            $this->resetGeneratedChunkFields($chunkRecord);
+            $this->regenerateChunkEmbeddingWithoutMetadata($record, $chunkRecord);
+            GenerateKnowledgeChunkMetadataBatch::dispatch((int) $record->id, [(int) $chunkRecord->id]);
+
+            return redirect()
+                ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+                ->with('success', 'Chunk-innhold oppdatert. Embedding og metadata regenereres for denne chunken.');
+        }
 
         $chunkRecord->forceFill([
             'title' => $payload['title'],
@@ -495,7 +509,7 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
-     * Purpose: Validate and normalize the editable product metadata for one knowledge chunk.
+     * Purpose: Validate and normalize editable metadata and optional manual chunk content updates.
      * Inputs: The current frontend request.
      * Returns: A normalized payload ready for persistence.
      * Side effects: Throws validation errors when the request is invalid.
@@ -510,6 +524,15 @@ class KnowledgeBaseController extends Controller
             'topic' => ['nullable', 'string', 'max:191'],
             'sub_topic' => ['nullable', 'string', 'max:191'],
             'keywords' => ['nullable', 'string', 'max:4000'],
+            'content' => ['nullable', 'string', 'max:200000'],
+            'table_text' => ['nullable', 'string', 'max:200000'],
+            'table_markdown' => ['nullable', 'string', 'max:200000'],
+            'table_html' => ['nullable', 'string', 'max:500000'],
+            'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif', 'max:10240'],
+            'image_alt_text' => ['nullable', 'string', 'max:2000'],
+            'image_caption' => ['nullable', 'string', 'max:2000'],
+            'ocr_text' => ['nullable', 'string', 'max:20000'],
+            'image_description' => ['nullable', 'string', 'max:20000'],
         ]);
 
         return [
@@ -520,6 +543,31 @@ class KnowledgeBaseController extends Controller
             'topic' => $this->cleanNullableString($validated['topic'] ?? null, 191),
             'sub_topic' => $this->cleanNullableString($validated['sub_topic'] ?? null, 191),
             'keywords' => $this->knowledgeChunkCoverageService->normalizeKeywords($validated['keywords'] ?? null),
+            'content' => array_key_exists('content', $validated)
+                ? $this->cleanNullableString($validated['content'] ?? null, 200000)
+                : null,
+            'table_text' => array_key_exists('table_text', $validated)
+                ? $this->cleanNullableString($validated['table_text'] ?? null, 200000)
+                : null,
+            'table_markdown' => array_key_exists('table_markdown', $validated)
+                ? $this->cleanNullableString($validated['table_markdown'] ?? null, 200000)
+                : null,
+            'table_html' => array_key_exists('table_html', $validated)
+                ? $this->cleanNullableString($validated['table_html'] ?? null, 500000)
+                : null,
+            'image' => $request->file('image'),
+            'image_alt_text' => array_key_exists('image_alt_text', $validated)
+                ? $this->cleanNullableString($validated['image_alt_text'] ?? null, 2000)
+                : null,
+            'image_caption' => array_key_exists('image_caption', $validated)
+                ? $this->cleanNullableString($validated['image_caption'] ?? null, 2000)
+                : null,
+            'ocr_text' => array_key_exists('ocr_text', $validated)
+                ? $this->cleanNullableString($validated['ocr_text'] ?? null, 20000)
+                : null,
+            'image_description' => array_key_exists('image_description', $validated)
+                ? $this->cleanNullableString($validated['image_description'] ?? null, 20000)
+                : null,
         ];
     }
 
@@ -640,6 +688,10 @@ class KnowledgeBaseController extends Controller
                             'knowledgeItem' => $knowledgeDocument->id,
                             'chunk' => $chunk->id,
                         ]),
+                        'content_update_url' => route('app.ai.knowledge-base.chunks.metadata.update', [
+                            'knowledgeItem' => $knowledgeDocument->id,
+                            'chunk' => $chunk->id,
+                        ]),
                         'ai_summary' => $chunk->ai_summary,
                         'service_product_tag' => $chunk->service_product_tag,
                         'theme_tag' => $chunk->theme_tag,
@@ -682,6 +734,7 @@ class KnowledgeBaseController extends Controller
                             ? route('app.ai.knowledge-base.chunks.image', [
                                 'knowledgeItem' => $knowledgeDocument->id,
                                 'chunk' => $chunk->id,
+                                'v' => $chunk->image_hash ?: optional($chunk->updated_at)?->getTimestamp(),
                             ])
                             : null,
                         'source_filename' => $knowledgeDocument->original_filename,
@@ -692,6 +745,387 @@ class KnowledgeBaseController extends Controller
                     ->all(),
             ],
         );
+    }
+
+    /**
+     * Purpose: Apply a manual content update to one chunk without reprocessing the full source document.
+     * Inputs: The request, the parent document, the selected chunk, and the validated payload.
+     * Returns: True when chunk content or structural media fields were changed.
+     * Side effects: Updates only the selected chunk and may replace one stored image file.
+     */
+    private function applyManualChunkContentUpdate(
+        Request $request,
+        KnowledgeItem $knowledgeDocument,
+        KnowledgeItemChunk $chunk,
+        array $payload,
+    ): bool {
+        if (! $this->requestHasManualChunkContentPayload($request)) {
+            return false;
+        }
+
+        $chunkType = (string) ($chunk->chunk_type ?? 'semantic');
+
+        if ($chunkType === 'image') {
+            return $this->applyManualImageChunkUpdate($request, $knowledgeDocument, $chunk, $payload);
+        }
+
+        if ($chunkType === 'table') {
+            return $this->applyManualTableChunkUpdate($request, $chunk, $payload);
+        }
+
+        return $this->applyManualTextChunkUpdate($chunk, $payload);
+    }
+
+    /**
+     * Purpose: Determine whether the request intends to change primary chunk content rather than only product metadata.
+     * Inputs: The current request.
+     * Returns: True when content, table, or image fields are present.
+     * Side effects: None.
+     */
+    private function requestHasManualChunkContentPayload(Request $request): bool
+    {
+        return $request->has('content')
+            || $request->has('table_text')
+            || $request->has('table_markdown')
+            || $request->has('table_html')
+            || $request->has('image_alt_text')
+            || $request->has('image_caption')
+            || $request->has('ocr_text')
+            || $request->has('image_description')
+            || $request->hasFile('image');
+    }
+
+    /**
+     * Purpose: Persist manually edited text content for one semantic chunk.
+     * Inputs: The selected chunk and validated payload.
+     * Returns: True when the chunk was updated.
+     * Side effects: Updates the selected chunk content and review status only.
+     */
+    private function applyManualTextChunkUpdate(KnowledgeItemChunk $chunk, array $payload): bool
+    {
+        $content = $payload['content'] ?? null;
+
+        abort_unless($content !== null && $content !== '', 422, 'Chunk content cannot be empty.');
+
+        $chunk->forceFill([
+            'content' => $content,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+        ])->save();
+
+        return true;
+    }
+
+    /**
+     * Purpose: Persist manually edited table content for one table chunk.
+     * Inputs: The request, selected chunk, and validated payload.
+     * Returns: True when the chunk was updated.
+     * Side effects: Updates only table text fields on the selected chunk and marks generated metadata stale.
+     */
+    private function applyManualTableChunkUpdate(Request $request, KnowledgeItemChunk $chunk, array $payload): bool
+    {
+        $tableText = $request->has('table_text')
+            ? $payload['table_text']
+            : $this->cleanNullableString($chunk->table_text, 200000);
+        $content = $request->has('content')
+            ? $payload['content']
+            : ($tableText ?? $this->cleanNullableString($chunk->content, 200000));
+
+        abort_unless($content !== null && $content !== '', 422, 'Table chunk content cannot be empty.');
+
+        $tableWarnings = $this->normalizedTableWarnings($chunk->table_warnings);
+
+        if (! in_array('manual_table_content_edited', $tableWarnings, true)) {
+            $tableWarnings[] = 'manual_table_content_edited';
+        }
+
+        $tableMetadata = is_array($chunk->table_metadata) ? $chunk->table_metadata : [];
+        $tableMetadata['manual_update_source'] = 'knowledge_base_chunk_editor';
+        $tableMetadata['manual_updated_at'] = now()->toIso8601String();
+
+        $chunk->forceFill([
+            'content' => $content,
+            'table_text' => $tableText ?? $content,
+            'table_markdown' => $request->has('table_markdown') ? $payload['table_markdown'] : $chunk->table_markdown,
+            'table_html' => $request->has('table_html') ? $payload['table_html'] : $chunk->table_html,
+            'table_json' => null,
+            'table_complexity' => 'manual_edit',
+            'table_warnings' => $tableWarnings,
+            'table_metadata' => $tableMetadata,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+        ])->save();
+
+        return true;
+    }
+
+    /**
+     * Purpose: Replace or update one image chunk without re-running document parsing or full chunking.
+     * Inputs: The request, parent document, selected image chunk, and validated payload.
+     * Returns: True when the image chunk was updated.
+     * Side effects: May store one new image file, delete the previous image file, and updates only the selected chunk.
+     */
+    private function applyManualImageChunkUpdate(
+        Request $request,
+        KnowledgeItem $knowledgeDocument,
+        KnowledgeItemChunk $chunk,
+        array $payload,
+    ): bool {
+        $oldImageDisk = $this->cleanNullableString($chunk->image_disk, 64) ?? 'local';
+        $oldImagePath = $this->cleanNullableString($chunk->image_path, 1024);
+        $imageUpdates = [];
+        $uploadedImage = $payload['image'] ?? null;
+
+        if ($uploadedImage instanceof UploadedFile) {
+            $imageUpdates = $this->storeManualChunkImage($knowledgeDocument, $uploadedImage);
+        }
+
+        $imageOriginalFilename = $this->cleanNullableString(
+            $imageUpdates['image_original_filename'] ?? $chunk->image_original_filename,
+            255,
+        ) ?? 'image';
+        $imageAltText = $request->has('image_alt_text') ? $payload['image_alt_text'] : $this->cleanNullableString($chunk->image_alt_text, 2000);
+        $imageCaption = $request->has('image_caption') ? $payload['image_caption'] : $this->cleanNullableString($chunk->image_caption, 2000);
+        $ocrText = $request->has('ocr_text') ? $payload['ocr_text'] : $this->cleanNullableString($chunk->ocr_text, 20000);
+        $imageDescription = $request->has('image_description') ? $payload['image_description'] : $this->cleanNullableString($chunk->image_description, 20000);
+        $content = $request->has('content')
+            ? $payload['content']
+            : $this->manualImageChunkContent($chunk, $imageOriginalFilename, $imageAltText, $imageCaption, $ocrText, $imageDescription);
+
+        if ($uploadedImage instanceof UploadedFile && $content === $this->cleanNullableString($chunk->content, 200000)) {
+            $content = $this->manualImageChunkContent($chunk, $imageOriginalFilename, $imageAltText, $imageCaption, $ocrText, $imageDescription);
+        }
+
+        abort_unless($content !== null && $content !== '', 422, 'Image chunk content cannot be empty.');
+
+        $imageMetadata = is_array($chunk->image_metadata) ? $chunk->image_metadata : [];
+        $imageMetadata['manual_update_source'] = 'knowledge_base_chunk_editor';
+        $imageMetadata['manual_updated_at'] = now()->toIso8601String();
+
+        if ($uploadedImage instanceof UploadedFile) {
+            $imageMetadata['manual_original_filename'] = $uploadedImage->getClientOriginalName();
+        }
+
+        $chunk->forceFill(array_merge([
+            'content' => $content,
+            'image_alt_text' => $imageAltText,
+            'image_caption' => $imageCaption,
+            'ocr_text' => $ocrText,
+            'image_description' => $imageDescription,
+            'image_metadata' => $imageMetadata,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+        ], $imageUpdates))->save();
+
+        $newImageDisk = $this->cleanNullableString($imageUpdates['image_disk'] ?? null, 64);
+        $newImagePath = $this->cleanNullableString($imageUpdates['image_path'] ?? null, 1024);
+
+        if ($oldImagePath !== null && $newImagePath !== null && $oldImagePath !== $newImagePath) {
+            Storage::disk($oldImageDisk)->delete($oldImagePath);
+        }
+
+        return true;
+    }
+
+    /**
+     * Purpose: Store a replacement image for one image chunk and return database-ready image attributes.
+     * Inputs: The parent knowledge document and uploaded image file.
+     * Returns: Image storage and metadata attributes for the chunk row.
+     * Side effects: Writes one image file to local storage.
+     */
+    private function storeManualChunkImage(KnowledgeItem $knowledgeDocument, UploadedFile $image): array
+    {
+        $imageBytes = file_get_contents((string) $image->getRealPath());
+
+        abort_unless(is_string($imageBytes) && $imageBytes !== '', 422, 'Uploaded image could not be read.');
+
+        $imageMimeType = $this->cleanNullableString($image->getMimeType(), 191) ?? 'application/octet-stream';
+        $imageExtension = Str::lower(trim((string) $image->getClientOriginalExtension()));
+
+        if ($imageExtension === '') {
+            $imageExtension = $this->imageExtensionFromMimeType($imageMimeType);
+        }
+
+        $imageHash = hash('sha256', $imageBytes);
+        $imagePath = sprintf('knowledge-images/%d/%s.%s', $knowledgeDocument->id, $imageHash, $imageExtension);
+        $imageSize = @getimagesize((string) $image->getRealPath());
+
+        abort_unless(Storage::disk('local')->put($imagePath, $imageBytes), 500, 'Failed to store the knowledge image.');
+
+        return [
+            'image_path' => $imagePath,
+            'image_disk' => 'local',
+            'image_mime_type' => $imageMimeType,
+            'image_original_filename' => $this->cleanNullableString($image->getClientOriginalName(), 255) ?? 'image.'.$imageExtension,
+            'image_width' => is_array($imageSize) ? (int) ($imageSize[0] ?? 0) : null,
+            'image_height' => is_array($imageSize) ? (int) ($imageSize[1] ?? 0) : null,
+            'image_hash' => $imageHash,
+        ];
+    }
+
+    /**
+     * Purpose: Resolve a safe image extension when the uploaded image filename lacks one.
+     * Inputs: The detected MIME type.
+     * Returns: A storage extension supported by the chunk image editor.
+     * Side effects: None.
+     */
+    private function imageExtensionFromMimeType(string $mimeType): string
+    {
+        return match ($mimeType) {
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'image/gif' => 'gif',
+            default => 'bin',
+        };
+    }
+
+    /**
+     * Purpose: Build searchable content for an image chunk after manual image or text changes.
+     * Inputs: The existing chunk and normalized image metadata fields.
+     * Returns: A stable searchable text representation for embedding and retrieval.
+     * Side effects: None.
+     */
+    private function manualImageChunkContent(
+        KnowledgeItemChunk $chunk,
+        string $imageOriginalFilename,
+        ?string $imageAltText,
+        ?string $imageCaption,
+        ?string $ocrText,
+        ?string $imageDescription,
+    ): string {
+        $parts = [];
+        $sectionPath = $this->cleanNullableString($chunk->section_path, 255)
+            ?? $this->cleanNullableString($chunk->heading_path, 255);
+
+        if ($sectionPath !== null) {
+            $parts[] = 'Bilde i seksjon: '.$sectionPath;
+        } else {
+            $parts[] = 'Bilde';
+        }
+
+        $parts[] = 'Bildefil: '.$imageOriginalFilename;
+
+        if ($imageCaption !== null) {
+            $parts[] = 'Bildetekst: '.$imageCaption;
+        }
+
+        if ($imageAltText !== null) {
+            $parts[] = 'Alternativ tekst: '.$imageAltText;
+        }
+
+        if ($ocrText !== null) {
+            $parts[] = 'OCR-tekst: '.$ocrText;
+        }
+
+        if ($imageDescription !== null) {
+            $parts[] = 'Bildebeskrivelse: '.$imageDescription;
+        }
+
+        return trim(implode("\n\n", $parts));
+    }
+
+    /**
+     * Purpose: Mark generated chunk data as stale when the content source changes manually.
+     * Inputs: The selected chunk.
+     * Returns: None.
+     * Side effects: Preserves visible metadata, marks the chunk as pending review, and clears only embedding fields before regeneration.
+     */
+    private function resetGeneratedChunkFields(KnowledgeItemChunk $chunk): void
+    {
+        $chunk->forceFill([
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+            'embedding_vector' => null,
+            'embedding_model' => null,
+            'embedding_generated_at' => null,
+            'embedding_error' => null,
+        ])->save();
+    }
+
+    /**
+     * Purpose: Regenerate the embedding for one manually edited chunk without touching any other chunks.
+     * Inputs: The parent document and the selected chunk.
+     * Returns: None.
+     * Side effects: Calls the embedding service and updates only this chunk embedding fields.
+     */
+    private function regenerateChunkEmbeddingWithoutMetadata(KnowledgeItem $knowledgeDocument, KnowledgeItemChunk $chunk): void
+    {
+        $chunk->refresh();
+        $chunkText = $this->chunkTextForEmbedding($chunk);
+
+        if ($chunkText === '') {
+            $chunk->forceFill([
+                'embedding_error' => 'Chunk content was empty and was not embedded.',
+            ])->save();
+
+            return;
+        }
+
+        $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
+
+        if (! ($outcome['ok'] ?? false)) {
+            $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
+
+            $chunk->forceFill([
+                'embedding_error' => (string) ($outcome['error_message'] ?? 'Knowledge chunk embedding failed.'),
+            ])->save();
+
+            return;
+        }
+
+        $chunk->forceFill([
+            'embedding_vector' => $outcome['embedding'] ?? null,
+            'embedding_model' => $outcome['model'] ?? null,
+            'embedding_generated_at' => now(),
+            'embedding_error' => null,
+        ])->save();
+    }
+
+    /**
+     * Purpose: Resolve the embedding source text for one chunk after manual updates.
+     * Inputs: The selected chunk.
+     * Returns: The text used for embedding.
+     * Side effects: None.
+     */
+    private function chunkTextForEmbedding(KnowledgeItemChunk $chunk): string
+    {
+        if (($chunk->chunk_type ?? null) === 'table') {
+            return trim((string) ($chunk->table_text ?: $chunk->content));
+        }
+
+        return trim((string) $chunk->content);
+    }
+
+    /**
+     * Purpose: Normalize table warnings into a safe string list.
+     * Inputs: Raw table warnings from the selected chunk.
+     * Returns: A de-duplicated list of warning strings.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function normalizedTableWarnings(mixed $warnings): array
+    {
+        if ($warnings instanceof Collection) {
+            $warnings = $warnings->all();
+        }
+
+        if (! is_array($warnings)) {
+            return [];
+        }
+
+        $normalized = [];
+        $seen = [];
+
+        foreach ($warnings as $warning) {
+            $text = trim((string) $warning);
+
+            if ($text === '' || isset($seen[$text])) {
+                continue;
+            }
+
+            $seen[$text] = true;
+            $normalized[] = $text;
+        }
+
+        return $normalized;
     }
 
     /**
@@ -724,6 +1158,8 @@ class KnowledgeBaseController extends Controller
 
         return response()->file($absolutePath, [
             'Content-Type' => $mimeType,
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma' => 'no-cache',
         ]);
     }
 
