@@ -1,5 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
 const TAB_OPTIONS = [
@@ -124,318 +124,6 @@ function formatFileTypeLabel(mimeType) {
     return mimeType;
 }
 
-
-/**
- * Purpose: Escape pasted table cell text before rendering a local preview.
- * Inputs: Raw cell text from clipboard data.
- * Returns: HTML-safe text.
- * Side effects: None.
- */
-function escapeHtmlText(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
-
-const PASTED_TABLE_ALLOWED_TAGS = new Set([
-    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
-    'br', 'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'sub', 'sup',
-]);
-
-const PASTED_TABLE_ALLOWED_STYLES = new Set([
-    'text-align', 'vertical-align', 'font-weight', 'font-style', 'text-decoration',
-    'background', 'background-color', 'color', 'border', 'border-top', 'border-right',
-    'border-bottom', 'border-left', 'border-color', 'border-style', 'border-width',
-    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-    'white-space', 'width', 'height', 'border-collapse',
-]);
-
-/**
- * Purpose: Preserve safe visual table formatting from Word or Excel paste HTML.
- * Inputs: Raw inline style text from a pasted table node.
- * Returns: A sanitized inline style value or an empty string.
- * Side effects: None.
- */
-function sanitizePastedTableStyle(styleValue) {
-    return String(styleValue ?? '')
-        .split(';')
-        .map((stylePart) => stylePart.trim())
-        .filter((stylePart) => stylePart.includes(':'))
-        .map((stylePart) => {
-            const separatorIndex = stylePart.indexOf(':');
-            const property = stylePart.slice(0, separatorIndex).trim().toLowerCase();
-            const value = stylePart.slice(separatorIndex + 1).trim();
-            const lowerValue = value.toLowerCase();
-
-            if (!PASTED_TABLE_ALLOWED_STYLES.has(property)) {
-                return null;
-            }
-
-            if (lowerValue.includes('url(') || lowerValue.includes('expression(') || lowerValue.includes('javascript:')) {
-                return null;
-            }
-
-            return `${property}: ${value}`;
-        })
-        .filter(Boolean)
-        .join('; ');
-}
-
-/**
- * Purpose: Copy one pasted table node while preserving only safe table markup and basic formatting.
- * Inputs: Source DOM node and the target document used to create sanitized nodes.
- * Returns: A sanitized DOM node or fragment.
- * Side effects: None.
- */
-function sanitizePastedTableNode(sourceNode, targetDocument) {
-    if (sourceNode.nodeType === Node.TEXT_NODE) {
-        return targetDocument.createTextNode(sourceNode.textContent ?? '');
-    }
-
-    if (sourceNode.nodeType !== Node.ELEMENT_NODE) {
-        return targetDocument.createDocumentFragment();
-    }
-
-    const tagName = sourceNode.tagName.toLowerCase();
-
-    if (!PASTED_TABLE_ALLOWED_TAGS.has(tagName)) {
-        const fragment = targetDocument.createDocumentFragment();
-
-        Array.from(sourceNode.childNodes).forEach((childNode) => {
-            fragment.appendChild(sanitizePastedTableNode(childNode, targetDocument));
-        });
-
-        return fragment;
-    }
-
-    const sanitizedNode = targetDocument.createElement(tagName);
-
-    Array.from(sourceNode.attributes).forEach((attribute) => {
-        const attributeName = attribute.name.toLowerCase();
-        const attributeValue = String(attribute.value ?? '').trim();
-
-        if (attributeName === 'style') {
-            const style = sanitizePastedTableStyle(attributeValue);
-
-            if (style !== '') {
-                sanitizedNode.setAttribute('style', style);
-            }
-
-            return;
-        }
-
-        if ((attributeName === 'colspan' || attributeName === 'rowspan') && ['th', 'td'].includes(tagName)) {
-            const spanValue = Math.max(1, Math.min(attributeName === 'colspan' ? 20 : 100, Number.parseInt(attributeValue, 10) || 1));
-            sanitizedNode.setAttribute(attributeName, String(spanValue));
-            return;
-        }
-
-        if (attributeName === 'scope' && ['th', 'td'].includes(tagName) && /^(row|col|rowgroup|colgroup)$/.test(attributeValue)) {
-            sanitizedNode.setAttribute(attributeName, attributeValue);
-            return;
-        }
-
-        if (attributeName === 'align' && /^(left|center|right|justify)$/.test(attributeValue)) {
-            sanitizedNode.setAttribute(attributeName, attributeValue);
-            return;
-        }
-
-        if (attributeName === 'valign' && /^(top|middle|bottom|baseline)$/.test(attributeValue)) {
-            sanitizedNode.setAttribute(attributeName, attributeValue);
-            return;
-        }
-
-        if ((attributeName === 'width' || attributeName === 'height') && /^[0-9]+(\.[0-9]+)?(%|px)?$/.test(attributeValue)) {
-            sanitizedNode.setAttribute(attributeName, attributeValue);
-        }
-    });
-
-    Array.from(sourceNode.childNodes).forEach((childNode) => {
-        sanitizedNode.appendChild(sanitizePastedTableNode(childNode, targetDocument));
-    });
-
-    return sanitizedNode;
-}
-
-/**
- * Purpose: Extract the pasted table HTML while preserving safe formatting from Word or Excel.
- * Inputs: Raw clipboard HTML.
- * Returns: Sanitized table HTML or an empty string when no table exists.
- * Side effects: None.
- */
-function sanitizePastedTableHtml(html) {
-    const rawHtml = String(html ?? '').trim();
-
-    if (rawHtml === '' || !rawHtml.toLowerCase().includes('<table')) {
-        return '';
-    }
-
-    const sourceDocument = new DOMParser().parseFromString(rawHtml, 'text/html');
-    const tableNode = sourceDocument.querySelector('table');
-
-    if (!tableNode) {
-        return '';
-    }
-
-    const targetDocument = document.implementation.createHTMLDocument('');
-    const container = targetDocument.createElement('div');
-    container.appendChild(sanitizePastedTableNode(tableNode, targetDocument));
-
-    return container.innerHTML;
-}
-
-/**
- * Purpose: Normalize one pasted table cell into plain searchable text.
- * Inputs: Raw text from a Word or Excel cell.
- * Returns: A squished cell value.
- * Side effects: None.
- */
-function normalizePastedTableCellText(value) {
-    return String(value ?? '').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Purpose: Extract table rows from HTML copied from Word, Excel, or a browser table.
- * Inputs: Raw clipboard HTML.
- * Returns: A two-dimensional row/cell array.
- * Side effects: None.
- */
-function extractPastedTableRowsFromHtml(html) {
-    const rawHtml = String(html ?? '').trim();
-
-    if (rawHtml === '' || !rawHtml.toLowerCase().includes('<table')) {
-        return [];
-    }
-
-    const documentNode = new DOMParser().parseFromString(rawHtml, 'text/html');
-    const tableNode = documentNode.querySelector('table');
-
-    if (!tableNode) {
-        return [];
-    }
-
-    return Array.from(tableNode.querySelectorAll('tr'))
-        .map((rowNode) => Array.from(rowNode.querySelectorAll('th,td'))
-            .map((cellNode) => normalizePastedTableCellText(cellNode.textContent))
-            .filter((cellText) => cellText !== ''))
-        .filter((row) => row.length > 0);
-}
-
-/**
- * Purpose: Extract table rows from plain-text clipboard data when HTML table data is unavailable.
- * Inputs: Raw clipboard plain text.
- * Returns: A two-dimensional row/cell array.
- * Side effects: None.
- */
-function extractPastedTableRowsFromText(text) {
-    const rawText = String(text ?? '').trim();
-
-    if (rawText === '') {
-        return [];
-    }
-
-    return rawText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line !== '')
-        .map((line) => {
-            if (line.includes('\t')) {
-                return line.split('\t').map((cellText) => normalizePastedTableCellText(cellText));
-            }
-
-            return line.split(/\s{2,}/).map((cellText) => normalizePastedTableCellText(cellText));
-        })
-        .map((row) => row.filter((cellText) => cellText !== ''))
-        .filter((row) => row.length > 0);
-}
-
-/**
- * Purpose: Convert pasted table rows into tab-separated text for storage and retrieval.
- * Inputs: A two-dimensional row/cell array.
- * Returns: Plain table text.
- * Side effects: None.
- */
-function pastedTableRowsToText(rows) {
-    return rows.map((row) => row.join('\t')).join('\n');
-}
-
-/**
- * Purpose: Convert pasted table rows into markdown for legacy table fallback rendering.
- * Inputs: A two-dimensional row/cell array.
- * Returns: Markdown table text.
- * Side effects: None.
- */
-function pastedTableRowsToMarkdown(rows) {
-    if (!Array.isArray(rows) || rows.length === 0) {
-        return '';
-    }
-
-    const columnCount = Math.max(...rows.map((row) => row.length));
-    const markdownRows = [];
-
-    rows.forEach((row, rowIndex) => {
-        const cells = [];
-
-        for (let cellIndex = 0; cellIndex < columnCount; cellIndex += 1) {
-            cells.push(String(row[cellIndex] ?? '').replace(/\|/g, '\\|'));
-        }
-
-        markdownRows.push(`| ${cells.join(' | ')} |`);
-
-        if (rowIndex === 0) {
-            markdownRows.push(`| ${Array.from({ length: columnCount }, () => '---').join(' | ')} |`);
-        }
-    });
-
-    return markdownRows.join('\n');
-}
-
-/**
- * Purpose: Convert pasted table rows into simple sanitized HTML for preview and backend parsing.
- * Inputs: A two-dimensional row/cell array.
- * Returns: Minimal table HTML.
- * Side effects: None.
- */
-function pastedTableRowsToHtml(rows) {
-    const htmlRows = rows.map((row, rowIndex) => {
-        const cellTagName = rowIndex === 0 ? 'th' : 'td';
-        const cells = row.map((cellText) => `<${cellTagName}>${escapeHtmlText(cellText)}</${cellTagName}>`).join('');
-
-        return `<tr>${cells}</tr>`;
-    });
-
-    return `<table><tbody>${htmlRows.join('')}</tbody></table>`;
-}
-
-/**
- * Purpose: Build normalized table payload fields from a Word or Excel paste event.
- * Inputs: A clipboard event from the table paste drop zone.
- * Returns: Table text, markdown, and HTML values, or null when no table was detected.
- * Side effects: None.
- */
-function buildPastedTablePayloadFromClipboard(clipboardData) {
-    const html = clipboardData?.getData('text/html') ?? '';
-    const text = clipboardData?.getData('text/plain') ?? '';
-    const rows = extractPastedTableRowsFromHtml(html);
-    const fallbackRows = rows.length > 0 ? rows : extractPastedTableRowsFromText(text);
-    const sanitizedTableHtml = sanitizePastedTableHtml(html);
-
-    if (fallbackRows.length === 0) {
-        return null;
-    }
-
-    return {
-        table_text: pastedTableRowsToText(fallbackRows),
-        table_markdown: pastedTableRowsToMarkdown(fallbackRows),
-        table_html: sanitizedTableHtml !== '' ? sanitizedTableHtml : pastedTableRowsToHtml(fallbackRows),
-        content: pastedTableRowsToText(fallbackRows),
-    };
-}
-
 function normalizeChunkKeywordList(value) {
     if (!Array.isArray(value)) {
         return [];
@@ -496,7 +184,106 @@ function getChunkReviewStatusMeta(chunk) {
     return CHUNK_REVIEW_STATUS_META[getChunkReviewStatus(chunk)] ?? CHUNK_REVIEW_STATUS_META.pending_review;
 }
 
-function getChunkDisplayTitle(chunk, index = 0) {
+function getGeneratedGraphicFallbackNumber(value) {
+    const text = String(value ?? '').trim();
+    const match = text.match(/^(?:bilde|grafikk|picture|image|graphic)\s*(\d+)$/iu);
+
+    return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function isGeneratedGraphicFallbackLabel(value) {
+    return getGeneratedGraphicFallbackNumber(value) !== null;
+}
+
+function getGraphicDisplayTitle(chunk, graphicSequence = 0) {
+    const title = String(chunk?.title ?? '').trim();
+
+    if (title !== '' && !isGeneratedGraphicFallbackLabel(title)) {
+        return title;
+    }
+
+    const caption = getGraphicCaption(chunk);
+
+    if (caption !== '') {
+        return caption;
+    }
+
+    const altText = String(chunk?.image_alt_text ?? '').trim();
+
+    if (altText !== '' && !isGeneratedGraphicFallbackLabel(altText)) {
+        return altText;
+    }
+
+    const storedSequence = Number.parseInt(String(chunk?.image_metadata?.graphic_sequence_in_document ?? ''), 10);
+    const resolvedSequence = Number.isFinite(storedSequence) && storedSequence > 0 ? storedSequence : graphicSequence;
+
+    return resolvedSequence > 0 ? `Grafikk ${resolvedSequence}` : 'Grafikk';
+}
+
+function getGraphicAltText(chunk) {
+    const altText = String(chunk?.image_alt_text ?? '').trim();
+
+    if (altText === '' || isGeneratedGraphicFallbackLabel(altText)) {
+        return '';
+    }
+
+    return altText;
+}
+
+function getGraphicCaption(chunk) {
+    const caption = String(chunk?.image_caption ?? '').trim();
+
+    if (caption === '' || isGeneratedGraphicFallbackLabel(caption)) {
+        return '';
+    }
+
+    return caption;
+}
+
+function getGraphicSearchableContent(chunk) {
+    let text = String(chunk?.content ?? chunk?.content_preview ?? '').trim();
+
+    if (text === '') {
+        return '';
+    }
+
+    text = text
+        .replace(/^Bilde i seksjon:/gimu, 'Grafikk i seksjon:')
+        .replace(/^Bilde$/gimu, 'Grafikk')
+        .replace(/^Bildefil:/gimu, 'Grafikkfil:')
+        .replace(/^Bildetekst:/gimu, 'Grafikktekst:')
+        .replace(/^Bildebeskrivelse:/gimu, 'Grafikkbeskrivelse:')
+        .replace(/(?:\n\s*)*Alternativ tekst:\s*(?:Bilde|Grafikk|Picture|Image|Graphic)\s*\d+\s*/gimu, '\n\n')
+        .replace(/\n{3,}/gmu, '\n\n')
+        .trim();
+
+    return text;
+}
+
+function getChunkEditableContent(chunk) {
+    if (chunk?.chunk_type === 'image') {
+        return getGraphicSearchableContent(chunk);
+    }
+
+    return chunk?.content ?? '';
+}
+
+function getTableDisplayTitle(chunk, tableSequence = 0) {
+    const storedSequence = Number.parseInt(String(chunk?.table_metadata?.table_sequence_in_document ?? ''), 10);
+    const resolvedSequence = Number.isFinite(storedSequence) && storedSequence > 0 ? storedSequence : tableSequence;
+
+    return resolvedSequence > 0 ? `Tabell ${resolvedSequence}` : 'Tabell';
+}
+
+function getChunkDisplayTitle(chunk, index = 0, graphicSequence = 0, tableSequence = 0) {
+    if (chunk?.chunk_type === 'image') {
+        return getGraphicDisplayTitle(chunk, graphicSequence);
+    }
+
+    if (chunk?.chunk_type === 'table') {
+        return getTableDisplayTitle(chunk, tableSequence);
+    }
+
     const title = String(chunk?.title ?? '').trim();
 
     return title !== '' ? title : `Chunk ${index + 1}`;
@@ -504,7 +291,7 @@ function getChunkDisplayTitle(chunk, index = 0) {
 
 function getChunkTypeLabel(chunk) {
     if (chunk?.chunk_type === 'image') {
-        return 'Bilde';
+        return 'Grafikk';
     }
 
     if (chunk?.chunk_type === 'table') {
@@ -797,12 +584,44 @@ export default function KnowledgeBaseShow({
         approved: 0,
         rejected: 0,
     });
+    const graphicSequenceByChunkId = useMemo(() => {
+        const sequenceByChunkId = new Map();
+        let graphicSequence = 0;
+
+        chunks.forEach((chunk) => {
+            if (chunk?.chunk_type !== 'image') {
+                return;
+            }
+
+            graphicSequence += 1;
+            sequenceByChunkId.set(chunk.id, graphicSequence);
+        });
+
+        return sequenceByChunkId;
+    }, [chunks]);
+    const tableSequenceByChunkId = useMemo(() => {
+        const sequenceByChunkId = new Map();
+        let tableSequence = 0;
+
+        chunks.forEach((chunk) => {
+            if (chunk?.chunk_type !== 'table') {
+                return;
+            }
+
+            tableSequence += 1;
+            sequenceByChunkId.set(chunk.id, tableSequence);
+        });
+
+        return sequenceByChunkId;
+    }, [chunks]);
     const reviewProgressCount = chunkReviewCounts.approved + chunkReviewCounts.rejected;
     const selectedChunk = chunks.find((chunk) => chunk.id === selectedChunkId) ?? chunks[0] ?? null;
     const selectedChunkIndex = selectedChunk ? chunks.findIndex((chunk) => chunk.id === selectedChunk.id) : -1;
     const selectedChunkReviewStatus = selectedChunk ? getChunkReviewStatus(selectedChunk) : 'pending_review';
     const selectedChunkReviewStatusMeta = CHUNK_REVIEW_STATUS_META[selectedChunkReviewStatus] ?? CHUNK_REVIEW_STATUS_META.pending_review;
-    const selectedChunkDisplayTitle = selectedChunk ? getChunkDisplayTitle(selectedChunk, selectedChunkIndex) : 'Chunk';
+    const selectedGraphicSequence = selectedChunk ? (graphicSequenceByChunkId.get(selectedChunk.id) ?? 0) : 0;
+    const selectedTableSequence = selectedChunk ? (tableSequenceByChunkId.get(selectedChunk.id) ?? 0) : 0;
+    const selectedChunkDisplayTitle = selectedChunk ? getChunkDisplayTitle(selectedChunk, selectedChunkIndex, selectedGraphicSequence, selectedTableSequence) : 'Chunk';
     const selectedChunkImageExtension = selectedChunk ? getImageChunkExtension(selectedChunk) : null;
     const selectedChunkImageCanPreview = selectedChunk ? canPreviewImageChunk(selectedChunk) : false;
     const selectedChunkTableWarnings = normalizeTableWarningsForDisplay(selectedChunk?.table_warnings);
@@ -862,7 +681,9 @@ export default function KnowledgeBaseShow({
             return;
         }
 
-        chunkMetadataForm.setData('title', selectedChunk.title ?? '');
+        chunkMetadataForm.setData('title', selectedChunk.chunk_type === 'image'
+            ? getGraphicDisplayTitle(selectedChunk, selectedGraphicSequence)
+            : (selectedChunk.chunk_type === 'table' ? getTableDisplayTitle(selectedChunk, selectedTableSequence) : (selectedChunk.title ?? '')));
         chunkMetadataForm.setData('ai_summary', selectedChunk.ai_summary ?? '');
         chunkMetadataForm.setData('service_product_tag', selectedChunk.service_product_tag ?? '');
         chunkMetadataForm.setData('theme_tag', selectedChunk.theme_tag ?? '');
@@ -870,13 +691,13 @@ export default function KnowledgeBaseShow({
         chunkMetadataForm.setData('sub_topic', selectedChunk.sub_topic ?? '');
         chunkMetadataForm.setData('keywords', normalizeChunkKeywordList(selectedChunk.keywords).join(', '));
         chunkContentForm.setData({
-            content: selectedChunk.content ?? '',
+            content: getChunkEditableContent(selectedChunk),
             table_text: selectedChunk.table_text ?? '',
             table_markdown: selectedChunk.table_markdown ?? '',
             table_html: selectedChunk.table_html ?? '',
             image: null,
-            image_alt_text: selectedChunk.image_alt_text ?? '',
-            image_caption: selectedChunk.image_caption ?? '',
+            image_alt_text: getGraphicAltText(selectedChunk),
+            image_caption: getGraphicCaption(selectedChunk),
             ocr_text: selectedChunk.ocr_text ?? '',
             image_description: selectedChunk.image_description ?? '',
         });
@@ -885,6 +706,9 @@ export default function KnowledgeBaseShow({
         setShowChunkSystemMetadata(false);
     }, [
         selectedChunk?.id,
+        selectedChunkIndex,
+        selectedGraphicSequence,
+        selectedTableSequence,
         selectedChunk?.title,
         selectedChunk?.ai_summary,
         selectedChunk?.service_product_tag,
@@ -935,7 +759,9 @@ export default function KnowledgeBaseShow({
             return;
         }
 
-        chunkMetadataForm.setData('title', selectedChunk.title ?? '');
+        chunkMetadataForm.setData('title', selectedChunk.chunk_type === 'image'
+            ? getGraphicDisplayTitle(selectedChunk, selectedGraphicSequence)
+            : (selectedChunk.chunk_type === 'table' ? getTableDisplayTitle(selectedChunk, selectedTableSequence) : (selectedChunk.title ?? '')));
         chunkMetadataForm.setData('ai_summary', selectedChunk.ai_summary ?? '');
         chunkMetadataForm.setData('service_product_tag', selectedChunk.service_product_tag ?? '');
         chunkMetadataForm.setData('theme_tag', selectedChunk.theme_tag ?? '');
@@ -960,38 +786,18 @@ export default function KnowledgeBaseShow({
         }
 
         chunkContentForm.setData({
-            content: selectedChunk.content ?? '',
+            content: getChunkEditableContent(selectedChunk),
             table_text: selectedChunk.table_text ?? '',
             table_markdown: selectedChunk.table_markdown ?? '',
             table_html: selectedChunk.table_html ?? '',
             image: null,
-            image_alt_text: selectedChunk.image_alt_text ?? '',
-            image_caption: selectedChunk.image_caption ?? '',
+            image_alt_text: getGraphicAltText(selectedChunk),
+            image_caption: getGraphicCaption(selectedChunk),
             ocr_text: selectedChunk.ocr_text ?? '',
             image_description: selectedChunk.image_description ?? '',
         });
         chunkContentForm.clearErrors();
         setIsChunkContentEditing(false);
-    };
-
-    /**
-     * Purpose: Replace the current table editor state with a structured table pasted from Word or Excel.
-     * Inputs: Clipboard paste event from the table paste drop zone.
-     * Returns: None.
-     * Side effects: Updates only local form state until the user clicks Save.
-     */
-    const handleTablePaste = (event) => {
-        const pastedTablePayload = buildPastedTablePayloadFromClipboard(event.clipboardData);
-
-        if (!pastedTablePayload) {
-            return;
-        }
-
-        event.preventDefault();
-        chunkContentForm.setData({
-            ...chunkContentForm.data,
-            ...pastedTablePayload,
-        });
     };
 
     const submitChunkContent = (event) => {
@@ -1017,14 +823,11 @@ export default function KnowledgeBaseShow({
                 image_description: chunkContentForm.data.image_description,
             };
 
-            if (String(chunkContentForm.data.content ?? '').trim() !== String(selectedChunk.content ?? '').trim()) {
+            if (String(chunkContentForm.data.content ?? '').trim() !== getGraphicSearchableContent(selectedChunk).trim()) {
                 payload.content = chunkContentForm.data.content;
             }
         } else if (selectedChunk.chunk_type === 'table') {
             payload.table_text = chunkContentForm.data.table_text;
-            payload.table_markdown = chunkContentForm.data.table_markdown;
-            payload.table_html = chunkContentForm.data.table_html;
-            payload.content = chunkContentForm.data.content || chunkContentForm.data.table_text;
         } else {
             payload.content = chunkContentForm.data.content;
         }
@@ -1036,9 +839,7 @@ export default function KnowledgeBaseShow({
             preserveScroll: true,
             forceFormData: true,
             onSuccess: () => {
-                chunkContentForm.setData('image', null);
                 setIsChunkContentEditing(false);
-                router.reload({ only: ['knowledgeItem'] });
             },
             onError: (errors) => {
                 chunkContentForm.setError(errors);
@@ -1109,17 +910,17 @@ export default function KnowledgeBaseShow({
         { label: 'Embeddingmodell', value: selectedChunk.embedding_model ?? '—' },
         { label: 'Embedding generert', value: selectedChunk.embedding_generated_at ? formatDateTime(selectedChunk.embedding_generated_at, locale) : '—' },
         ...(selectedChunk.chunk_type === 'image' ? [
-            { label: 'Bilde-URL', value: selectedChunk.image_url || '—' },
-            { label: 'Bildefil', value: selectedChunk.image_original_filename || '—' },
-            { label: 'Bildefilsti', value: selectedChunk.image_path || '—' },
+            { label: 'Grafikk-URL', value: selectedChunk.image_url || '—' },
+            { label: 'Grafikkfil', value: selectedChunk.image_original_filename || '—' },
+            { label: 'Grafikkfilsti', value: selectedChunk.image_path || '—' },
             { label: 'Lagringsdisk', value: selectedChunk.image_disk || '—' },
             { label: 'MIME-type', value: selectedChunk.image_mime_type || '—' },
             { label: 'Filtype', value: selectedChunkImageExtension || '—' },
-            { label: 'Bildetype', value: selectedChunk.image_metadata?.image_kind || selectedChunk.image_metadata?.detected_type || 'unknown' },
+            { label: 'Grafikktype', value: selectedChunk.image_metadata?.image_kind || selectedChunk.image_metadata?.detected_type || 'unknown' },
             { label: 'Bredde', value: selectedChunk.image_width ?? '—' },
             { label: 'Høyde', value: selectedChunk.image_height ?? '—' },
             { label: 'Hash', value: selectedChunk.image_hash || '—' },
-            { label: 'Bildemetadata', value: selectedChunk.image_metadata ? 'Tilgjengelig' : '—' },
+            { label: 'Grafikkmetadata', value: selectedChunk.image_metadata ? 'Tilgjengelig' : '—' },
         ] : []),
     ] : [];
 
@@ -1400,7 +1201,7 @@ export default function KnowledgeBaseShow({
                                                             <div className="space-y-2">
                                                                 <div className="flex flex-wrap items-center gap-2">
                                                                     <div className="text-sm font-medium text-slate-950">
-                                                                        {getChunkDisplayTitle(chunk, index)}
+                                                                        {getChunkDisplayTitle(chunk, index, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0)}
                                                                     </div>
                                                                     <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                                                                         {getChunkTypeLabel(chunk)}
@@ -1542,20 +1343,20 @@ export default function KnowledgeBaseShow({
                                                     {selectedChunk.chunk_type === 'image' ? (
                                                         <div className="mt-4 max-h-[32rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Bilde
+                                                                Grafikk
                                                             </div>
                                                             {selectedChunk.image_url && selectedChunkImageCanPreview ? (
                                                                 <div className="mt-4 overflow-hidden rounded-[16px] border border-slate-200 bg-slate-50">
                                                                     <img
                                                                         src={selectedChunk.image_url}
-                                                                        alt={selectedChunk.image_alt_text || selectedChunk.image_caption || selectedChunk.title || 'Bilde'}
+                                                                        alt={getGraphicAltText(selectedChunk) || getGraphicCaption(selectedChunk) || selectedChunkDisplayTitle || 'Grafikk'}
                                                                         className="block max-h-[22rem] w-full object-contain"
                                                                     />
                                                                 </div>
                                                             ) : (
                                                                 <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                                                                     {selectedChunk.image_url && !selectedChunkImageCanPreview
-                                                                        ? 'Bildet er ekstrahert, men formatet kan ikke forhåndsvises direkte.'
+                                                                        ? 'Grafikken er ekstrahert, men formatet kan ikke forhåndsvises direkte.'
                                                                         : 'Ingen forhåndsvisning tilgjengelig.'}
                                                                 </div>
                                                             )}
@@ -1563,10 +1364,10 @@ export default function KnowledgeBaseShow({
                                                             <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
                                                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Bildetekst
+                                                                        Grafikktekst
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {selectedChunk.image_caption || 'Ingen bildetekst registrert.'}
+                                                                        {getGraphicCaption(selectedChunk) || 'Ingen grafikktekst registrert.'}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
@@ -1574,7 +1375,7 @@ export default function KnowledgeBaseShow({
                                                                         Alt-tekst
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {selectedChunk.image_alt_text || 'Ingen alternativ tekst registrert.'}
+                                                                        {getGraphicAltText(selectedChunk) || 'Ingen alternativ tekst registrert.'}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
@@ -1590,7 +1391,7 @@ export default function KnowledgeBaseShow({
                                                                         Beskrivelse
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {selectedChunk.image_description ? 'Bildebeskrivelse generert' : 'Bildebeskrivelse ikke generert'}
+                                                                        {selectedChunk.image_description ? 'Grafikkbeskrivelse generert' : 'Grafikkbeskrivelse ikke generert'}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -1600,14 +1401,14 @@ export default function KnowledgeBaseShow({
                                                                     Søkbar tekst
                                                                 </div>
                                                                 <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                                                    {selectedChunk.content || selectedChunk.content_preview || 'Ingen søkbar tekst tilgjengelig.'}
+                                                                    {getGraphicSearchableContent(selectedChunk) || 'Ingen søkbar tekst tilgjengelig.'}
                                                                 </pre>
                                                             </div>
 
                                                             {selectedChunk.image_metadata ? (
                                                                 <details className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
                                                                     <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Bildemetadata
+                                                                        Grafikkmetadata
                                                                     </summary>
                                                                     <pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
                                                                         {JSON.stringify(selectedChunk.image_metadata, null, 2)}
@@ -1691,7 +1492,7 @@ export default function KnowledgeBaseShow({
                                                                 <div className="grid gap-4 sm:grid-cols-2">
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Bytt bilde
+                                                                            Bytt grafikk
                                                                         </span>
                                                                         <input
                                                                             type="file"
@@ -1705,7 +1506,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Bildetekst
+                                                                            Grafikktekst
                                                                         </span>
                                                                         <input
                                                                             type="text"
@@ -1727,6 +1528,34 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            OCR-tekst
+                                                                        </span>
+                                                                        <textarea
+                                                                            value={chunkContentForm.data.ocr_text}
+                                                                            onChange={(event) => chunkContentForm.setData('ocr_text', event.target.value)}
+                                                                            rows={5}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {chunkContentForm.errors.ocr_text ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.ocr_text}</p>
+                                                                        ) : null}
+                                                                    </label>
+                                                                    <label className="space-y-2 sm:col-span-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Grafikkbeskrivelse
+                                                                        </span>
+                                                                        <textarea
+                                                                            value={chunkContentForm.data.image_description}
+                                                                            onChange={(event) => chunkContentForm.setData('image_description', event.target.value)}
+                                                                            rows={5}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        {chunkContentForm.errors.image_description ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.image_description}</p>
+                                                                        ) : null}
+                                                                    </label>
+                                                                    <label className="space-y-2 sm:col-span-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             Søkbar tekst
                                                                         </span>
                                                                         <textarea
@@ -1735,63 +1564,26 @@ export default function KnowledgeBaseShow({
                                                                             rows={6}
                                                                             className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
+                                                                        {chunkContentForm.errors.content ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.content}</p>
+                                                                        ) : null}
                                                                     </label>
                                                                 </div>
                                                             ) : selectedChunk.chunk_type === 'table' ? (
-                                                                <div className="space-y-4">
-                                                                    <div
-                                                                        role="textbox"
-                                                                        tabIndex={0}
-                                                                        onPaste={handleTablePaste}
-                                                                        className="rounded-[18px] border border-dashed border-violet-300 bg-violet-50/70 px-4 py-6 text-sm leading-6 text-slate-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
-                                                                    >
-                                                                        <div className="font-semibold text-slate-950">
-                                                                            Lim inn tabell fra Word eller Excel her
-                                                                        </div>
-                                                                        <p className="mt-1 text-slate-600">
-                                                                            Kopier hele tabellen i Word eller Excel, klikk i dette feltet og lim inn. Procynia gjør den om til strukturert tabell før lagring.
-                                                                        </p>
-                                                                    </div>
-
-                                                                    {chunkContentForm.data.table_html ? (
-                                                                        <div className="overflow-x-auto rounded-[16px] border border-slate-200 bg-white p-3">
-                                                                            <div
-                                                                                className="prose prose-sm max-w-none prose-table:min-w-full prose-th:border prose-th:border-slate-200 prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-2"
-                                                                                dangerouslySetInnerHTML={{ __html: chunkContentForm.data.table_html }}
-                                                                            />
-                                                                        </div>
+                                                                <label className="block space-y-2">
+                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        Tabelltekst
+                                                                    </span>
+                                                                    <textarea
+                                                                        value={chunkContentForm.data.table_text}
+                                                                        onChange={(event) => chunkContentForm.setData('table_text', event.target.value)}
+                                                                        rows={10}
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                    />
+                                                                    {chunkContentForm.errors.table_text ? (
+                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
                                                                     ) : null}
-
-                                                                    <label className="block space-y-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Tabelltekst
-                                                                        </span>
-                                                                        <textarea
-                                                                            value={chunkContentForm.data.table_text}
-                                                                            onChange={(event) => {
-                                                                                const tableText = event.target.value;
-                                                                                chunkContentForm.setData({
-                                                                                    ...chunkContentForm.data,
-                                                                                    table_text: tableText,
-                                                                                    content: tableText,
-                                                                                    table_html: '',
-                                                                                    table_markdown: '',
-                                                                                });
-                                                                            }}
-                                                                            rows={10}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        <p className="text-xs text-slate-500">
-                                                                            Tabeller som limes inn fra Word eller Excel vises strukturert over. Dette tekstfeltet brukes til søk og embedding.
-                                                                        </p>
-                                                                        {chunkContentForm.errors.table_text ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
-                                                                        ) : null}
-                                                                        {chunkContentForm.errors.table_html ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.table_html}</p>
-                                                                        ) : null}
-                                                                    </label>
-                                                                </div>
+                                                                </label>
                                                             ) : (
                                                                 <label className="block space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
