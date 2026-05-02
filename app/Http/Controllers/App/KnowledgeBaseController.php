@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\User;
@@ -271,7 +272,8 @@ class KnowledgeBaseController extends Controller
                 ];
             });
 
-            $this->syncChunkEmbeddings($result['knowledge_document'], $result['chunks']);
+            $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
+            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
