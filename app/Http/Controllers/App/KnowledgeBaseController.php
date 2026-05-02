@@ -34,6 +34,7 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class KnowledgeBaseController extends Controller
 {
     private const RULE_BASED_CHUNK_MAX_WORDS = 800;
+    private const RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS = 40;
 
     public function __construct(
         private readonly CustomerContext $customerContext,
@@ -997,6 +998,11 @@ class KnowledgeBaseController extends Controller
 
                 $wordCount = count(preg_split('/\s+/u', trim($content), -1, PREG_SPLIT_NO_EMPTY) ?: []);
                 $contentLength = mb_strlen($content, 'UTF-8');
+
+                if ($wordCount < self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
+                    $skippedOrEmptyRangesCount++;
+                    continue;
+                }
 
                 $coveredCharacterCount += $endOffset - $startOffset;
                 $lastAcceptedEndOffset = $endOffset;
