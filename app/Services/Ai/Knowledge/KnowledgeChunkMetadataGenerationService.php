@@ -17,6 +17,8 @@ class KnowledgeChunkMetadataGenerationService
 {
     private const MAX_OUTPUT_TOKENS = 1800;
 
+    private const BATCH_MAX_OUTPUT_TOKENS = 6000;
+
     private const TEMPERATURE = 0;
 
     public function __construct(
@@ -93,6 +95,170 @@ class KnowledgeChunkMetadataGenerationService
         ]);
 
         return $this->finalizeResult($document, $chunk, $validated, $vocabularyMap, $model, $startedAt);
+    }
+
+    /**
+     * Purpose: Generate, validate and prepare metadata for several knowledge chunks in one OpenAI request.
+     * Inputs: The parent knowledge document and a batch of chunks to analyze together.
+     * Returns: Metadata payloads keyed by chunk id.
+     * Side effects: Calls OpenAI once for the batch, may persist suggestion rows, and emits observability logs.
+     *
+     * @param iterable<int, KnowledgeItemChunk> $chunks
+     * @return array<int, array<string, mixed>>
+     */
+    public function generateForChunks(KnowledgeItem $document, iterable $chunks): array
+    {
+        $chunkList = [];
+
+        foreach ($chunks as $chunk) {
+            if ($chunk instanceof KnowledgeItemChunk) {
+                $chunkList[] = $chunk;
+            }
+        }
+
+        if ($chunkList === []) {
+            return [];
+        }
+
+        $vocabularyMap = $this->vocabularyService->buildForCustomer((int) $document->customer_id);
+        $startedAt = microtime(true);
+        $payload = $this->batchOpenAiRequestPayload($document, $chunkList, $vocabularyMap);
+        $model = (string) ($payload['model'] ?? '');
+        $chunkIds = array_map(static fn (KnowledgeItemChunk $chunk): int => (int) $chunk->id, $chunkList);
+        $chunkIndexes = array_map(static fn (KnowledgeItemChunk $chunk): int => (int) $chunk->chunk_index, $chunkList);
+
+        Log::info('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata generation starting.', [
+            'customer_id' => (int) $document->customer_id,
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_chunk_ids' => $chunkIds,
+            'chunk_indexes' => $chunkIndexes,
+            'batch_size' => count($chunkList),
+            'available_field_count' => count((array) data_get($vocabularyMap, 'available_fields', [])),
+            'term_count' => array_sum((array) data_get($vocabularyMap, 'field_counts', [])),
+            'model' => $model,
+        ]);
+
+        try {
+            $response = $this->openAiClient->createResponse($payload);
+            $decoded = $this->decodePayload($response);
+            $decodedChunks = data_get($decoded, 'chunks', []);
+
+            if (! is_array($decodedChunks)) {
+                throw new RuntimeException('OpenAI batch metadata response did not include a chunks array.');
+            }
+        } catch (Throwable $exception) {
+            Log::warning('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata generation failed; using fallback metadata.', [
+                'customer_id' => (int) $document->customer_id,
+                'knowledge_item_id' => $document->id,
+                'knowledge_item_chunk_ids' => $chunkIds,
+                'chunk_indexes' => $chunkIndexes,
+                'error' => $exception->getMessage(),
+            ]);
+
+            $fallbackResults = [];
+
+            foreach ($chunkList as $chunk) {
+                $validated = $this->failedValidationResult($chunk);
+                $fallbackResults[(int) $chunk->id] = $this->finalizeResult($document, $chunk, $validated, $vocabularyMap, $model, $startedAt);
+            }
+
+            return $fallbackResults;
+        }
+
+        $decodedByChunkId = [];
+
+        foreach ($decodedChunks as $decodedChunk) {
+            if (! is_array($decodedChunk)) {
+                continue;
+            }
+
+            $chunkId = (int) data_get($decodedChunk, 'chunk_id', 0);
+
+            if ($chunkId < 1) {
+                continue;
+            }
+
+            unset($decodedChunk['chunk_id']);
+            $decodedByChunkId[$chunkId] = $decodedChunk;
+        }
+
+        $results = [];
+
+        foreach ($chunkList as $chunk) {
+            $chunkStartedAt = microtime(true);
+            $decodedForChunk = $decodedByChunkId[(int) $chunk->id] ?? null;
+
+            if (! is_array($decodedForChunk)) {
+                $validated = $this->failedValidationResult($chunk);
+
+                Log::warning('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata response missed chunk; using fallback metadata.', [
+                    'customer_id' => (int) $document->customer_id,
+                    'knowledge_item_id' => $document->id,
+                    'knowledge_item_chunk_id' => $chunk->id,
+                    'chunk_index' => $chunk->chunk_index,
+                ]);
+
+                $results[(int) $chunk->id] = $this->finalizeResult($document, $chunk, $validated, $vocabularyMap, $model, $chunkStartedAt);
+
+                continue;
+            }
+
+            try {
+                $decodedForChunk = $this->applyDescriptiveMetadataFallbacks($chunk, $decodedForChunk);
+                $validated = $this->validator->validate($document, $chunk, $decodedForChunk, $vocabularyMap);
+            } catch (Throwable $exception) {
+                $validated = $this->failedValidationResult($chunk);
+
+                Log::warning('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata validation failed; using fallback metadata.', [
+                    'customer_id' => (int) $document->customer_id,
+                    'knowledge_item_id' => $document->id,
+                    'knowledge_item_chunk_id' => $chunk->id,
+                    'chunk_index' => $chunk->chunk_index,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                $results[(int) $chunk->id] = $this->finalizeResult($document, $chunk, $validated, $vocabularyMap, $model, $chunkStartedAt);
+
+                continue;
+            }
+
+            try {
+                $this->persistSuggestions($document, $chunk, (array) data_get($validated, 'new_term_suggestions', []));
+            } catch (Throwable $exception) {
+                Log::warning('[PROCYNIA][KNOWLEDGE_METADATA] Metadata suggestion persistence failed; continuing without suggestions.', [
+                    'customer_id' => (int) $document->customer_id,
+                    'knowledge_item_id' => $document->id,
+                    'knowledge_item_chunk_id' => $chunk->id,
+                    'chunk_index' => $chunk->chunk_index,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+
+            Log::info('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata generation completed for chunk.', [
+                'customer_id' => (int) $document->customer_id,
+                'knowledge_item_id' => $document->id,
+                'knowledge_item_chunk_id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'metadata_status' => data_get($validated, 'metadata_status'),
+                'confidence_score' => data_get($validated, 'confidence_score'),
+                'suggestion_count' => count((array) data_get($validated, 'new_term_suggestions', [])),
+                'elapsed_ms' => $this->elapsedMs($chunkStartedAt),
+            ]);
+
+            $results[(int) $chunk->id] = $this->finalizeResult($document, $chunk, $validated, $vocabularyMap, $model, $chunkStartedAt);
+        }
+
+        Log::info('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata generation completed.', [
+            'customer_id' => (int) $document->customer_id,
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_chunk_ids' => $chunkIds,
+            'chunk_indexes' => $chunkIndexes,
+            'batch_size' => count($chunkList),
+            'result_count' => count($results),
+            'elapsed_ms' => $this->elapsedMs($startedAt),
+        ]);
+
+        return $results;
     }
 
     /**
@@ -205,6 +371,182 @@ class KnowledgeChunkMetadataGenerationService
             ],
             'temperature' => self::TEMPERATURE,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
+        ];
+    }
+
+    /**
+     * Purpose: Build the OpenAI Responses API payload for a batch of chunk metadata analyses.
+     * Inputs: The document, a batch of chunks, and the approved vocabulary map.
+     * Returns: The exact request payload sent to OpenAI.
+     * Side effects: None.
+     *
+     * @param array<int, KnowledgeItemChunk> $chunks
+     */
+    private function batchOpenAiRequestPayload(KnowledgeItem $document, array $chunks, array $vocabularyMap): array
+    {
+        return [
+            'model' => $this->openAiModel(),
+            'input' => [
+                [
+                    'role' => 'developer',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->batchSystemPrompt(),
+                        ],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        [
+                            'type' => 'input_text',
+                            'text' => $this->batchUserPrompt($document, $chunks, $vocabularyMap),
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'knowledge_chunk_metadata_batch',
+                    'description' => 'Structured metadata generation results for a batch of knowledge chunks.',
+                    'strict' => true,
+                    'schema' => $this->batchMetadataSchema(),
+                ],
+            ],
+            'temperature' => self::TEMPERATURE,
+            'max_output_tokens' => self::BATCH_MAX_OUTPUT_TOKENS,
+        ];
+    }
+
+    /**
+     * Purpose: Build the developer instructions for batched metadata generation.
+     * Inputs: None.
+     * Returns: A short instruction string for the model.
+     * Side effects: None.
+     */
+    private function batchSystemPrompt(): string
+    {
+        return implode("\n", [
+            'You generate metadata for several knowledge chunks in one request.',
+            'You are not writing SQL.',
+            'Return exactly one result object for each input chunk id.',
+            'Never merge chunks and never copy metadata from one chunk to another unless the content truly supports it.',
+            'You must use only the approved vocabulary values when they fit the chunk.',
+            'You must not invent authoritative values.',
+            'If a useful concept is not covered by the approved vocabulary, place it in new_term_suggestions.',
+            'Do not over-tag.',
+            'Keywords must be concrete and relevant to each chunk content.',
+            'Matched terms must be terms that truly appear in the chunk or clearly match an approved synonym.',
+            'summary_for_retrieval must be short, concrete and useful for later retrieval.',
+            'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
+            'Return only JSON that matches the schema.',
+            'Write all string values in Norwegian.',
+        ]);
+    }
+
+    /**
+     * Purpose: Build the user-facing payload for batched metadata generation.
+     * Inputs: The document, the chunk batch, and the approved vocabulary map.
+     * Returns: A JSON string that the model can inspect deterministically.
+     * Side effects: None.
+     *
+     * @param array<int, KnowledgeItemChunk> $chunks
+     */
+    private function batchUserPrompt(KnowledgeItem $document, array $chunks, array $vocabularyMap): string
+    {
+        $chunkPayloads = [];
+
+        foreach ($chunks as $chunk) {
+            $sourceText = $this->sourceTextForSummary($chunk);
+
+            $chunkPayloads[] = [
+                'id' => $chunk->id,
+                'chunk_index' => $chunk->chunk_index,
+                'chunk_type' => $chunk->chunk_type,
+                'title' => $chunk->title,
+                'heading_path' => $chunk->heading_path,
+                'section_title' => $chunk->section_title,
+                'section_path' => $chunk->section_path,
+                'content' => $sourceText,
+                'source_text' => $sourceText,
+                'table_text' => $chunk->table_text,
+                'table_html' => $chunk->table_html,
+                'table_json' => $chunk->table_json,
+            ];
+        }
+
+        $payload = [
+            'document' => [
+                'id' => $document->id,
+                'title' => $document->title,
+                'original_filename' => $document->original_filename,
+                'content_type' => $document->content_type,
+                'document_type' => $document->document_type,
+                'summary' => $document->summary,
+            ],
+            'chunks' => $chunkPayloads,
+            'allowed_metadata_fields' => data_get($vocabularyMap, 'available_fields', []),
+            'approved_vocabulary' => data_get($vocabularyMap, 'terms', []),
+            'instructions' => [
+                'Return one metadata result per input chunk in the chunks array.',
+                'Each result must include the original chunk id as chunk_id.',
+                'Use existing approved values when they fit the chunk.',
+                'Return canonical names for approved values.',
+                'Topic is the short main theme for the chunk, and sub_topic is a narrower descriptive theme within that topic.',
+                'Topic and sub_topic are descriptive chunk metadata, not controlled vocabulary fields.',
+                'Fill topic and sub_topic for every chunk with meaningful content.',
+                'Leave topic and sub_topic empty only when the chunk has no meaningful content.',
+                'Use the same language as the chunk content for topic and sub_topic.',
+                'Service/product tag and theme tag are the controlled vocabulary fields.',
+                'Put genuinely new or unknown concepts in new_term_suggestions.',
+                'summary_for_retrieval must be short and concrete.',
+                'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
+                'confidence_score must be a number between 0 and 1.',
+            ],
+        ];
+
+        try {
+            return json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException('Unable to encode the batched knowledge chunk metadata prompt payload.', 0, $exception);
+        }
+    }
+
+    /**
+     * Purpose: Define the strict JSON schema for batched metadata generation responses.
+     * Inputs: None.
+     * Returns: The JSON schema array used for structured output.
+     * Side effects: None.
+     */
+    private function batchMetadataSchema(): array
+    {
+        $singleChunkSchema = $this->metadataSchema();
+        $chunkProperties = array_merge([
+            'chunk_id' => [
+                'type' => 'integer',
+            ],
+        ], (array) $singleChunkSchema['properties']);
+        $chunkRequired = array_merge(['chunk_id'], (array) $singleChunkSchema['required']);
+
+        return [
+            'type' => 'object',
+            'properties' => [
+                'chunks' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => $chunkProperties,
+                        'required' => $chunkRequired,
+                        'additionalProperties' => false,
+                    ],
+                ],
+            ],
+            'required' => [
+                'chunks',
+            ],
+            'additionalProperties' => false,
         ];
     }
 
