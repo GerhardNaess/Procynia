@@ -86,7 +86,10 @@ class RequirementKnowledgeMatcher
 
         $rankedCandidates = $knowledgeChunks
             ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts, &$tableCandidateDiagnostics): ?array {
-                $chunkContent = (string) data_get($chunk, 'content', '');
+                $chunkType = (string) data_get($chunk, 'chunk_type', '');
+                $chunkContent = $chunkType === 'table'
+                    ? (string) data_get($chunk, 'table_text', '')
+                    : (string) data_get($chunk, 'content', '');
                 $normalizedChunkContent = $this->normalizeText($chunkContent);
 
                 if ($normalizedChunkContent === '') {
