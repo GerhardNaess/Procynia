@@ -124,6 +124,318 @@ function formatFileTypeLabel(mimeType) {
     return mimeType;
 }
 
+
+/**
+ * Purpose: Escape pasted table cell text before rendering a local preview.
+ * Inputs: Raw cell text from clipboard data.
+ * Returns: HTML-safe text.
+ * Side effects: None.
+ */
+function escapeHtmlText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+
+const PASTED_TABLE_ALLOWED_TAGS = new Set([
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
+    'br', 'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'sub', 'sup',
+]);
+
+const PASTED_TABLE_ALLOWED_STYLES = new Set([
+    'text-align', 'vertical-align', 'font-weight', 'font-style', 'text-decoration',
+    'background', 'background-color', 'color', 'border', 'border-top', 'border-right',
+    'border-bottom', 'border-left', 'border-color', 'border-style', 'border-width',
+    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+    'white-space', 'width', 'height', 'border-collapse',
+]);
+
+/**
+ * Purpose: Preserve safe visual table formatting from Word or Excel paste HTML.
+ * Inputs: Raw inline style text from a pasted table node.
+ * Returns: A sanitized inline style value or an empty string.
+ * Side effects: None.
+ */
+function sanitizePastedTableStyle(styleValue) {
+    return String(styleValue ?? '')
+        .split(';')
+        .map((stylePart) => stylePart.trim())
+        .filter((stylePart) => stylePart.includes(':'))
+        .map((stylePart) => {
+            const separatorIndex = stylePart.indexOf(':');
+            const property = stylePart.slice(0, separatorIndex).trim().toLowerCase();
+            const value = stylePart.slice(separatorIndex + 1).trim();
+            const lowerValue = value.toLowerCase();
+
+            if (!PASTED_TABLE_ALLOWED_STYLES.has(property)) {
+                return null;
+            }
+
+            if (lowerValue.includes('url(') || lowerValue.includes('expression(') || lowerValue.includes('javascript:')) {
+                return null;
+            }
+
+            return `${property}: ${value}`;
+        })
+        .filter(Boolean)
+        .join('; ');
+}
+
+/**
+ * Purpose: Copy one pasted table node while preserving only safe table markup and basic formatting.
+ * Inputs: Source DOM node and the target document used to create sanitized nodes.
+ * Returns: A sanitized DOM node or fragment.
+ * Side effects: None.
+ */
+function sanitizePastedTableNode(sourceNode, targetDocument) {
+    if (sourceNode.nodeType === Node.TEXT_NODE) {
+        return targetDocument.createTextNode(sourceNode.textContent ?? '');
+    }
+
+    if (sourceNode.nodeType !== Node.ELEMENT_NODE) {
+        return targetDocument.createDocumentFragment();
+    }
+
+    const tagName = sourceNode.tagName.toLowerCase();
+
+    if (!PASTED_TABLE_ALLOWED_TAGS.has(tagName)) {
+        const fragment = targetDocument.createDocumentFragment();
+
+        Array.from(sourceNode.childNodes).forEach((childNode) => {
+            fragment.appendChild(sanitizePastedTableNode(childNode, targetDocument));
+        });
+
+        return fragment;
+    }
+
+    const sanitizedNode = targetDocument.createElement(tagName);
+
+    Array.from(sourceNode.attributes).forEach((attribute) => {
+        const attributeName = attribute.name.toLowerCase();
+        const attributeValue = String(attribute.value ?? '').trim();
+
+        if (attributeName === 'style') {
+            const style = sanitizePastedTableStyle(attributeValue);
+
+            if (style !== '') {
+                sanitizedNode.setAttribute('style', style);
+            }
+
+            return;
+        }
+
+        if ((attributeName === 'colspan' || attributeName === 'rowspan') && ['th', 'td'].includes(tagName)) {
+            const spanValue = Math.max(1, Math.min(attributeName === 'colspan' ? 20 : 100, Number.parseInt(attributeValue, 10) || 1));
+            sanitizedNode.setAttribute(attributeName, String(spanValue));
+            return;
+        }
+
+        if (attributeName === 'scope' && ['th', 'td'].includes(tagName) && /^(row|col|rowgroup|colgroup)$/.test(attributeValue)) {
+            sanitizedNode.setAttribute(attributeName, attributeValue);
+            return;
+        }
+
+        if (attributeName === 'align' && /^(left|center|right|justify)$/.test(attributeValue)) {
+            sanitizedNode.setAttribute(attributeName, attributeValue);
+            return;
+        }
+
+        if (attributeName === 'valign' && /^(top|middle|bottom|baseline)$/.test(attributeValue)) {
+            sanitizedNode.setAttribute(attributeName, attributeValue);
+            return;
+        }
+
+        if ((attributeName === 'width' || attributeName === 'height') && /^[0-9]+(\.[0-9]+)?(%|px)?$/.test(attributeValue)) {
+            sanitizedNode.setAttribute(attributeName, attributeValue);
+        }
+    });
+
+    Array.from(sourceNode.childNodes).forEach((childNode) => {
+        sanitizedNode.appendChild(sanitizePastedTableNode(childNode, targetDocument));
+    });
+
+    return sanitizedNode;
+}
+
+/**
+ * Purpose: Extract the pasted table HTML while preserving safe formatting from Word or Excel.
+ * Inputs: Raw clipboard HTML.
+ * Returns: Sanitized table HTML or an empty string when no table exists.
+ * Side effects: None.
+ */
+function sanitizePastedTableHtml(html) {
+    const rawHtml = String(html ?? '').trim();
+
+    if (rawHtml === '' || !rawHtml.toLowerCase().includes('<table')) {
+        return '';
+    }
+
+    const sourceDocument = new DOMParser().parseFromString(rawHtml, 'text/html');
+    const tableNode = sourceDocument.querySelector('table');
+
+    if (!tableNode) {
+        return '';
+    }
+
+    const targetDocument = document.implementation.createHTMLDocument('');
+    const container = targetDocument.createElement('div');
+    container.appendChild(sanitizePastedTableNode(tableNode, targetDocument));
+
+    return container.innerHTML;
+}
+
+/**
+ * Purpose: Normalize one pasted table cell into plain searchable text.
+ * Inputs: Raw text from a Word or Excel cell.
+ * Returns: A squished cell value.
+ * Side effects: None.
+ */
+function normalizePastedTableCellText(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Purpose: Extract table rows from HTML copied from Word, Excel, or a browser table.
+ * Inputs: Raw clipboard HTML.
+ * Returns: A two-dimensional row/cell array.
+ * Side effects: None.
+ */
+function extractPastedTableRowsFromHtml(html) {
+    const rawHtml = String(html ?? '').trim();
+
+    if (rawHtml === '' || !rawHtml.toLowerCase().includes('<table')) {
+        return [];
+    }
+
+    const documentNode = new DOMParser().parseFromString(rawHtml, 'text/html');
+    const tableNode = documentNode.querySelector('table');
+
+    if (!tableNode) {
+        return [];
+    }
+
+    return Array.from(tableNode.querySelectorAll('tr'))
+        .map((rowNode) => Array.from(rowNode.querySelectorAll('th,td'))
+            .map((cellNode) => normalizePastedTableCellText(cellNode.textContent))
+            .filter((cellText) => cellText !== ''))
+        .filter((row) => row.length > 0);
+}
+
+/**
+ * Purpose: Extract table rows from plain-text clipboard data when HTML table data is unavailable.
+ * Inputs: Raw clipboard plain text.
+ * Returns: A two-dimensional row/cell array.
+ * Side effects: None.
+ */
+function extractPastedTableRowsFromText(text) {
+    const rawText = String(text ?? '').trim();
+
+    if (rawText === '') {
+        return [];
+    }
+
+    return rawText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== '')
+        .map((line) => {
+            if (line.includes('\t')) {
+                return line.split('\t').map((cellText) => normalizePastedTableCellText(cellText));
+            }
+
+            return line.split(/\s{2,}/).map((cellText) => normalizePastedTableCellText(cellText));
+        })
+        .map((row) => row.filter((cellText) => cellText !== ''))
+        .filter((row) => row.length > 0);
+}
+
+/**
+ * Purpose: Convert pasted table rows into tab-separated text for storage and retrieval.
+ * Inputs: A two-dimensional row/cell array.
+ * Returns: Plain table text.
+ * Side effects: None.
+ */
+function pastedTableRowsToText(rows) {
+    return rows.map((row) => row.join('\t')).join('\n');
+}
+
+/**
+ * Purpose: Convert pasted table rows into markdown for legacy table fallback rendering.
+ * Inputs: A two-dimensional row/cell array.
+ * Returns: Markdown table text.
+ * Side effects: None.
+ */
+function pastedTableRowsToMarkdown(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return '';
+    }
+
+    const columnCount = Math.max(...rows.map((row) => row.length));
+    const markdownRows = [];
+
+    rows.forEach((row, rowIndex) => {
+        const cells = [];
+
+        for (let cellIndex = 0; cellIndex < columnCount; cellIndex += 1) {
+            cells.push(String(row[cellIndex] ?? '').replace(/\|/g, '\\|'));
+        }
+
+        markdownRows.push(`| ${cells.join(' | ')} |`);
+
+        if (rowIndex === 0) {
+            markdownRows.push(`| ${Array.from({ length: columnCount }, () => '---').join(' | ')} |`);
+        }
+    });
+
+    return markdownRows.join('\n');
+}
+
+/**
+ * Purpose: Convert pasted table rows into simple sanitized HTML for preview and backend parsing.
+ * Inputs: A two-dimensional row/cell array.
+ * Returns: Minimal table HTML.
+ * Side effects: None.
+ */
+function pastedTableRowsToHtml(rows) {
+    const htmlRows = rows.map((row, rowIndex) => {
+        const cellTagName = rowIndex === 0 ? 'th' : 'td';
+        const cells = row.map((cellText) => `<${cellTagName}>${escapeHtmlText(cellText)}</${cellTagName}>`).join('');
+
+        return `<tr>${cells}</tr>`;
+    });
+
+    return `<table><tbody>${htmlRows.join('')}</tbody></table>`;
+}
+
+/**
+ * Purpose: Build normalized table payload fields from a Word or Excel paste event.
+ * Inputs: A clipboard event from the table paste drop zone.
+ * Returns: Table text, markdown, and HTML values, or null when no table was detected.
+ * Side effects: None.
+ */
+function buildPastedTablePayloadFromClipboard(clipboardData) {
+    const html = clipboardData?.getData('text/html') ?? '';
+    const text = clipboardData?.getData('text/plain') ?? '';
+    const rows = extractPastedTableRowsFromHtml(html);
+    const fallbackRows = rows.length > 0 ? rows : extractPastedTableRowsFromText(text);
+    const sanitizedTableHtml = sanitizePastedTableHtml(html);
+
+    if (fallbackRows.length === 0) {
+        return null;
+    }
+
+    return {
+        table_text: pastedTableRowsToText(fallbackRows),
+        table_markdown: pastedTableRowsToMarkdown(fallbackRows),
+        table_html: sanitizedTableHtml !== '' ? sanitizedTableHtml : pastedTableRowsToHtml(fallbackRows),
+        content: pastedTableRowsToText(fallbackRows),
+    };
+}
+
 function normalizeChunkKeywordList(value) {
     if (!Array.isArray(value)) {
         return [];
@@ -662,6 +974,26 @@ export default function KnowledgeBaseShow({
         setIsChunkContentEditing(false);
     };
 
+    /**
+     * Purpose: Replace the current table editor state with a structured table pasted from Word or Excel.
+     * Inputs: Clipboard paste event from the table paste drop zone.
+     * Returns: None.
+     * Side effects: Updates only local form state until the user clicks Save.
+     */
+    const handleTablePaste = (event) => {
+        const pastedTablePayload = buildPastedTablePayloadFromClipboard(event.clipboardData);
+
+        if (!pastedTablePayload) {
+            return;
+        }
+
+        event.preventDefault();
+        chunkContentForm.setData({
+            ...chunkContentForm.data,
+            ...pastedTablePayload,
+        });
+    };
+
     const submitChunkContent = (event) => {
         event.preventDefault();
 
@@ -690,6 +1022,9 @@ export default function KnowledgeBaseShow({
             }
         } else if (selectedChunk.chunk_type === 'table') {
             payload.table_text = chunkContentForm.data.table_text;
+            payload.table_markdown = chunkContentForm.data.table_markdown;
+            payload.table_html = chunkContentForm.data.table_html;
+            payload.content = chunkContentForm.data.content || chunkContentForm.data.table_text;
         } else {
             payload.content = chunkContentForm.data.content;
         }
@@ -1403,20 +1738,60 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                 </div>
                                                             ) : selectedChunk.chunk_type === 'table' ? (
-                                                                <label className="block space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tabelltekst
-                                                                    </span>
-                                                                    <textarea
-                                                                        value={chunkContentForm.data.table_text}
-                                                                        onChange={(event) => chunkContentForm.setData('table_text', event.target.value)}
-                                                                        rows={10}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                    />
-                                                                    {chunkContentForm.errors.table_text ? (
-                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
+                                                                <div className="space-y-4">
+                                                                    <div
+                                                                        role="textbox"
+                                                                        tabIndex={0}
+                                                                        onPaste={handleTablePaste}
+                                                                        className="rounded-[18px] border border-dashed border-violet-300 bg-violet-50/70 px-4 py-6 text-sm leading-6 text-slate-700 outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                                                    >
+                                                                        <div className="font-semibold text-slate-950">
+                                                                            Lim inn tabell fra Word eller Excel her
+                                                                        </div>
+                                                                        <p className="mt-1 text-slate-600">
+                                                                            Kopier hele tabellen i Word eller Excel, klikk i dette feltet og lim inn. Procynia gjør den om til strukturert tabell før lagring.
+                                                                        </p>
+                                                                    </div>
+
+                                                                    {chunkContentForm.data.table_html ? (
+                                                                        <div className="overflow-x-auto rounded-[16px] border border-slate-200 bg-white p-3">
+                                                                            <div
+                                                                                className="prose prose-sm max-w-none prose-table:min-w-full prose-th:border prose-th:border-slate-200 prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-2"
+                                                                                dangerouslySetInnerHTML={{ __html: chunkContentForm.data.table_html }}
+                                                                            />
+                                                                        </div>
                                                                     ) : null}
-                                                                </label>
+
+                                                                    <label className="block space-y-2">
+                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                            Tabelltekst
+                                                                        </span>
+                                                                        <textarea
+                                                                            value={chunkContentForm.data.table_text}
+                                                                            onChange={(event) => {
+                                                                                const tableText = event.target.value;
+                                                                                chunkContentForm.setData({
+                                                                                    ...chunkContentForm.data,
+                                                                                    table_text: tableText,
+                                                                                    content: tableText,
+                                                                                    table_html: '',
+                                                                                    table_markdown: '',
+                                                                                });
+                                                                            }}
+                                                                            rows={10}
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        />
+                                                                        <p className="text-xs text-slate-500">
+                                                                            Tabeller som limes inn fra Word eller Excel vises strukturert over. Dette tekstfeltet brukes til søk og embedding.
+                                                                        </p>
+                                                                        {chunkContentForm.errors.table_text ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
+                                                                        ) : null}
+                                                                        {chunkContentForm.errors.table_html ? (
+                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.table_html}</p>
+                                                                        ) : null}
+                                                                    </label>
+                                                                </div>
                                                             ) : (
                                                                 <label className="block space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">

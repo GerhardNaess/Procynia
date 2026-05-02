@@ -816,45 +816,539 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
-     * Purpose: Persist manually edited table content for one table chunk.
+     * Purpose: Persist a manually pasted Word/Excel table for one table chunk as structured table data.
      * Inputs: The request, selected chunk, and validated payload.
      * Returns: True when the chunk was updated.
-     * Side effects: Updates only table text fields on the selected chunk and marks generated metadata stale.
+     * Side effects: Updates only table fields on the selected chunk and marks generated metadata stale.
      */
     private function applyManualTableChunkUpdate(Request $request, KnowledgeItemChunk $chunk, array $payload): bool
     {
-        $tableText = $request->has('table_text')
-            ? $payload['table_text']
-            : $this->cleanNullableString($chunk->table_text, 200000);
-        $content = $request->has('content')
-            ? $payload['content']
-            : ($tableText ?? $this->cleanNullableString($chunk->content, 200000));
+        $tableHtml = $request->has('table_html') ? $payload['table_html'] : null;
+        $tableText = $request->has('table_text') ? $payload['table_text'] : null;
+        $tableRows = $this->manualTableRowsFromHtml($tableHtml);
 
-        abort_unless($content !== null && $content !== '', 422, 'Table chunk content cannot be empty.');
+        if ($tableRows === []) {
+            $tableRows = $this->manualTableRowsFromText($tableText);
+        }
+
+        abort_unless($tableRows !== [], 422, 'Table chunk content cannot be empty.');
+
+        $normalizedTableText = $this->manualTableTextFromRows($tableRows);
+        $normalizedTableMarkdown = $this->manualTableMarkdownFromRows($tableRows);
+        $normalizedTableHtml = $this->manualSanitizedTableHtml($tableHtml)
+            ?? $this->manualTableHtmlFromRows($tableRows);
+        $tableJson = $this->manualTableJsonFromRows($tableRows, $normalizedTableText, $normalizedTableMarkdown, $normalizedTableHtml);
+        $content = $this->manualTableChunkContent($chunk, $normalizedTableText);
+
+        abort_unless($content !== '', 422, 'Table chunk content cannot be empty.');
 
         $tableWarnings = $this->normalizedTableWarnings($chunk->table_warnings);
 
-        if (! in_array('manual_table_content_edited', $tableWarnings, true)) {
-            $tableWarnings[] = 'manual_table_content_edited';
+        foreach (['manual_table_content_edited', 'manual_table_pasted'] as $warning) {
+            if (! in_array($warning, $tableWarnings, true)) {
+                $tableWarnings[] = $warning;
+            }
         }
 
         $tableMetadata = is_array($chunk->table_metadata) ? $chunk->table_metadata : [];
         $tableMetadata['manual_update_source'] = 'knowledge_base_chunk_editor';
+        $tableMetadata['manual_update_method'] = $request->has('table_html') ? 'pasted_html_table' : 'pasted_text_table';
         $tableMetadata['manual_updated_at'] = now()->toIso8601String();
+        $tableMetadata['row_count'] = count($tableRows);
+        $tableMetadata['column_count'] = max(array_map(static fn (array $row): int => count($row), $tableRows));
 
         $chunk->forceFill([
             'content' => $content,
-            'table_text' => $tableText ?? $content,
-            'table_markdown' => $request->has('table_markdown') ? $payload['table_markdown'] : $chunk->table_markdown,
-            'table_html' => $request->has('table_html') ? $payload['table_html'] : $chunk->table_html,
-            'table_json' => null,
-            'table_complexity' => 'manual_edit',
+            'table_text' => $normalizedTableText,
+            'table_markdown' => $normalizedTableMarkdown,
+            'table_html' => $normalizedTableHtml,
+            'table_json' => $tableJson,
+            'table_complexity' => 'manual_paste',
             'table_warnings' => $tableWarnings,
             'table_metadata' => $tableMetadata,
             'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
         ])->save();
 
         return true;
+    }
+
+
+    /**
+     * Purpose: Preserve safe visual formatting from manually pasted Word or Excel table HTML.
+     * Inputs: Raw pasted table HTML from the chunk editor.
+     * Returns: Sanitized table HTML, or null when no usable table HTML exists.
+     * Side effects: None.
+     */
+    private function manualSanitizedTableHtml(?string $tableHtml): ?string
+    {
+        $html = trim((string) ($tableHtml ?? ''));
+
+        if ($html === '' || stripos($html, '<table') === false) {
+            return null;
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+        $sourceDocument = new \DOMDocument('1.0', 'UTF-8');
+        $loaded = $sourceDocument->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previousLibxmlState);
+
+        if (! $loaded) {
+            return null;
+        }
+
+        $xpath = new \DOMXPath($sourceDocument);
+        $tableNode = $xpath->query('//table[1]')?->item(0);
+
+        if (! $tableNode instanceof \DOMElement) {
+            return null;
+        }
+
+        $targetDocument = new \DOMDocument('1.0', 'UTF-8');
+        $sanitizedTableNode = $this->manualSanitizedTableNode($tableNode, $targetDocument);
+
+        if (! $sanitizedTableNode instanceof \DOMNode) {
+            return null;
+        }
+
+        $targetDocument->appendChild($sanitizedTableNode);
+        $sanitizedHtml = trim((string) $targetDocument->saveHTML($targetDocument->documentElement));
+
+        return $sanitizedHtml !== '' ? $sanitizedHtml : null;
+    }
+
+    /**
+     * Purpose: Copy one pasted table DOM node while allowing only safe table markup and basic formatting.
+     * Inputs: Source DOM node and target DOM document.
+     * Returns: A sanitized node or document fragment.
+     * Side effects: None.
+     */
+    private function manualSanitizedTableNode(\DOMNode $sourceNode, \DOMDocument $targetDocument): ?\DOMNode
+    {
+        if ($sourceNode instanceof \DOMText) {
+            return $targetDocument->createTextNode($sourceNode->nodeValue ?? '');
+        }
+
+        if (! $sourceNode instanceof \DOMElement) {
+            return $targetDocument->createDocumentFragment();
+        }
+
+        $tagName = Str::lower($sourceNode->tagName);
+        $allowedTags = [
+            'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col',
+            'br', 'p', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 'sub', 'sup',
+        ];
+
+        if (! in_array($tagName, $allowedTags, true)) {
+            $fragment = $targetDocument->createDocumentFragment();
+
+            foreach ($sourceNode->childNodes as $childNode) {
+                $sanitizedChildNode = $this->manualSanitizedTableNode($childNode, $targetDocument);
+
+                if ($sanitizedChildNode instanceof \DOMNode) {
+                    $fragment->appendChild($sanitizedChildNode);
+                }
+            }
+
+            return $fragment;
+        }
+
+        $sanitizedNode = $targetDocument->createElement($tagName);
+
+        if ($sourceNode->hasAttributes()) {
+            foreach ($sourceNode->attributes as $attribute) {
+                $attributeName = Str::lower((string) $attribute->name);
+                $attributeValue = trim((string) $attribute->value);
+                $sanitizedAttributeValue = $this->manualSanitizedTableAttribute($tagName, $attributeName, $attributeValue);
+
+                if ($sanitizedAttributeValue !== null) {
+                    $sanitizedNode->setAttribute($attributeName, $sanitizedAttributeValue);
+                }
+            }
+        }
+
+        foreach ($sourceNode->childNodes as $childNode) {
+            $sanitizedChildNode = $this->manualSanitizedTableNode($childNode, $targetDocument);
+
+            if ($sanitizedChildNode instanceof \DOMNode) {
+                $sanitizedNode->appendChild($sanitizedChildNode);
+            }
+        }
+
+        return $sanitizedNode;
+    }
+
+    /**
+     * Purpose: Sanitize one allowed pasted table attribute before it is persisted and rendered.
+     * Inputs: The parent tag name, attribute name, and raw value.
+     * Returns: A safe attribute value or null when the attribute must be removed.
+     * Side effects: None.
+     */
+    private function manualSanitizedTableAttribute(string $tagName, string $attributeName, string $attributeValue): ?string
+    {
+        if ($attributeValue === '') {
+            return null;
+        }
+
+        if ($attributeName === 'style') {
+            return $this->manualSanitizedTableStyle($attributeValue);
+        }
+
+        if (($attributeName === 'colspan' || $attributeName === 'rowspan') && in_array($tagName, ['th', 'td'], true)) {
+            $maxValue = $attributeName === 'colspan' ? 20 : 100;
+            $spanValue = max(1, min($maxValue, (int) $attributeValue));
+
+            return (string) $spanValue;
+        }
+
+        if ($attributeName === 'scope' && in_array($tagName, ['th', 'td'], true) && preg_match('/^(row|col|rowgroup|colgroup)$/', $attributeValue)) {
+            return $attributeValue;
+        }
+
+        if ($attributeName === 'align' && preg_match('/^(left|center|right|justify)$/', $attributeValue)) {
+            return $attributeValue;
+        }
+
+        if ($attributeName === 'valign' && preg_match('/^(top|middle|bottom|baseline)$/', $attributeValue)) {
+            return $attributeValue;
+        }
+
+        if (($attributeName === 'width' || $attributeName === 'height') && preg_match('/^[0-9]+(\.[0-9]+)?(%|px)?$/', $attributeValue)) {
+            return $attributeValue;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Preserve only safe inline style declarations from pasted Word or Excel table HTML.
+     * Inputs: Raw inline CSS from one pasted table element.
+     * Returns: Sanitized inline CSS or null when no safe declarations remain.
+     * Side effects: None.
+     */
+    private function manualSanitizedTableStyle(string $style): ?string
+    {
+        $allowedProperties = [
+            'text-align', 'vertical-align', 'font-weight', 'font-style', 'text-decoration',
+            'background', 'background-color', 'color', 'border', 'border-top', 'border-right',
+            'border-bottom', 'border-left', 'border-color', 'border-style', 'border-width',
+            'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+            'white-space', 'width', 'height', 'border-collapse',
+        ];
+        $declarations = [];
+
+        foreach (explode(';', $style) as $stylePart) {
+            $stylePart = trim($stylePart);
+
+            if ($stylePart === '' || ! str_contains($stylePart, ':')) {
+                continue;
+            }
+
+            [$property, $value] = array_map('trim', explode(':', $stylePart, 2));
+            $property = Str::lower($property);
+            $lowerValue = Str::lower($value);
+
+            if (! in_array($property, $allowedProperties, true)) {
+                continue;
+            }
+
+            if (str_contains($lowerValue, 'url(') || str_contains($lowerValue, 'expression(') || str_contains($lowerValue, 'javascript:')) {
+                continue;
+            }
+
+            $declarations[] = $property.': '.$value;
+        }
+
+        return $declarations !== [] ? implode('; ', $declarations) : null;
+    }
+
+    /**
+     * Purpose: Extract normalized rows and cells from pasted Word or Excel table HTML.
+     * Inputs: Raw HTML copied from the user's clipboard.
+     * Returns: A row/cell matrix that preserves cell text and basic spans.
+     * Side effects: None.
+     *
+     * @return array<int, array<int, array{text: string, colspan: int, rowspan: int, tag: string}>>
+     */
+    private function manualTableRowsFromHtml(?string $tableHtml): array
+    {
+        $html = trim((string) ($tableHtml ?? ''));
+
+        if ($html === '' || stripos($html, '<table') === false) {
+            return [];
+        }
+
+        $previousLibxmlState = libxml_use_internal_errors(true);
+        $document = new \DOMDocument('1.0', 'UTF-8');
+        $loaded = $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previousLibxmlState);
+
+        if (! $loaded) {
+            return [];
+        }
+
+        $xpath = new \DOMXPath($document);
+        $rowNodes = $xpath->query('//table[1]//tr');
+
+        if (! $rowNodes instanceof \DOMNodeList || $rowNodes->length === 0) {
+            return [];
+        }
+
+        $rows = [];
+
+        foreach ($rowNodes as $rowNode) {
+            $cellNodes = $xpath->query('./th|./td', $rowNode);
+
+            if (! $cellNodes instanceof \DOMNodeList || $cellNodes->length === 0) {
+                continue;
+            }
+
+            $cells = [];
+
+            foreach ($cellNodes as $cellNode) {
+                $cellText = Str::squish((string) $cellNode->textContent);
+                $tagName = strtolower((string) $cellNode->nodeName);
+                $colspan = max(1, min(20, (int) ($cellNode->attributes?->getNamedItem('colspan')?->nodeValue ?? 1)));
+                $rowspan = max(1, min(100, (int) ($cellNode->attributes?->getNamedItem('rowspan')?->nodeValue ?? 1)));
+
+                $cells[] = [
+                    'text' => $cellText,
+                    'colspan' => $colspan,
+                    'rowspan' => $rowspan,
+                    'tag' => $tagName === 'th' ? 'th' : 'td',
+                ];
+            }
+
+            if ($this->manualTableRowHasContent($cells)) {
+                $rows[] = $cells;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Purpose: Extract normalized rows and cells from pasted plain-text table data.
+     * Inputs: Plain text copied from Word, Excel, or another table source.
+     * Returns: A row/cell matrix using tab-separated cells when present.
+     * Side effects: None.
+     *
+     * @return array<int, array<int, array{text: string, colspan: int, rowspan: int, tag: string}>>
+     */
+    private function manualTableRowsFromText(?string $tableText): array
+    {
+        $text = trim((string) ($tableText ?? ''));
+
+        if ($text === '') {
+            return [];
+        }
+
+        $rows = [];
+        $lines = preg_split('/\R/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        foreach ($lines as $lineIndex => $line) {
+            $line = trim((string) $line);
+
+            if ($line === '') {
+                continue;
+            }
+
+            $rawCells = str_contains($line, "	")
+                ? explode("	", $line)
+                : preg_split('/\s{2,}/u', $line, -1, PREG_SPLIT_NO_EMPTY);
+
+            if (! is_array($rawCells) || $rawCells === []) {
+                $rawCells = [$line];
+            }
+
+            $cells = array_map(
+                static fn (string $cellText): array => [
+                    'text' => Str::squish($cellText),
+                    'colspan' => 1,
+                    'rowspan' => 1,
+                    'tag' => $lineIndex === 0 ? 'th' : 'td',
+                ],
+                $rawCells,
+            );
+
+            if ($this->manualTableRowHasContent($cells)) {
+                $rows[] = $cells;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Purpose: Determine whether a manually pasted table row contains searchable cell content.
+     * Inputs: One normalized row of cells.
+     * Returns: True when at least one cell has text.
+     * Side effects: None.
+     */
+    private function manualTableRowHasContent(array $cells): bool
+    {
+        foreach ($cells as $cell) {
+            if (trim((string) ($cell['text'] ?? '')) !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Purpose: Convert normalized table rows into tab-separated searchable text.
+     * Inputs: Normalized table rows.
+     * Returns: Plain text for embedding and retrieval.
+     * Side effects: None.
+     */
+    private function manualTableTextFromRows(array $rows): string
+    {
+        return trim(implode("\n", array_map(
+            static fn (array $row): string => implode("	", array_map(
+                static fn (array $cell): string => Str::squish((string) ($cell['text'] ?? '')),
+                $row,
+            )),
+            $rows,
+        )));
+    }
+
+    /**
+     * Purpose: Convert normalized table rows into simple markdown for legacy fallback display.
+     * Inputs: Normalized table rows.
+     * Returns: Markdown table text.
+     * Side effects: None.
+     */
+    private function manualTableMarkdownFromRows(array $rows): string
+    {
+        if ($rows === []) {
+            return '';
+        }
+
+        $columnCount = max(array_map(static fn (array $row): int => count($row), $rows));
+        $markdownRows = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            $cellTexts = [];
+
+            for ($cellIndex = 0; $cellIndex < $columnCount; $cellIndex++) {
+                $cellTexts[] = str_replace('|', '\|', Str::squish((string) ($row[$cellIndex]['text'] ?? '')));
+            }
+
+            $markdownRows[] = '| '.implode(' | ', $cellTexts).' |';
+
+            if ($rowIndex === 0) {
+                $markdownRows[] = '| '.implode(' | ', array_fill(0, $columnCount, '---')).' |';
+            }
+        }
+
+        return implode("\n", $markdownRows);
+    }
+
+    /**
+     * Purpose: Convert normalized table rows into sanitized table HTML for preview rendering.
+     * Inputs: Normalized table rows.
+     * Returns: A safe, minimal HTML table.
+     * Side effects: None.
+     */
+    private function manualTableHtmlFromRows(array $rows): string
+    {
+        $htmlRows = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            $htmlCells = [];
+
+            foreach ($row as $cell) {
+                $isHeaderCell = $rowIndex === 0 || ($cell['tag'] ?? 'td') === 'th';
+                $tagName = $isHeaderCell ? 'th' : 'td';
+                $attributes = '';
+                $colspan = max(1, (int) ($cell['colspan'] ?? 1));
+                $rowspan = max(1, (int) ($cell['rowspan'] ?? 1));
+
+                if ($colspan > 1) {
+                    $attributes .= ' colspan="'.$colspan.'"';
+                }
+
+                if ($rowspan > 1) {
+                    $attributes .= ' rowspan="'.$rowspan.'"';
+                }
+
+                $htmlCells[] = '<'.$tagName.$attributes.'>'.htmlspecialchars(Str::squish((string) ($cell['text'] ?? '')), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8').'</'.$tagName.'>';
+            }
+
+            $htmlRows[] = '<tr>'.implode('', $htmlCells).'</tr>';
+        }
+
+        return '<table><tbody>'.implode('', $htmlRows).'</tbody></table>';
+    }
+
+    /**
+     * Purpose: Convert normalized table rows into the structured table payload used by the preview UI.
+     * Inputs: Normalized rows plus generated text, markdown, and HTML values.
+     * Returns: Structured table JSON.
+     * Side effects: None.
+     */
+    private function manualTableJsonFromRows(array $rows, string $tableText, string $tableMarkdown, string $tableHtml): array
+    {
+        $columnCount = max(array_map(static fn (array $row): int => count($row), $rows));
+
+        return [
+            'rows' => array_map(static function (array $row, int $rowIndex): array {
+                return [
+                    'row_index' => $rowIndex,
+                    'row_type' => $rowIndex === 0 ? 'header' : 'data',
+                    'cells' => array_map(static function (array $cell, int $cellIndex): array {
+                        return [
+                            'cell_index' => $cellIndex,
+                            'text' => Str::squish((string) ($cell['text'] ?? '')),
+                            'colspan' => max(1, (int) ($cell['colspan'] ?? 1)),
+                            'rowspan' => max(1, (int) ($cell['rowspan'] ?? 1)),
+                            'source_metadata' => [
+                                'manual_tag' => ($cell['tag'] ?? 'td') === 'th' ? 'th' : 'td',
+                            ],
+                        ];
+                    }, $row, array_keys($row)),
+                ];
+            }, $rows, array_keys($rows)),
+            'row_count' => count($rows),
+            'column_count' => $columnCount,
+            'title_row_index' => null,
+            'header_row_indices' => [0],
+            'table_text' => $tableText,
+            'table_markdown' => $tableMarkdown,
+            'table_html' => $tableHtml,
+            'complexity' => 'manual_paste',
+            'source_metadata' => [
+                'manual_update_source' => 'knowledge_base_chunk_editor',
+            ],
+        ];
+    }
+
+    /**
+     * Purpose: Build searchable chunk content from a manually pasted table.
+     * Inputs: The existing chunk and generated table text.
+     * Returns: Searchable content for embedding and retrieval.
+     * Side effects: None.
+     */
+    private function manualTableChunkContent(KnowledgeItemChunk $chunk, string $tableText): string
+    {
+        $contentParts = [];
+        $sectionPath = $this->cleanNullableString($chunk->section_path, 255)
+            ?? $this->cleanNullableString($chunk->heading_path, 255);
+        $title = $this->cleanNullableString($chunk->title, 255);
+
+        if ($sectionPath !== null) {
+            $contentParts[] = $sectionPath;
+        }
+
+        if ($title !== null && $title !== $sectionPath) {
+            $contentParts[] = $title;
+        }
+
+        $contentParts[] = $tableText;
+
+        return trim(implode("\n\n", $contentParts));
     }
 
     /**
