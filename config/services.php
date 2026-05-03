@@ -38,7 +38,10 @@ return [
             'OPENAI_REQUIREMENT_GROUNDING_JUDGE_MODEL',
             env('OPENAI_REQUIREMENT_EXTRACTION_MODEL', env('OPENAI_MODEL', 'gpt-4.1-mini')),
         ),
-        'requirement_answer_model' => env('OPENAI_REQUIREMENT_ANSWER_MODEL', 'gpt-5'),
+        'requirement_answer_model' => env(
+            'OPENAI_REQUIREMENT_ANSWER_MODEL',
+            'gpt-5',
+        ),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
     ],
 

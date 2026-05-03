@@ -751,6 +751,211 @@ function normalizeClipboardImageUrl(imageUrl) {
     }
 }
 
+function formatClipboardInlineText(value) {
+    return escapeClipboardHtml(value)
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/&lt;(\/?)strong&gt;/gi, '<$1strong>')
+        .replace(/&lt;(\/?)b&gt;/gi, '<$1b>')
+        .replace(/&lt;(\/?)em&gt;/gi, '<$1em>')
+        .replace(/&lt;(\/?)i&gt;/gi, '<$1i>')
+        .replace(/&lt;(\/?)u&gt;/gi, '<$1u>');
+}
+
+function markdownTableRowToClipboardCells(line) {
+    const normalizedLine = String(line ?? '').trim();
+
+    if (!normalizedLine.includes('|')) {
+        return [];
+    }
+
+    const trimmedLine = normalizedLine.replace(/^\|/, '').replace(/\|$/, '');
+
+    return trimmedLine
+        .split('|')
+        .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparatorLine(line) {
+    const cells = markdownTableRowToClipboardCells(line);
+
+    return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function isMarkdownTableDataLine(line) {
+    const cells = markdownTableRowToClipboardCells(line);
+
+    return cells.length > 1 && cells.some((cell) => cell !== '');
+}
+
+function markdownTableToClipboardHtml(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return '';
+    }
+
+    const headerCells = rows[0];
+    const bodyRows = rows.slice(1);
+
+    return `<table><thead><tr>${headerCells
+        .map((cellText) => `<th>${formatClipboardInlineText(cellText)}</th>`)
+        .join('')}</tr></thead><tbody>${bodyRows
+        .map((cells) => `<tr>${cells
+            .map((cellText) => `<td>${formatClipboardInlineText(cellText)}</td>`)
+            .join('')}</tr>`)
+        .join('')}</tbody></table>`;
+}
+
+function markdownTableToClipboardText(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return '';
+    }
+
+    return rows
+        .map((cells) => cells.map((cell) => String(cell ?? '').trim()).join('\t'))
+        .join('\n')
+        .trim();
+}
+
+function answerDraftTextToClipboardPayload(answerDraftText) {
+    const lines = normalizeAnswerDraftText(answerDraftText).split('\n');
+    const htmlBlocks = [];
+    const textBlocks = [];
+    let paragraphLines = [];
+    let activeListType = null;
+    let activeListItems = [];
+
+    const flushParagraph = () => {
+        if (paragraphLines.length === 0) {
+            return;
+        }
+
+        htmlBlocks.push(`<p>${paragraphLines.map((line) => formatClipboardInlineText(line)).join('<br />')}</p>`);
+        textBlocks.push(paragraphLines.join('\n'));
+        paragraphLines = [];
+    };
+
+    const flushList = () => {
+        if (activeListType === null || activeListItems.length === 0) {
+            activeListType = null;
+            activeListItems = [];
+            return;
+        }
+
+        htmlBlocks.push(`<${activeListType}>${activeListItems
+            .map((itemText) => `<li>${formatClipboardInlineText(itemText)}</li>`)
+            .join('')}</${activeListType}>`);
+        textBlocks.push(activeListItems.map((itemText, index) => {
+            if (activeListType === 'ol') {
+                return `${index + 1}. ${itemText}`;
+            }
+
+            return `• ${itemText}`;
+        }).join('\n'));
+        activeListType = null;
+        activeListItems = [];
+    };
+
+    let lineIndex = 0;
+
+    while (lineIndex < lines.length) {
+        const rawLine = lines[lineIndex] ?? '';
+        const trimmedLine = rawLine.trim();
+
+        if (trimmedLine === '') {
+            flushParagraph();
+            flushList();
+            lineIndex += 1;
+            continue;
+        }
+
+        if (
+            isMarkdownTableDataLine(trimmedLine)
+            && lineIndex + 1 < lines.length
+            && isMarkdownTableSeparatorLine(lines[lineIndex + 1])
+        ) {
+            flushParagraph();
+            flushList();
+
+            const tableRows = [markdownTableRowToClipboardCells(trimmedLine)];
+            lineIndex += 2;
+
+            while (lineIndex < lines.length && isMarkdownTableDataLine(lines[lineIndex])) {
+                tableRows.push(markdownTableRowToClipboardCells(lines[lineIndex]));
+                lineIndex += 1;
+            }
+
+            const tableHtml = markdownTableToClipboardHtml(tableRows);
+            const tableText = markdownTableToClipboardText(tableRows);
+
+            if (tableHtml !== '') {
+                htmlBlocks.push(tableHtml);
+            }
+
+            if (tableText !== '') {
+                textBlocks.push(tableText);
+            }
+
+            continue;
+        }
+
+        const headingMatch = trimmedLine.match(/^(#{1,3})\s+(.+)$/);
+
+        if (headingMatch) {
+            flushParagraph();
+            flushList();
+
+            const headingLevel = Math.min(3, headingMatch[1].length);
+            const headingText = headingMatch[2].trim();
+
+            htmlBlocks.push(`<h${headingLevel}>${formatClipboardInlineText(headingText)}</h${headingLevel}>`);
+            textBlocks.push(headingText);
+            lineIndex += 1;
+            continue;
+        }
+
+        const bulletMatch = trimmedLine.match(/^[-*•]\s+(.+)$/);
+
+        if (bulletMatch) {
+            flushParagraph();
+
+            if (activeListType !== 'ul') {
+                flushList();
+                activeListType = 'ul';
+            }
+
+            activeListItems.push(bulletMatch[1].trim());
+            lineIndex += 1;
+            continue;
+        }
+
+        const numberedMatch = trimmedLine.match(/^\d+[.)]\s+(.+)$/);
+
+        if (numberedMatch) {
+            flushParagraph();
+
+            if (activeListType !== 'ol') {
+                flushList();
+                activeListType = 'ol';
+            }
+
+            activeListItems.push(numberedMatch[1].trim());
+            lineIndex += 1;
+            continue;
+        }
+
+        flushList();
+        paragraphLines.push(trimmedLine);
+        lineIndex += 1;
+    }
+
+    flushParagraph();
+    flushList();
+
+    return {
+        html: htmlBlocks.join('\n').trim(),
+        text: textBlocks.join('\n\n').trim(),
+    };
+}
+
 function tableJsonToClipboardRows(tableJson) {
     const rows = Array.isArray(tableJson?.rows) ? tableJson.rows : [];
 
@@ -758,7 +963,9 @@ function tableJsonToClipboardRows(tableJson) {
         .map((row) => {
             const cells = Array.isArray(row?.cells) ? row.cells : [];
 
-            return cells.map((cell) => String(cell?.text ?? '').trim());
+            return cells
+                .filter((cell) => String(cell?.source_metadata?.v_merge ?? '').trim() !== 'continue')
+                .map((cell) => String(cell?.text ?? '').trim());
         })
         .filter((cells) => cells.some((cellText) => cellText !== ''));
 }
@@ -772,7 +979,7 @@ function tableJsonToClipboardHtml(tableJson) {
 
     return `<table><tbody>${rows
         .map((cells) => `<tr>${cells
-            .map((cellText) => `<td>${escapeClipboardHtml(cellText)}</td>`)
+            .map((cellText) => `<td>${formatClipboardInlineText(cellText)}</td>`)
             .join('')}</tr>`)
         .join('')}</tbody></table>`;
 }
@@ -792,6 +999,89 @@ function resolveClipboardImageUrl(source) {
         || source?.url
         || '',
     );
+}
+
+function resolveClipboardSourceTitle(source, fallbackTitle) {
+    return String(
+        source?.title
+        || source?.heading_path
+        || source?.section_title
+        || source?.document_title
+        || source?.knowledge_item_title
+        || fallbackTitle
+        || '',
+    ).replace(/\s+/g, ' ').trim();
+}
+
+function sourceTableToClipboardPayload(source, index) {
+    const fallbackTitle = `Tabell ${index + 1}`;
+    const sourceTitle = resolveClipboardSourceTitle(source, fallbackTitle);
+    const tableHtml = String(source?.table_html ?? '').trim();
+    const tableText = String(source?.table_text ?? '').trim();
+    const tableJsonHtml = tableHtml === '' ? tableJsonToClipboardHtml(source?.table_json) : '';
+    const tableJsonText = tableText === '' ? tableJsonToClipboardText(source?.table_json) : '';
+    const htmlBlocks = [];
+    const textBlocks = [];
+
+    if (sourceTitle !== '') {
+        htmlBlocks.push(`<p><strong>${formatClipboardInlineText(sourceTitle)}</strong></p>`);
+        textBlocks.push(sourceTitle);
+    }
+
+    if (tableHtml !== '') {
+        htmlBlocks.push(tableHtml);
+    } else if (tableJsonHtml !== '') {
+        htmlBlocks.push(tableJsonHtml);
+    } else if (tableText !== '') {
+        htmlBlocks.push(`<pre>${escapeClipboardHtml(tableText)}</pre>`);
+    }
+
+    if (tableText !== '') {
+        textBlocks.push(tableText);
+    } else if (tableJsonText !== '') {
+        textBlocks.push(tableJsonText);
+    }
+
+    return {
+        html: htmlBlocks.join('\n').trim(),
+        text: textBlocks.join('\n').trim(),
+    };
+}
+
+function sourceImageToClipboardPayload(source, index) {
+    const imageUrl = resolveClipboardImageUrl(source);
+
+    if (imageUrl === '') {
+        return {
+            html: '',
+            text: '',
+        };
+    }
+
+    const fallbackTitle = `Grafikk ${index + 1}`;
+    const sourceTitle = resolveClipboardSourceTitle(source, fallbackTitle);
+    const imageAltText = String(source?.image_alt_text ?? '').replace(/\s+/g, ' ').trim();
+    const imageCaption = String(source?.image_caption ?? '').replace(/\s+/g, ' ').trim();
+    const htmlBlocks = [];
+    const textBlocks = [];
+
+    if (sourceTitle !== '') {
+        htmlBlocks.push(`<p><strong>${formatClipboardInlineText(sourceTitle)}</strong></p>`);
+        textBlocks.push(sourceTitle);
+    }
+
+    htmlBlocks.push(`<p><img src="${escapeClipboardHtml(imageUrl)}" alt="${escapeClipboardHtml(imageAltText)}" style="max-width: 100%; height: auto;" /></p>`);
+    textBlocks.push(imageUrl);
+
+    if (imageCaption !== '') {
+        htmlBlocks.push(`<p><em>${formatClipboardInlineText(imageCaption)}</em></p>`);
+        textBlocks.push(imageCaption);
+    }
+
+    return {
+        html: htmlBlocks.join('\n').trim(),
+        text: textBlocks.join('\n').trim(),
+    };
 }
 
 function copyHtmlSelectionToClipboard(html) {
@@ -846,9 +1136,7 @@ async function writeHtmlClipboardPayload(html, text) {
         return false;
     }
 
-    if (copyHtmlSelectionToClipboard(html)) {
-        return true;
-    }
+    const fullHtml = `<!doctype html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
 
     if (
         typeof window !== 'undefined'
@@ -858,7 +1146,7 @@ async function writeHtmlClipboardPayload(html, text) {
         try {
             await navigator.clipboard.write([
                 new window.ClipboardItem({
-                    'text/html': new Blob([html], { type: 'text/html' }),
+                    'text/html': new Blob([fullHtml], { type: 'text/html' }),
                     'text/plain': new Blob([text], { type: 'text/plain' }),
                 }),
             ]);
@@ -866,6 +1154,10 @@ async function writeHtmlClipboardPayload(html, text) {
             return true;
         } catch (error) {
         }
+    }
+
+    if (copyHtmlSelectionToClipboard(html)) {
+        return true;
     }
 
     if (text !== '' && navigator.clipboard?.writeText) {
@@ -966,53 +1258,44 @@ function buildAnswerDraftClipboardPayload(answerDraftText, retrievalSources) {
         : [];
     const tableSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
     const imageSources = normalizedSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
-
-    if (tableSources.length === 0 && imageSources.length === 0) {
-        const normalizedText = normalizeAnswerDraftText(answerDraftText).trim();
-
-        return {
-            html: '',
-            text: normalizedText,
-        };
-    }
-
+    const answerPayload = answerDraftTextToClipboardPayload(answerDraftText);
     const htmlBlocks = [];
     const textBlocks = [];
 
-    tableSources.forEach((source) => {
-        const tableHtml = String(source?.table_html ?? '').trim();
-        const tableText = String(source?.table_text ?? '').trim();
-        const tableJsonHtml = tableHtml === '' ? tableJsonToClipboardHtml(source?.table_json) : '';
-        const tableJsonText = tableText === '' ? tableJsonToClipboardText(source?.table_json) : '';
+    if (answerPayload.html !== '') {
+        htmlBlocks.push(answerPayload.html);
+    }
 
-        if (tableHtml !== '') {
-            htmlBlocks.push(tableHtml);
-        } else if (tableJsonHtml !== '') {
-            htmlBlocks.push(tableJsonHtml);
-        } else if (tableText !== '') {
-            htmlBlocks.push(`<pre>${escapeClipboardHtml(tableText)}</pre>`);
+    if (answerPayload.text !== '') {
+        textBlocks.push(answerPayload.text);
+    }
+
+    tableSources.forEach((source, index) => {
+        const tablePayload = sourceTableToClipboardPayload(source, index);
+
+        if (tablePayload.html !== '') {
+            htmlBlocks.push(tablePayload.html);
         }
 
-        if (tableText !== '') {
-            textBlocks.push(tableText);
-        } else if (tableJsonText !== '') {
-            textBlocks.push(tableJsonText);
+        if (tablePayload.text !== '') {
+            textBlocks.push(tablePayload.text);
         }
     });
 
-    imageSources.forEach((source) => {
-        const imageUrl = resolveClipboardImageUrl(source);
+    imageSources.forEach((source, index) => {
+        const imagePayload = sourceImageToClipboardPayload(source, index);
 
-        if (imageUrl === '') {
-            return;
+        if (imagePayload.html !== '') {
+            htmlBlocks.push(imagePayload.html);
         }
 
-        htmlBlocks.push(`<img src="${escapeClipboardHtml(imageUrl)}" style="max-width: 100%; height: auto;" />`);
-        textBlocks.push(imageUrl);
+        if (imagePayload.text !== '') {
+            textBlocks.push(imagePayload.text);
+        }
     });
 
     return {
-        html: htmlBlocks.join('\n'),
+        html: htmlBlocks.join('\n').trim(),
         text: textBlocks.join('\n\n').trim(),
     };
 }
@@ -1252,6 +1535,7 @@ export default function AiShow({
     const [answerDraftSavingRequirementId, setAnswerDraftSavingRequirementId] = useState(null);
     const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
+    const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
     const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
     const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
@@ -1469,6 +1753,10 @@ export default function AiShow({
 
     useEffect(() => {
         setAnswerDraftCopyStatus(null);
+    }, [activeRequirementKey]);
+
+    useEffect(() => {
+        setAnswerDraftReaderExpanded(false);
     }, [activeRequirementKey]);
 
     const handleDocumentChange = (event) => {
@@ -2916,6 +3204,16 @@ export default function AiShow({
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
                                             Svarutkast for krav {activeRequirementDisplayIdentifier}
                                         </div>
+
+                                        {activeRequirementHasDraft && !activeRequirementBlockedMissingKnowledge ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
+                                                className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                                            >
+                                                {answerDraftReaderExpanded ? 'Normal leseplate' : 'Større leseplate'}
+                                            </button>
+                                        ) : null}
                                     </div>
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
@@ -3088,7 +3386,7 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className="h-[130px] w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
                                                     placeholder="Svarutkastet vises her og kan redigeres direkte."
                                                 />
                                             </div>
@@ -3239,7 +3537,7 @@ export default function AiShow({
                                                         }
                                                         className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {answerDraftCopyStatus === 'copied' ? 'Kopiert' : 'Kopier innhold'}
+                                                        {answerDraftCopyStatus === 'copied' ? 'Kopiert' : 'Kopier til Word'}
                                                     </button>
 
                                                     <button

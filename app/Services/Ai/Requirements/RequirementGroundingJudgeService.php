@@ -69,6 +69,7 @@ class RequirementGroundingJudgeService
         array $knowledgeGrounding,
     ): array {
         $model = $this->openAiModel();
+
         $payload = [
             'model' => $model,
             'input' => [
@@ -123,15 +124,19 @@ class RequirementGroundingJudgeService
             'You are not writing a tender answer.',
             'The requirement text is the customer request, not supplier evidence.',
             'Only retrieved knowledge context, chunk metadata, section context and approved document context are evidence.',
-            'Decide whether the retrieved knowledge gives enough documented material to generate a safe answer draft.',
+            'Classify source coverage so the product can separate answer generation from quality assurance.',
             'Break specific requirements into concrete requirement points.',
             'For broad descriptive requirements, judge whether the knowledge context gives enough concrete material to describe the requested service, capability, process or approach safely.',
+            'Use status supported when the substantive requirement is directly documented well enough for a fully source-grounded answer.',
+            'Use status partial when some relevant material exists, but the answer needs professional completion beyond directly documented wording.',
+            'Use status unsupported only when the knowledge context lacks requirement-specific support or contains only generic vocabulary overlap.',
+            'Set can_generate_answer to true for supported and partial coverage, and false for unsupported coverage.',
             'A requested answer length, word count, formatting instruction or instruction to describe something is not itself a missing knowledge point.',
             'Do not require every possible detail for a broad descriptive answer when the customer only asks for an overall description.',
             'If the requirement asks for specific named systems, tools, standards, roles, commitments, integrations or obligations, those specific elements must be documented before they are directly supported.',
             'Separate directly supported points, related but insufficient points, and unsupported points.',
             'Directly supported means the knowledge documents the same capability, process, service, obligation or practice the requirement asks for, including clear technical equivalents when the practical meaning is the same.',
-            'Related but insufficient means the knowledge is in the same primary subject, capability or delivery area as the requirement, but does not prove the concrete requirement point.',
+            'Related but insufficient means the knowledge is in the same primary subject, capability or delivery area as the requirement, but does not directly document the concrete requirement point.',
             'Nearby operational background alone is not related but insufficient when it only shares generic words with the requirement.',
             'Unsupported means the knowledge does not document the requirement point or only shares broad generic concepts with it.',
             'Do not require exact word matching when the same practical capability is documented with equivalent technical wording.',
@@ -143,7 +148,7 @@ class RequirementGroundingJudgeService
             'Do not treat requirement wording as supplier evidence.',
             'Return directly supported points as objects with requirement_point, support_summary, evidence_reference and evidence_quote.',
             'evidence_reference and evidence_quote may be null when the support is clear from the supplied context.',
-            'Return recommended_document_title and suggested_filename based on the requirement-specific subject matter when documentation is missing.',
+            'Return recommended_document_title and suggested_filename based on the requirement-specific subject matter when documentation is missing or only partially documented.',
             'Do not return generic document names such as Dokumentasjon for udekket krav when the requirement text contains usable context.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
@@ -162,16 +167,20 @@ class RequirementGroundingJudgeService
         array $knowledgeGrounding,
     ): string {
         $payload = [
-            'instruction' => 'Evaluate whether the knowledge context is sufficient to generate a safe answer draft.',
+            'instruction' => 'Classify source coverage for answer generation and separate quality assurance.',
             'support_classification' => [
                 'directly_supported' => 'The knowledge explicitly documents the same capability, process, system, obligation or practice the requirement asks for, including clearly equivalent technical wording when the practical meaning is the same.',
                 'directly_supported_service_description' => 'When the requirement asks to describe a service or solution, a document that describes that same service or solution and its operating model counts as direct support.',
-                'related_but_insufficient' => 'The knowledge shares the same primary subject, capability or delivery area as the requirement, but it does not prove the supplier satisfies the concrete requirement.',
+                'related_but_insufficient' => 'The knowledge shares the same primary subject, capability or delivery area as the requirement, but it does not directly document the concrete requirement point.',
                 'unsupported' => 'The knowledge does not document the requirement point, or it only shares broad generic vocabulary with the requirement.',
             ],
             'judging_rules' => [
                 'Break the requirement into concrete points.',
                 'Evaluate each point against the retrieved knowledge context and supporting metadata.',
+                'Use supported when the retrieved knowledge directly documents the substantive requirement well enough for a fully source-grounded answer.',
+                'Use partial when the retrieved knowledge gives relevant material but professional completion is needed to produce a complete answer.',
+                'Use unsupported only when the retrieved knowledge lacks requirement-specific support or only shares generic vocabulary.',
+                'Set can_generate_answer to true for supported and partial, and false for unsupported.',
                 'For broad descriptive requirements, do not treat answer length or requested word count as a missing knowledge point.',
                 'For broad descriptive requirements, decide whether the retrieved knowledge gives enough concrete material for a safe bounded description.',
                 'Do not require exact word matching when equivalent technical wording clearly documents the same practical capability.',
@@ -183,7 +192,7 @@ class RequirementGroundingJudgeService
                 'Use requirement_relevance_profile.significant_requirement_terms as anchors for deciding whether nearby evidence is actually related.',
                 'If evidence is from a different subject area, put the requirement-specific gap in unsupported_points instead of related_but_insufficient_points.',
                 'Do not treat the requirement text as supplier evidence.',
-                'When documentation is missing, recommended_document_title and suggested_filename must use the requirement-specific subject matter instead of a generic fallback name.',
+                'When documentation is missing or only partially documented, recommended_document_title and suggested_filename must use the requirement-specific subject matter instead of a generic fallback name.',
             ],
             'requirement_relevance_profile' => $this->requirementRelevanceProfileFromRequirementText((string) $requirement->requirement_text),
             'requirement' => [
@@ -217,7 +226,7 @@ class RequirementGroundingJudgeService
             ],
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
                 ? 'No relevant knowledge chunks were retrieved. Mark the grounding unsupported unless the available document context clearly proves the requirement.'
-                : 'Use only the supplied knowledge context. Requirement wording is not evidence.',
+                : 'Use only the supplied knowledge context to classify documentation coverage. Requirement wording is not evidence.',
             'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
         ];
 
@@ -630,28 +639,30 @@ class RequirementGroundingJudgeService
             );
         }
 
-        if ($status === 'supported' && $canGenerateAnswer !== true) {
+        if ($status === 'supported' && ($relatedButInsufficientPoints !== [] || $unsupportedPoints !== [])) {
             $status = 'partial';
-            $canGenerateAnswer = false;
         }
 
         if ($status === 'supported' && $directlySupportedPoints === []) {
-            $status = 'partial';
-            $canGenerateAnswer = false;
+            $status = $relatedButInsufficientPoints !== [] ? 'partial' : 'unsupported';
         }
 
-        if ($status !== 'supported') {
-            $canGenerateAnswer = false;
+        if ($status === 'partial' && $directlySupportedPoints === [] && $relatedButInsufficientPoints === []) {
+            $status = 'unsupported';
         }
 
-        if ($status === 'unsupported' && $directlySupportedPoints !== []) {
+        if ($status === 'unsupported' && ($directlySupportedPoints !== [] || $relatedButInsufficientPoints !== [])) {
             $status = 'partial';
         }
+
+        $canGenerateAnswer = in_array($status, ['supported', 'partial'], true);
 
         if ($missingKnowledgeSummary === null) {
-            $missingKnowledgeSummary = $status === 'supported'
-                ? 'Kunnskapsgrunnlaget dokumenterer kravet godt nok til å lage et trygt svarutkast.'
-                : 'Kunnskapsgrunnlaget dokumenterer ikke kravet godt nok til å lage et trygt svarutkast.';
+            $missingKnowledgeSummary = match ($status) {
+                'supported' => 'Kunnskapsgrunnlaget dokumenterer kravet godt nok til å lage et kildebasert svarutkast.',
+                'partial' => 'Kunnskapsgrunnlaget dokumenterer deler av kravet. Procynia kan lage et komplett svarutkast, men kvalitetssikringen må vise hvilke deler som er faglig utfylt eller mangler konkret referanse.',
+                default => 'Kunnskapsgrunnlaget dokumenterer ikke kravet godt nok til å lage et vanlig kildebasert svarutkast.',
+            };
         }
 
         if ($reasoningSummary === null) {
@@ -669,7 +680,7 @@ class RequirementGroundingJudgeService
 
         return [
             'status' => $status,
-            'can_generate_answer' => $status === 'supported' && $canGenerateAnswer === true,
+            'can_generate_answer' => $canGenerateAnswer,
             'directly_supported_points' => $directlySupportedPoints,
             'related_but_insufficient_points' => $this->normalizeStringList($relatedButInsufficientPoints),
             'unsupported_points' => $this->normalizeStringList($unsupportedPoints),
@@ -1617,6 +1628,17 @@ class RequirementGroundingJudgeService
     }
 
     /**
+     * Purpose: Determine whether the selected OpenAI model accepts the temperature parameter.
+     * Inputs: The resolved model name.
+     * Returns: True when temperature can be sent in the Responses API payload.
+     * Side effects: None.
+     */
+    private function openAiModelSupportsTemperature(string $model): bool
+    {
+        return ! Str::startsWith(Str::lower(trim($model)), 'gpt-5');
+    }
+
+    /**
      * Purpose: Return the configured OpenAI model for grounding judge requests.
      * Inputs: None.
      * Returns: The configured model name.
@@ -1635,10 +1657,7 @@ class RequirementGroundingJudgeService
 
                     $model = trim((string) $config->get(
                         'services.openai.requirement_grounding_judge_model',
-                        $config->get(
-                            'services.openai.requirement_extraction_model',
-                            $config->get('services.openai.model', $model),
-                        ),
+                        $config->get('services.openai.requirement_extraction_model', $config->get('services.openai.model', $model)),
                     ));
                 }
             }
@@ -1651,19 +1670,6 @@ class RequirementGroundingJudgeService
         }
 
         return $model;
-    }
-
-    /**
-     * Purpose: Detect whether the selected OpenAI model accepts the temperature request parameter.
-     * Inputs: The configured OpenAI model name.
-     * Returns: True when temperature can be sent safely, otherwise false.
-     * Side effects: None.
-     */
-    private function openAiModelSupportsTemperature(string $model): bool
-    {
-        $normalizedModel = Str::lower(trim($model));
-
-        return ! Str::startsWith($normalizedModel, 'gpt-5');
     }
 
     /**

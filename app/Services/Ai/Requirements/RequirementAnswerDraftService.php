@@ -369,6 +369,7 @@ class RequirementAnswerDraftService
     ): array
     {
         $model = $this->openAiModel();
+
         $payload = [
             'model' => $model,
             'input' => [
@@ -430,32 +431,39 @@ class RequirementAnswerDraftService
     {
         return implode("\n", [
             'You draft one editable supplier answer for one tender requirement.',
+            'Write sober, professional Norwegian contract-near tender text that can be used directly in a formal offer response.',
+            'The answer must be complete, precise, confidence-building and directly relevant to the requirement, with the ambition of achieving the highest evaluation score.',
             'Use the requirement text only to understand the customer request; it is not evidence.',
-            'Use only the provided evidence, selected answer basis items, retrieved knowledge chunks, and grounding judge as factual basis.',
+            'Use provided evidence, selected answer basis items, retrieved knowledge chunks, and the grounding judge to distinguish documented claims from professional completion.',
             'Use the selected answer basis items as the primary supplier-owned source material when drafting the answer.',
-            'Use the retrieved knowledge chunks as the primary grounded source material for factual content.',
-            'If a capability, system, tool, process, certification, role, or commitment is not documented in the supplied knowledge context, do not claim it.',
-            'Use directly_supported_points from the grounding judge as the supported coverage map for the answer, not as the full wording limit.',
-            'Each directly_supported_points item identifies a requirement area that has enough grounded support to answer.',
+            'Use the retrieved knowledge chunks as the primary grounded source material for documented factual content.',
+            'For partial coverage, still write a complete and strong answer draft by combining documented material with careful professional delivery language, but do not present unsupported supplier-specific claims as documented facts.',
+            'If a named capability, system, tool, certification, integration, role, metric, legal obligation, or binding commitment is not documented in the supplied knowledge context, do not claim that specific fact.',
+            'Generic professional descriptions of how Leverandøren will organize, manage, quality-assure and follow up the delivery may be used to make the answer complete when coverage is partial.',
+            'Use directly_supported_points from the grounding judge as the supported coverage map for documented content, not as the full wording limit.',
+            'Each directly_supported_points item identifies a requirement area that has grounded support.',
             'Within directly supported requirement areas, use the supplied evidence rows, selected answer basis items, retrieved knowledge chunks, evidence references, and evidence quotes as detailed factual material.',
-            'Treat related_but_insufficient_points as context only, not as supplier evidence.',
-            'Do not use unsupported_points or related_but_insufficient_points as supplier claims.',
+            'Use related_but_insufficient_points only as a signal for areas that need careful professional completion, not as documented supplier evidence.',
+            'Do not use unsupported_points as supplier claims.',
             'Apply the case-specific AI instructions from the user payload for tone, terminology, style, and capitalization.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
             'Write all string values in Norwegian.',
-            'Do not write an assessment, critique, or coverage commentary.',
-            'Do not invent facts that are not supported by the evidence.',
+            'Do not write an assessment, critique, source analysis, coverage commentary, warnings, or missing-documentation notes inside the answer draft.',
+            'Do not invent supplier-specific facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
-            'Do not copy requirement wording into the answer unless it is also grounded in the supplied knowledge context.',
-            'If the provided sources are thin, keep the answer factual and conservative, but do not confuse conservative with short.',
-            'Conservative means factually restrained and evidence-backed; it does not mean compressed, generic, or artificially brief.',
+            'Do not copy requirement wording into the answer unless it improves a direct and relevant response.',
+            'If the provided sources are thin but the grounding judge allows generation, keep supplier-specific claims restrained while still writing a complete, useful and professionally formulated answer.',
+            'Conservative means factually restrained; it does not mean compressed, generic, evasive, fragmented, or artificially brief.',
             'Respect explicit answer length requirements supplied in answer_length_guidance.',
             'If answer_length_guidance.target_word_count is present, the requested word count is a binding drafting requirement, not an optional preference.',
             'If answer_length_guidance.max_word_count is present, do not exceed that word count.',
             'Do not silently produce a very short answer when the customer explicitly requests a long answer.',
             'For long target-length answers, the service may ask for one section at a time. In that case, write only the requested section and meet the local section target.',
-            'Keep the answer practical, complete, and suitable for direct editing by the user.',
+            'Always write Kunden, Kundens, Leverandøren and Leverandørens with capital first letter and definite form when referring to the parties.',
+            'Do not write kunde, kundens, leverandør or leverandørens with lower-case first letter when referring to the parties.',
+            'The answer must explain how Leverandøren solves the requirement, what Leverandøren does, how the work is carried out, what principles apply, and how Kunden receives confidence in the delivery.',
+            'Keep the answer practical, complete, coherent, and suitable for direct editing by the user.',
         ]);
     }
 
@@ -489,23 +497,23 @@ class RequirementAnswerDraftService
                 'approval_status' => $requirement->approval_status,
                 'review_status' => $requirement->review_status,
             ],
-            'answer_style' => 'Write a practical answer a supplier could submit after editing. Do not assess compliance.',
+            'answer_style' => 'Write sober, professional and contract-near Norwegian tender text. The answer must be complete, precise, directly relevant to the requirement and suitable for formal submission after editing. Do not assess compliance and do not include quality-assurance notes inside the answer text.',
             'answer_length_guidance' => $answerLengthGuidance,
             'answer_length_strategy' => $this->answerLengthStrategy($answerLengthGuidance),
             'answer_basis_strategy' => $answerBasisRows->isEmpty()
-                ? 'No answer basis items are selected. Use evidence and retrieved knowledge only; use the requirement text only to understand the customer request.'
-                : 'Use the selected answer basis items as the primary supplier-owned source material. Keep the wording grounded in those items.',
+                ? 'No answer basis items are selected. Use evidence, retrieved knowledge and careful professional completion only; use the requirement text only to understand the customer request.'
+                : 'Use the selected answer basis items as the primary supplier-owned source material. Keep documented claims grounded in those items.',
             'answer_basis_items' => $this->promptAnswerBasisRows($answerBasisRows),
             'evidence_strategy' => $evidenceRows->isEmpty()
-                ? 'No evidence rows are available. Use selected answer basis items and retrieved knowledge chunks only; do not treat requirement wording as evidence.'
+                ? 'No evidence rows are available. Use selected answer basis items, retrieved knowledge chunks and careful professional completion only; do not treat requirement wording as evidence.'
                 : 'Use the supplied evidence only. Selected evidence has priority over suggested evidence.',
             'evidence' => $this->promptEvidenceRows($evidenceRows),
             'retrieved_knowledge_strategy' => $retrievedKnowledgeRows->isEmpty()
-                ? 'No relevant knowledge chunks were retrieved. Do not invent supplier claims.'
-                : 'Use the retrieved knowledge chunks and grounding judge as the factual foundation. Requirement wording is not evidence.',
+                ? 'No relevant knowledge chunks were retrieved. Do not invent supplier-specific claims.'
+                : 'Use the retrieved knowledge chunks and grounding judge as the factual foundation for documented claims. Requirement wording is not evidence.',
             'retrieved_knowledge_chunks' => $this->promptRetrievedKnowledgeRows($retrievedKnowledgeRows),
             'grounding_judge_strategy' => is_array($groundingJudge)
-                ? 'The grounding judge is an internal guardrail. Use directly_supported_points as the supported coverage map for the answer, not as the full wording limit. Use evidence rows, selected answer basis items, retrieved knowledge chunks, evidence quotes, and evidence references to write detailed factual paragraphs within those supported areas. Treat related_but_insufficient_points as context only. Do not use related_but_insufficient_points or unsupported_points as supplier claims.'
+                ? 'The grounding judge is an internal quality-assurance layer, not a writing limit. Use directly_supported_points as the documented coverage map. Use related_but_insufficient_points as areas where careful professional completion may be needed. Do not use unsupported_points as supplier claims. Do not include the quality-assurance assessment in the answer text.'
                 : 'No grounding judge payload was supplied.',
             'grounding_judge' => $this->promptGroundingJudge($groundingJudge),
         ];
@@ -518,7 +526,7 @@ class RequirementAnswerDraftService
                 'Start with the exact section title as a Markdown heading.',
                 'Do not write the other planned sections.',
                 'Do not write a complete answer in this section call.',
-                'Do not include coverage commentary or source analysis.',
+                'Do not include coverage commentary, source analysis, warnings or missing-documentation notes.',
                 'Use connected paragraphs rather than a compressed bullet list.',
             ]);
         }
@@ -526,7 +534,7 @@ class RequirementAnswerDraftService
         if ($isLengthRetry) {
             $payload['answer_length_retry_instruction'] = implode(' ', [
                 'The previous draft was shorter than the explicit word-count target.',
-                'Expand supported details without adding unsupported claims.',
+                'Expand supported details and careful professional delivery language without adding unsupported supplier-specific claims.',
                 'Use the supplied evidence, answer basis items, retrieved knowledge chunks, evidence quotes, and directly supported points more fully.',
             ]);
         }
@@ -1304,6 +1312,17 @@ class RequirementAnswerDraftService
     }
 
     /**
+     * Purpose: Determine whether the selected OpenAI model accepts the temperature parameter.
+     * Inputs: The resolved model name.
+     * Returns: True when temperature can be sent in the Responses API payload.
+     * Side effects: None.
+     */
+    private function openAiModelSupportsTemperature(string $model): bool
+    {
+        return ! Str::startsWith(Str::lower(trim($model)), 'gpt-5');
+    }
+
+    /**
      * Purpose: Return the configured OpenAI model for answer draft requests.
      * Inputs: None.
      * Returns: The configured model name.
@@ -1321,18 +1340,5 @@ class RequirementAnswerDraftService
         }
 
         return $model;
-    }
-
-    /**
-     * Purpose: Detect whether the selected OpenAI model accepts the temperature request parameter.
-     * Inputs: The configured OpenAI model name.
-     * Returns: True when temperature can be sent safely, otherwise false.
-     * Side effects: None.
-     */
-    private function openAiModelSupportsTemperature(string $model): bool
-    {
-        $normalizedModel = Str::lower(trim($model));
-
-        return ! Str::startsWith($normalizedModel, 'gpt-5');
     }
 }

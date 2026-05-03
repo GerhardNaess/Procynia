@@ -24,7 +24,7 @@ class OpenAiClient
         ]);
     }
 
-    public function post(string $endpoint, array $payload, int $timeoutSeconds = 60): Response
+    public function post(string $endpoint, array $payload, int $timeoutSeconds = 180): Response
     {
         $response = $this->pendingRequest($timeoutSeconds)->post(ltrim($endpoint, '/'), $payload);
 
@@ -87,7 +87,7 @@ class OpenAiClient
         );
     }
 
-    private function pendingRequest(int $timeoutSeconds = 60): PendingRequest
+    private function pendingRequest(int $timeoutSeconds = 180): PendingRequest
     {
         $apiKey = trim((string) config('services.openai.api_key'));
         $baseUrl = trim((string) config('services.openai.base_url', 'https://api.openai.com/v1'));
