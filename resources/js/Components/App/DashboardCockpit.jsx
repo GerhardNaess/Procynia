@@ -642,7 +642,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
         <div className="space-y-5">
             <section className="space-y-1.5">
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                    Oversikt
+                    Bid Status
                 </h1>
                 <p className="max-w-4xl text-[15px] leading-7 text-slate-500">
                     Porteføljeoversikten gir deg et samlet cockpit-blikk på hvor sakene ligger i bid-prosessen akkurat nå.

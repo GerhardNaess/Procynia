@@ -68,8 +68,9 @@ class RequirementGroundingJudgeService
         Collection $retrievedKnowledgeRows,
         array $knowledgeGrounding,
     ): array {
-        return [
-            'model' => $this->openAiModel(),
+        $model = $this->openAiModel();
+        $payload = [
+            'model' => $model,
             'input' => [
                 [
                     'role' => 'developer',
@@ -99,9 +100,14 @@ class RequirementGroundingJudgeService
                     'schema' => $this->judgeSchema(),
                 ],
             ],
-            'temperature' => self::TEMPERATURE,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
+
+        if ($this->openAiModelSupportsTemperature($model)) {
+            $payload['temperature'] = self::TEMPERATURE;
+        }
+
+        return $payload;
     }
 
     /**
@@ -1628,8 +1634,11 @@ class RequirementGroundingJudgeService
                     $config = $container->make('config');
 
                     $model = trim((string) $config->get(
-                        'services.openai.requirement_answer_model',
-                        $config->get('services.openai.model', $model),
+                        'services.openai.requirement_grounding_judge_model',
+                        $config->get(
+                            'services.openai.requirement_extraction_model',
+                            $config->get('services.openai.model', $model),
+                        ),
                     ));
                 }
             }
@@ -1642,6 +1651,19 @@ class RequirementGroundingJudgeService
         }
 
         return $model;
+    }
+
+    /**
+     * Purpose: Detect whether the selected OpenAI model accepts the temperature request parameter.
+     * Inputs: The configured OpenAI model name.
+     * Returns: True when temperature can be sent safely, otherwise false.
+     * Side effects: None.
+     */
+    private function openAiModelSupportsTemperature(string $model): bool
+    {
+        $normalizedModel = Str::lower(trim($model));
+
+        return ! Str::startsWith($normalizedModel, 'gpt-5');
     }
 
     /**

@@ -368,8 +368,9 @@ class RequirementAnswerDraftService
         ?array $longFormSection = null,
     ): array
     {
-        return [
-            'model' => $this->openAiModel(),
+        $model = $this->openAiModel();
+        $payload = [
+            'model' => $model,
             'input' => [
                 [
                     'role' => 'developer',
@@ -409,9 +410,14 @@ class RequirementAnswerDraftService
                     'schema' => $this->answerDraftSchema(),
                 ],
             ],
-            'temperature' => self::TEMPERATURE,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
+
+        if ($this->openAiModelSupportsTemperature($model)) {
+            $payload['temperature'] = self::TEMPERATURE;
+        }
+
+        return $payload;
     }
 
     /**
@@ -1315,5 +1321,18 @@ class RequirementAnswerDraftService
         }
 
         return $model;
+    }
+
+    /**
+     * Purpose: Detect whether the selected OpenAI model accepts the temperature request parameter.
+     * Inputs: The configured OpenAI model name.
+     * Returns: True when temperature can be sent safely, otherwise false.
+     * Side effects: None.
+     */
+    private function openAiModelSupportsTemperature(string $model): bool
+    {
+        $normalizedModel = Str::lower(trim($model));
+
+        return ! Str::startsWith($normalizedModel, 'gpt-5');
     }
 }

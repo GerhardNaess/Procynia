@@ -60,7 +60,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                 Saker
                             </div>
                             <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                Saker klare for oversikt
+                                Saker klare for arbeid med AI-assistanse
                             </h2>
                             <p className="max-w-3xl text-sm leading-6 text-slate-500">
                                 Disse sakene har nok struktur til at arbeid kan skje videre i saken.
