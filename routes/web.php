@@ -44,6 +44,7 @@ Route::prefix('app')
         Route::redirect('/', '/app/notices?mode=saved');
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
+        Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::prefix('/ai/knowledge-vocabulary')->name('ai.knowledge-vocabulary.')->group(function (): void {

@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Models\Department;
 use App\Models\User;
 use App\Support\CustomerContext;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -20,7 +22,7 @@ class CustomerEnvironmentController extends Controller
     public function index(Request $request): Response
     {
         [$actor, $customerId] = $this->customerBidManagerContext($request);
-        $activeTab = in_array($request->query('tab'), ['departments', 'users'], true)
+        $activeTab = in_array($request->query('tab'), ['departments', 'users', 'permissions'], true)
             ? (string) $request->query('tab')
             : 'departments';
 
@@ -63,13 +65,94 @@ class CustomerEnvironmentController extends Controller
             'managedDepartmentOptions' => $this->managedDepartmentOptions($actor, $customerId),
             'departmentFilterOptions' => $this->departmentFilterOptions($actor, $customerId),
             'canCreateDepartments' => $this->customerContext->canCreateCustomerDepartments($actor),
+            'permissionSettings' => $actor->isSystemOwner()
+                ? $this->permissionSettingsPayload($actor, $customerId)
+                : null,
             'routes' => [
                 'index' => route('app.customer-environment.index'),
                 'departments_store' => route('app.departments.store'),
                 'users_store' => route('app.users.store'),
                 'users_create' => route('app.users.create'),
+                'permissions_update' => route('app.customer-environment.permissions.update'),
             ],
         ]);
+    }
+
+    public function updatePermissions(Request $request): RedirectResponse
+    {
+        /** @var User|null $actor */
+        $actor = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($actor);
+
+        abort_unless(
+            $actor instanceof User
+            && $actor->isSystemOwner()
+            && $customerId !== null,
+            403,
+        );
+
+        $allowedRoles = ['system_owner', 'bid_manager', 'contributor', 'all'];
+        $allowedPermissions = [
+            Customer::PERMISSION_CREATE_DEPARTMENTS,
+            Customer::PERMISSION_CREATE_USERS,
+            Customer::PERMISSION_VIEW_ALL_CASES,
+        ];
+
+        $validated = $request->validate([
+            'permission' => ['required', 'string', 'in:' . implode(',', $allowedPermissions)],
+            'roles' => ['required', 'array'],
+            'roles.*' => ['string', 'in:' . implode(',', $allowedRoles)],
+        ]);
+
+        $customer = Customer::findOrFail($customerId);
+        $settings = $customer->resolvedPermissionSettings();
+
+        $roles = array_values(array_unique(
+            array_merge(['system_owner'], $validated['roles'])
+        ));
+
+        $settings[$validated['permission']] = $roles;
+        $customer->permission_settings = $settings;
+        $customer->save();
+
+        return redirect()->route('app.customer-environment.index', ['tab' => 'permissions']);
+    }
+
+    private function permissionSettingsPayload(User $actor, int $customerId): array
+    {
+        $customer = Customer::find($customerId);
+        $settings = $customer ? $customer->resolvedPermissionSettings() : Customer::DEFAULT_PERMISSION_SETTINGS;
+
+        $roleColumns = [
+            ['value' => 'system_owner', 'label' => 'System Owner', 'locked' => true],
+            ['value' => 'bid_manager', 'label' => 'Bid Manager', 'locked' => false],
+            ['value' => 'contributor', 'label' => 'Contributor', 'locked' => false],
+            ['value' => 'all', 'label' => 'Alle', 'locked' => false],
+        ];
+
+        $permissionRows = [
+            [
+                'key' => Customer::PERMISSION_CREATE_DEPARTMENTS,
+                'label' => 'Opprette avdelinger',
+                'roles' => $settings[Customer::PERMISSION_CREATE_DEPARTMENTS],
+            ],
+            [
+                'key' => Customer::PERMISSION_CREATE_USERS,
+                'label' => 'Opprette brukere',
+                'roles' => $settings[Customer::PERMISSION_CREATE_USERS],
+            ],
+            [
+                'key' => Customer::PERMISSION_VIEW_ALL_CASES,
+                'label' => 'Se alle saker',
+                'roles' => $settings[Customer::PERMISSION_VIEW_ALL_CASES],
+            ],
+        ];
+
+        return [
+            'role_columns' => $roleColumns,
+            'permission_rows' => $permissionRows,
+            'update_url' => route('app.customer-environment.permissions.update'),
+        ];
     }
 
     private function customerBidManagerContext(Request $request): array

@@ -6,7 +6,7 @@ export default function DashboardIndex({ cockpit = null }) {
     const { locale = 'nb-NO' } = usePage().props;
 
     return (
-        <CustomerAppLayout title="Oversikt" showPageTitle={false}>
+        <CustomerAppLayout title="Bid Status" showPageTitle={false}>
             <DashboardCockpit cockpit={cockpit} locale={locale} />
         </CustomerAppLayout>
     );

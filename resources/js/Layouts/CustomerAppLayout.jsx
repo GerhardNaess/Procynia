@@ -131,7 +131,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     })();
 
     const mainNavigation = [
-        { key: 'overview', label: 'Oversikt', href: '/app/dashboard' },
+        { key: 'overview', label: 'Bid Status', href: '/app/dashboard' },
         { key: 'procurements', label: 'Kunngjøringer', href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },

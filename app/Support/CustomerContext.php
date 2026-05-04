@@ -91,9 +91,17 @@ class CustomerContext
     {
         $user ??= $this->currentUser();
 
-        return $user instanceof User
-            && $this->canManageCustomerUsers($user)
-            && $user->isSystemOwner();
+        if (! $user instanceof User || ! $this->canManageCustomerUsers($user)) {
+            return false;
+        }
+
+        $customer = $user->customer;
+
+        if ($customer === null) {
+            return false;
+        }
+
+        return $customer->roleHasPermission($user->resolvedBidRole(), Customer::PERMISSION_CREATE_DEPARTMENTS);
     }
 
     public function customerDepartmentIds(?User $user = null): array
@@ -121,6 +129,10 @@ class CustomerContext
         }
 
         if ($user->hasCompanyWideCustomerManagementScope()) {
+            return $this->customerDepartmentIds($user);
+        }
+
+        if ($user->resolvedBidRole() === User::BID_ROLE_CONTRIBUTOR) {
             return $this->customerDepartmentIds($user);
         }
 

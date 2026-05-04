@@ -124,14 +124,11 @@ These are known issues/features being actively worked on (from internal backlog)
 - Nr. 5: Fjerne noen elementer fra Oversikt-siden
 - Nr. 7: Fasefilter og status-badge på saker i oversikten
 - Nr. 10: Bedre håndtering av selskapsvokabular — hvordan ekstraheres og brukes for `topic`/`sub_topic` på chunks
-- Nr. 15: Endre teksten "Oversikt" til "Bid Status" på Dashboard-siden
-- Nr. 16: Kommersiell eier må kunne legge til bidragsytere i bid-prosjekter (nå kun Bid Manager via Kundemiljø-fanen)
-- Nr. 17: Systemeier skal kunne delegere hvem som kan opprette avdelinger og brukere (rollebasert tilgangstabell)
-- Nr. 18: Systemeier skal kunne delegere hvem som har innsyn i case (se alle vs. kun egne)
+- Nr. 17/18 (ferdig): Tilganger-fane i Kundemiljø — System Owner kan konfigurere hvilke bid-roller som kan opprette avdelinger, opprette brukere, og se alle saker. Lagres som `permission_settings` JSON på `customers`-tabellen. Sjekkes via `Customer::roleHasPermission()`, `User::canManageCustomerUsers()`, `User::canViewAllCasesViaSettings()`, og `CustomerContext::canCreateCustomerDepartments()`.
 - Nr. 24: Ikke definert ennå
 
 **Ferdig:**
-Nr. 3, 6, 8, 9, 11, 12a, 12b, 13, 14, 19, 20, 21, 22, 23
+Nr. 3, 6, 7, 8, 9, 11, 12a, 12b, 13, 14, 15, 19, 20, 21, 22, 23, 17/18
 
 ## Project docs
 

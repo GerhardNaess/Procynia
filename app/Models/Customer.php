@@ -8,19 +8,51 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Customer extends Model
 {
+    public const PERMISSION_CREATE_DEPARTMENTS = 'create_departments';
+
+    public const PERMISSION_CREATE_USERS = 'create_users';
+
+    public const PERMISSION_VIEW_ALL_CASES = 'view_all_cases';
+
+    public const DEFAULT_PERMISSION_SETTINGS = [
+        self::PERMISSION_CREATE_DEPARTMENTS => ['system_owner'],
+        self::PERMISSION_CREATE_USERS => ['system_owner', 'bid_manager', 'contributor'],
+        self::PERMISSION_VIEW_ALL_CASES => ['system_owner', 'bid_manager', 'contributor'],
+    ];
+
     protected $fillable = [
         'name',
         'slug',
         'nationality_id',
         'language_id',
         'is_active',
+        'permission_settings',
     ];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'permission_settings' => 'array',
         ];
+    }
+
+    public function resolvedPermissionSettings(): array
+    {
+        $stored = $this->permission_settings ?? [];
+
+        return array_merge(self::DEFAULT_PERMISSION_SETTINGS, $stored);
+    }
+
+    public function roleHasPermission(string $bidRole, string $permission): bool
+    {
+        if ($bidRole === 'system_owner') {
+            return true;
+        }
+
+        $roles = $this->resolvedPermissionSettings()[$permission] ?? [];
+
+        return in_array($bidRole, $roles, true) || in_array('all', $roles, true);
     }
 
     public function users(): HasMany

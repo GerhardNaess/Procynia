@@ -97,28 +97,22 @@ class SavedNoticeAccessService
 
         $query->where('customer_id', $user->customer_id);
 
-        if ($user->isSystemOwner()) {
-            return $query;
-        }
+        if ($user->canViewAllCasesViaSettings()) {
+            if ($user->isSystemOwner()) {
+                return $query;
+            }
 
-        if ($user->isBidManager() && $user->hasCompanyWideBidManagementScope()) {
-            return $query;
-        }
+            if ($user->isBidManager() && $user->hasCompanyWideBidManagementScope()) {
+                return $query;
+            }
 
-        if (
-            ! $requireManage
-            && in_array($user->resolvedBidRole(), [User::BID_ROLE_CONTRIBUTOR, User::BID_ROLE_VIEWER], true)
-            && $user->hasCompanyPrimaryAffiliation()
-        ) {
-            return $query;
-        }
+            if (! $requireManage && $user->hasCompanyPrimaryAffiliation()) {
+                return $query;
+            }
 
-        if (
-            $requireManage
-            && $user->resolvedBidRole() === User::BID_ROLE_CONTRIBUTOR
-            && $user->hasCompanyPrimaryAffiliation()
-        ) {
-            return $query;
+            if ($requireManage && $user->resolvedBidRole() !== User::BID_ROLE_VIEWER && $user->hasCompanyPrimaryAffiliation()) {
+                return $query;
+            }
         }
 
         return $query->where(function (Builder $builder) use ($user, $requireManage): void {
@@ -149,6 +143,10 @@ class SavedNoticeAccessService
                     $builder->orWhereIn('organizational_department_id', $managedDepartmentIds);
                 }
 
+                return;
+            }
+
+            if (! $user->canViewAllCasesViaSettings()) {
                 return;
             }
 

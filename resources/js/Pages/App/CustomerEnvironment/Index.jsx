@@ -51,10 +51,11 @@ function EnvironmentModal({ isOpen, title, description, onClose, children, foote
     );
 }
 
-function SectionTabs({ activeTab, onChange }) {
+function SectionTabs({ activeTab, onChange, showPermissions = false }) {
     const tabs = [
         { key: 'departments', label: 'Avdelinger' },
         { key: 'users', label: 'Brukere' },
+        ...(showPermissions ? [{ key: 'permissions', label: 'Tilganger' }] : []),
     ];
 
     return (
@@ -188,6 +189,7 @@ export default function CustomerEnvironmentIndex({
     managedDepartmentOptions,
     departmentFilterOptions,
     canCreateDepartments,
+    permissionSettings = null,
     routes,
 }) {
     const { locale = 'nb-NO' } = usePage().props;
@@ -198,9 +200,11 @@ export default function CustomerEnvironmentIndex({
     const [userDepartmentFilter, setUserDepartmentFilter] = useState('');
     const [userStatusFilter, setUserStatusFilter] = useState('all');
 
-    const currentTab = activeTab === 'users' ? 'users' : 'departments';
+    const validTabs = ['departments', 'users', ...(permissionSettings ? ['permissions'] : [])];
+    const currentTab = validTabs.includes(activeTab) ? activeTab : 'departments';
     const departmentsTabUrl = `${routes.index}?tab=departments`;
     const usersTabUrl = `${routes.index}?tab=users`;
+    const [permissionSaving, setPermissionSaving] = useState(null);
     const userCreateHref = `${routes.users_create}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
     const userEditHref = (user) => `${user.edit_url}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
 
@@ -343,7 +347,7 @@ export default function CustomerEnvironmentIndex({
                     </p>
                 </section>
 
-                <SectionTabs activeTab={currentTab} onChange={changeTab} />
+                <SectionTabs activeTab={currentTab} onChange={changeTab} showPermissions={permissionSettings !== null} />
 
                 {currentTab === 'departments' ? (
                     <section className="space-y-5">
@@ -733,6 +737,75 @@ export default function CustomerEnvironmentIndex({
                         </div>
                     </form>
                 </EnvironmentModal>
+
+                {currentTab === 'permissions' && permissionSettings ? (
+                    <section className="space-y-5">
+                        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <h2 className="text-lg font-semibold text-slate-950">Tilganger</h2>
+                            <p className="mt-1 text-sm leading-6 text-slate-500">
+                                Styr hvilke roller som har tilgang til å utføre spesifikke handlinger i kundemiljøet. System Owner har alltid full tilgang og kan ikke endres.
+                            </p>
+
+                            <div className="mt-6 overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-slate-200">
+                                            <th className="pb-3 pr-6 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                Handling
+                                            </th>
+                                            {permissionSettings.role_columns.map((col) => (
+                                                <th key={col.value} className="pb-3 px-4 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    {col.label}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {permissionSettings.permission_rows.map((row) => (
+                                            <tr key={row.key}>
+                                                <td className="py-4 pr-6 font-medium text-slate-900">
+                                                    {row.label}
+                                                </td>
+                                                {permissionSettings.role_columns.map((col) => {
+                                                    const checked = row.roles.includes(col.value);
+                                                    const locked = col.locked;
+
+                                                    return (
+                                                        <td key={col.value} className="px-4 py-4 text-center">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={checked}
+                                                                disabled={locked || permissionSaving === row.key}
+                                                                onChange={() => {
+                                                                    const nextRoles = checked
+                                                                        ? row.roles.filter((r) => r !== col.value)
+                                                                        : [...row.roles, col.value];
+
+                                                                    setPermissionSaving(row.key);
+
+                                                                    router.patch(
+                                                                        permissionSettings.update_url,
+                                                                        { permission: row.key, roles: nextRoles },
+                                                                        {
+                                                                            preserveScroll: true,
+                                                                            preserveState: false,
+                                                                            onFinish: () => setPermissionSaving(null),
+                                                                        },
+                                                                    );
+                                                                }}
+                                                                className="h-4 w-4 cursor-pointer rounded border-slate-300 text-violet-600 focus:ring-violet-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            />
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
 
             </div>
         </CustomerAppLayout>

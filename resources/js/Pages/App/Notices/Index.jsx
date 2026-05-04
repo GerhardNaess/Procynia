@@ -1751,6 +1751,11 @@ export default function NoticeIndex({
                                                                 <BuildingIcon className="h-4 w-4 text-slate-400" />
                                                                 {notice.buyer_name || 'Oppdragsgiver ikke angitt'}
                                                             </span>
+                                                            {isSavedOrHistoryMode && notice.bid_status ? (
+                                                                <span className={classNames('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset', bidStatusBadgeClassName(notice.bid_status))}>
+                                                                    {notice.bid_status_label ?? notice.bid_status}
+                                                                </span>
+                                                            ) : null}
                                                         </div>
 
                                                         {isHistoryMode && notice.history_type_label ? (

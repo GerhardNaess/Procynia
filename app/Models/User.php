@@ -235,12 +235,33 @@ class User extends Authenticatable implements FilamentUser
             return false;
         }
 
+        $customer = $this->customer;
+
+        if ($customer === null) {
+            return false;
+        }
+
+        if (! $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_CREATE_USERS)) {
+            return false;
+        }
+
         if ($this->isSystemOwner()) {
             return true;
         }
 
-        return $this->isBidManager()
-            && $this->resolvedBidManagerScope() !== null;
+        return $this->resolvedBidManagerScope() !== null || $this->resolvedBidRole() === self::BID_ROLE_CONTRIBUTOR;
+    }
+
+    public function canViewAllCasesViaSettings(): bool
+    {
+        if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {
+            return false;
+        }
+
+        $customer = $this->customer;
+
+        return $customer !== null
+            && $customer->roleHasPermission($this->resolvedBidRole(), Customer::PERMISSION_VIEW_ALL_CASES);
     }
 
     public static function customerRoleForBidRole(string $bidRole): string
