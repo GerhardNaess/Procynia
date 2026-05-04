@@ -145,6 +145,7 @@ class RequirementAnswerDraftService
                 $answerLengthGuidance,
                 false,
             ),
+            300,
         );
 
         try {
@@ -172,6 +173,7 @@ class RequirementAnswerDraftService
                         $answerLengthGuidance,
                         true,
                     ),
+                    300,
                 );
 
                 return $this->validateAnswerDraftPayload(

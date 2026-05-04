@@ -108,9 +108,12 @@ class MetadataRetrievalPlanService
                     'schema' => $this->planSchema($metadataMap),
                 ],
             ],
-            'temperature' => self::TEMPERATURE,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
+
+        if ($this->openAiModelSupportsTemperature($payload['model'])) {
+            $payload['temperature'] = self::TEMPERATURE;
+        }
     }
 
     /**
@@ -389,13 +392,18 @@ class MetadataRetrievalPlanService
      */
     private function openAiModel(): string
     {
-        $model = trim((string) config('services.openai.requirement_answer_model', config('services.openai.model', 'gpt-4.1-mini')));
+        $model = trim((string) config('services.openai.model', 'gpt-4.1-mini'));
 
         if ($model === '') {
             throw new RuntimeException('OpenAI metadata retrieval model is not configured.');
         }
 
         return $model;
+    }
+
+    private function openAiModelSupportsTemperature(string $model): bool
+    {
+        return ! Str::startsWith(Str::lower(trim($model)), 'gpt-5');
     }
 
     /**

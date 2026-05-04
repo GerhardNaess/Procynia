@@ -11,9 +11,9 @@ use RuntimeException;
 
 class OpenAiClient
 {
-    public function createResponse(array $payload): array
+    public function createResponse(array $payload, int $timeoutSeconds = 120): array
     {
-        return $this->send('responses', $payload);
+        return $this->send('responses', $payload, $timeoutSeconds);
     }
 
     public function createEmbedding(string $input): array
@@ -35,9 +35,9 @@ class OpenAiClient
         return $response;
     }
 
-    private function send(string $endpoint, array $payload): array
+    private function send(string $endpoint, array $payload, int $timeoutSeconds = 120): array
     {
-        $response = $this->post($endpoint, $payload);
+        $response = $this->post($endpoint, $payload, $timeoutSeconds);
         $requestId = $this->requestIdFrom($response);
 
         if ($response->failed()) {
@@ -104,7 +104,12 @@ class OpenAiClient
             ->withToken($apiKey)
             ->acceptJson()
             ->asJson()
-            ->timeout($timeoutSeconds);
+            ->timeout($timeoutSeconds)
+            ->withOptions([
+                'curl' => [
+                    CURLOPT_CONNECTTIMEOUT => 15,
+                ],
+            ]);
     }
 
     private function embeddingModel(): string

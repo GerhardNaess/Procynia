@@ -1884,7 +1884,7 @@ export default function AiShow({
                 answer_basis_item_ids: selectedAnswerBasisItemIds,
                 force,
                 user_answer_prompt: userAnswerPrompt,
-            });
+            }, { timeout: 320000 });
             const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
             const normalizedText = normalizeAnswerDraftText(answerDraft.text);
             const knowledgeGrounding = normalizeKnowledgeGroundingPayload(response?.data?.knowledge_grounding ?? null);
@@ -2663,16 +2663,14 @@ export default function AiShow({
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => {
-                                                                        void openRequirementAnswerWorkspace(requirement);
+                                                                        void requestAnswerDraftGeneration(requirement);
                                                                     }}
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
-                                                                    title="Åpne svarutkast for dette kravet"
-                                                                    className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-60 ${sourceTypeMeta.className} ${
-                                                                        isActiveRequirement ? 'ring-violet-300' : ''
-                                                                    }`}
+                                                                    title="Generer svarutkast for dette kravet"
+                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {hasExistingAnswerDraft ? 'Åpne svar' : 'Forbered svar'}
+                                                                    Lag svar
                                                                 </button>
                                                             </>
                                                         ) : (
