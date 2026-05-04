@@ -614,6 +614,12 @@ class NoticeController extends Controller
             ->whereKey($savedNotice->id)
             ->firstOrFail();
 
+        if ($record->saved_by_user_id !== $user->id) {
+            return redirect()
+                ->back()
+                ->with('error', 'Du kan bare slette saker du selv har opprettet.');
+        }
+
         $record->delete();
 
         return redirect()
@@ -636,6 +642,12 @@ class NoticeController extends Controller
         $record = $this->archivedSavedNoticeManageableQuery($user)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+
+        if ($record->saved_by_user_id !== $user->id) {
+            return redirect()
+                ->back()
+                ->with('error', 'Du kan bare slette saker du selv har opprettet.');
+        }
 
         $record->delete();
 
@@ -1428,6 +1440,7 @@ class NoticeController extends Controller
             'follow_up_mode' => $notice->follow_up_mode,
             'follow_up_offset_months' => $notice->follow_up_offset_months,
             'next_process_date_at' => optional($notice->next_process_date_at)?->toIso8601String(),
+            'can_delete' => $notice->saved_by_user_id === $user->id,
             'actions' => [
                 'can_archive' => $canArchive,
                 'archive_url' => $canArchive

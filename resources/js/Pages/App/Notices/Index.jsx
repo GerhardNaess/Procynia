@@ -788,6 +788,10 @@ export default function NoticeIndex({
     };
 
     const removeNotice = (notice) => {
+        if (!window.confirm('Er du sikker på at du vil slette denne anskaffelsen?\n\nDenne handlingen kan ikke angres.')) {
+            return;
+        }
+
         router.delete(`/app/notices/saved/${notice.saved_notice_id}`, {
             preserveScroll: true,
         });
@@ -2050,22 +2054,28 @@ export default function NoticeIndex({
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeNotice(notice)}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                                                            >
-                                                                Slett
-                                                            </button>
+                                                            <span title={!notice.can_delete ? `Kun den som opprettet saken kan slette den (opprettet av ${notice.saved_by_name ?? 'ukjent'})` : undefined}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeNotice(notice)}
+                                                                    disabled={!notice.can_delete}
+                                                                    className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                >
+                                                                    Slett
+                                                                </button>
+                                                            </span>
                                                         ) : null}
                                                         {isHistoryMode ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeHistoryNotice(notice)}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                                                            >
-                                                                Slett
-                                                            </button>
+                                                            <span title={!notice.can_delete ? `Kun den som opprettet saken kan slette den (opprettet av ${notice.saved_by_name ?? 'ukjent'})` : undefined}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeHistoryNotice(notice)}
+                                                                    disabled={!notice.can_delete}
+                                                                    className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                >
+                                                                    Slett
+                                                                </button>
+                                                            </span>
                                                         ) : null}
                                                         {notice.external_url ? (
                                                             <a
