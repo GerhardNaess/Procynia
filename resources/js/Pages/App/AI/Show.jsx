@@ -3297,7 +3297,7 @@ export default function AiShow({
                                             Svarutkast for krav {activeRequirementDisplayIdentifier}
                                         </div>
 
-                                        <div className="flex flex-wrap items-center gap-2">
+                                        <div className="flex flex-wrap items-center gap-2 pr-3">
                                             {activeRequirementHasDraft && !activeRequirementBlockedMissingKnowledge ? (
                                                 <button
                                                     type="button"
@@ -3307,25 +3307,6 @@ export default function AiShow({
                                                     {answerDraftReaderExpanded ? 'Normal leseplate' : 'Større leseplate'}
                                                 </button>
                                             ) : null}
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    void requestAnswerDraftGeneration(activeRequirement, { force: true });
-                                                }}
-                                                disabled={
-                                                    !activeRequirement.answer_draft_generate_url
-                                                    || answerDraftGeneratingRequirementId === activeRequirement.id
-                                                    || answerDraftSavingRequirementId === activeRequirement.id
-                                                    || answerBasisSelectionSavingRequirementId === activeRequirement.id
-                                                }
-                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                            >
-                                                {answerDraftGeneratingRequirementId === activeRequirement.id
-                                                    ? 'Genererer...'
-                                                    : activeRequirementHasDraft
-                                                        ? 'Lag nytt svar'
-                                                        : 'Lag svar'}
-                                            </button>
                                         </div>
                                     </div>
 
