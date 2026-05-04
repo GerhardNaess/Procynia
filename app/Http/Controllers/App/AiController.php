@@ -689,7 +689,10 @@ class AiController extends Controller
             'answer_basis_item_ids' => ['present', 'array'],
             'answer_basis_item_ids.*' => ['integer'],
             'force' => ['sometimes', 'boolean'],
+            'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
         ]);
+
+        $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
 
         $selectedAnswerBasisItems = $this->syncRequirementAnswerBasisSelectionItems(
             $record,
@@ -842,6 +845,7 @@ class AiController extends Controller
             $selectedAnswerBasisItems,
             (bool) ($validated['force'] ?? false),
             $record->ai_instructions,
+            $userAnswerPrompt,
             $retrievedKnowledgeChunks,
             $groundingJudge,
         );
@@ -868,15 +872,9 @@ class AiController extends Controller
         ]);
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
-        $answerDraftResponsePayload = $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement);
-        $answerDraftResponsePayload['answer_draft']['quality_assurance'] = $this->answerDraftQualityAssurancePayload(
-            $ownedRequirement,
-            $groundingJudge,
-            $retrievedKnowledgeChunks,
-        );
 
         return response()->json(array_merge(
-            $answerDraftResponsePayload,
+            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement),
             [
                 'answer_basis_item_ids' => $selectedAnswerBasisItems
                     ->pluck('id')
@@ -888,6 +886,19 @@ class AiController extends Controller
                 'knowledge_grounding' => $knowledgeGrounding,
             ],
         ));
+    }
+
+    /**
+     * Purpose: Normalize optional user prompt text for one answer draft generation request.
+     * Inputs: Raw request value from the answer draft generation form.
+     * Returns: A trimmed string or null when the user has not provided an individual prompt.
+     * Side effects: None.
+     */
+    private function normalizeOptionalPromptText(mixed $value): ?string
+    {
+        $normalized = trim(str_replace(["\r\n", "\r"], "\n", (string) ($value ?? '')));
+
+        return $normalized !== '' ? $normalized : null;
     }
 
     /**
@@ -1494,7 +1505,6 @@ class AiController extends Controller
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
             'generation_state' => $hasAnswerDraftText ? 'generated' : null,
             'missing_knowledge' => null,
-            'quality_assurance' => null,
             'retrieval_sources' => $retrievalSources,
         ];
     }
@@ -1960,47 +1970,6 @@ class AiController extends Controller
             'reasoning_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'reasoning_summary')),
             'judge_status' => $this->normalizeOptionalString(data_get($groundingJudge, 'status')),
             'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
-            'supported_points' => $this->normalizeGroundingPointRequirementPoints($directlySupportedPoints),
-        ], $recommendation);
-    }
-
-    /**
-     * Purpose: Build the separate quality-assurance payload for a generated answer draft.
-     * Inputs: The requirement, grounding judge result, and retrieved source rows.
-     * Returns: A frontend-ready quality-assurance payload separated from the answer text.
-     * Side effects: None.
-     */
-    private function answerDraftQualityAssurancePayload(
-        SavedNoticeAiRequirement $requirement,
-        array $groundingJudge,
-        Collection $retrievedKnowledgeChunks,
-    ): array
-    {
-        $recommendation = $this->recommendationForGroundingJudge($requirement, $groundingJudge);
-        $directlySupportedPoints = $this->normalizeGroundingPointList(
-            data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
-        );
-        $directlySupportedPoints = $this->enrichGroundingPointsWithSources($directlySupportedPoints, $retrievedKnowledgeChunks);
-        $relatedButInsufficientPoints = $this->normalizeStringList(data_get($groundingJudge, 'related_but_insufficient_points', []));
-        $unsupportedPoints = $this->normalizeStringList(data_get($groundingJudge, 'unsupported_points', []));
-        $judgeStatus = $this->normalizeOptionalString(data_get($groundingJudge, 'status'));
-        $missingKnowledgeSummary = $this->normalizeOptionalString(data_get($groundingJudge, 'missing_knowledge_summary'));
-        $reasoningSummary = $this->normalizeOptionalString(data_get($groundingJudge, 'reasoning_summary'));
-
-        return array_merge([
-            'message' => match ($judgeStatus) {
-                'supported' => 'Kunnskapsgrunnlaget dokumenterer svaret godt. Svarutkastet er laget som et rent tilbudssvar uten kildemerknader i selve teksten.',
-                'partial' => 'Svarutkastet er laget som et komplett tilbudssvar. Kvalitetssikringen viser hvilke deler som er direkte dokumentert, hvilke deler som er faglig utfylt, og hva som mangler konkret referanse.',
-                default => 'Kunnskapsgrunnlaget er vurdert som utilstrekkelig for et vanlig kildebasert svarutkast.',
-            },
-            'missing_knowledge_summary' => $missingKnowledgeSummary,
-            'directly_supported_points' => $directlySupportedPoints,
-            'related_but_insufficient_points' => $relatedButInsufficientPoints,
-            'unsupported_points' => $unsupportedPoints,
-            'reasoning_summary' => $reasoningSummary,
-            'judge_status' => $judgeStatus,
-            'can_generate_answer' => (bool) data_get($groundingJudge, 'can_generate_answer', false),
-            'requires_follow_up' => $judgeStatus !== 'supported' || $relatedButInsufficientPoints !== [] || $unsupportedPoints !== [],
             'supported_points' => $this->normalizeGroundingPointRequirementPoints($directlySupportedPoints),
         ], $recommendation);
     }

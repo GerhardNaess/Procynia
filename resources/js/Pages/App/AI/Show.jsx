@@ -1536,6 +1536,8 @@ export default function AiShow({
     const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
     const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
+    const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
+    const [promptEditorOpenRequirementId, setPromptEditorOpenRequirementId] = useState(null);
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
     const [answerBasisSelectionError, setAnswerBasisSelectionError] = useState(null);
     const [deletingAnswerBasisItemId, setDeletingAnswerBasisItemId] = useState(null);
@@ -1856,6 +1858,7 @@ export default function AiShow({
         const requirementKey = String(requirement.id);
         const selectedAnswerBasisItemIds = answerBasisSelectionsByRequirementId[requirementKey]
             ?? buildRequirementAnswerBasisSelectionState(requirement);
+        const userAnswerPrompt = normalizeAnswerDraftText(answerDraftPromptsByRequirementId[requirementKey] ?? '');
 
         setActiveRequirementId(String(requirement.id));
         setAnswerDraftError(null);
@@ -1880,6 +1883,7 @@ export default function AiShow({
             const response = await window.axios.post(requirement.answer_draft_generate_url, {
                 answer_basis_item_ids: selectedAnswerBasisItemIds,
                 force,
+                user_answer_prompt: userAnswerPrompt,
             });
             const answerDraft = normalizeAnswerDraftPayload(response?.data?.answer_draft ?? null);
             const normalizedText = normalizeAnswerDraftText(answerDraft.text);
@@ -2012,6 +2016,49 @@ export default function AiShow({
                 },
             };
         });
+    };
+
+    /**
+     * Purpose: Toggle the per-requirement prompt editor from the requirement card.
+     * Inputs: Requirement row selected by the user.
+     * Returns: Nothing.
+     * Side effects: Opens the answer workspace for the requirement and toggles local prompt editor state.
+     */
+    const toggleRequirementPromptEditor = (requirement) => {
+        if (!requirement || requirement.approval_status === 'rejected') {
+            return;
+        }
+
+        const requirementKey = String(requirement.id);
+
+        if (requirement.answer_draft_generate_url) {
+            setActiveRequirementId(requirementKey);
+            setAnswerDraftError(null);
+            setAnswerBasisSelectionError(null);
+        }
+
+        setPromptEditorOpenRequirementId((currentState) => (
+            currentState === requirementKey ? null : requirementKey
+        ));
+    };
+
+    /**
+     * Purpose: Keep the per-requirement user prompt in local UI state before answer generation.
+     * Inputs: Requirement row and raw prompt text from the requirement card prompt field.
+     * Returns: Nothing.
+     * Side effects: Updates local prompt state for the selected requirement only.
+     */
+    const updateRequirementUserPrompt = (requirement, text) => {
+        if (!requirement) {
+            return;
+        }
+
+        const requirementKey = String(requirement.id);
+
+        setAnswerDraftPromptsByRequirementId((currentState) => ({
+            ...currentState,
+            [requirementKey]: text,
+        }));
     };
 
     useEffect(() => {
@@ -2522,6 +2569,10 @@ export default function AiShow({
                                         requirementDraftState.generatedAt !== null
                                         || normalizeAnswerDraftText(requirementDraftState.text).trim() !== ''
                                     );
+                                    const requirementKey = String(requirement.id);
+                                    const requirementUserPrompt = answerDraftPromptsByRequirementId[requirementKey] ?? '';
+                                    const requirementPromptEditorOpen = promptEditorOpenRequirementId === requirementKey;
+                                    const requirementHasUserPrompt = normalizeAnswerDraftText(requirementUserPrompt).trim() !== '';
 
                                     return (
                                         <article
@@ -2591,20 +2642,39 @@ export default function AiShow({
                                                     </div>
                                                     <div className="flex flex-wrap gap-2">
                                                         {canOpenAnswerWorkspace ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    void requestAnswerDraftGeneration(requirement, { force: true });
-                                                                }}
-                                                                disabled={requirementUpdatesLocked || answerDraftGeneratingRequirementId === requirement.id}
-                                                                aria-pressed={isActiveRequirement}
-                                                                title="Generer svarutkast for dette kravet"
-                                                                className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-60 ${sourceTypeMeta.className} ${
-                                                                    isActiveRequirement ? 'ring-violet-300' : ''
-                                                                }`}
-                                                            >
-                                                                {hasExistingAnswerDraft ? 'Lag nytt svar' : 'Lag svar'}
-                                                            </button>
+                                                            <>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        toggleRequirementPromptEditor(requirement);
+                                                                    }}
+                                                                    disabled={requirementUpdatesLocked}
+                                                                    aria-expanded={requirementPromptEditorOpen}
+                                                                    aria-controls={`requirement-prompt-${requirement.id}`}
+                                                                    title="Åpne individuell prompt for dette kravet"
+                                                                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                        requirementPromptEditorOpen || requirementHasUserPrompt
+                                                                            ? 'border-violet-300 bg-violet-50 text-violet-700'
+                                                                            : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'
+                                                                    }`}
+                                                                >
+                                                                    Prompt
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        void openRequirementAnswerWorkspace(requirement);
+                                                                    }}
+                                                                    disabled={requirementUpdatesLocked}
+                                                                    aria-pressed={isActiveRequirement}
+                                                                    title="Åpne svarutkast for dette kravet"
+                                                                    className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset transition disabled:cursor-not-allowed disabled:opacity-60 ${sourceTypeMeta.className} ${
+                                                                        isActiveRequirement ? 'ring-violet-300' : ''
+                                                                    }`}
+                                                                >
+                                                                    {hasExistingAnswerDraft ? 'Åpne svar' : 'Forbered svar'}
+                                                                </button>
+                                                            </>
                                                         ) : (
                                                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
                                                                 {requirement.source_type_label ?? sourceTypeMeta.label}
@@ -2656,6 +2726,30 @@ export default function AiShow({
                                                         );
                                                     })()}
                                                 </div>
+
+                                                {requirementPromptEditorOpen ? (
+                                                    <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-4">
+                                                        <label
+                                                            className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700"
+                                                            htmlFor={`requirement-prompt-${requirement.id}`}
+                                                        >
+                                                            Individuell prompt
+                                                        </label>
+                                                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                                                            Denne instruksen legges til Procynias standardprompt når du trykker Lag svar.
+                                                        </p>
+                                                        <textarea
+                                                            id={`requirement-prompt-${requirement.id}`}
+                                                            value={requirementUserPrompt}
+                                                            onChange={(event) => updateRequirementUserPrompt(requirement, event.target.value)}
+                                                            maxLength={5000}
+                                                            rows={4}
+                                                            disabled={answerDraftGeneratingRequirementId === requirement.id}
+                                                            className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            placeholder="Eksempel: Skriv ca. 700 ord, bruk mer formelt språk, legg vekt på samhandling med Kunden og forklar hvordan Leverandøren sikrer fremdrift."
+                                                        />
+                                                    </div>
+                                                ) : null}
 
                                                 {activeRequirement ? (
                                                     showAdvancedAI ? (
@@ -3205,15 +3299,36 @@ export default function AiShow({
                                             Svarutkast for krav {activeRequirementDisplayIdentifier}
                                         </div>
 
-                                        {activeRequirementHasDraft && !activeRequirementBlockedMissingKnowledge ? (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {activeRequirementHasDraft && !activeRequirementBlockedMissingKnowledge ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
+                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                                                >
+                                                    {answerDraftReaderExpanded ? 'Normal leseplate' : 'Større leseplate'}
+                                                </button>
+                                            ) : null}
                                             <button
                                                 type="button"
-                                                onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
-                                                className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                                                onClick={() => {
+                                                    void requestAnswerDraftGeneration(activeRequirement, { force: true });
+                                                }}
+                                                disabled={
+                                                    !activeRequirement.answer_draft_generate_url
+                                                    || answerDraftGeneratingRequirementId === activeRequirement.id
+                                                    || answerDraftSavingRequirementId === activeRequirement.id
+                                                    || answerBasisSelectionSavingRequirementId === activeRequirement.id
+                                                }
+                                                className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
-                                                {answerDraftReaderExpanded ? 'Normal leseplate' : 'Større leseplate'}
+                                                {answerDraftGeneratingRequirementId === activeRequirement.id
+                                                    ? 'Genererer...'
+                                                    : activeRequirementHasDraft
+                                                        ? 'Lag nytt svar'
+                                                        : 'Lag svar'}
                                             </button>
-                                        ) : null}
+                                        </div>
                                     </div>
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
@@ -3563,7 +3678,7 @@ export default function AiShow({
                                                 Ingen svarutkast er opprettet ennå.
                                             </div>
                                             <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                Trykk Lag svar på kravet for å generere et utkast for akkurat dette kravet.
+                                                Bruk eventuelt Prompt-knappen på kravkortet, og trykk Lag svar for å generere et utkast for akkurat dette kravet.
                                             </p>
                                         </div>
                                     )}
