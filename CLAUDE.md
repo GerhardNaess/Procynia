@@ -117,9 +117,44 @@ Contributors with user management permission automatically get access to all cus
 Upload validation accepts `docx`, `xlsx`, `pdf` (max 20 MB). Quality differs by format:
 
 - **`.docx`** — full structured extraction: text, tables, images, H1/H2-based chunking with AI topic splitting
-- **`.xlsx` and `.pdf`** — use `extractStructuredFallbackText`, meaning table/image handling is degraded compared to docx
+- **`.pdf`** — extracted via `pdftotext` binary (path in `config/services.php` → `services.pdftotext.binary`); structural heuristics applied, but no table/image extraction
+- **`.xlsx`** — uses `extractStructuredFallbackText`; degraded compared to docx
 
-Known gap: Excel and PDF are technically accepted but lack the same depth of chunking and structure extraction. This is an area for future improvement. Typical knowledge base content: service descriptions, standard texts, policies, CVs, references, and other reusable tender material.
+Typical knowledge base content: service descriptions, standard texts, policies, CVs, references, and other reusable tender material.
+
+### Internationalisation (i18n)
+
+**All new UI strings must be internationalised — no hardcoded Norwegian in new code.**
+
+#### How it works
+
+- Lang files: `lang/no/procynia.php` and `lang/en/procynia.php`, nested by domain (`ai.*`, `frontend.*`, `common.*`, etc.)
+- Backend shares translations via `HandleInertiaRequests::share()` under the `translations` prop
+- Frontend access: destructure from `usePage().props` or use the `useTranslations` hook (`resources/js/Support/useTranslations.js`)
+
+#### Pattern for new React pages
+
+```jsx
+const { translations = {} } = usePage().props;
+const tf = translations?.frontend ?? {};   // or translations?.ai, translations?.common, etc.
+
+// Always include a Norwegian fallback string
+<button>{tf.save_button ?? 'Lagre'}</button>
+```
+
+#### Pattern for new strings
+
+1. Add the key to **both** `lang/no/procynia.php` and `lang/en/procynia.php`
+2. Share it in `HandleInertiaRequests::share()` under the appropriate namespace
+3. Use it in React via the `translations` prop with a Norwegian fallback
+
+#### AI service prompts
+
+AI prompts must not hardcode a language. Use `CustomerContext::resolveLanguageCode()` in HTTP controllers and resolve from `$model->customer->language->code` in queue jobs. Pass the resulting `$languageCode` to all AI service methods that produce user-facing text. The `languageName(string $code)` helper (defined locally in each AI service) maps codes to English language names for insertion into prompts.
+
+#### Status
+
+Infrastructure is complete. Most existing pages still have hardcoded Norwegian — these will be migrated incrementally. Do not retroactively fix pages unless explicitly asked.
 
 ### Doffin integration
 
