@@ -50,6 +50,18 @@ function normalizeSearchText(value) {
     return String(value ?? '').trim().toLowerCase();
 }
 
+function highlightText(text, query) {
+    if (!query || !text) return text;
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = String(text).split(new RegExp(`(${escaped})`, 'gi'));
+    if (parts.length === 1) return text;
+    return parts.map((part, i) =>
+        normalizeSearchText(part) === normalizeSearchText(query)
+            ? <mark key={i} className="rounded bg-amber-100 text-amber-900">{part}</mark>
+            : part,
+    );
+}
+
 function formatDateTime(value, locale) {
     if (!value) {
         return '—';
@@ -154,6 +166,10 @@ function getDocumentStatus(item) {
     }
 
     return 'approved';
+}
+
+function isChunkMetadataPending(chunk) {
+    return chunk?.metadata_status === 'pending_review' && !chunk?.ai_summary;
 }
 
 function getChunkStatus(chunk) {
@@ -566,6 +582,7 @@ export default function KnowledgeBaseShow({
     const [isChunkContentEditing, setIsChunkContentEditing] = useState(false);
     const [isChunkContentSaving, setIsChunkContentSaving] = useState(false);
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
+    const [chunkSearchQuery, setChunkSearchQuery] = useState('');
     const tabsRef = useRef(null);
 
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? 'Kunnskapsdokument';
@@ -614,6 +631,30 @@ export default function KnowledgeBaseShow({
 
         return sequenceByChunkId;
     }, [chunks]);
+    const filteredChunks = useMemo(() => {
+        const q = normalizeSearchText(chunkSearchQuery);
+        if (!q) return chunks;
+        return chunks.filter((chunk, index) => {
+            const displayTitle = normalizeSearchText(
+                getChunkDisplayTitle(chunk, index, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0),
+            );
+            return (
+                displayTitle.includes(q) ||
+                normalizeSearchText(chunk.content_preview).includes(q) ||
+                normalizeSearchText(chunk.title).includes(q) ||
+                normalizeSearchText(chunk.ai_summary).includes(q) ||
+                normalizeSearchText(chunk.keywords).includes(q)
+            );
+        });
+    }, [chunks, chunkSearchQuery, graphicSequenceByChunkId, tableSequenceByChunkId]);
+
+    useEffect(() => {
+        if (!chunkSearchQuery || filteredChunks.length === 0) return;
+        if (!filteredChunks.some((c) => c.id === selectedChunkId)) {
+            setSelectedChunkId(filteredChunks[0].id);
+        }
+    }, [filteredChunks, chunkSearchQuery, selectedChunkId]);
+
     const reviewProgressCount = chunkReviewCounts.approved + chunkReviewCounts.rejected;
     const selectedChunk = chunks.find((chunk) => chunk.id === selectedChunkId) ?? chunks[0] ?? null;
     const selectedChunkIndex = selectedChunk ? chunks.findIndex((chunk) => chunk.id === selectedChunk.id) : -1;
@@ -1097,26 +1138,42 @@ export default function KnowledgeBaseShow({
                     ref={tabsRef}
                     className="rounded-[22px] border border-slate-200 bg-slate-50/70 p-2 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"
                 >
-                    <div className="flex flex-wrap gap-2">
-                        {TAB_OPTIONS.map((option) => {
-                            const isActive = activeTab === option.value;
+                    <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap gap-2">
+                            {TAB_OPTIONS.map((option) => {
+                                const isActive = activeTab === option.value;
 
-                            return (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    onClick={() => setActiveTab(option.value)}
-                                    className={classNames(
-                                        'inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition',
-                                        isActive
-                                            ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                            : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:text-slate-950',
-                                    )}
-                                >
-                                    {option.label}
-                                </button>
-                            );
-                        })}
+                                return (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setActiveTab(option.value)}
+                                        className={classNames(
+                                            'inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition',
+                                            isActive
+                                                ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:text-slate-950',
+                                        )}
+                                    >
+                                        {option.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {activeTab === 'chunks' && chunks.length > 0 ? (
+                            <div className="relative ml-auto">
+                                <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400">
+                                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                                </svg>
+                                <input
+                                    type="search"
+                                    value={chunkSearchQuery}
+                                    onChange={(e) => setChunkSearchQuery(e.target.value)}
+                                    placeholder="Søk i chunks…"
+                                    className="h-9 w-56 rounded-full border border-slate-300 bg-white pl-8 pr-4 text-sm text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                />
+                            </div>
+                        ) : null}
                     </div>
                 </section>
 
@@ -1174,15 +1231,24 @@ export default function KnowledgeBaseShow({
                                                 </div>
                                             </div>
                                             <div className="text-xs font-medium text-slate-500">
-                                                {chunks.length} chunks
+                                                {chunkSearchQuery
+                                                    ? `${filteredChunks.length} av ${chunks.length} chunks`
+                                                    : `${chunks.length} chunks`}
                                             </div>
                                         </div>
 
                                         <div className="mt-4 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
-                                            {chunks.map((chunk, index) => {
+                                            {filteredChunks.length === 0 && chunkSearchQuery ? (
+                                                <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-sm text-slate-500">
+                                                    Ingen chunks matcher «{chunkSearchQuery}».
+                                                </div>
+                                            ) : null}
+                                            {filteredChunks.map((chunk) => {
                                                 const isSelected = selectedChunk?.id === chunk.id;
                                                 const reviewStatusMeta = getChunkReviewStatusMeta(chunk);
                                                 const previewText = chunk.content_preview || 'Ingen forhåndsvisning tilgjengelig.';
+                                                const originalIndex = chunks.findIndex((c) => c.id === chunk.id);
+                                                const q = normalizeSearchText(chunkSearchQuery);
 
                                                 return (
                                                     <button
@@ -1201,11 +1267,17 @@ export default function KnowledgeBaseShow({
                                                             <div className="space-y-2">
                                                                 <div className="flex flex-wrap items-center gap-2">
                                                                     <div className="text-sm font-medium text-slate-950">
-                                                                        {getChunkDisplayTitle(chunk, index, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0)}
+                                                                        {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0), q)}
                                                                     </div>
                                                                     <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                                                                         {getChunkTypeLabel(chunk)}
                                                                     </span>
+                                                                    {isChunkMetadataPending(chunk) ? (
+                                                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                                                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                                                                            Metadata genereres
+                                                                        </span>
+                                                                    ) : null}
                                                                     {isSelected ? (
                                                                         <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
                                                                             Valgt
@@ -1214,7 +1286,7 @@ export default function KnowledgeBaseShow({
                                                                 </div>
 
                                                                 <p className="max-h-24 overflow-hidden text-sm leading-6 text-slate-600">
-                                                                    {previewText}
+                                                                    {highlightText(previewText, q)}
                                                                 </p>
                                                             </div>
 
@@ -1245,76 +1317,75 @@ export default function KnowledgeBaseShow({
                                     <div className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(15,23,42,0.03)]">
                                         {selectedChunk ? (
                                             <div className="space-y-5">
-                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                    <div className="space-y-2">
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center justify-between gap-3">
                                                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                                             Valgt chunk
                                                         </div>
-                                                        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                                            {selectedChunkDisplayTitle}
-                                                        </h2>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            <span className={classNames(
-                                                                'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
-                                                                selectedChunkReviewStatusMeta.className,
-                                                            )}>
-                                                                {selectedChunkReviewStatusMeta.label}
-                                                            </span>
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                                                                {selectedChunkIndex >= 0 ? `Chunk ${selectedChunkIndex + 1}` : 'Chunk'}
-                                                            </span>
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                                                                {getChunkTypeLabel(selectedChunk)}
-                                                            </span>
+                                                        <div className="flex shrink-0 gap-1.5">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateSelectedChunkReviewStatus('approved')}
+                                                                disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
+                                                                className={classNames(
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    selectedChunkReviewStatus === 'approved'
+                                                                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                                        : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
+                                                                )}
+                                                            >
+                                                                {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'approved'
+                                                                    ? 'Lagrer...'
+                                                                    : 'Godkjenn'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateSelectedChunkReviewStatus('rejected')}
+                                                                disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
+                                                                className={classNames(
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    selectedChunkReviewStatus === 'rejected'
+                                                                        ? 'bg-rose-600 text-white hover:bg-rose-700'
+                                                                        : 'border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
+                                                                )}
+                                                            >
+                                                                {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'rejected'
+                                                                    ? 'Lagrer...'
+                                                                    : 'Avvis'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateSelectedChunkReviewStatus('pending_review')}
+                                                                disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
+                                                                className={classNames(
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    selectedChunkReviewStatus === 'pending_review'
+                                                                        ? 'bg-amber-600 text-white hover:bg-amber-700'
+                                                                        : 'border border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100',
+                                                                )}
+                                                            >
+                                                                {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'pending_review'
+                                                                    ? 'Lagrer...'
+                                                                    : 'Trenger review'}
+                                                            </button>
                                                         </div>
                                                     </div>
-
+                                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">
+                                                        {selectedChunkDisplayTitle}
+                                                    </h2>
                                                     <div className="flex flex-wrap gap-2">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => updateSelectedChunkReviewStatus('approved')}
-                                                            disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
-                                                            className={classNames(
-                                                                'inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
-                                                                selectedChunkReviewStatus === 'approved'
-                                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                                                    : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
-                                                            )}
-                                                        >
-                                                            {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'approved'
-                                                                ? 'Lagrer...'
-                                                                : 'Godkjenn'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => updateSelectedChunkReviewStatus('rejected')}
-                                                            disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
-                                                            className={classNames(
-                                                                'inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
-                                                                selectedChunkReviewStatus === 'rejected'
-                                                                    ? 'bg-rose-600 text-white hover:bg-rose-700'
-                                                                    : 'border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
-                                                            )}
-                                                        >
-                                                            {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'rejected'
-                                                                ? 'Lagrer...'
-                                                                : 'Avvis'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => updateSelectedChunkReviewStatus('pending_review')}
-                                                            disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
-                                                            className={classNames(
-                                                                'inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
-                                                                selectedChunkReviewStatus === 'pending_review'
-                                                                    ? 'bg-amber-600 text-white hover:bg-amber-700'
-                                                                    : 'border border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100',
-                                                            )}
-                                                        >
-                                                            {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'pending_review'
-                                                                ? 'Lagrer...'
-                                                                : 'Trenger review'}
-                                                        </button>
+                                                        <span className={classNames(
+                                                            'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
+                                                            selectedChunkReviewStatusMeta.className,
+                                                        )}>
+                                                            {selectedChunkReviewStatusMeta.label}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                                                            {selectedChunkIndex >= 0 ? `Chunk ${selectedChunkIndex + 1}` : 'Chunk'}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                                            {getChunkTypeLabel(selectedChunk)}
+                                                        </span>
                                                     </div>
                                                 </div>
 
@@ -1663,6 +1734,14 @@ export default function KnowledgeBaseShow({
 
                                                     {!isChunkMetadataEditing ? (
                                                         <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                                                            {isChunkMetadataPending(selectedChunk) ? (
+                                                                <div className="sm:col-span-2 flex items-center gap-3 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3">
+                                                                    <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" />
+                                                                    <p className="text-sm text-amber-800">
+                                                                        AI-metadata genereres i bakgrunnen. Last siden på nytt om litt.
+                                                                    </p>
+                                                                </div>
+                                                            ) : null}
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     Tittel

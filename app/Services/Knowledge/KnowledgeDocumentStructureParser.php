@@ -77,7 +77,8 @@ class KnowledgeDocumentStructureParser
 
             return match ($extension) {
                 'docx' => $this->parseDocx($path),
-                'pdf', 'xlsx' => $this->parsePlainText($path),
+                'pdf' => $this->parsePdf($path),
+                'xlsx' => $this->parsePlainText($path),
                 default => $this->parsePlainText($path),
             };
         } catch (Throwable) {
@@ -965,6 +966,66 @@ class KnowledgeDocumentStructureParser
      *     word_count: int
      * }
      */
+    private function parsePdf(string $path): array
+    {
+        $blocks = $this->documentTextExtractor->extractStructuredText($path);
+
+        if ($blocks === []) {
+            return $this->normalizeElements([], 'text');
+        }
+
+        $elements = [];
+        $currentHeadings = [];
+
+        foreach ($blocks as $block) {
+            $text = trim((string) ($block['text'] ?? ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $level = isset($block['level']) && is_int($block['level']) ? $block['level'] : null;
+
+            if ($level !== null) {
+                $currentHeadings = $this->trimHeadingStack($currentHeadings, $level);
+                $currentHeadings[$level] = $text;
+                $headingPath = $this->currentHeadingPath($currentHeadings);
+
+                $elements[] = [
+                    'type' => 'heading',
+                    'heading_path' => $headingPath,
+                    'text' => $text,
+                    'heading_level' => $level,
+                    'relation_hint' => null,
+                ];
+            } else {
+                $headingPath = $this->currentHeadingPath($currentHeadings);
+
+                $elements[] = [
+                    'type' => $this->isListText($text) ? 'list' : 'paragraph',
+                    'heading_path' => $headingPath,
+                    'text' => $text,
+                    'heading_level' => null,
+                    'relation_hint' => null,
+                ];
+            }
+        }
+
+        if ($elements === []) {
+            $elements[] = [
+                'type' => 'other',
+                'heading_path' => null,
+                'text' => implode("\n\n", array_column($blocks, 'text')),
+                'heading_level' => null,
+                'relation_hint' => null,
+            ];
+        }
+
+        $grouped = $this->groupH2Sections($this->mergeContiguousListElements($elements));
+
+        return $this->normalizeElements($grouped, 'text');
+    }
+
     private function parsePlainText(string $path): array
     {
         $text = trim($this->documentTextExtractor->extractText($path));

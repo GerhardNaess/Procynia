@@ -31,9 +31,10 @@ class RequirementGroundingJudgeService
         SavedNoticeAiRequirement $requirement,
         Collection $retrievedKnowledgeRows,
         array $knowledgeGrounding,
+        string $languageCode = 'no',
     ): array {
         $response = $this->openAiClient->createResponse(
-            $this->openAiRequestPayload($requirement, $retrievedKnowledgeRows, $knowledgeGrounding),
+            $this->openAiRequestPayload($requirement, $retrievedKnowledgeRows, $knowledgeGrounding, $languageCode),
         );
 
         try {
@@ -67,6 +68,7 @@ class RequirementGroundingJudgeService
         SavedNoticeAiRequirement $requirement,
         Collection $retrievedKnowledgeRows,
         array $knowledgeGrounding,
+        string $languageCode = 'no',
     ): array {
         $model = $this->openAiModel();
 
@@ -78,7 +80,7 @@ class RequirementGroundingJudgeService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->systemPrompt(),
+                            'text' => $this->systemPrompt($languageCode),
                         ],
                     ],
                 ],
@@ -117,7 +119,7 @@ class RequirementGroundingJudgeService
      * Returns: A short instruction string for the model.
      * Side effects: None.
      */
-    private function systemPrompt(): string
+    private function systemPrompt(string $languageCode = 'no'): string
     {
         return implode("\n", [
             'You judge grounding quality only.',
@@ -151,8 +153,18 @@ class RequirementGroundingJudgeService
             'Return recommended_document_title and suggested_filename based on the requirement-specific subject matter when documentation is missing or only partially documented.',
             'Do not return generic document names such as Dokumentasjon for udekket krav when the requirement text contains usable context.',
             'Return only JSON that matches the schema.',
-            'Write all string values in Norwegian.',
+            'Write all string values in ' . $this->languageName($languageCode) . '.',
         ]);
+    }
+
+    private function languageName(string $code): string
+    {
+        return match ($code) {
+            'en' => 'English',
+            'sv' => 'Swedish',
+            'da' => 'Danish',
+            default => 'Norwegian',
+        };
     }
 
     /**

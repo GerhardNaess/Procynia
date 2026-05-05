@@ -4,45 +4,6 @@ import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 
-const statusOptions = [
-    { value: '', label: 'Alle statuser' },
-    { value: 'ACTIVE', label: 'Aktiv' },
-    { value: 'EXPIRED', label: 'Utgått' },
-    { value: 'AWARDED', label: 'Tildelt' },
-    { value: 'CANCELLED', label: 'Avlyst' },
-];
-
-const relevanceOptions = [
-    { value: '', label: 'Alle nivåer' },
-    { value: 'high', label: 'Høy relevans' },
-    { value: 'medium', label: 'Middels relevans' },
-    { value: 'low', label: 'Lav relevans' },
-];
-
-const historyProcurementTypeOptions = [
-    { value: 'one_time', label: 'Engangsanskaffelse' },
-    { value: 'recurring', label: 'Løpende avtale' },
-];
-
-const historyFollowUpOptions = [
-    { value: 'none', label: 'Ingen oppfølging' },
-    { value: 'manual_offset', label: 'Varsle etter antall måneder' },
-];
-
-const bidStatusOptions = [
-    { value: '', label: 'Alle bid-statuser' },
-    { value: 'discovered', label: 'Registrert' },
-    { value: 'qualifying', label: 'Kvalifiseres' },
-    { value: 'go_no_go', label: 'Go / No-Go' },
-    { value: 'in_progress', label: 'Under arbeid' },
-    { value: 'submitted', label: 'Sendt' },
-    { value: 'negotiation', label: 'Forhandling' },
-    { value: 'won', label: 'Vunnet' },
-    { value: 'lost', label: 'Tapt' },
-    { value: 'no_go', label: 'No-Go' },
-    { value: 'withdrawn', label: 'Trukket' },
-    { value: 'archived', label: 'Arkiv' },
-];
 
 const noticeSummaryPreviewLimit = 280;
 const noticeSummaryCollapsedStyle = {
@@ -602,6 +563,48 @@ export default function NoticeIndex({
     watchAlerts = {},
 }) {
     const { locale, translations } = usePage().props;
+    const tf = translations?.frontend ?? {};
+
+    const statusOptions = [
+        { value: '', label: tf.notice_status_all ?? 'Alle statuser' },
+        { value: 'ACTIVE', label: tf.notice_status_active ?? 'Aktiv' },
+        { value: 'EXPIRED', label: tf.notice_status_expired ?? 'Utgått' },
+        { value: 'AWARDED', label: tf.notice_status_awarded ?? 'Tildelt' },
+        { value: 'CANCELLED', label: tf.notice_status_cancelled ?? 'Avlyst' },
+    ];
+
+    const relevanceOptions = [
+        { value: '', label: tf.relevance_all ?? 'Alle nivåer' },
+        { value: 'high', label: tf.relevance_high ?? 'Høy relevans' },
+        { value: 'medium', label: tf.relevance_medium ?? 'Middels relevans' },
+        { value: 'low', label: tf.relevance_low ?? 'Lav relevans' },
+    ];
+
+    const historyProcurementTypeOptions = [
+        { value: 'one_time', label: 'Engangsanskaffelse' },
+        { value: 'recurring', label: 'Løpende avtale' },
+    ];
+
+    const historyFollowUpOptions = [
+        { value: 'none', label: 'Ingen oppfølging' },
+        { value: 'manual_offset', label: 'Varsle etter antall måneder' },
+    ];
+
+    const bidStatusOptions = [
+        { value: '', label: tf.bid_status_all ?? 'Alle bid-statuser' },
+        { value: 'discovered', label: tf.bid_status_discovered ?? 'Registrert' },
+        { value: 'qualifying', label: tf.bid_status_qualifying ?? 'Kvalifiseres' },
+        { value: 'go_no_go', label: tf.bid_status_go_no_go ?? 'Go / No-Go' },
+        { value: 'in_progress', label: tf.bid_status_in_progress ?? 'Under arbeid' },
+        { value: 'submitted', label: tf.bid_status_submitted ?? 'Sendt' },
+        { value: 'negotiation', label: tf.bid_status_negotiation ?? 'Forhandling' },
+        { value: 'won', label: tf.bid_status_won ?? 'Vunnet' },
+        { value: 'lost', label: tf.bid_status_lost ?? 'Tapt' },
+        { value: 'no_go', label: tf.bid_status_no_go ?? 'No-Go' },
+        { value: 'withdrawn', label: tf.bid_status_withdrawn ?? 'Trukket' },
+        { value: 'archived', label: tf.bid_status_archived ?? 'Arkiv' },
+    ];
+
     const [selectedWatchListId, setSelectedWatchListId] = useState(() => filters.watch_list_id ?? '');
     const [searchQuery, setSearchQuery] = useState(filters.q ?? '');
     const [organizationName, setOrganizationName] = useState(filters.organization_name ?? '');

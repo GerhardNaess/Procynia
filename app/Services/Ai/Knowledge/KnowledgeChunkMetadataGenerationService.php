@@ -34,11 +34,11 @@ class KnowledgeChunkMetadataGenerationService
      * Returns: A normalized metadata payload and a ready-to-embed text input.
      * Side effects: May call OpenAI, may persist suggestion rows, and emits observability logs.
      */
-    public function generateForChunk(KnowledgeItem $document, KnowledgeItemChunk $chunk): array
+    public function generateForChunk(KnowledgeItem $document, KnowledgeItemChunk $chunk, string $languageCode = 'no'): array
     {
         $vocabularyMap = $this->vocabularyService->buildForCustomer((int) $document->customer_id);
         $startedAt = microtime(true);
-        $payload = $this->openAiRequestPayload($document, $chunk, $vocabularyMap);
+        $payload = $this->openAiRequestPayload($document, $chunk, $vocabularyMap, $languageCode);
         $model = (string) ($payload['model'] ?? '');
 
         Log::info('[PROCYNIA][KNOWLEDGE_METADATA] Metadata generation starting.', [
@@ -106,7 +106,7 @@ class KnowledgeChunkMetadataGenerationService
      * @param iterable<int, KnowledgeItemChunk> $chunks
      * @return array<int, array<string, mixed>>
      */
-    public function generateForChunks(KnowledgeItem $document, iterable $chunks): array
+    public function generateForChunks(KnowledgeItem $document, iterable $chunks, string $languageCode = 'no'): array
     {
         $chunkList = [];
 
@@ -122,7 +122,7 @@ class KnowledgeChunkMetadataGenerationService
 
         $vocabularyMap = $this->vocabularyService->buildForCustomer((int) $document->customer_id);
         $startedAt = microtime(true);
-        $payload = $this->batchOpenAiRequestPayload($document, $chunkList, $vocabularyMap);
+        $payload = $this->batchOpenAiRequestPayload($document, $chunkList, $vocabularyMap, $languageCode);
         $model = (string) ($payload['model'] ?? '');
         $chunkIds = array_map(static fn (KnowledgeItemChunk $chunk): int => (int) $chunk->id, $chunkList);
         $chunkIndexes = array_map(static fn (KnowledgeItemChunk $chunk): int => (int) $chunk->chunk_index, $chunkList);
@@ -336,7 +336,7 @@ class KnowledgeChunkMetadataGenerationService
      * Returns: The exact request payload sent to OpenAI.
      * Side effects: None.
      */
-    private function openAiRequestPayload(KnowledgeItem $document, KnowledgeItemChunk $chunk, array $vocabularyMap): array
+    private function openAiRequestPayload(KnowledgeItem $document, KnowledgeItemChunk $chunk, array $vocabularyMap, string $languageCode = 'no'): array
     {
         return [
             'model' => $this->openAiModel(),
@@ -346,7 +346,7 @@ class KnowledgeChunkMetadataGenerationService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->systemPrompt(),
+                            'text' => $this->systemPrompt($languageCode),
                         ],
                     ],
                 ],
@@ -382,7 +382,7 @@ class KnowledgeChunkMetadataGenerationService
      *
      * @param array<int, KnowledgeItemChunk> $chunks
      */
-    private function batchOpenAiRequestPayload(KnowledgeItem $document, array $chunks, array $vocabularyMap): array
+    private function batchOpenAiRequestPayload(KnowledgeItem $document, array $chunks, array $vocabularyMap, string $languageCode = 'no'): array
     {
         return [
             'model' => $this->openAiModel(),
@@ -392,7 +392,7 @@ class KnowledgeChunkMetadataGenerationService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->batchSystemPrompt(),
+                            'text' => $this->batchSystemPrompt($languageCode),
                         ],
                     ],
                 ],
@@ -426,7 +426,7 @@ class KnowledgeChunkMetadataGenerationService
      * Returns: A short instruction string for the model.
      * Side effects: None.
      */
-    private function batchSystemPrompt(): string
+    private function batchSystemPrompt(string $languageCode = 'no'): string
     {
         return implode("\n", [
             'You generate metadata for several knowledge chunks in one request.',
@@ -442,7 +442,7 @@ class KnowledgeChunkMetadataGenerationService
             'summary_for_retrieval must be short, concrete and useful for later retrieval.',
             'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
             'Return only JSON that matches the schema.',
-            'Write all string values in Norwegian.',
+            'Write all string values in ' . $this->languageName($languageCode) . '.',
         ]);
     }
 
@@ -556,7 +556,7 @@ class KnowledgeChunkMetadataGenerationService
      * Returns: A short instruction string for the model.
      * Side effects: None.
      */
-    private function systemPrompt(): string
+    private function systemPrompt(string $languageCode = 'no'): string
     {
         return implode("\n", [
             'You generate metadata for a single knowledge chunk.',
@@ -570,8 +570,18 @@ class KnowledgeChunkMetadataGenerationService
             'summary_for_retrieval must be short, concrete and useful for later retrieval.',
             'When chunk_type is table, use table_text as the primary source text and summarize the table itself.',
             'Return only JSON that matches the schema.',
-            'Write all string values in Norwegian.',
+            'Write all string values in ' . $this->languageName($languageCode) . '.',
         ]);
+    }
+
+    private function languageName(string $code): string
+    {
+        return match ($code) {
+            'en' => 'English',
+            'sv' => 'Swedish',
+            'da' => 'Danish',
+            default => 'Norwegian',
+        };
     }
 
     /**

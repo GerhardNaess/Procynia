@@ -700,6 +700,8 @@ class AiController extends Controller
             $validated['answer_basis_item_ids'],
         );
 
+        $languageCode = $this->customerContext->resolveLanguageCode();
+
         $retrievedKnowledgeChunks = $this->retrievedKnowledgeChunksForRequirement($request, $record, $ownedRequirement);
         $knowledgeGrounding = $this->calculateKnowledgeGroundingLevel($retrievedKnowledgeChunks, $ownedRequirement->requirement_text);
 
@@ -754,6 +756,7 @@ class AiController extends Controller
                 $ownedRequirement,
                 $retrievedKnowledgeChunks,
                 $knowledgeGrounding,
+                $languageCode,
             );
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge failed. Blocking answer generation safely.', [
@@ -848,6 +851,7 @@ class AiController extends Controller
             $userAnswerPrompt,
             $retrievedKnowledgeChunks,
             $groundingJudge,
+            $languageCode,
         );
 
         DB::table('saved_notice_ai_requirements')

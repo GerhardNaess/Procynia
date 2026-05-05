@@ -45,6 +45,7 @@ class RequirementAnswerDraftService
         ?string $requirementUserPrompt = null,
         ?Collection $retrievedKnowledgeChunks = null,
         ?array $groundingJudge = null,
+        string $languageCode = 'no',
     ): SavedNoticeAiRequirement
     {
         $requirement->loadMissing([
@@ -63,6 +64,7 @@ class RequirementAnswerDraftService
             $requirementUserPrompt,
             $retrievedKnowledgeRows,
             $groundingJudge,
+            $languageCode,
         );
 
         return DB::transaction(function () use ($requirement, $answerDraftText): SavedNoticeAiRequirement {
@@ -113,6 +115,7 @@ class RequirementAnswerDraftService
         ?string $requirementUserPrompt,
         Collection $retrievedKnowledgeRows,
         ?array $groundingJudge,
+        string $languageCode = 'no',
     ): string
     {
         $answerLengthGuidance = $this->extractAnswerLengthGuidance(implode("\n", array_filter([
@@ -130,6 +133,7 @@ class RequirementAnswerDraftService
                 $retrievedKnowledgeRows,
                 $groundingJudge,
                 $answerLengthGuidance,
+                $languageCode,
             );
         }
 
@@ -144,6 +148,8 @@ class RequirementAnswerDraftService
                 $groundingJudge,
                 $answerLengthGuidance,
                 false,
+                null,
+                $languageCode,
             ),
             300,
         );
@@ -172,6 +178,8 @@ class RequirementAnswerDraftService
                         $groundingJudge,
                         $answerLengthGuidance,
                         true,
+                        null,
+                        $languageCode,
                     ),
                     300,
                 );
@@ -210,6 +218,7 @@ class RequirementAnswerDraftService
         Collection $retrievedKnowledgeRows,
         ?array $groundingJudge,
         array $answerLengthGuidance,
+        string $languageCode = 'no',
     ): string
     {
         $draftSections = [];
@@ -226,6 +235,7 @@ class RequirementAnswerDraftService
                 $answerLengthGuidance,
                 $section,
                 false,
+                $languageCode,
             );
         }
 
@@ -267,6 +277,7 @@ class RequirementAnswerDraftService
                 $answerLengthGuidance,
                 $supplementalSection,
                 true,
+                $languageCode,
             );
 
             $answerDraftText = $this->normalizeDraftText(implode("\n\n", array_filter(
@@ -305,6 +316,7 @@ class RequirementAnswerDraftService
         array $answerLengthGuidance,
         array $section,
         bool $isLengthRetry,
+        string $languageCode = 'no',
     ): string
     {
         $response = $this->openAiClient->createResponse(
@@ -319,6 +331,7 @@ class RequirementAnswerDraftService
                 $answerLengthGuidance,
                 $isLengthRetry,
                 $section,
+                $languageCode,
             ),
         );
 
@@ -348,6 +361,7 @@ class RequirementAnswerDraftService
                     $answerLengthGuidance,
                     $section,
                     true,
+                    $languageCode,
                 );
             }
 
@@ -384,6 +398,7 @@ class RequirementAnswerDraftService
         array $answerLengthGuidance,
         bool $isLengthRetry,
         ?array $longFormSection = null,
+        string $languageCode = 'no',
     ): array
     {
         $model = $this->openAiModel();
@@ -396,7 +411,7 @@ class RequirementAnswerDraftService
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->systemPrompt(),
+                            'text' => $this->systemPrompt($languageCode),
                         ],
                     ],
                 ],
@@ -446,7 +461,7 @@ class RequirementAnswerDraftService
      * Returns: A short instruction string for the model.
      * Side effects: None.
      */
-    private function systemPrompt(): string
+    private function systemPrompt(string $languageCode = 'no'): string
     {
         return implode("\n", [
             'You draft one editable supplier answer for one tender requirement.',
@@ -465,7 +480,7 @@ class RequirementAnswerDraftService
             'If requirement-specific user instructions conflict with grounded facts, selected sources, or the JSON schema, keep the facts, selected sources, and schema.',
             'If the case-specific instructions conflict with grounded facts or the JSON schema, keep the facts and schema.',
             'Return only JSON that matches the schema.',
-            'Write all string values in Norwegian.',
+            'Write all string values in ' . $this->languageName($languageCode) . '.',
             'Do not write an assessment, critique, or coverage commentary.',
             'Do not invent facts that are not supported by the evidence.',
             'Do not use unselected answer basis items.',
@@ -479,6 +494,16 @@ class RequirementAnswerDraftService
             'For long target-length answers, the service may ask for one section at a time. In that case, write only the requested section and meet the local section target.',
             'Keep the answer practical, complete, and suitable for direct editing by the user.',
         ]);
+    }
+
+    private function languageName(string $code): string
+    {
+        return match ($code) {
+            'en' => 'English',
+            'sv' => 'Swedish',
+            'da' => 'Danish',
+            default => 'Norwegian',
+        };
     }
 
     /**

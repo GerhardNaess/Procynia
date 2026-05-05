@@ -1504,7 +1504,15 @@ export default function AiShow({
     const {
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
+        translations = {},
     } = usePage().props;
+    const tai = translations?.ai ?? {};
+
+    const WORK_STATUS_OPTIONS = [
+        { value: 'not_started', label: tai.work_status_not_started ?? 'Ikke startet' },
+        { value: 'in_progress', label: tai.work_status_in_progress ?? 'Under arbeid' },
+        { value: 'done', label: tai.work_status_done ?? 'Ferdig' },
+    ];
     const fileInputRef = useRef(null);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
@@ -1578,7 +1586,7 @@ export default function AiShow({
     const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
     const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
         ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
-        : 'Ingen filer valgt ennå.';
+        : (tai.no_files_selected ?? 'Ingen filer valgt ennå.');
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
@@ -1865,7 +1873,7 @@ export default function AiShow({
         setAnswerBasisSelectionError(null);
 
         if (!requirement.answer_draft_generate_url) {
-            setAnswerDraftError('Svarutkast kan ikke genereres for dette kravet.');
+            setAnswerDraftError(tai.answer_draft_cannot_generate ?? 'Svarutkast kan ikke genereres for dette kravet.');
             return;
         }
 
@@ -2119,7 +2127,7 @@ export default function AiShow({
         }
 
         if (!activeRequirement.answer_draft_save_url) {
-            setAnswerDraftError('Svarutkast kan ikke lagres for dette kravet.');
+            setAnswerDraftError(tai.answer_draft_cannot_save ?? 'Svarutkast kan ikke lagres for dette kravet.');
             return;
         }
 
@@ -2130,7 +2138,7 @@ export default function AiShow({
         const normalizedText = normalizeAnswerDraftText(activeRequirementDraft.text).trim();
 
         if (normalizedText === '') {
-            setAnswerDraftError('Svarutkastet kan ikke være tomt.');
+            setAnswerDraftError(tai.answer_draft_cannot_be_empty ?? 'Svarutkastet kan ikke være tomt.');
             return;
         }
 
@@ -2533,7 +2541,7 @@ export default function AiShow({
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
                                     const assignedUserId = requirement.assigned_user?.id ? String(requirement.assigned_user.id) : '';
-                                    const assignedUserLabel = requirement.assigned_user?.name ?? 'Ikke tildelt';
+                                    const assignedUserLabel = requirement.assigned_user?.name ?? (tai.not_assigned ?? 'Ikke tildelt');
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
@@ -2651,7 +2659,7 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-expanded={requirementPromptEditorOpen}
                                                                     aria-controls={`requirement-prompt-${requirement.id}`}
-                                                                    title="Åpne individuell prompt for dette kravet"
+                                                                    title={tai.open_prompt_for_requirement ?? 'Åpne individuell prompt for dette kravet'}
                                                                     className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                         requirementPromptEditorOpen || requirementHasUserPrompt
                                                                             ? 'border-violet-300 bg-violet-50 text-violet-700'
@@ -2667,10 +2675,10 @@ export default function AiShow({
                                                                     }}
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
-                                                                    title="Generer svarutkast for dette kravet"
+                                                                    title={tai.generate_draft_for_requirement ?? 'Generer svarutkast for dette kravet'}
                                                                     className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    Lag svar
+                                                                    {tai.create_answer ?? 'Lag svar'}
                                                                 </button>
                                                             </>
                                                         ) : (
@@ -2744,7 +2752,7 @@ export default function AiShow({
                                                             rows={4}
                                                             disabled={answerDraftGeneratingRequirementId === requirement.id}
                                                             className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            placeholder="Eksempel: Skriv ca. 700 ord, bruk mer formelt språk, legg vekt på samhandling med Kunden og forklar hvordan Leverandøren sikrer fremdrift."
+                                                            placeholder={tai.example_prompt_placeholder ?? 'Eksempel: Skriv ca. 700 ord, bruk mer formelt språk, legg vekt på samhandling med Kunden og forklar hvordan Leverandøren sikrer fremdrift.'}
                                                         />
                                                     </div>
                                                 ) : null}
@@ -2769,7 +2777,7 @@ export default function AiShow({
                                                                     }
                                                                     className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? 'Genererer...' : 'Generer på nytt'}
+                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? (tai.generating ?? 'Genererer...') : (tai.regenerate ?? 'Generer på nytt')}
                                                                 </button>
                                                             </div>
 
@@ -2782,7 +2790,7 @@ export default function AiShow({
                                                             {activeRequirementSelectedAnswerBasisItems.length > 0 ? (
                                                                 <div className="space-y-2">
                                                                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                        Valgte kilder
+                                                                        {tai.selected_sources ?? 'Valgte kilder'}
                                                                     </div>
                                                                     <div className="space-y-2">
                                                                         {activeRequirementSelectedAnswerBasisItems.map((answerBasisItem) => {
@@ -3294,7 +3302,7 @@ export default function AiShow({
                                 }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
-                                            Svarutkast for krav {activeRequirementDisplayIdentifier}
+                                            {tai.answer_draft_for_requirement ?? 'Svarutkast for krav'} {activeRequirementDisplayIdentifier}
                                         </div>
 
                                         <div className="flex flex-wrap items-center gap-2 pr-3">
@@ -3304,7 +3312,7 @@ export default function AiShow({
                                                     onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
                                                     className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
                                                 >
-                                                    {answerDraftReaderExpanded ? 'Normal leseplate' : 'Større leseplate'}
+                                                    {answerDraftReaderExpanded ? (tai.normal_reader ?? 'Normal leseplate') : (tai.larger_reader ?? 'Større leseplate')}
                                                 </button>
                                             ) : null}
                                         </div>
@@ -3312,7 +3320,7 @@ export default function AiShow({
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
                                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                                            Genererer svarutkast ...
+                                            {tai.generating_answer_draft ?? 'Genererer svarutkast ...'}
                                         </div>
                                     ) : null}
 
@@ -3463,7 +3471,7 @@ export default function AiShow({
                                             ) : activeRequirementKnowledgeGrounding ? (
                                                 <div className="mt-4 flex justify-end">
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
-                                                        {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
+                                                        {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
                                                     </span>
                                                 </div>
                                             ) : null}
@@ -3472,7 +3480,7 @@ export default function AiShow({
                                         <div className="flex flex-col gap-5">
                                             <div className="flex flex-col gap-2">
                                                 <textarea
-                                                    aria-label={`Svarutkast for krav ${activeRequirementDisplayIdentifier}`}
+                                                    aria-label={`${tai.answer_draft_for_requirement ?? 'Svarutkast for krav'} ${activeRequirementDisplayIdentifier}`}
                                                     value={activeRequirementDraft?.text ?? ''}
                                                     onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
                                                     rows={16}
@@ -3481,7 +3489,7 @@ export default function AiShow({
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
                                                     className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
-                                                    placeholder="Svarutkastet vises her og kan redigeres direkte."
+                                                    placeholder={tai.answer_draft_placeholder ?? 'Svarutkastet vises her og kan redigeres direkte.'}
                                                 />
                                             </div>
 
@@ -3584,7 +3592,7 @@ export default function AiShow({
                                             {activeRequirementKnowledgeGrounding ? (
                                                 <div className="mt-4 flex justify-end">
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
-                                                        {KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
+                                                        {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
                                                     </span>
                                                 </div>
                                             ) : null}
@@ -3593,7 +3601,7 @@ export default function AiShow({
                                                 <div className="text-xs text-slate-500">
                                                     {activeRequirementDraft?.generatedAt ? (
                                                         <>
-                                                            Generert{' '}
+                                                            {tai.generated ?? 'Generert'}{' '}
                                                             {new Intl.DateTimeFormat(locale, {
                                                                 day: '2-digit',
                                                                 month: 'short',
@@ -3603,9 +3611,9 @@ export default function AiShow({
                                                             }).format(new Date(activeRequirementDraft.generatedAt))}
                                                         </>
                                                     ) : (
-                                                        'Svarutkast er ikke generert ennå.'
+                                                        (tai.answer_draft_not_generated ?? 'Svarutkast er ikke generert ennå.')
                                                     )}
-                                                    {activeRequirementDraft?.isDirty ? ' Ulagrede endringer.' : ''}
+                                                    {activeRequirementDraft?.isDirty ? ` ${tai.unsaved_changes ?? 'Ulagrede endringer.'}` : ''}
                                                 </div>
 
                                                 <div className="flex flex-wrap items-center gap-2">

@@ -98,6 +98,20 @@ Defined in `docs/chunking-strategy.md`. H1/H2 headings are hard structural bound
 
 `SavedNotice` (bid case), `SavedNoticeAiDocument`, `SavedNoticeAiDocumentChunk`, `SavedNoticeAiRequirement`, `SavedNoticeAiRequirementAssessment`, `KnowledgeItem`, `KnowledgeItemChunk`, `KnowledgeMetadataTerm`, `Notice`, `Customer`, `Department`, `WatchProfile`.
 
+### Customer permission settings
+
+System Owners can configure role-based permissions via the **Tilganger** tab in Kundemiljø. Stored as `permission_settings` JSON on `customers`. Three configurable permissions:
+
+- `create_departments` — default: `['system_owner']`
+- `create_users` — default: `['system_owner', 'bid_manager', 'contributor']`
+- `view_all_cases` — default: `['system_owner', 'bid_manager', 'contributor']`
+
+Key methods: `Customer::roleHasPermission()`, `User::canManageCustomerUsers()`, `User::canViewAllCasesViaSettings()`, `CustomerContext::canCreateCustomerDepartments()`.
+
+Case visibility is enforced in `SavedNoticeAccessService::applyVisibility()`. Without `view_all_cases`, contributors/viewers only see cases they are directly involved in (saved_by, bid_manager, opportunity_owner, or explicit `SavedNoticeUserAccess`). Department-based fallback visibility is also gated by this setting.
+
+Contributors with user management permission automatically get access to all customer departments when creating/editing users (via `CustomerContext::manageableDepartmentIds()`).
+
 ### Knowledge base document support
 
 Upload validation accepts `docx`, `xlsx`, `pdf` (max 20 MB). Quality differs by format:
@@ -122,13 +136,11 @@ These are known issues/features being actively worked on (from internal backlog)
 **Åpne (ikke ferdig):**
 - Nr. 4: Definer hva "aktivitet på saker" betyr; tydeliggjøre Cockpit-scope
 - Nr. 5: Fjerne noen elementer fra Oversikt-siden
-- Nr. 7: Fasefilter og status-badge på saker i oversikten
 - Nr. 10: Bedre håndtering av selskapsvokabular — hvordan ekstraheres og brukes for `topic`/`sub_topic` på chunks
-- Nr. 17/18 (ferdig): Tilganger-fane i Kundemiljø — System Owner kan konfigurere hvilke bid-roller som kan opprette avdelinger, opprette brukere, og se alle saker. Lagres som `permission_settings` JSON på `customers`-tabellen. Sjekkes via `Customer::roleHasPermission()`, `User::canManageCustomerUsers()`, `User::canViewAllCasesViaSettings()`, og `CustomerContext::canCreateCustomerDepartments()`.
 - Nr. 24: Ikke definert ennå
 
 **Ferdig:**
-Nr. 3, 6, 7, 8, 9, 11, 12a, 12b, 13, 14, 15, 19, 20, 21, 22, 23, 17/18
+Nr. 3, 6, 7, 8, 9, 11, 12a, 12b, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
 
 ## Project docs
 

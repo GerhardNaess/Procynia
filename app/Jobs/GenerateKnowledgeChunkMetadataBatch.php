@@ -209,8 +209,10 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
             ]);
         }
 
+        $languageCode = $this->resolveCustomerLanguageCode($knowledgeDocument);
+
         try {
-            $metadataOutcomes = $metadataGenerationService->generateForChunks($knowledgeDocument, $chunks);
+            $metadataOutcomes = $metadataGenerationService->generateForChunks($knowledgeDocument, $chunks, $languageCode);
         } catch (Throwable $throwable) {
             Log::warning('[PROCYNIA][KNOWLEDGE_METADATA] Batch metadata generation failed in background job.', [
                 'knowledge_item_id' => $knowledgeDocument->id,
@@ -327,6 +329,17 @@ class GenerateKnowledgeChunkMetadataBatch implements ShouldQueue
         ]);
 
         $vocabularyCandidateService->syncForChunk($knowledgeDocument, $chunk);
+    }
+
+    private function resolveCustomerLanguageCode(KnowledgeItem $knowledgeDocument): string
+    {
+        $knowledgeDocument->loadMissing('customer.language');
+        $code = trim((string) ($knowledgeDocument->customer?->language?->code ?? ''));
+
+        return match ($code) {
+            'en', 'sv', 'da' => $code,
+            default => 'no',
+        };
     }
 
     /**

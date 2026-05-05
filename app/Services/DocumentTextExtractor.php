@@ -4,6 +4,7 @@ namespace App\Services;
 
 use DOMDocument;
 use DOMXPath;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Throwable;
 use ZipArchive;
@@ -55,7 +56,8 @@ class DocumentTextExtractor
 
             return match ($extension) {
                 'docx' => $this->extractStructuredDocxText($path),
-                'xlsx', 'pdf' => $this->extractStructuredFallbackText($path),
+                'pdf' => $this->extractStructuredPdfText($path),
+                'xlsx' => $this->extractStructuredFallbackText($path),
                 default => [],
             };
         } catch (Throwable) {
@@ -137,6 +139,77 @@ class DocumentTextExtractor
                 'level' => null,
             ],
         ];
+    }
+
+    /**
+     * @return array<int, array{text: string, style: ?string, level: ?int}>
+     */
+    private function extractStructuredPdfText(string $path): array
+    {
+        $text = trim($this->extractPdfText($path));
+
+        if ($text === '') {
+            return [];
+        }
+
+        $blocks = [];
+        $paragraphLines = [];
+
+        foreach (explode("\n", $text) as $line) {
+            $trimmed = trim($line);
+
+            if ($trimmed === '') {
+                if ($paragraphLines !== []) {
+                    $blocks[] = ['text' => implode(' ', $paragraphLines), 'style' => null, 'level' => null];
+                    $paragraphLines = [];
+                }
+
+                continue;
+            }
+
+            $level = $this->detectPdfHeadingLevel($trimmed);
+
+            if ($level !== null) {
+                if ($paragraphLines !== []) {
+                    $blocks[] = ['text' => implode(' ', $paragraphLines), 'style' => null, 'level' => null];
+                    $paragraphLines = [];
+                }
+
+                $blocks[] = ['text' => $trimmed, 'style' => null, 'level' => $level];
+            } else {
+                $paragraphLines[] = $trimmed;
+            }
+        }
+
+        if ($paragraphLines !== []) {
+            $blocks[] = ['text' => implode(' ', $paragraphLines), 'style' => null, 'level' => null];
+        }
+
+        return $blocks !== [] ? $blocks : [['text' => $text, 'style' => null, 'level' => null]];
+    }
+
+    private function detectPdfHeadingLevel(string $line): ?int
+    {
+        if (mb_strlen($line) > 120) {
+            return null;
+        }
+
+        // Sub-numbered: "1.1 Title", "2.3.4 Title"
+        if (preg_match('/^\d+\.\d[\d.]*\s+\S/u', $line)) {
+            return 2;
+        }
+
+        // Top-level numbered: "1. Title", "10. Title"
+        if (preg_match('/^\d+\.\s+[^\d\s]/u', $line)) {
+            return 1;
+        }
+
+        // ALL CAPS heading (min 4 letters, no sentence punctuation)
+        if (preg_match('/^[A-ZÆØÅ][A-ZÆØÅ0-9\s\-\/]{3,}$/u', $line) && ! str_contains($line, '.')) {
+            return 1;
+        }
+
+        return null;
     }
 
     /**
@@ -491,33 +564,15 @@ class DocumentTextExtractor
      */
     private function extractPdfText(string $path): string
     {
-        $contents = @file_get_contents($path);
+        $binary = trim((string) config('services.pdftotext.binary', 'pdftotext'));
 
-        if (! is_string($contents) || trim($contents) === '') {
+        $result = Process::run([$binary, '-nopgbrk', '-enc', 'UTF-8', $path, '-']);
+
+        if (! $result->successful() || trim($result->output()) === '') {
             return '';
         }
 
-        $chunks = [];
-        $streamMatches = [];
-
-        if (preg_match_all('/stream\r?\n(.*?)\r?\nendstream/s', $contents, $streamMatches)) {
-            foreach ($streamMatches[1] as $stream) {
-                $decodedStream = $this->decodePdfStream((string) $stream);
-                $text = $this->extractPdfTextFromChunk($decodedStream);
-
-                if ($text !== '') {
-                    $chunks[] = $text;
-                }
-            }
-        } else {
-            $text = $this->extractPdfTextFromChunk($contents);
-
-            if ($text !== '') {
-                $chunks[] = $text;
-            }
-        }
-
-        return $this->normalizeBlockText(implode("\n\n", $chunks));
+        return $this->normalizeBlockText($result->output());
     }
 
     /**
