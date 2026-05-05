@@ -380,7 +380,8 @@ function PhaseCommentCard({ comment, locale }) {
 
 export default function SavedNoticeShow({ notice }) {
     const page = usePage();
-    const { auth, errors = {} } = page.props;
+    const { auth, errors = {}, translations = {} } = page.props;
+    const tsn = translations?.saved_notice ?? {};
     const locale = document.documentElement.lang || 'no-NO';
     const infoItems = notice.info_items;
     const infoItemDefaults = infoItems.defaults;
@@ -865,7 +866,7 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : null}
                                 {notice.archived_at ? (
                                     <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
-                                        Arkivert
+                                        {tsn.archived ?? 'Arkivert'}
                                     </span>
                                 ) : null}
                             </div>
@@ -873,7 +874,7 @@ export default function SavedNoticeShow({ notice }) {
                             <div className="space-y-1.5">
                                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{notice.title}</h1>
                                 <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                                    {notice.organization_name || 'Oppdragsgiver ikke registrert'}
+                                    {notice.organization_name || (tsn.organization_unknown ?? 'Oppdragsgiver ikke registrert')}
                                 </p>
                             </div>
                         </div>
@@ -900,13 +901,13 @@ export default function SavedNoticeShow({ notice }) {
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
-                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Statuspanel</h2>
-                                    <p className="mt-1 text-sm text-slate-500">Operativ status, ansvar og nøkkeldatoer.</p>
+                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.status_panel ?? 'Statuspanel'}</h2>
+                                    <p className="mt-1 text-sm text-slate-500">{tsn.status_panel_subtitle ?? 'Operativ status, ansvar og nøkkeldatoer.'}</p>
                                 </div>
 
                                 <div className="space-y-3">
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Nåværende status</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.current_status ?? 'Nåværende status'}</div>
                                         <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
                                         <div className="mt-2 text-sm font-medium text-slate-900">{guidance.phaseTitle}</div>
                                         <p className="mt-1 text-sm leading-6 text-slate-600">{guidance.description}</p>
@@ -914,45 +915,45 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ansvarlige</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.responsible ?? 'Ansvarlige'}</div>
                                         <div className="mt-3 space-y-3">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Bid-manager</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || 'Ikke satt'}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.bid_manager_label ?? 'Bid-manager'}</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || (tsn.not_set ?? 'Ikke satt')}</div>
                                                 {notice.bid_manager?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
-                                                        Global bid-rolle: {bidRoleLabel(notice.bid_manager.bid_role)}
+                                                        {tsn.global_bid_role ?? 'Global bid-rolle'}: {bidRoleLabel(notice.bid_manager.bid_role)}
                                                     </div>
                                                 ) : null}
                                             </div>
 
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Kommersiell eier</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || 'Ikke satt'}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.opportunity_owner_label ?? 'Kommersiell eier'}</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || (tsn.not_set ?? 'Ikke satt')}</div>
                                                 {notice.opportunity_owner?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
-                                                        Global bid-rolle: {bidRoleLabel(notice.opportunity_owner.bid_role)}
+                                                        {tsn.global_bid_role ?? 'Global bid-rolle'}: {bidRoleLabel(notice.opportunity_owner.bid_role)}
                                                     </div>
                                                 ) : null}
                                             </div>
 
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Din globale bid-rolle</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.your_global_bid_role ?? 'Din globale bid-rolle'}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{currentUserBidRoleLabel}</div>
-                                                <div className="mt-1 text-xs text-slate-500">Gjelder brukerkontoen din, ikke denne saken.</div>
+                                                <div className="mt-1 text-xs text-slate-500">{tsn.role_applies_to_account ?? 'Gjelder brukerkontoen din, ikke denne saken.'}</div>
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Sentrale datoer</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.key_dates ?? 'Sentrale datoer'}</div>
                                         <div className="mt-3 space-y-3">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Sendt dato</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.submitted_date ?? 'Sendt dato'}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_submitted_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Lukket dato</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.closed_date ?? 'Lukket dato'}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                         </div>
@@ -966,11 +967,11 @@ export default function SavedNoticeShow({ notice }) {
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
                                 <div>
-                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">Informasjon</h2>
+                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.information ?? 'Informasjon'}</h2>
                                     <p className="mt-1 text-sm text-slate-500">
                                         {isPrivateRequest
-                                            ? 'Manuell forespørsel med relevant kontakt- og fristinformasjon.'
-                                            : 'Sakens innhold, oppsummering og fasebundet kontekst.'}
+                                            ? (tsn.private_request_subtitle ?? 'Manuell forespørsel med relevant kontakt- og fristinformasjon.')
+                                            : (tsn.notice_subtitle ?? 'Sakens innhold, oppsummering og fasebundet kontekst.')}
                                     </p>
                                 </div>
 
@@ -978,22 +979,22 @@ export default function SavedNoticeShow({ notice }) {
                                     isEditingDeadlines ? (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered ?? 'Registrert'}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
                                                 <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : (tsn.not_registered ?? 'Ikke registrert')}</div>
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="reference_number">
-                                                    Referanse
+                                                    {tsn.reference ?? 'Referanse'}
                                                 </label>
                                                 <input
                                                     id="reference_number"
@@ -1008,7 +1009,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_name">
-                                                    Kontaktperson
+                                                    {tsn.contact_person ?? 'Kontaktperson'}
                                                 </label>
                                                 <input
                                                     id="contact_person_name"
@@ -1023,7 +1024,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_email">
-                                                    Kontakt e-post
+                                                    {tsn.contact_email ?? 'Kontakt e-post'}
                                                 </label>
                                                 <input
                                                     id="contact_person_email"
@@ -1037,7 +1038,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 ) : null}
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link ?? 'Ekstern lenke'}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
@@ -1049,13 +1050,13 @@ export default function SavedNoticeShow({ notice }) {
                                                             {externalLinkLabel}
                                                         </a>
                                                     ) : (
-                                                        'Ikke registrert'
+                                                        tsn.not_registered ?? 'Ikke registrert'
                                                     )}
                                                 </div>
                                             </div>
                                             <div className="space-y-1.5 md:col-span-2">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="notes">
-                                                    Notater
+                                                    {tsn.notes ?? 'Notater'}
                                                 </label>
                                                 <textarea
                                                     id="notes"
@@ -1063,7 +1064,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     onChange={(event) => deadlineForm.setData('notes', event.target.value)}
                                                     rows={4}
                                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                    placeholder="Valgfritt notat"
+                                                    placeholder={tsn.notes_placeholder ?? 'Valgfritt notat'}
                                                 />
                                                 {deadlineForm.errors.notes ? (
                                                     <p className="text-sm text-rose-600">{deadlineForm.errors.notes}</p>
@@ -1073,33 +1074,33 @@ export default function SavedNoticeShow({ notice }) {
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered ?? 'Registrert'}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
                                                 <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : (tsn.not_registered ?? 'Ikke registrert')}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Referanse</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || 'Ikke registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.reference ?? 'Referanse'}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || (tsn.not_registered ?? 'Ikke registrert')}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontaktperson</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || 'Ikke registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_person ?? 'Kontaktperson'}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || (tsn.not_registered ?? 'Ikke registrert')}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kontakt e-post</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || 'Ikke registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_email ?? 'Kontakt e-post'}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || (tsn.not_registered ?? 'Ikke registrert')}</div>
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link ?? 'Ekstern lenke'}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
@@ -1111,7 +1112,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             {externalLinkLabel}
                                                         </a>
                                                     ) : (
-                                                        'Ikke registrert'
+                                                        tsn.not_registered ?? 'Ikke registrert'
                                                     )}
                                                 </div>
                                             </div>
@@ -1120,27 +1121,27 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Kunngjøring</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.announcement ?? 'Kunngjøring'}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.notice_id || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.organization_name || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Publisert</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.published ?? 'Publisert'}</div>
                                             <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
                                             <div className="text-sm font-medium text-slate-900">{formatDate(notice.deadline, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Neste leveringsfrist</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.next_deadline ?? 'Neste leveringsfrist'}</div>
                                             <div className="text-sm font-medium text-slate-900">{deadlineStateLabel(notice, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">CPV</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.cpv ?? 'CPV'}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.cpv_code || '—'}</div>
                                         </div>
                                     </div>
@@ -1233,15 +1234,15 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : null}
 
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppsummering</div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.summary ?? 'Oppsummering'}</div>
                                     <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
-                                        {notice.summary || 'Ingen oppsummering er registrert ennå.'}
+                                        {notice.summary || (tsn.no_summary ?? 'Ingen oppsummering er registrert ennå.')}
                                     </div>
                                 </div>
 
                                 {isPrivateRequest && notice.notes && !isEditingDeadlines ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notater</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.notes ?? 'Notater'}</div>
                                         <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
                                             {notice.notes}
                                         </div>

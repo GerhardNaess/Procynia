@@ -3,36 +3,11 @@ import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import { KNOWLEDGE_DOCUMENT_TYPE_OPTIONS } from './KnowledgeItemForm';
 
-const DOCUMENT_STATUS_OPTIONS = [
-    { value: 'all', label: 'Alle' },
-    { value: 'review', label: 'Trenger review' },
-    { value: 'processing', label: 'Under prosessering' },
-    { value: 'approved', label: 'Godkjent' },
-    { value: 'failed', label: 'Feilet' },
-];
-
-const DOCUMENT_TYPE_FILTER_OPTIONS = [
-    { value: 'all', label: 'Alle typer' },
-    ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
-];
-
-const DOCUMENT_STATUS_META = {
-    review: {
-        label: 'Trenger review',
-        className: 'bg-amber-100 text-amber-800 ring-amber-200',
-    },
-    processing: {
-        label: 'Under prosessering',
-        className: 'bg-sky-100 text-sky-700 ring-sky-200',
-    },
-    approved: {
-        label: 'Godkjent',
-        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-    },
-    failed: {
-        label: 'Feilet',
-        className: 'bg-rose-100 text-rose-700 ring-rose-200',
-    },
+const DOCUMENT_STATUS_CLASS = {
+    review: 'bg-amber-100 text-amber-800 ring-amber-200',
+    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
+    approved: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    failed: 'bg-rose-100 text-rose-700 ring-rose-200',
 };
 
 function classNames(...values) {
@@ -194,7 +169,7 @@ function DeleteIcon(props) {
     );
 }
 
-function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onConfirm }) {
+function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onConfirm, tk = {} }) {
     if (!item) {
         return null;
     }
@@ -211,9 +186,9 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
             <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
-                        <h2 className="text-xl font-semibold text-slate-950">Slette kunnskapsdokument?</h2>
+                        <h2 className="text-xl font-semibold text-slate-950">{tk.delete_title ?? 'Slette kunnskapsdokument?'}</h2>
                         <p className="text-sm leading-6 text-slate-500">
-                            Dette sletter dokumentet og tilhørende kunnskapsbiter. Handlingen kan ikke angres.
+                            {tk.delete_body ?? 'Dette sletter dokumentet og tilhørende kunnskapsbiter. Handlingen kan ikke angres.'}
                         </p>
                     </div>
 
@@ -229,7 +204,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                 <div className="space-y-3 px-6 py-6">
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                         <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
-                            Dokument
+                            {tk.delete_document_label ?? 'Dokument'}
                         </div>
                         <div className="mt-1 text-sm font-medium text-slate-950">
                             {item.original_filename}
@@ -244,7 +219,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                             onClick={onCancel}
                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
-                            Avbryt
+                            {tk.cancel ?? 'Avbryt'}
                         </button>
                         <button
                             type="button"
@@ -252,7 +227,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                             disabled={processing}
                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                            {processing ? 'Sletter...' : 'Slett dokument'}
+                            {processing ? (tk.deleting ?? 'Sletter...') : (tk.delete_confirm ?? 'Slett dokument')}
                         </button>
                     </div>
                 </div>
@@ -281,7 +256,8 @@ export default function KnowledgeBaseIndex({
     knowledgeItems = [],
     createUrl = '/app/ai/knowledge-base/create',
 }) {
-    const { locale = 'nb-NO' } = usePage().props;
+    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const tk = translations?.knowledge ?? {};
     const items = Array.isArray(knowledgeItems) ? knowledgeItems : [];
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -292,6 +268,24 @@ export default function KnowledgeBaseIndex({
     const [isDeleting, setIsDeleting] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const pageSize = 6;
+
+    const DOCUMENT_STATUS_OPTIONS = [
+        { value: 'all', label: tk.filter_all ?? 'Alle' },
+        { value: 'review', label: tk.filter_review ?? 'Trenger review' },
+        { value: 'processing', label: tk.filter_processing ?? 'Under prosessering' },
+        { value: 'approved', label: tk.filter_approved ?? 'Godkjent' },
+        { value: 'failed', label: tk.filter_failed ?? 'Feilet' },
+    ];
+    const DOCUMENT_TYPE_FILTER_OPTIONS = [
+        { value: 'all', label: tk.filter_all ?? 'Alle' },
+        ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+    ];
+    const DOCUMENT_STATUS_LABEL = {
+        review: tk.filter_review ?? 'Trenger review',
+        processing: tk.filter_processing ?? 'Under prosessering',
+        approved: tk.filter_approved ?? 'Godkjent',
+        failed: tk.filter_failed ?? 'Feilet',
+    };
 
     const statusCounts = items.reduce((accumulator, item) => {
         const status = getKnowledgeDocumentStatus(item);
@@ -322,7 +316,6 @@ export default function KnowledgeBaseIndex({
     const pageStart = filteredItems.length === 0 ? 0 : startIndex + 1;
     const pageEnd = Math.min(startIndex + pageSize, filteredItems.length);
     const isTypeFilterActive = documentTypeFilter !== 'all';
-    const activeStatusChip = DOCUMENT_STATUS_OPTIONS.find((option) => option.value === statusFilter) ?? DOCUMENT_STATUS_OPTIONS[0];
     const newDocumentUrl = createUrl.includes('?') ? `${createUrl}&mode=new` : `${createUrl}?mode=new`;
 
     useEffect(() => {
@@ -369,13 +362,13 @@ export default function KnowledgeBaseIndex({
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="space-y-2">
                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Kunnskapsdokumenter
+                                {tk.title ?? 'Kunnskapsdokumenter'}
                             </div>
                             <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                                Kunnskapsdokumenter
+                                {tk.title ?? 'Kunnskapsdokumenter'}
                             </h1>
                             <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                                Last opp, gjennomgå og aktiver kunnskapen som AI-en bruker i anbudsarbeid.
+                                {tk.subtitle ?? 'Last opp, gjennomgå og aktiver kunnskapen som AI-en bruker i anbudsarbeid.'}
                             </p>
                         </div>
 
@@ -384,7 +377,7 @@ export default function KnowledgeBaseIndex({
                                 href={newDocumentUrl}
                                 className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
                             >
-                                Nytt dokument
+                                {tk.new_document ?? 'Nytt dokument'}
                             </Link>
                         </div>
                     </div>
@@ -432,7 +425,7 @@ export default function KnowledgeBaseIndex({
                                     type="search"
                                     value={searchQuery}
                                     onChange={(event) => setSearchQuery(event.target.value)}
-                                    placeholder="Søk i dokumenter..."
+                                    placeholder={tk.search_placeholder ?? 'Søk i dokumenter...'}
                                     className="h-[54px] w-full border-0 bg-transparent pl-12 pr-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
                                 />
                             </label>
@@ -448,7 +441,7 @@ export default function KnowledgeBaseIndex({
                                 )}
                             >
                                 <FilterIcon className="h-4 w-4" />
-                                {showMoreFilters ? 'Skjul filtre' : 'Filter'}
+                                {showMoreFilters ? (tk.hide_filters ?? 'Skjul filtre') : (tk.filter_button ?? 'Filter')}
                             </button>
                         </div>
                     </div>
@@ -457,7 +450,7 @@ export default function KnowledgeBaseIndex({
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                                 <label className="space-y-2 md:max-w-sm md:flex-1">
-                                    <span className="text-sm font-medium text-slate-700">Dokumenttype</span>
+                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_type ?? 'Dokumenttype'}</span>
                                     <select
                                         value={documentTypeFilter}
                                         onChange={(event) => setDocumentTypeFilter(event.target.value)}
@@ -477,7 +470,7 @@ export default function KnowledgeBaseIndex({
                                         onClick={clearMoreFilters}
                                         className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                     >
-                                        Tøm
+                                        {tk.clear_filters ?? 'Tøm'}
                                     </button>
                                 </div>
                             </div>
@@ -489,10 +482,10 @@ export default function KnowledgeBaseIndex({
                     {filteredItems.length === 0 ? (
                         <div className="px-6 py-12 text-center">
                             <div className="text-lg font-semibold text-slate-900">
-                                Ingen dokumenter matcher filtrene.
+                                {tk.no_results_title ?? 'Ingen dokumenter matcher filtrene.'}
                             </div>
                             <p className="mt-2 text-sm text-slate-500">
-                                Prøv et bredere søk, eller velg en annen status eller dokumenttype.
+                                {tk.no_results_subtitle ?? 'Prøv et bredere søk, eller velg en annen status eller dokumenttype.'}
                             </p>
                         </div>
                     ) : (
@@ -501,10 +494,10 @@ export default function KnowledgeBaseIndex({
                                 <thead className="bg-slate-50/80">
                                     <tr>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-                                            Dokument
+                                            {tk.col_document ?? 'Dokument'}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-                                            Type
+                                            {tk.col_type ?? 'Type'}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
                                             Status
@@ -513,21 +506,22 @@ export default function KnowledgeBaseIndex({
                                             Chunks
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-                                            Sist endret
+                                            {tk.col_updated ?? 'Sist endret'}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-                                            Eier
+                                            {tk.col_owner ?? 'Eier'}
                                         </th>
                                         <th className="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
-                                            Handling
+                                            {tk.col_action ?? 'Handling'}
                                         </th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 bg-white">
                                     {pagedItems.map((item) => {
                                         const status = getKnowledgeDocumentStatus(item);
-                                        const statusMeta = DOCUMENT_STATUS_META[status] ?? DOCUMENT_STATUS_META.review;
-                                        const ownerName = item.uploaded_by ?? 'Ukjent';
+                                        const statusClass = DOCUMENT_STATUS_CLASS[status] ?? DOCUMENT_STATUS_CLASS.review;
+                                        const statusLabel = DOCUMENT_STATUS_LABEL[status] ?? DOCUMENT_STATUS_LABEL.review;
+                                        const ownerName = item.uploaded_by ?? '?';
                                         const ownerInitials = getOwnerInitials(ownerName);
                                         const versionLabel = item.version_label ?? 'Versjon 1';
                                         const subtitle = `${versionLabel} · ${item.file_size_human ?? '—'}`;
@@ -555,8 +549,8 @@ export default function KnowledgeBaseIndex({
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusMeta.className}`}>
-                                                        {statusMeta.label}
+                                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>
+                                                        {statusLabel}
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3.5 text-sm text-slate-500">
@@ -568,7 +562,7 @@ export default function KnowledgeBaseIndex({
                                                             {formatDate(item.updated_at ?? item.uploaded_at, locale)}
                                                         </div>
                                                         <div className="text-xs text-slate-500">
-                                                            av {ownerName}
+                                                            {tk.by_prefix ?? 'av'} {ownerName}
                                                         </div>
                                                     </div>
                                                 </td>
@@ -582,7 +576,7 @@ export default function KnowledgeBaseIndex({
                                                                 {ownerName}
                                                             </div>
                                                             <div className="text-xs text-slate-500">
-                                                                Eier
+                                                                {tk.col_owner ?? 'Eier'}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -593,7 +587,7 @@ export default function KnowledgeBaseIndex({
                                                             href={item.show_url ?? item.edit_url}
                                                             className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                         >
-                                                            Åpne
+                                                            {translations?.common?.open ?? 'Åpne'}
                                                         </Link>
                                                         <button
                                                             type="button"
@@ -601,7 +595,7 @@ export default function KnowledgeBaseIndex({
                                                             className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800"
                                                         >
                                                             <DeleteIcon className="h-4 w-4" />
-                                                            <span className="ml-1.5">Slett</span>
+                                                            <span className="ml-1.5">{tk.delete ?? 'Slett'}</span>
                                                         </button>
                                                     </div>
                                                 </td>
@@ -616,8 +610,8 @@ export default function KnowledgeBaseIndex({
                     <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-sm text-slate-500">
                             {filteredItems.length === 0
-                                ? 'Viser 0–0 av 0 dokumenter'
-                                : `Viser ${pageStart}–${pageEnd} av ${filteredItems.length === 1 ? '1 dokument' : `${filteredItems.length} dokumenter`}`}
+                                ? `${tk.showing ?? 'Viser'} 0 ${tk.documents ?? 'dokumenter'}`
+                                : `${tk.showing ?? 'Viser'} ${pageStart}–${pageEnd} ${tk.of ?? 'av'} ${filteredItems.length === 1 ? `1 ${tk.document ?? 'dokument'}` : `${filteredItems.length} ${tk.documents ?? 'dokumenter'}`}`}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -625,18 +619,18 @@ export default function KnowledgeBaseIndex({
                                 direction="prev"
                                 disabled={safeCurrentPage <= 1}
                                 onClick={() => setCurrentPage((current) => Math.max(1, current - 1))}
-                                >
-                                    Forrige
-                                </PaginationButton>
+                            >
+                                {translations?.common?.previous ?? 'Forrige'}
+                            </PaginationButton>
                             <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
-                                {safeCurrentPage} av {totalPages}
+                                {safeCurrentPage} {tk.of ?? 'av'} {totalPages}
                             </span>
                             <PaginationButton
                                 direction="next"
                                 disabled={safeCurrentPage >= totalPages}
                                 onClick={() => setCurrentPage((current) => Math.min(totalPages, current + 1))}
                             >
-                                Neste
+                                {translations?.common?.next ?? 'Neste'}
                             </PaginationButton>
                         </div>
                     </div>
@@ -646,14 +640,14 @@ export default function KnowledgeBaseIndex({
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="max-w-3xl">
                             <div className="text-sm font-medium text-slate-900">
-                                Slik fungerer kunnskapsdokumenter
+                                {tk.help_title ?? 'Slik fungerer kunnskapsdokumenter'}
                             </div>
                             <p className="mt-1 text-sm leading-6 text-slate-500">
-                                AI-en bruker kun dokumenter som er godkjent. Dokumenter i review blir ikke brukt før de er godkjent.
+                                {tk.help_text ?? 'AI-en bruker kun dokumenter som er godkjent. Dokumenter i review blir ikke brukt før de er godkjent.'}
                             </p>
                             {showHelpDetails ? (
                                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                                    Når dokumentene er godkjent, kan de brukes i svarutkast, bevisgrunnlag og øvrig AI-arbeid uten at du trenger å åpne detaljvisningen.
+                                    {tk.help_text_more ?? 'Når dokumentene er godkjent, kan de brukes i svarutkast, bevisgrunnlag og øvrig AI-arbeid uten at du trenger å åpne detaljvisningen.'}
                                 </p>
                             ) : null}
                         </div>
@@ -663,7 +657,7 @@ export default function KnowledgeBaseIndex({
                             onClick={() => setShowHelpDetails((current) => !current)}
                             className="inline-flex items-center justify-center self-start rounded-xl px-0 text-sm font-medium text-slate-500 transition hover:text-slate-700"
                         >
-                            {showHelpDetails ? 'Skjul' : 'Les mer'}
+                            {showHelpDetails ? (tk.help_hide ?? 'Skjul') : (tk.help_read_more ?? 'Les mer')}
                         </button>
                     </div>
                 </section>
@@ -674,6 +668,7 @@ export default function KnowledgeBaseIndex({
                 processing={isDeleting}
                 onCancel={closeDeleteDialog}
                 onConfirm={confirmDelete}
+                tk={tk}
             />
         </CustomerAppLayout>
     );
