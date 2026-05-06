@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\CustomerResource\Pages\CreateCustomer;
 use App\Filament\Resources\CustomerResource\Pages\EditCustomer;
 use App\Filament\Resources\CustomerResource\Pages\ListCustomers;
+use App\Filament\Resources\CustomerResource\Pages\ManageCustomerBilling;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -115,6 +116,10 @@ class CustomerResource extends Resource
             ])
             ->recordActions([
                 \Filament\Actions\EditAction::make(),
+                \Filament\Actions\Action::make('billing')
+                    ->label('Fakturering')
+                    ->icon('heroicon-o-credit-card')
+                    ->url(fn (Customer $record) => static::getUrl('billing', ['record' => $record])),
             ]);
     }
 
@@ -141,6 +146,7 @@ class CustomerResource extends Resource
             'index' => ListCustomers::route('/'),
             'create' => CreateCustomer::route('/create'),
             'edit' => EditCustomer::route('/{record}/edit'),
+            'billing' => ManageCustomerBilling::route('/{record}/billing'),
         ];
     }
 

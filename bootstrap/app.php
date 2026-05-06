@@ -25,6 +25,10 @@ return Application::configure(basePath: dirname(__DIR__))
             SetCustomerLocale::class,
             HandleInertiaRequests::class,
         ]);
+
+        $middleware->validateCsrfTokens(except: [
+            'stripe/webhook',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

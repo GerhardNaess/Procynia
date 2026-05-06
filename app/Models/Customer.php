@@ -5,9 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Cashier\Billable;
 
 class Customer extends Model
 {
+    use Billable;
+
     public const PERMISSION_CREATE_DEPARTMENTS = 'create_departments';
 
     public const PERMISSION_CREATE_USERS = 'create_users';
@@ -27,6 +30,11 @@ class Customer extends Model
         'language_id',
         'is_active',
         'permission_settings',
+        'stripe_id',
+        'pm_type',
+        'pm_last_four',
+        'trial_ends_at',
+        'subscription_plan',
     ];
 
     protected function casts(): array
@@ -34,6 +42,7 @@ class Customer extends Model
         return [
             'is_active' => 'boolean',
             'permission_settings' => 'array',
+            'trial_ends_at' => 'datetime',
         ];
     }
 

@@ -2222,28 +2222,34 @@ export default function NoticeIndex({
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
-                                                            <span title={!notice.can_delete ? noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser) : undefined}>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => removeNotice(notice)}
-                                                                    disabled={!notice.can_delete}
-                                                                    className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                                                                >
-                                                                    {noticesText.delete}
-                                                                </button>
-                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!notice.can_delete) {
+                                                                        window.alert(noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser));
+                                                                        return;
+                                                                    }
+                                                                    removeNotice(notice);
+                                                                }}
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                            >
+                                                                {noticesText.delete}
+                                                            </button>
                                                         ) : null}
                                                         {isHistoryMode ? (
-                                                            <span title={!notice.can_delete ? noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser) : undefined}>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => removeHistoryNotice(notice)}
-                                                                    disabled={!notice.can_delete}
-                                                                    className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                                                                >
-                                                                    {noticesText.delete}
-                                                                </button>
-                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!notice.can_delete) {
+                                                                        window.alert(noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser));
+                                                                        return;
+                                                                    }
+                                                                    removeHistoryNotice(notice);
+                                                                }}
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                            >
+                                                                {noticesText.delete}
+                                                            </button>
                                                         ) : null}
                                                         {notice.external_url ? (
                                                             <a

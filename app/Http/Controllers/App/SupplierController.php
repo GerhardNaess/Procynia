@@ -41,6 +41,8 @@ class SupplierController extends Controller
         $search = trim((string) $request->query('search', ''));
         $sortField = trim((string) $request->query('sort_field', ''));
         $sortDirection = strtolower(trim((string) $request->query('sort_direction', 'desc')));
+        $dateFrom = trim((string) $request->query('date_from', '')) ?: null;
+        $dateTo = trim((string) $request->query('date_to', '')) ?: now()->toDateString();
         $allowedSortFields = [
             'supplier_name' => 'supplier_name',
             'organization_number' => 'organization_number',
@@ -58,8 +60,14 @@ class SupplierController extends Controller
         }
 
         $suppliers = DoffinSupplier::query()
-            ->withListingMetrics()
-            ->searchListing($search);
+            ->withListingMetrics($dateFrom, $dateTo)
+            ->searchListing($search)
+            ->whereHas('notices', function ($q) use ($dateFrom, $dateTo): void {
+                if ($dateFrom) {
+                    $q->where('publication_date', '>=', $dateFrom . ' 00:00:00');
+                }
+                $q->where('publication_date', '<=', $dateTo . ' 23:59:59');
+            });
 
         if ($sortField === 'total_estimated_value_amount') {
             $suppliers->orderByRaw(sprintf('total_estimated_value_amount %s NULLS LAST', $sortDirection));
@@ -91,6 +99,8 @@ class SupplierController extends Controller
                 'search' => $search,
                 'sort_field' => $sortField,
                 'sort_direction' => $sortDirection,
+                'date_from' => $dateFrom ?? '',
+                'date_to' => $dateTo,
             ],
             'suppliers' => $suppliers,
         ]);

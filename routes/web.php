@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\App\KnowledgeVocabularyController;
@@ -14,7 +15,10 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
+
+Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
 
 Route::get('/', function () {
     $user = auth()->user();
@@ -91,6 +95,8 @@ Route::prefix('app')
             ->name('ai.answer-basis.destroy');
         Route::post('/ai/{savedNotice}/requirements', [AiController::class, 'storeRequirement'])
             ->name('ai.requirements.store');
+        Route::delete('/ai/{savedNotice}/requirements', [AiController::class, 'destroyAllRequirements'])
+            ->name('ai.requirements.destroy-all');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
             ->name('ai.requirements.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/review-status', [AiController::class, 'updateRequirementReviewStatus'])
@@ -161,4 +167,7 @@ Route::prefix('app')
             ->name('notices.documents.download');
         Route::get('/notices/{notice}/documents/download-all', [NoticeDocumentDownloadController::class, 'downloadAll'])
             ->name('notices.documents.download-all');
+        Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
+        Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
+        Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
     });

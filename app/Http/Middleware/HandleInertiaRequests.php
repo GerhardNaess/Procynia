@@ -98,6 +98,8 @@ class HandleInertiaRequests extends Middleware
                 'ai' => __('procynia.ai'),
                 'knowledge' => __('procynia.knowledge'),
                 'saved_notice' => __('procynia.saved_notice'),
+                'billing' => __('procynia.billing'),
+                'suppliers' => __('procynia.suppliers'),
                 'common' => [
                     'back' => __('procynia.frontend.back'),
                     'customer' => __('procynia.common.customer'),

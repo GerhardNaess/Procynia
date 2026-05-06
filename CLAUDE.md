@@ -156,6 +156,18 @@ AI prompts must not hardcode a language. Use `CustomerContext::resolveLanguageCo
 
 Infrastructure is complete. Most existing pages still have hardcoded Norwegian — these will be migrated incrementally. Do not retroactively fix pages unless explicitly asked.
 
+### Billing and subscriptions (planned)
+
+Planned implementation: **Stripe + Laravel Cashier**. Not yet built — do not assume any billing code exists.
+
+Two distinct concerns:
+
+1. **Procynia as product owner** — automated subscription billing, renewals, cancellations, PDF invoices, failed payment retries. All handled by Stripe/Cashier, nothing custom-built. Filament resource shows Stripe subscription data (status, history, upgrade/downgrade/cancel actions) — data is fetched from Stripe, not stored in the local database.
+
+2. **System Owner self-service** — a protected tab in the customer frontend where System Owners can view their invoices, next renewal date, and trigger cancellation. All data comes from Stripe API.
+
+Design principle: keep billing logic entirely in Stripe/Cashier; the app only reads and displays Stripe state.
+
 ### Doffin integration
 
 `app/Services/Doffin/` handles API calls to the Norwegian Doffin procurement platform. Config in `config/doffin.php`. Supplier harvest runs on the `supplier-harvests` queue. The relevance scoring engine uses weighted CPV matches, keyword matches, deadline bonuses, and type bonuses (weights configurable in `config/doffin.php`).

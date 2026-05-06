@@ -144,6 +144,7 @@ class AiController extends Controller
             'requirements_overview' => $requirementsOverview,
             'requirements' => $requirementsPayload,
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
+            'requirements_destroy_all_url' => route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
@@ -582,6 +583,21 @@ class AiController extends Controller
         );
 
         return back()->with('success', 'Krav lagt til.');
+    }
+
+    /**
+     * Purpose: Delete all requirement candidates for the visible AI case.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A redirect back to the AI case view after deletion.
+     * Side effects: Deletes all SavedNoticeAiRequirement rows for the notice.
+     */
+    public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
+    {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+
+        $record->aiRequirements()->delete();
+
+        return back()->with('success', 'Alle kravkandidater er slettet.');
     }
 
     /**

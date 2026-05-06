@@ -128,8 +128,13 @@ class DoffinSupplierHarvest extends Page implements HasForms
      */
     public function mount(): void
     {
+        $lastRun = \App\Models\DoffinSupplierHarvestRun::query()
+            ->where('status', \App\Models\DoffinSupplierHarvestRun::STATUS_COMPLETED)
+            ->orderByDesc('finished_at')
+            ->first();
+
         $this->form->fill([
-            'from' => now()->subDays(7)->toDateString(),
+            'from' => $lastRun?->source_to_date?->toDateString() ?? now()->subDays(7)->toDateString(),
             'to' => now()->toDateString(),
             'types' => ['RESULT'],
         ]);

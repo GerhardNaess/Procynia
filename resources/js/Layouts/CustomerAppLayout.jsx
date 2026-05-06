@@ -82,6 +82,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : readLastAiCaseId();
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
+    const billingHref = user?.is_system_owner ? '/app/billing' : null;
 
     const activeMainArea = (() => {
         if (pathname === '/app') {
@@ -128,6 +129,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'environment';
         }
 
+        if (pathname.startsWith('/app/billing')) {
+            return 'billing';
+        }
+
         return 'overview';
     })();
 
@@ -140,6 +145,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
+        ...(billingHref ? [{ key: 'billing', label: translations.billing?.nav ?? 'Fakturering', href: billingHref }] : []),
     ];
 
     const secondaryNavigation = (() => {

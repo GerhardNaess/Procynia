@@ -40,11 +40,19 @@ class DoffinSupplier extends Model
 
     /**
      * Return the read-only listing query used by supplier index screens.
+     * Optionally restricts notice counts and values to a publication_date range.
      */
-    public function scopeWithListingMetrics(Builder $query): Builder
+    public function scopeWithListingMetrics(Builder $query, ?string $dateFrom = null, ?string $dateTo = null): Builder
     {
         return $query
-            ->withCount('notices')
+            ->withCount(['notices' => function ($q) use ($dateFrom, $dateTo): void {
+                if ($dateFrom) {
+                    $q->where('publication_date', '>=', $dateFrom . ' 00:00:00');
+                }
+                if ($dateTo) {
+                    $q->where('publication_date', '<=', $dateTo . ' 23:59:59');
+                }
+            }])
             ->selectSub(
                 DB::query()
                     ->fromSub(
@@ -53,6 +61,8 @@ class DoffinSupplier extends Model
                             ->whereColumn('dns.doffin_supplier_id', 'doffin_suppliers.id')
                             ->where('dn.estimated_value_currency_code', 'NOK')
                             ->whereNotNull('dn.estimated_value_amount')
+                            ->when($dateFrom, fn ($q) => $q->where('dn.publication_date', '>=', $dateFrom . ' 00:00:00'))
+                            ->when($dateTo, fn ($q) => $q->where('dn.publication_date', '<=', $dateTo . ' 23:59:59'))
                             ->selectRaw('distinct dns.doffin_notice_id, dn.estimated_value_amount'),
                         'supplier_notice_values',
                     )

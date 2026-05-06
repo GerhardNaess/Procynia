@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
@@ -75,7 +75,11 @@ function formatEstimatedValue(amount, currencyCode) {
  */
 export default function SuppliersIndex({ suppliers, filters = {} }) {
     const locale = document.documentElement.lang || 'no';
+    const { translations = {} } = usePage().props;
+    const ts = translations?.suppliers ?? {};
     const [search, setSearch] = useState(filters.search ?? '');
+    const [dateFrom, setDateFrom] = useState(filters.date_from ?? '');
+    const [dateTo, setDateTo] = useState(filters.date_to ?? new Date().toISOString().slice(0, 10));
     const sortField = filters.sort_field ?? 'updated_at';
     const sortDirection = filters.sort_direction ?? 'desc';
 
@@ -84,6 +88,8 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
             search,
             sort_field: sortField,
             sort_direction: sortDirection,
+            date_from: dateFrom,
+            date_to: dateTo,
             ...params,
         }, {
             preserveScroll: true,
@@ -123,35 +129,60 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                 <section className="space-y-1.5">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Konkurrenter</h1>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        Read-only customer view of harvested Doffin competitors and their linked notice counts.
+                        {ts.page_subtitle ?? 'Oversikt over høstede Doffin-konkurrenter og tilknyttede kunngjøringer.'}
                     </p>
                 </section>
 
                 <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="flex justify-end">
-                        <form onSubmit={submitSearch} className="flex w-full max-w-sm gap-2">
+                    <form onSubmit={submitSearch} className="flex flex-wrap items-end gap-3">
+                        <div className="flex flex-1 flex-col gap-1 min-w-48">
+                            <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                Leverandørnavn / org.nr.
+                            </label>
                             <input
                                 type="search"
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search supplier name or org. number"
-                                className="min-h-11 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                                placeholder="Søk på navn eller org.nr."
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
                             />
-                            <button
-                                type="submit"
-                                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
-                            >
-                                Search
-                            </button>
-                        </form>
-                    </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                Fra dato
+                            </label>
+                            <input
+                                type="date"
+                                value={dateFrom}
+                                onChange={(event) => setDateFrom(event.target.value)}
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                Til dato
+                            </label>
+                            <input
+                                type="date"
+                                value={dateTo}
+                                onChange={(event) => setDateTo(event.target.value)}
+                                className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                        >
+                            Søk
+                        </button>
+                    </form>
                 </section>
 
                 {rows.length === 0 ? (
                     <section className="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-lg font-semibold text-slate-900">No competitors found</div>
+                        <div className="text-lg font-semibold text-slate-900">{ts.not_found_title ?? 'Ingen konkurrenter funnet'}</div>
                         <p className="mt-2 text-sm text-slate-500">
-                            Try a different search or wait for more supplier harvests to complete.
+                            {ts.not_found_hint ?? 'Prøv et annet søk eller vent til neste høsting er fullført.'}
                         </p>
                     </section>
                 ) : (
@@ -169,11 +200,11 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                         </div>
                                         <div className="grid grid-cols-2 gap-3 text-sm">
                                             <div>
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Notices</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.col_notices ?? 'Kunngjøringer'}</div>
                                                 <div className="mt-1 font-medium text-slate-950">{supplier.notices_count}</div>
                                             </div>
                                             <div>
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Total verdi</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.col_total_value ?? 'Total verdi'}</div>
                                                 <div className="mt-1 font-medium text-slate-950">
                                                     {formatEstimatedValue(
                                                         supplier.total_estimated_value_amount,
@@ -182,7 +213,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                                 </div>
                                             </div>
                                             <div>
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Updated at</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{ts.col_updated_at ?? 'Oppdatert'}</div>
                                                 <div className="mt-1 font-medium text-slate-950">{formatDateTime(supplier.updated_at, locale)}</div>
                                             </div>
                                         </div>
@@ -190,7 +221,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                             href={supplier.view_url}
                                             className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                         >
-                                            View
+                                            {ts.view_button ?? 'Vis'}
                                         </Link>
                                     </div>
                                 </article>
@@ -204,35 +235,35 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                         <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                                             <th className="px-6 py-4">
                                                 <button type="button" onClick={() => toggleSort('supplier_name')} className="inline-flex items-center gap-1 transition hover:text-slate-700">
-                                                    <span>Supplier name</span>
+                                                    <span>{ts.col_supplier_name ?? 'Leverandørnavn'}</span>
                                                     {sortIndicator('supplier_name') ? <span>{sortIndicator('supplier_name')}</span> : null}
                                                 </button>
                                             </th>
                                             <th className="px-6 py-4">
                                                 <button type="button" onClick={() => toggleSort('organization_number')} className="inline-flex items-center gap-1 transition hover:text-slate-700">
-                                                    <span>Organization number</span>
+                                                    <span>{ts.col_org_number ?? 'Organisasjonsnummer'}</span>
                                                     {sortIndicator('organization_number') ? <span>{sortIndicator('organization_number')}</span> : null}
                                                 </button>
                                             </th>
                                             <th className="px-6 py-4">
                                                 <button type="button" onClick={() => toggleSort('notices_count')} className="inline-flex items-center gap-1 transition hover:text-slate-700">
-                                                    <span>Notices</span>
+                                                    <span>{ts.col_notices ?? 'Kunngjøringer'}</span>
                                                     {sortIndicator('notices_count') ? <span>{sortIndicator('notices_count')}</span> : null}
                                                 </button>
                                             </th>
                                             <th className="px-6 py-4">
                                                 <button type="button" onClick={() => toggleSort('total_estimated_value_amount')} className="inline-flex items-center gap-1 transition hover:text-slate-700">
-                                                    <span>Total verdi</span>
+                                                    <span>{ts.col_total_value ?? 'Total verdi'}</span>
                                                     {sortIndicator('total_estimated_value_amount') ? <span>{sortIndicator('total_estimated_value_amount')}</span> : null}
                                                 </button>
                                             </th>
                                             <th className="px-6 py-4">
                                                 <button type="button" onClick={() => toggleSort('updated_at')} className="inline-flex items-center gap-1 transition hover:text-slate-700">
-                                                    <span>Updated at</span>
+                                                    <span>{ts.col_updated_at ?? 'Oppdatert'}</span>
                                                     {sortIndicator('updated_at') ? <span>{sortIndicator('updated_at')}</span> : null}
                                                 </button>
                                             </th>
-                                            <th className="px-6 py-4">View</th>
+                                            <th className="px-6 py-4">{ts.col_view ?? 'Vis'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -253,7 +284,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                                         href={supplier.view_url}
                                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
-                                                        View
+                                                        {ts.view_button ?? 'Vis'}
                                                     </Link>
                                                 </td>
                                             </tr>
@@ -266,8 +297,8 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                         <section className="flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 {suppliers.from && suppliers.to
-                                    ? `${suppliers.from}–${suppliers.to} of ${suppliers.total}`
-                                    : `${suppliers.total ?? rows.length} competitors`}
+                                    ? `${suppliers.from}–${suppliers.to} av ${suppliers.total}`
+                                    : `${suppliers.total ?? rows.length} konkurrenter`}
                             </div>
 
                             <div className="flex gap-2">
@@ -280,7 +311,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                     })}
                                     className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
                                 >
-                                    Previous
+                                    Forrige
                                 </button>
                                 <button
                                     type="button"
@@ -291,7 +322,7 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
                                     })}
                                     className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
                                 >
-                                    Next
+                                    Neste
                                 </button>
                             </div>
                         </section>
