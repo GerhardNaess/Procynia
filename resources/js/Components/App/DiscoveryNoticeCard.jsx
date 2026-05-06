@@ -48,11 +48,11 @@ function formatDate(value, locale, options = {}) {
     }).format(new Date(value));
 }
 
-function summarizeText(value) {
+function summarizeText(value, texts = {}) {
     const trimmed = (value ?? '').trim();
 
     if (trimmed === '') {
-        return 'Kort beskrivelse kommer i neste steg.';
+        return texts.summary_fallback;
     }
 
     return trimmed;
@@ -66,7 +66,7 @@ const DESCRIPTION_COLLAPSED_STYLE = {
     overflow: 'hidden',
 };
 
-function statusBadge(status, deadline) {
+function statusBadge(status, deadline, texts = {}) {
     if (status) {
         return {
             label: status,
@@ -76,20 +76,20 @@ function statusBadge(status, deadline) {
 
     if (!deadline) {
         return {
-            label: 'Kunngjøring',
+            label: texts.default_status_label,
             className: 'bg-slate-100 text-slate-700 ring-slate-200',
         };
     }
 
     if (new Date(deadline) <= new Date()) {
         return {
-            label: 'Utgått',
+            label: texts.expired_status_label,
             className: 'bg-rose-100 text-rose-700 ring-rose-200',
         };
     }
 
     return {
-        label: 'Aktiv',
+        label: texts.active_status_label,
         className: 'bg-violet-100 text-violet-700 ring-violet-200',
     };
 }
@@ -113,14 +113,16 @@ export default function DiscoveryNoticeCard({
     notice,
     locale,
     canSaveToWorklist = false,
-    saveButtonLabel = 'Lagre',
+    saveButtonLabel = null,
     deleteAction = null,
     actions = null,
     provenanceBadges = [],
+    texts = {},
 }) {
-    const statusTag = statusBadge(notice.status, notice.deadline);
+    const saveLabel = saveButtonLabel ?? texts.save_label;
+    const statusTag = statusBadge(notice.status, notice.deadline, texts);
     const deadlineBadge = {
-        label: `Frist ${formatDate(notice.deadline, locale)}`,
+        label: `${texts.deadline_prefix} ${formatDate(notice.deadline, locale)}`,
         className: 'bg-slate-100 text-slate-700 ring-slate-200',
     };
     const canRenderSaveAction = canSaveToWorklist && Boolean(notice.notice_id) && Boolean(notice.title);
@@ -146,7 +148,7 @@ export default function DiscoveryNoticeCard({
             return;
         }
 
-        const confirmMessage = deleteAction.confirmMessage ?? 'Delete this discovery item?';
+        const confirmMessage = deleteAction.confirmMessage ?? texts.delete_confirm;
 
         if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
             return;
@@ -184,21 +186,21 @@ export default function DiscoveryNoticeCard({
                     </div>
 
                     <div className="mt-1.5 flex flex-wrap items-center gap-4 text-sm text-slate-600">
-                        <span className="inline-flex items-center gap-2">
+                            <span className="inline-flex items-center gap-2">
                             <BuildingIcon className="h-4 w-4 text-slate-400" />
-                            {notice.buyer_name || 'Oppdragsgiver ikke angitt'}
+                            {notice.buyer_name || texts.missing_buyer}
                         </span>
                     </div>
 
                     <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
-                        <div style={descriptionStyle}>{summarizeText(notice.summary)}</div>
+                        <div style={descriptionStyle}>{summarizeText(notice.summary, texts)}</div>
                         {shouldCollapseDescription ? (
                             <button
                                 type="button"
                                 onClick={() => setIsDescriptionExpanded((current) => !current)}
                                 className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
                             >
-                                {isDescriptionExpanded ? 'Vis mindre' : 'Mer'}
+                                {isDescriptionExpanded ? texts.show_less : texts.show_more}
                             </button>
                         ) : null}
                     </div>
@@ -206,7 +208,7 @@ export default function DiscoveryNoticeCard({
                     <div className="mt-4 flex flex-wrap gap-2">
                         <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
                             <CalendarIcon className="h-3.5 w-3.5" />
-                            Publisert {formatDate(notice.publication_date, locale)}
+                            {texts.published_prefix} {formatDate(notice.publication_date, locale)}
                         </span>
                         <span
                             className={classNames(
@@ -218,7 +220,7 @@ export default function DiscoveryNoticeCard({
                             {deadlineBadge.label}
                         </span>
                         <span className="inline-flex items-center gap-2 rounded-full bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200">
-                            {notice.cpv_code ? `CPV: ${notice.cpv_code}` : 'Kategori: Doffin-kunngjøring'}
+                            {notice.cpv_code ? `${texts.cpv_prefix}: ${notice.cpv_code}` : texts.default_category}
                         </span>
                         <span
                             className={classNames(
@@ -245,7 +247,7 @@ export default function DiscoveryNoticeCard({
                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                 )}
                             >
-                                {notice.is_saved ? 'Lagret' : saveButtonLabel}
+                                {notice.is_saved ? texts.saved_label : saveLabel}
                             </button>
                         ) : null}
                         {canDelete ? (
@@ -254,7 +256,7 @@ export default function DiscoveryNoticeCard({
                                 onClick={deleteNoticeFromDiscovery}
                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                             >
-                                {deleteAction.label ?? 'Slett'}
+                                {deleteAction.label ?? texts.delete_label}
                             </button>
                         ) : null}
                         {actions}

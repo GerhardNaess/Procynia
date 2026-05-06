@@ -273,8 +273,8 @@ function isHistoryFollowUpMode(value) {
     return value === 'none' || value === 'manual_offset' || value === 'contract_end';
 }
 
-function historyMonthLabel(months) {
-    return `${months} ${Number(months) === 1 ? 'måned' : 'måneder'}`;
+function historyMonthLabel(months, text) {
+    return `${months} ${Number(months) === 1 ? text.monthSingular : text.monthPlural}`;
 }
 
 function deriveHistorySelection(notice) {
@@ -319,15 +319,15 @@ function buildHistoryFormData(notice) {
     };
 }
 
-function historyContractSummary(notice) {
+function historyContractSummary(notice, text) {
     const selection = deriveHistorySelection(notice);
 
     if (selection.procurementType === 'recurring' && notice.contract_period_months) {
-        return `Avtaleperiode: ${historyMonthLabel(notice.contract_period_months)}`;
+        return `${text.contractPeriodPrefix}: ${historyMonthLabel(notice.contract_period_months, text)}`;
     }
 
     if (notice.contract_period_text) {
-        return `Avtaleperiode: ${notice.contract_period_text}`;
+        return `${text.contractPeriodPrefix}: ${notice.contract_period_text}`;
     }
 
     return null;
@@ -349,17 +349,17 @@ function formatInteger(value, locale) {
     return new Intl.NumberFormat(locale).format(normalizeCount(value));
 }
 
-function summarizeText(value) {
+function summarizeText(value, text) {
     const trimmed = (value ?? '').trim();
 
     if (trimmed === '') {
-        return 'Kort beskrivelse kommer i neste steg.';
+        return text.summaryFallback;
     }
 
     return trimmed;
 }
 
-function statusBadge(status, deadline) {
+function statusBadge(status, deadline, text) {
     if (status) {
         return {
             label: status,
@@ -369,46 +369,46 @@ function statusBadge(status, deadline) {
 
     if (!deadline) {
         return {
-            label: 'Kunngjøring',
+            label: text.defaultStatusLabel,
             className: 'bg-slate-100 text-slate-700 ring-slate-200',
         };
     }
 
     if (new Date(deadline) <= new Date()) {
         return {
-            label: 'Utgått',
+            label: text.deadlineExpiredLabel,
             className: 'bg-rose-100 text-rose-700 ring-rose-200',
         };
     }
 
     return {
-        label: 'Aktiv',
+        label: text.activeLabel,
         className: 'bg-violet-100 text-violet-700 ring-violet-200',
     };
 }
 
-function noticeSourceTypeLabel(notice) {
+function noticeSourceTypeLabel(notice, text) {
     if (notice.source_type_label) {
         return notice.source_type_label;
     }
 
     return notice.source_type === 'private_request'
-        ? 'Privat forespørsel'
-        : 'Offentlig kunngjøring';
+        ? text.privateRequestSourceLabel
+        : text.publicNoticeSourceLabel;
 }
 
-function noticeSourceTimelineLabel(notice, locale) {
+function noticeSourceTimelineLabel(notice, locale, text) {
     if (notice.source_type === 'private_request') {
-        return `Registrert ${formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}`;
+        return `${text.sourceRegisteredLabel} ${formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}`;
     }
 
-    return `Publisert ${formatDate(notice.publication_date, locale)}`;
+    return `${text.sourcePublishedLabel} ${formatDate(notice.publication_date, locale)}`;
 }
 
-function noticeExternalLinkLabel(notice) {
+function noticeExternalLinkLabel(notice, text) {
     return notice.source_type === 'private_request'
-        ? 'Åpne lenke'
-        : 'Åpne i Doffin';
+        ? text.openLinkLabel
+        : text.openInDoffinLabel;
 }
 
 function noticeSourceBadgeClassName(notice) {
@@ -417,135 +417,135 @@ function noticeSourceBadgeClassName(notice) {
         : 'bg-slate-100 text-slate-700 ring-slate-200';
 }
 
-function savedNoticeDeadlineBadge(notice, locale) {
+function savedNoticeDeadlineBadge(notice, locale, text) {
     if (notice.source_type === 'private_request') {
         if (!notice.deadline) {
             return {
-                label: 'Frist ikke registrert',
+                label: text.deadlineNotRegisteredLabel,
                 className: 'bg-slate-100 text-slate-700 ring-slate-200',
             };
         }
 
         if (new Date(notice.deadline) <= new Date()) {
             return {
-                label: 'Frist utløpt',
+                label: text.deadlineExpiredLabel,
                 className: 'bg-rose-100 text-rose-700 ring-rose-200',
             };
         }
 
         return {
-            label: `Frist ${formatDate(notice.deadline, locale)}`,
+            label: `${text.deadlinePrefix} ${formatDate(notice.deadline, locale)}`,
             className: 'bg-violet-100 text-violet-700 ring-violet-200',
         };
     }
 
     if (notice.deadline_state === 'upcoming' && notice.next_deadline_type && notice.next_deadline_at) {
         return {
-            label: `Frist ${notice.next_deadline_type}: ${formatDeadlineDate(notice.next_deadline_at)}`,
+            label: `${text.deadlinePrefix} ${notice.next_deadline_type}: ${formatDeadlineDate(notice.next_deadline_at)}`,
             className: 'bg-slate-100 text-slate-700 ring-slate-200',
         };
     }
 
     if (notice.deadline_state === 'expired') {
         return {
-            label: 'Frist utløpt',
+            label: text.deadlineExpiredLabel,
             className: 'bg-rose-100 text-rose-700 ring-rose-200',
         };
     }
 
     return {
-        label: 'Frist mangler metadata',
+        label: text.deadlineMissingMetadataLabel,
         className: 'bg-rose-100 text-rose-700 ring-rose-200',
     };
 }
 
-function savedNoticeTimelineSteps(notice) {
+function savedNoticeTimelineSteps(notice, text) {
     return [
-        { key: 'questions_rfi', label: 'Spm RFI', date: notice.questions_rfi_deadline_at },
-        { key: 'rfi', label: 'RFI', date: notice.rfi_submission_deadline_at },
-        { key: 'questions_rfp', label: 'Spm RFP', date: notice.questions_rfp_deadline_at },
-        { key: 'rfp', label: 'RFP', date: notice.rfp_submission_deadline_at },
-        { key: 'award', label: 'Tildeling', date: notice.award_date_at },
+        { key: 'questions_rfi', label: text.questionsRfiLabel, date: notice.questions_rfi_deadline_at },
+        { key: 'rfi', label: text.rfiLabel, date: notice.rfi_submission_deadline_at },
+        { key: 'questions_rfp', label: text.questionsRfpLabel, date: notice.questions_rfp_deadline_at },
+        { key: 'rfp', label: text.rfpLabel, date: notice.rfp_submission_deadline_at },
+        { key: 'award', label: text.awardLabel, date: notice.award_date_at },
     ];
 }
 
-function privateRequestSummaryFields(notice, locale) {
+function privateRequestSummaryFields(notice, locale, text) {
     return [
         {
             key: 'saved_at',
-            label: 'Registrert',
-            value: notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : 'Ikke registrert',
+            label: text.registeredLabel,
+            value: notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : text.notRegistered,
         },
         {
             key: 'buyer_name',
-            label: 'Oppdragsgiver',
-            value: notice.buyer_name || 'Ikke registrert',
+            label: text.buyerLabel,
+            value: notice.buyer_name || text.notRegistered,
         },
         {
             key: 'deadline',
-            label: 'Frist',
-            value: notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert',
+            label: text.deadlineLabel,
+            value: notice.deadline ? formatDate(notice.deadline, locale) : text.notRegistered,
         },
         {
             key: 'reference_number',
-            label: 'Referanse',
-            value: notice.reference_number || 'Ikke registrert',
+            label: text.referenceLabel,
+            value: notice.reference_number || text.notRegistered,
         },
         {
             key: 'contact_person_name',
-            label: 'Kontaktperson',
-            value: notice.contact_person_name || 'Ikke registrert',
+            label: text.contactPersonLabel,
+            value: notice.contact_person_name || text.notRegistered,
         },
         {
             key: 'contact_person_email',
-            label: 'Kontakt e-post',
-            value: notice.contact_person_email || 'Ikke registrert',
+            label: text.contactEmailLabel,
+            value: notice.contact_person_email || text.notRegistered,
         },
         {
             key: 'notes',
-            label: 'Notater',
-            value: notice.notes || 'Ingen notater registrert',
+            label: text.notesLabel,
+            value: notice.notes || text.noNotesRegistered,
             span: true,
         },
     ];
 }
 
-function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits = 0, visibleHits = 0, liveSearchError = '') {
+function emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits = 0, visibleHits = 0, liveSearchError = '', text) {
     if (mode === 'live' && liveSearchError.trim() !== '') {
         return {
-            title: 'Doffin-søket feilet.',
+            title: text.noResultsLiveSearchErrorTitle,
             body: liveSearchError,
         };
     }
 
     if (mode === 'saved') {
         return {
-            title: 'Ingen lagrede kunngjøringer ennå.',
-            body: 'Lagre kunngjøringer fra live Doffin-søk for å holde dem synlige her.',
+            title: text.noResultsSavedTitle,
+            body: text.noResultsSavedBody,
         };
     }
 
     if (mode === 'history') {
         return {
-            title: 'Ingen kunngjøringer i historikk ennå.',
-            body: 'Flytt lagrede kunngjøringer hit når de ikke lenger skal ligge i arbeidslisten.',
+            title: text.noResultsHistoryTitle,
+            body: text.noResultsHistoryBody,
         };
     }
 
     if (totalHits > 0 && visibleHits === 0) {
         return {
-            title: 'Doffin ga treff, men ingen matcher nøkkelordene dine.',
-            body: 'Prøv bredere nøkkelord eller fjern noen filtre.',
+            title: text.noResultsFilteredTitle,
+            body: text.noResultsFilteredBody,
         };
     }
 
     return {
         title: hasAppliedSearch || hasAppliedRefinements
-            ? 'Ingen treff fra Doffin for dette søket.'
-            : 'Ingen treff fra Doffin akkurat nå.',
+            ? text.noResultsLiveTitle
+            : text.noResultsLiveTitle,
         body: hasAppliedRefinements
-            ? 'Prøv et bredere søk eller fjern noen av filtrene.'
-            : 'Søk i tittel, oppdragsgiver eller organisasjonsnummer for å finne kunngjøringer direkte i Doffin.',
+            ? text.noResultsFilteredBody
+            : text.noResultsLiveBody,
     };
 }
 
@@ -564,45 +564,205 @@ export default function NoticeIndex({
 }) {
     const { locale, translations } = usePage().props;
     const tf = translations?.frontend ?? {};
+    const common = translations?.common ?? {};
+    const navigation = translations?.navigation ?? {};
+    const nt = translations?.notices ?? {};
+    const noticesCardText = nt.card ?? {};
+    const noticesText = {
+        pageSubtitleSaved: nt.page_subtitle_saved,
+        pageSubtitleHistory: nt.page_subtitle_history,
+        summaryFallback: nt.summary_fallback,
+        monthSingular: nt.month_singular,
+        monthPlural: nt.month_plural,
+        contractPeriodPrefix: nt.contract_period_prefix,
+        defaultStatusLabel: nt.default_status_label,
+        activeLabel: nt.active_label,
+        deadlineExpiredLabel: nt.deadline_expired_label,
+        deadlineNotRegisteredLabel: nt.deadline_not_registered_label,
+        deadlineMissingMetadataLabel: nt.deadline_missing_metadata_label,
+        deadlinePrefix: nt.deadline_prefix,
+        privateRequestSourceLabel: nt.private_request_source_label,
+        publicNoticeSourceLabel: nt.public_notice_source_label,
+        typePrefix: nt.type_prefix,
+        sourceRegisteredLabel: nt.source_registered_label,
+        sourcePublishedLabel: nt.source_published_label,
+        openLinkLabel: nt.open_link_label,
+        openInDoffinLabel: nt.open_in_doffin_label,
+        externalLinkLabel: nt.external_link_label,
+        questionsRfiLabel: nt.questions_rfi_label,
+        rfiLabel: nt.rfi_label,
+        questionsRfpLabel: nt.questions_rfp_label,
+        rfpLabel: nt.rfp_label,
+        awardLabel: nt.award_label,
+        deadlineQuestionsRfiLabel: nt.deadline_questions_rfi_label,
+        deadlineRfiSubmissionLabel: nt.deadline_rfi_submission_label,
+        deadlineQuestionsRfpLabel: nt.deadline_questions_rfp_label,
+        deadlineRfpSubmissionLabel: nt.deadline_rfp_submission_label,
+        deadlineAwardDateLabel: nt.deadline_award_date_label,
+        registeredLabel: nt.registered_label,
+        buyerLabel: nt.buyer_label,
+        deadlineLabel: nt.deadline_label,
+        referenceLabel: nt.reference_label,
+        contactPersonLabel: nt.contact_person_label,
+        contactEmailLabel: nt.contact_email_label,
+        notesLabel: nt.notes_label,
+        notRegistered: nt.not_registered,
+        noNotesRegistered: nt.no_notes_registered,
+        savedByLabel: nt.saved_by_label,
+        savedLabel: nt.saved_label,
+        selectedSupplierLabel: nt.selected_supplier_label,
+        contractValueLabel: nt.contract_value_label,
+        procurementTypeLabel: nt.procurement_type_label,
+        selectProcurementType: nt.select_procurement_type,
+        followUpLabel: nt.follow_up_label,
+        followUpOffsetMonthsLabel: nt.follow_up_offset_months_label,
+        contractPeriodMonthsLabel: nt.contract_period_months_label,
+        contractPeriodHelp: nt.contract_period_help,
+        nextFollowUpTitle: nt.next_follow_up_title,
+        nextFollowUpManualHint: nt.next_follow_up_manual_hint,
+        nextFollowUpManualHelp: nt.next_follow_up_manual_help,
+        noPlannedFollowUp: nt.no_planned_follow_up,
+        noResultsLiveSearchErrorTitle: nt.no_results_live_search_error_title,
+        noResultsSavedTitle: nt.no_results_saved_title,
+        noResultsSavedBody: nt.no_results_saved_body,
+        noResultsHistoryTitle: nt.no_results_history_title,
+        noResultsHistoryBody: nt.no_results_history_body,
+        noResultsFilteredTitle: nt.no_results_filtered_title,
+        noResultsFilteredBody: nt.no_results_filtered_body,
+        noResultsLiveTitle: nt.no_results_live_title,
+        noResultsLiveBody: nt.no_results_live_body,
+        liveSearchErrorTitle: nt.live_search_error_title,
+        liveSearchHitsTitle: nt.live_search_hits_title,
+        liveCappedWarning: nt.live_capped_warning,
+        liveFallbackBanner: nt.live_fallback_banner,
+        alertsTitle: nt.alerts_title,
+        alertsEmpty: nt.alerts_empty,
+        alertsDeleteLabel: nt.alerts_delete_label,
+        alertsDeleteConfirm: nt.alerts_delete_confirm,
+        alertsOpenDoffin: nt.alerts_open_doffin,
+        liveTitle: nt.live_title,
+        liveDescription: nt.live_description,
+        liveSearchPlaceholder: nt.live_search_placeholder,
+        filtersDescription: nt.filters_description,
+        watchListPlaceholder: nt.watch_list_placeholder,
+        watchListPlaceholderEmpty: nt.watch_list_placeholder_empty,
+        watchListActiveTitle: nt.watch_list_active_title,
+        watchListActiveDescription: nt.watch_list_active_description,
+        watchListEmptyHelp: nt.watch_list_empty_help,
+        watchListHelp: nt.watch_list_help,
+        organizationPlaceholder: nt.organization_placeholder,
+        keywordsPlaceholder: nt.keywords_placeholder,
+        keywordsHelp: nt.keywords_help,
+        publicationDateLabel: nt.publication_date_label,
+        fromDateLabel: nt.from_date_label,
+        toDateLabel: nt.to_date_label,
+        relevanceDisabledHelp: nt.relevance_disabled_help,
+        privateRequestTitle: nt.private_request_title,
+        privateRequestDescription: nt.private_request_description,
+        privateRequestToggleHide: nt.private_request_toggle_hide,
+        privateRequestToggleShow: nt.private_request_toggle_show,
+        privateRequestFormHidden: nt.private_request_form_hidden,
+        privateRequestFieldTitle: nt.private_request_field_title,
+        privateRequestPlaceholderTitle: nt.private_request_placeholder_title,
+        privateRequestFieldBuyerName: nt.private_request_field_buyer_name,
+        privateRequestPlaceholderBuyerName: nt.private_request_placeholder_buyer_name,
+        privateRequestFieldSummary: nt.private_request_field_summary,
+        privateRequestPlaceholderSummary: nt.private_request_placeholder_summary,
+        privateRequestFieldReference: nt.private_request_field_reference,
+        privateRequestPlaceholderReference: nt.private_request_placeholder_reference,
+        privateRequestFieldContactPerson: nt.private_request_field_contact_person,
+        privateRequestPlaceholderContactPerson: nt.private_request_placeholder_contact_person,
+        privateRequestFieldContactEmail: nt.private_request_field_contact_email,
+        privateRequestPlaceholderContactEmail: nt.private_request_placeholder_contact_email,
+        privateRequestFieldExternalUrl: nt.private_request_field_external_url,
+        privateRequestPlaceholderExternalUrl: nt.private_request_placeholder_external_url,
+        privateRequestFieldNotes: nt.private_request_field_notes,
+        privateRequestPlaceholderNotes: nt.private_request_placeholder_notes,
+        privateRequestSaving: nt.private_request_saving,
+        privateRequestSubmit: nt.private_request_submit,
+        privateRequestReset: nt.private_request_reset,
+        worklistClearFilter: nt.worklist_clear_filter,
+        worklistFilterAllTypes: nt.worklist_filter_all_types,
+        worklistFilterTitleHistory: nt.worklist_filter_title_history,
+        worklistFilterTitleSaved: nt.worklist_filter_title_saved,
+        worklistFilterDescriptionHistory: nt.worklist_filter_description_history,
+        worklistFilterDescriptionSaved: nt.worklist_filter_description_saved,
+        worklistFilterLabelHistory: nt.worklist_filter_label_history,
+        worklistFilterLabelSaved: nt.worklist_filter_label_saved,
+        businessReviewTitle: nt.business_review_title,
+        businessReviewDescription: nt.business_review_description,
+        businessReviewAdd: nt.business_review_add,
+        businessReviewItemLabel: nt.business_review_item_label,
+        businessReviewEmpty: nt.business_review_empty,
+        privateRequestSectionDescription: nt.private_request_section_description,
+        procurementTypeOneTime: nt.procurement_type_one_time,
+        procurementTypeRecurring: nt.procurement_type_recurring,
+        followUpNone: nt.follow_up_none,
+        followUpManualOffset: nt.follow_up_manual_offset,
+        archiveToHistoryHelp: nt.archive_to_history_help,
+        saveAndMoveToHistory: nt.save_and_move_to_history,
+        moving: nt.moving,
+        addInformation: nt.add_information,
+        hideMove: nt.hide_move,
+        moveToHistory: nt.move_to_history,
+        historyNeedsSelection: nt.history_needs_selection,
+        savingLabel: nt.saving,
+        saveLabel: nt.save,
+        cancelLabel: nt.cancel,
+        searchLabel: nt.search,
+        openLabel: nt.open,
+        previousLabel: nt.previous,
+        nextLabel: nt.next,
+        statusLabel: nt.status,
+        buyerUnknown: nt.buyer_unknown,
+        moreLabel: nt.more,
+        showLessLabel: nt.show_less,
+        hitsSuffix: nt.hits_suffix,
+        delete: nt.delete,
+        deleteNoticeConfirm: nt.delete_notice_confirm,
+        deleteHistoryConfirm: nt.delete_history_confirm,
+        deletePermissionMessage: nt.delete_permission_message,
+        unknownUser: nt.unknown_user,
+    };
 
     const statusOptions = [
-        { value: '', label: tf.notice_status_all ?? 'Alle statuser' },
-        { value: 'ACTIVE', label: tf.notice_status_active ?? 'Aktiv' },
-        { value: 'EXPIRED', label: tf.notice_status_expired ?? 'Utgått' },
-        { value: 'AWARDED', label: tf.notice_status_awarded ?? 'Tildelt' },
-        { value: 'CANCELLED', label: tf.notice_status_cancelled ?? 'Avlyst' },
+        { value: '', label: tf.notice_status_all },
+        { value: 'ACTIVE', label: tf.notice_status_active },
+        { value: 'EXPIRED', label: tf.notice_status_expired },
+        { value: 'AWARDED', label: tf.notice_status_awarded },
+        { value: 'CANCELLED', label: tf.notice_status_cancelled },
     ];
 
     const relevanceOptions = [
-        { value: '', label: tf.relevance_all ?? 'Alle nivåer' },
-        { value: 'high', label: tf.relevance_high ?? 'Høy relevans' },
-        { value: 'medium', label: tf.relevance_medium ?? 'Middels relevans' },
-        { value: 'low', label: tf.relevance_low ?? 'Lav relevans' },
+        { value: '', label: tf.relevance_all },
+        { value: 'high', label: tf.relevance_high },
+        { value: 'medium', label: tf.relevance_medium },
+        { value: 'low', label: tf.relevance_low },
     ];
 
     const historyProcurementTypeOptions = [
-        { value: 'one_time', label: 'Engangsanskaffelse' },
-        { value: 'recurring', label: 'Løpende avtale' },
+        { value: 'one_time', label: noticesText.procurementTypeOneTime },
+        { value: 'recurring', label: noticesText.procurementTypeRecurring },
     ];
 
     const historyFollowUpOptions = [
-        { value: 'none', label: 'Ingen oppfølging' },
-        { value: 'manual_offset', label: 'Varsle etter antall måneder' },
+        { value: 'none', label: noticesText.followUpNone },
+        { value: 'manual_offset', label: noticesText.followUpManualOffset },
     ];
 
     const bidStatusOptions = [
-        { value: '', label: tf.bid_status_all ?? 'Alle bid-statuser' },
-        { value: 'discovered', label: tf.bid_status_discovered ?? 'Registrert' },
-        { value: 'qualifying', label: tf.bid_status_qualifying ?? 'Kvalifiseres' },
-        { value: 'go_no_go', label: tf.bid_status_go_no_go ?? 'Go / No-Go' },
-        { value: 'in_progress', label: tf.bid_status_in_progress ?? 'Under arbeid' },
-        { value: 'submitted', label: tf.bid_status_submitted ?? 'Sendt' },
-        { value: 'negotiation', label: tf.bid_status_negotiation ?? 'Forhandling' },
-        { value: 'won', label: tf.bid_status_won ?? 'Vunnet' },
-        { value: 'lost', label: tf.bid_status_lost ?? 'Tapt' },
-        { value: 'no_go', label: tf.bid_status_no_go ?? 'No-Go' },
-        { value: 'withdrawn', label: tf.bid_status_withdrawn ?? 'Trukket' },
-        { value: 'archived', label: tf.bid_status_archived ?? 'Arkiv' },
+        { value: '', label: tf.bid_status_all },
+        { value: 'discovered', label: tf.bid_status_discovered },
+        { value: 'qualifying', label: tf.bid_status_qualifying },
+        { value: 'go_no_go', label: tf.bid_status_go_no_go },
+        { value: 'in_progress', label: tf.bid_status_in_progress },
+        { value: 'submitted', label: tf.bid_status_submitted },
+        { value: 'negotiation', label: tf.bid_status_negotiation },
+        { value: 'won', label: tf.bid_status_won },
+        { value: 'lost', label: tf.bid_status_lost },
+        { value: 'no_go', label: tf.bid_status_no_go },
+        { value: 'withdrawn', label: tf.bid_status_withdrawn },
+        { value: 'archived', label: tf.bid_status_archived },
     ];
 
     const [selectedWatchListId, setSelectedWatchListId] = useState(() => filters.watch_list_id ?? '');
@@ -666,14 +826,14 @@ export default function NoticeIndex({
     const isAlertsTab = isLiveMode && tab === 'alerts';
     const isSavedOrHistoryMode = mode === 'saved' || mode === 'history';
     const worklistFilterOptions = isHistoryMode
-        ? [{ value: '', label: 'Alle typer' }, ...historyTypeOptions]
+        ? [{ value: '', label: noticesText.worklistFilterAllTypes }, ...historyTypeOptions]
         : bidStatusOptions;
     const worklistFilterValue = isHistoryMode ? historyTypeFilter : bidStatusFilter;
-    const worklistFilterTitle = isHistoryMode ? 'Type avslutning' : 'Fasefilter';
+    const worklistFilterTitle = isHistoryMode ? noticesText.worklistFilterTitleHistory : noticesText.worklistFilterTitleSaved;
     const worklistFilterDescription = isHistoryMode
-        ? 'Filtrer arbeidslisten etter avslutningstype for å finne riktige saker raskere.'
-        : 'Filtrer arbeidslisten etter fase for å finne riktige saker raskere.';
-    const worklistFilterLabel = isHistoryMode ? 'Filtrer på type' : 'Filtrer på fase';
+        ? noticesText.worklistFilterDescriptionHistory
+        : noticesText.worklistFilterDescriptionSaved;
+    const worklistFilterLabel = isHistoryMode ? noticesText.worklistFilterLabelHistory : noticesText.worklistFilterLabelSaved;
     const hasAppliedSearch = (filters.q ?? '').trim() !== '';
     const hasAppliedRefinements = [
         filters.organization_name,
@@ -702,11 +862,11 @@ export default function NoticeIndex({
     const totalHits = normalizeCount(notices?.meta?.numHitsTotal ?? notices?.meta?.total ?? 0);
     const accessibleHits = normalizeCount(notices?.meta?.numHitsAccessible ?? notices?.meta?.total ?? 0);
     const visibleHits = normalizeCount(notices?.data?.length ?? 0);
-    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits, liveSearchError);
+    const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits, liveSearchError, noticesText);
     const isCappedLiveSearch = isLiveMode && liveSearchError === '' && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
     const liveSearchHeading = liveSearchError !== ''
-        ? 'Doffin-søket feilet'
-        : `${formatInteger(notices?.meta?.total ?? 0, locale)} treff fra Doffin`;
+        ? noticesText.liveSearchErrorTitle
+        : `${formatInteger(notices?.meta?.total ?? 0, locale)} ${noticesText.liveSearchHitsTitle}`;
     const showLiveSearchFallbackBanner = liveSearchFallbackUsed && liveSearchError === '';
     const watchAlertRows = Array.isArray(watchAlerts?.data) ? watchAlerts.data : [];
     const hasPrimarySearchInput = searchQuery.trim() !== '' || organizationName.trim() !== '';
@@ -791,7 +951,7 @@ export default function NoticeIndex({
     };
 
     const removeNotice = (notice) => {
-        if (!window.confirm('Er du sikker på at du vil slette denne anskaffelsen?\n\nDenne handlingen kan ikke angres.')) {
+        if (!window.confirm(noticesText.deleteNoticeConfirm)) {
             return;
         }
 
@@ -801,7 +961,7 @@ export default function NoticeIndex({
     };
 
     const removeHistoryNotice = (notice) => {
-        if (!window.confirm('Er du sikker på at du vil slette denne historikk-kunngjøringen?\n\nDenne handlingen kan ikke angres.')) {
+        if (!window.confirm(noticesText.deleteHistoryConfirm)) {
             return;
         }
 
@@ -1162,38 +1322,43 @@ export default function NoticeIndex({
         }
     };
 
-    const pageTitle = isLiveMode ? 'Kunngjøringer' : 'Arbeidsliste';
-    const pageHeading = isLiveMode ? translations.frontend.procurements_nav : 'Arbeidsliste';
+    const pageTitle = isLiveMode
+        ? navigation.notices
+        : (isHistoryMode ? navigation.history : navigation.worklist);
+    const pageHeading = pageTitle;
     const pageSubtitle = isLiveMode
-        ? translations.frontend.procurements_subtitle
-        : 'Oversikt over kunngjøringer du følger opp og jobber aktivt med.';
+        ? tf.procurements_subtitle
+        : (isHistoryMode
+            ? noticesText.pageSubtitleHistory
+            : noticesText.pageSubtitleSaved);
 
     if (isAlertsTab) {
         return (
-            <CustomerAppLayout title="Varsler" showPageTitle={false}>
+            <CustomerAppLayout title={noticesText.alertsTitle} showPageTitle={false}>
                 <div className="space-y-7">
                     <section className="space-y-1.5">
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Varsler</h1>
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{noticesText.alertsTitle}</h1>
                     </section>
 
                     <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="max-h-[calc(100vh-180px)] space-y-3.5 overflow-y-auto pr-1">
                             {watchAlertRows.length === 0 ? (
                                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                                    Ingen nye varsler siste døgn.
+                                    {noticesText.alertsEmpty}
                                 </div>
                             ) : (
                                 watchAlertRows.map((notice) => (
-                                    <DiscoveryNoticeCard
-                                        key={notice.id}
-                                        notice={notice}
-                                        locale={locale}
-                                        canSaveToWorklist
-                                        saveButtonLabel={translations.frontend.save_button}
-                                        deleteAction={{
-                                            href: notice.delete_url,
-                                            label: 'Slett',
-                                            confirmMessage: 'Slette dette varselet?',
+                                        <DiscoveryNoticeCard
+                                            key={notice.id}
+                                            notice={notice}
+                                            locale={locale}
+                                            canSaveToWorklist
+                                            saveButtonLabel={translations.frontend.save_button}
+                                            texts={noticesCardText}
+                                            deleteAction={{
+                                                href: notice.delete_url,
+                                                label: noticesText.alertsDeleteLabel,
+                                                confirmMessage: noticesText.alertsDeleteConfirm,
                                         }}
                                         actions={
                                             notice.external_url ? (
@@ -1203,7 +1368,7 @@ export default function NoticeIndex({
                                                     rel="noreferrer"
                                                     className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                 >
-                                                    Åpne i Doffin
+                                                    {noticesText.alertsOpenDoffin}
                                                 </a>
                                             ) : null
                                         }
@@ -1241,10 +1406,10 @@ export default function NoticeIndex({
                         {isLiveMode ? (
                             <>
                                 <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
-                            <div className="mb-3">
-                                <div className="text-sm font-medium text-slate-900">Live søk i Doffin</div>
+                                <div className="mb-3">
+                                <div className="text-sm font-medium text-slate-900">{noticesText.liveTitle}</div>
                                 <p className="mt-1 text-sm text-slate-500">
-                                    Søk direkte i Doffin etter tittel, oppdragsgiver, organisasjonsnummer og beskrivelse.
+                                    {noticesText.liveDescription}
                                 </p>
                             </div>
                             <form
@@ -1260,7 +1425,7 @@ export default function NoticeIndex({
                                         type="search"
                                         value={searchQuery}
                                         onChange={(event) => setSearchQuery(event.target.value)}
-                                        placeholder="Søk i tittel, oppdragsgiver, org.nr. eller beskrivelse"
+                                        placeholder={noticesText.liveSearchPlaceholder}
                                         className="h-[54px] w-full border-0 bg-transparent pl-12 pr-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:ring-0"
                                     />
                                 </label>
@@ -1269,22 +1434,22 @@ export default function NoticeIndex({
 
                         <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="mb-4">
-                                <div className="flex items-center gap-2.5">
-                                    <FilterIcon className="h-5 w-5 text-slate-500" />
-                                    <h2 className="text-xl font-semibold text-slate-950">Filtrer Doffin-treff</h2>
+                                    <div className="flex items-center gap-2.5">
+                                        <FilterIcon className="h-5 w-5 text-slate-500" />
+                                    <h2 className="text-xl font-semibold text-slate-950">{tf.filters_title}</h2>
+                                    </div>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                    {noticesText.filtersDescription}
+                                    </p>
                                 </div>
-                                <p className="mt-1 text-sm text-slate-500">
-                                    Bruk filtrene under for å snevre inn live-resultatene fra Doffin.
-                                </p>
-                            </div>
 
                             <div className="space-y-3.5">
                                 <label className="space-y-2">
                                     <div className="flex items-center justify-between gap-3">
-                                        <span className="text-sm font-medium text-slate-700">Watch list</span>
+                                        <span className="text-sm font-medium text-slate-700">{navigation.watch_lists}</span>
                                         {activeWatchList ? (
                                             <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                Aktiv
+                                                {common.active}
                                             </span>
                                         ) : null}
                                     </div>
@@ -1294,7 +1459,7 @@ export default function NoticeIndex({
                                         onChange={(event) => applyWatchListPrefill(event.target.value)}
                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                                     >
-                                        <option value="">{watchListOptions.length === 0 ? 'Ingen watch lists tilgjengelig' : 'Ingen watch list'}</option>
+                                        <option value="">{watchListOptions.length === 0 ? noticesText.watchListPlaceholderEmpty : noticesText.watchListPlaceholder}</option>
                                         {watchListOptions.map((item) => (
                                             <option key={item.value} value={item.value}>
                                                 {item.label}
@@ -1304,30 +1469,30 @@ export default function NoticeIndex({
                                     {activeWatchList ? (
                                         <div className="rounded-xl border border-violet-200 bg-violet-50/70 px-3 py-2.5">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">Aktiv watch list</span>
+                                                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">{noticesText.watchListActiveTitle}</span>
                                                 <span className="text-sm font-medium text-violet-900">{activeWatchList.label}</span>
                                             </div>
                                             <p className="mt-1 text-xs leading-5 text-violet-800">
-                                                Valgt watch list fyller inn filtrene automatisk. Du kan fortsatt justere feltene manuelt.
+                                                {noticesText.watchListActiveDescription}
                                             </p>
                                         </div>
                                     ) : (
                                         <p className="text-xs text-slate-400">
                                             {watchListOptions.length === 0
-                                                ? 'Ingen watch lists er tilgjengelige for kunden akkurat nå.'
-                                                : 'Velg en watch list for å fylle inn filtrene under. Du kan fortsatt redigere alle felter manuelt etterpå.'}
+                                                ? noticesText.watchListEmptyHelp
+                                                : noticesText.watchListHelp}
                                         </p>
                                     )}
                                 </label>
 
                                 <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{translations.frontend.organization_name}</span>
+                                        <span className="text-sm font-medium text-slate-700">{tf.organization_name}</span>
                                         <input
                                             type="text"
                                             value={organizationName}
                                             onChange={(event) => setOrganizationName(event.target.value)}
-                                            placeholder="Skriv organisasjonsnavn eller org.nr."
+                                            placeholder={noticesText.organizationPlaceholder}
                                             className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
                                     </label>
@@ -1338,7 +1503,7 @@ export default function NoticeIndex({
                                         popularItems={cpvSelector?.popular ?? []}
                                     />
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{translations.frontend.keyword}</span>
+                                        <span className="text-sm font-medium text-slate-700">{tf.keyword}</span>
                                         <input
                                             type="text"
                                             value={keywords}
@@ -1346,16 +1511,16 @@ export default function NoticeIndex({
                                                 setKeywords(event.target.value);
                                                 setKeywordsSource('manual');
                                             }}
-                                            placeholder="For eksempel havn, ferge, drift"
+                                            placeholder={noticesText.keywordsPlaceholder}
                                             className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
-                                        <p className="text-xs text-slate-400">Kommaseparer ord for å snevre inn hovedsøket.</p>
+                                        <p className="text-xs text-slate-400">{noticesText.keywordsHelp}</p>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">Kunngjøringsdato</span>
+                                        <span className="text-sm font-medium text-slate-700">{noticesText.publicationDateLabel}</span>
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             <label className="space-y-1">
-                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Fra dato</span>
+                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{noticesText.fromDateLabel}</span>
                                                 <input
                                                     type="date"
                                                     value={publicationDateFrom}
@@ -1364,7 +1529,7 @@ export default function NoticeIndex({
                                                 />
                                             </label>
                                             <label className="space-y-1">
-                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Til dato</span>
+                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{noticesText.toDateLabel}</span>
                                                 <input
                                                     type="date"
                                                     value={publicationDateTo}
@@ -1375,7 +1540,7 @@ export default function NoticeIndex({
                                         </div>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{translations.common.status}</span>
+                                        <span className="text-sm font-medium text-slate-700">{common.status}</span>
                                         <select
                                             value={status}
                                             onChange={(event) => setStatus(event.target.value)}
@@ -1389,7 +1554,7 @@ export default function NoticeIndex({
                                         </select>
                                     </label>
                                     <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{translations.frontend.relevance}</span>
+                                        <span className="text-sm font-medium text-slate-700">{tf.relevance}</span>
                                         <select
                                             value={relevance}
                                             onChange={(event) => setRelevance(event.target.value)}
@@ -1402,7 +1567,7 @@ export default function NoticeIndex({
                                                 </option>
                                             ))}
                                         </select>
-                                        <p className="text-xs text-slate-400">Relevans finnes ikke som live Doffin-filter i denne flyten.</p>
+                                        <p className="text-xs text-slate-400">{noticesText.relevanceDisabledHelp}</p>
                                     </label>
                                 </div>
                             </div>
@@ -1413,14 +1578,14 @@ export default function NoticeIndex({
                                     onClick={applyFilters}
                                     className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
                                 >
-                                    {translations.frontend.search_button}
+                                    {common.search}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={clearFilters}
                                     className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
-                                    {translations.frontend.clear_filters}
+                                    {tf.clear_filters}
                                 </button>
                             </div>
                         </section>
@@ -1440,9 +1605,9 @@ export default function NoticeIndex({
                                 <div className="space-y-4">
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
-                                            <div className="text-sm font-medium text-slate-900">Registrer privat forespørsel</div>
+                                            <div className="text-sm font-medium text-slate-900">{noticesText.privateRequestTitle}</div>
                                             <p className="mt-1 text-sm text-slate-500">
-                                                Legg inn inviterte eller direkte mottatte forespørsler i samme saksmotor som offentlige kunngjøringer.
+                                                {noticesText.privateRequestDescription}
                                             </p>
                                         </div>
 
@@ -1453,7 +1618,7 @@ export default function NoticeIndex({
                                             onClick={() => setIsPrivateRequestFormOpen((current) => !current)}
                                             className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                         >
-                                            {isPrivateRequestFormOpen ? 'Skjul skjema' : 'Registrer privat forespørsel'}
+                                            {isPrivateRequestFormOpen ? noticesText.privateRequestToggleHide : noticesText.privateRequestToggleShow}
                                         </button>
                                     </div>
 
@@ -1470,13 +1635,13 @@ export default function NoticeIndex({
 
                                             <div className="grid gap-3.5 md:grid-cols-2">
                                                 <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-sm font-medium text-slate-700">Tittel</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldTitle}</span>
                                                     <input
                                                         type="text"
                                                         value={privateRequestForm.data.title}
                                                         onChange={(event) => privateRequestForm.setData('title', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Navn på forespørselen"
+                                                        placeholder={noticesText.privateRequestPlaceholderTitle}
                                                     />
                                                     {privateRequestForm.errors.title ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.title}</p>
@@ -1484,13 +1649,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2">
-                                                    <span className="text-sm font-medium text-slate-700">Oppdragsgiver</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.buyerLabel}</span>
                                                     <input
                                                         type="text"
                                                         value={privateRequestForm.data.buyer_name}
                                                         onChange={(event) => privateRequestForm.setData('buyer_name', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Navn på kunde eller oppdragsgiver"
+                                                        placeholder={noticesText.privateRequestPlaceholderBuyerName}
                                                     />
                                                     {privateRequestForm.errors.buyer_name ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.buyer_name}</p>
@@ -1498,7 +1663,7 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2">
-                                                    <span className="text-sm font-medium text-slate-700">Frist</span>
+                                                    <span className="text-sm font-medium text-slate-700">{translations.common.deadline}</span>
                                                     <input
                                                         type="date"
                                                         value={privateRequestForm.data.deadline}
@@ -1511,13 +1676,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-sm font-medium text-slate-700">Kort beskrivelse</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldSummary}</span>
                                                     <textarea
                                                         value={privateRequestForm.data.summary}
                                                         onChange={(event) => privateRequestForm.setData('summary', event.target.value)}
                                                         rows={3}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Kort om hva forespørselen gjelder"
+                                                        placeholder={noticesText.privateRequestPlaceholderSummary}
                                                     />
                                                     {privateRequestForm.errors.summary ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.summary}</p>
@@ -1525,13 +1690,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2">
-                                                    <span className="text-sm font-medium text-slate-700">Referanse</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldReference}</span>
                                                     <input
                                                         type="text"
                                                         value={privateRequestForm.data.reference_number}
                                                         onChange={(event) => privateRequestForm.setData('reference_number', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Valgfri referanse"
+                                                        placeholder={noticesText.privateRequestPlaceholderReference}
                                                     />
                                                     {privateRequestForm.errors.reference_number ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.reference_number}</p>
@@ -1539,13 +1704,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2">
-                                                    <span className="text-sm font-medium text-slate-700">Kontaktperson</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldContactPerson}</span>
                                                     <input
                                                         type="text"
                                                         value={privateRequestForm.data.contact_person_name}
                                                         onChange={(event) => privateRequestForm.setData('contact_person_name', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Navn på kontaktperson"
+                                                        placeholder={noticesText.privateRequestPlaceholderContactPerson}
                                                     />
                                                     {privateRequestForm.errors.contact_person_name ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.contact_person_name}</p>
@@ -1553,13 +1718,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2">
-                                                    <span className="text-sm font-medium text-slate-700">Kontakt e-post</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldContactEmail}</span>
                                                     <input
                                                         type="email"
                                                         value={privateRequestForm.data.contact_person_email}
                                                         onChange={(event) => privateRequestForm.setData('contact_person_email', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="kontakt@kunde.no"
+                                                        placeholder={noticesText.privateRequestPlaceholderContactEmail}
                                                     />
                                                     {privateRequestForm.errors.contact_person_email ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.contact_person_email}</p>
@@ -1567,13 +1732,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-sm font-medium text-slate-700">Ekstern lenke</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldExternalUrl}</span>
                                                     <input
                                                         type="url"
                                                         value={privateRequestForm.data.external_url}
                                                         onChange={(event) => privateRequestForm.setData('external_url', event.target.value)}
                                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="https://..."
+                                                        placeholder={noticesText.privateRequestPlaceholderExternalUrl}
                                                     />
                                                     {privateRequestForm.errors.external_url ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.external_url}</p>
@@ -1581,13 +1746,13 @@ export default function NoticeIndex({
                                                 </label>
 
                                                 <label className="space-y-2 md:col-span-2">
-                                                    <span className="text-sm font-medium text-slate-700">Notater</span>
+                                                    <span className="text-sm font-medium text-slate-700">{noticesText.privateRequestFieldNotes}</span>
                                                     <textarea
                                                         value={privateRequestForm.data.notes}
                                                         onChange={(event) => privateRequestForm.setData('notes', event.target.value)}
                                                         rows={3}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        placeholder="Valgfri intern informasjon"
+                                                        placeholder={noticesText.privateRequestPlaceholderNotes}
                                                     />
                                                     {privateRequestForm.errors.notes ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.notes}</p>
@@ -1601,7 +1766,7 @@ export default function NoticeIndex({
                                                     disabled={privateRequestForm.processing}
                                                     className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    {privateRequestForm.processing ? 'Lagrer...' : 'Registrer forespørsel'}
+                                                    {privateRequestForm.processing ? noticesText.privateRequestSaving : noticesText.privateRequestSubmit}
                                                 </button>
                                                 <button
                                                     type="button"
@@ -1612,13 +1777,13 @@ export default function NoticeIndex({
                                                     disabled={privateRequestForm.processing}
                                                     className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    Tøm
+                                                    {noticesText.privateRequestReset}
                                                 </button>
                                             </div>
                                         </form>
                                     ) : (
                                         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                                            Skjemaet er skjult. Klikk for å registrere en privat forespørsel.
+                                            {noticesText.privateRequestFormHidden}
                                         </div>
                                     )}
                                 </div>
@@ -1657,7 +1822,7 @@ export default function NoticeIndex({
                                                 onClick={() => applySavedNoticeFilter('')}
                                                 className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
-                                                Fjern filter
+                                                {noticesText.worklistClearFilter}
                                             </button>
                                         ) : null}
                                     </div>
@@ -1675,14 +1840,13 @@ export default function NoticeIndex({
 
                             {isCappedLiveSearch ? (
                                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                                    Doffin rapporterer {formatInteger(totalHits, locale)} treff for dette søket. I denne søkeflyten er bare topp{' '}
-                                    {formatInteger(accessibleHits, locale)} treff tilgjengelige for sidevisning. Bruk filtre for å snevre inn treffene og få tilgang til flere relevante kunngjøringer.
+                                    {noticesText.liveCappedWarning?.replace(':total', formatInteger(totalHits, locale)).replace(':accessible', formatInteger(accessibleHits, locale))}
                                 </div>
                             ) : null}
 
                             {showLiveSearchFallbackBanner ? (
                                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                                    Doffin brukte fallback for deler av søket. Resultatene kan være bredere enn normalt.
+                                    {noticesText.liveFallbackBanner}
                                 </div>
                             ) : null}
 
@@ -1695,19 +1859,19 @@ export default function NoticeIndex({
                                 <div className="space-y-3.5">
                                     {notices.data.map((notice) => {
                                         const isPrivateRequest = notice.source_type === 'private_request';
-                                        const statusTag = statusBadge(notice.status, notice.deadline);
+                                        const statusTag = statusBadge(notice.status, notice.deadline, noticesText);
                                         const deadlineBadge = isSavedOrHistoryMode
-                                            ? savedNoticeDeadlineBadge(notice, locale)
+                                            ? savedNoticeDeadlineBadge(notice, locale, noticesText)
                                             : {
-                                                label: `Frist ${formatDate(notice.deadline, locale)}`,
+                                                label: `${noticesText.deadlinePrefix} ${formatDate(notice.deadline, locale)}`,
                                                 className: 'bg-slate-100 text-slate-700 ring-slate-200',
                                             };
-                                        const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest ? savedNoticeTimelineSteps(notice) : [];
+                                        const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest ? savedNoticeTimelineSteps(notice, noticesText) : [];
                                         const businessReviews = (notice.business_reviews ?? []).filter((review) => review.business_review_at);
                                         const isDetailsExpanded = Boolean(expandedSavedNoticeIds[notice.id]);
                                         const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
                                         const isEditingHistory = isHistoryMode && editingHistoryNoticeId === notice.id;
-                                        const historyContractLabel = isHistoryMode ? historyContractSummary(notice) : null;
+                                        const historyContractLabel = isHistoryMode ? historyContractSummary(notice, noticesText) : null;
                                         const needsHistorySelection = isHistoryMode ? historyNeedsStructuredSelection(notice) : false;
                                         const noticeSummary = (notice.summary ?? '').trim();
                                         const isNoticeSummaryExpandable = noticeSummary.length > noticeSummaryPreviewLimit;
@@ -1724,6 +1888,7 @@ export default function NoticeIndex({
                                                     locale={locale}
                                                     canSaveToWorklist
                                                     saveButtonLabel={translations.frontend.save_button}
+                                                    texts={noticesCardText}
                                                     actions={
                                                         notice.external_url ? (
                                                             <a
@@ -1732,7 +1897,7 @@ export default function NoticeIndex({
                                                                 rel="noreferrer"
                                                                 className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
-                                                                Åpne i Doffin
+                                                                {noticesText.openInDoffinLabel}
                                                             </a>
                                                         ) : null
                                                     }
@@ -1756,7 +1921,7 @@ export default function NoticeIndex({
                                                         <div className="mt-1.5 flex flex-wrap items-center gap-4 text-sm text-slate-600">
                                                             <span className="inline-flex items-center gap-2">
                                                                 <BuildingIcon className="h-4 w-4 text-slate-400" />
-                                                                {notice.buyer_name || 'Oppdragsgiver ikke angitt'}
+                                                                {notice.buyer_name || noticesText.buyerUnknown}
                                                             </span>
                                                             {isSavedOrHistoryMode && notice.bid_status ? (
                                                                 <span className={classNames('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset', bidStatusBadgeClassName(notice.bid_status))}>
@@ -1768,13 +1933,13 @@ export default function NoticeIndex({
                                                         {isHistoryMode && notice.history_type_label ? (
                                                             <div className="mt-2">
                                                                 <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                                    Type: {notice.history_type_label}
+                                                                {noticesText.typePrefix}: {notice.history_type_label}
                                                                 </span>
                                                             </div>
                                                         ) : null}
 
                                                         <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
-                                                            <div style={noticeSummaryStyle}>{summarizeText(notice.summary)}</div>
+                                                            <div style={noticeSummaryStyle}>{summarizeText(notice.summary, noticesText)}</div>
                                                             {isNoticeSummaryExpandable ? (
                                                                 <button
                                                                     type="button"
@@ -1784,7 +1949,7 @@ export default function NoticeIndex({
                                                                     }))}
                                                                     className="mt-2 text-sm font-medium text-violet-700 transition hover:text-violet-800"
                                                                 >
-                                                                    {isNoticeSummaryExpanded ? 'Vis mindre' : 'Mer'}
+                                                                    {isNoticeSummaryExpanded ? noticesText.showLessLabel : noticesText.moreLabel}
                                                                 </button>
                                                             ) : null}
                                                         </div>
@@ -1795,10 +1960,10 @@ export default function NoticeIndex({
                                                                     <div className="flex flex-wrap items-start justify-between gap-3">
                                                                         <div>
                                                                             <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">
-                                                                                Privat forespørsel
+                                                                                {noticesText.privateRequestSourceLabel}
                                                                             </div>
                                                                             <p className="mt-1 text-sm text-violet-950/75">
-                                                                                Saksinformasjon for en manuelt registrert forespørsel.
+                                                                                {noticesText.privateRequestSectionDescription}
                                                                             </p>
                                                                         </div>
                                                                     </div>
@@ -1807,19 +1972,19 @@ export default function NoticeIndex({
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
-                                                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : 'Ikke registrert'}
+                                                                                    {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
-                                                                                    {notice.buyer_name || 'Ikke registrert'}
+                                                                                    {notice.buyer_name || noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
-                                                                                    {notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}
+                                                                                    {notice.deadline ? formatDate(notice.deadline, locale) : noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="space-y-1.5">
@@ -1868,7 +2033,7 @@ export default function NoticeIndex({
                                                                                 ) : null}
                                                                             </div>
                                                                             <div className="sm:col-span-2">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Ekstern lenke</div>
+                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{noticesText.externalLinkLabel}</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
                                                                                     {notice.external_url ? (
                                                                                         <a
@@ -1877,10 +2042,10 @@ export default function NoticeIndex({
                                                                                             rel="noreferrer"
                                                                                             className="font-medium text-violet-700 transition hover:text-violet-800"
                                                                                         >
-                                                                                            {noticeExternalLinkLabel(notice)}
+                                                                                            {noticeExternalLinkLabel(notice, noticesText)}
                                                                                         </a>
                                                                                     ) : (
-                                                                                        'Ikke registrert'
+                                                                                        noticesText.notRegistered
                                                                                     )}
                                                                                 </div>
                                                                             </div>
@@ -1902,8 +2067,8 @@ export default function NoticeIndex({
                                                                             </div>
                                                                         </div>
                                                                     ) : (
-                                                                        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                                                                            {privateRequestSummaryFields(notice, locale).map((field) => (
+                                                                    <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                                            {privateRequestSummaryFields(notice, locale, noticesText).map((field) => (
                                                                                 <div
                                                                                     key={field.key}
                                                                                     className={classNames(
@@ -1957,7 +2122,7 @@ export default function NoticeIndex({
                                                                     {businessReviews.length > 0 ? (
                                                                         <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
                                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
-                                                                                Business Review
+                                                                                    {noticesText.businessReviewTitle}
                                                                             </div>
                                                                             <div className="mt-3 space-y-3">
                                                                                 {businessReviews.map((review) => (
@@ -2011,7 +2176,7 @@ export default function NoticeIndex({
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                             >
-                                                                {isHistoryMode ? 'Legg til informasjon' : '...'}
+                                                                                {isHistoryMode ? noticesText.addInformation : '...'}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
@@ -2040,7 +2205,7 @@ export default function NoticeIndex({
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                             >
-                                                                {notice.is_saved ? 'Lagret' : translations.frontend.save_button}
+                                                                {notice.is_saved ? noticesText.savedLabel : common.save}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
@@ -2053,30 +2218,30 @@ export default function NoticeIndex({
                                                                 )}
                                                                 className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                {archivingSavedNoticeId === notice.id ? 'Skjul flytting' : 'Flytt til historikk'}
+                                                                {archivingSavedNoticeId === notice.id ? noticesText.hideMove : noticesText.moveToHistory}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
-                                                            <span title={!notice.can_delete ? `Kun den som opprettet saken kan slette den (opprettet av ${notice.saved_by_name ?? 'ukjent'})` : undefined}>
+                                                            <span title={!notice.can_delete ? noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser) : undefined}>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => removeNotice(notice)}
                                                                     disabled={!notice.can_delete}
                                                                     className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                                                                 >
-                                                                    Slett
+                                                                    {noticesText.delete}
                                                                 </button>
                                                             </span>
                                                         ) : null}
                                                         {isHistoryMode ? (
-                                                            <span title={!notice.can_delete ? `Kun den som opprettet saken kan slette den (opprettet av ${notice.saved_by_name ?? 'ukjent'})` : undefined}>
+                                                            <span title={!notice.can_delete ? noticesText.deletePermissionMessage.replace(':name', notice.saved_by_name ?? noticesText.unknownUser) : undefined}>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => removeHistoryNotice(notice)}
                                                                     disabled={!notice.can_delete}
                                                                     className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
                                                                 >
-                                                                    Slett
+                                                                    {noticesText.delete}
                                                                 </button>
                                                             </span>
                                                         ) : null}
@@ -2087,7 +2252,7 @@ export default function NoticeIndex({
                                                                 rel="noreferrer"
                                                                 className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
-                                                                {noticeExternalLinkLabel(notice)}
+                                                                {noticeExternalLinkLabel(notice, noticesText)}
                                                             </a>
                                                         ) : null}
                                                     </div>
@@ -2100,11 +2265,11 @@ export default function NoticeIndex({
                                                     >
                                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                             <div>
-                                                                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                                                    Flytt til historikk
+                                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                                    {noticesText.moveToHistory}
                                                                 </div>
                                                                 <p className="mt-1 text-sm text-slate-600">
-                                                                    Velg type før saken arkiveres i historikk.
+                                                                    {noticesText.archiveToHistoryHelp}
                                                                 </p>
                                                             </div>
 
@@ -2113,7 +2278,7 @@ export default function NoticeIndex({
                                                                 onClick={cancelArchiveSavedNoticeForm}
                                                                 className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                Avbryt
+                                                                {noticesText.cancelLabel}
                                                             </button>
                                                         </div>
 
@@ -2143,7 +2308,7 @@ export default function NoticeIndex({
                                                                 disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
                                                                 className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
-                                                                {archiveHistoryForm.processing ? 'Flytter...' : 'Lagre og flytt til historikk'}
+                                                                {archiveHistoryForm.processing ? noticesText.moving : noticesText.saveAndMoveToHistory}
                                                             </button>
                                                         </div>
                                                     </form>
@@ -2154,37 +2319,37 @@ export default function NoticeIndex({
                                                                 {isPrivateRequest ? (
                                                                     <div className="grid gap-2 sm:grid-cols-2">
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Registrert av:</span>{' '}
-                                                                            <span>{notice.saved_by_name || 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.savedByLabel}:</span>{' '}
+                                                                            <span>{notice.saved_by_name || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         {notice.saved_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Registrert:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.registeredLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Oppdragsgiver:</span>{' '}
-                                                                            <span>{notice.buyer_name || 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.buyerLabel}:</span>{' '}
+                                                                            <span>{notice.buyer_name || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Frist:</span>{' '}
-                                                                            <span>{notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.deadlineLabel}:</span>{' '}
+                                                                            <span>{notice.deadline ? formatDate(notice.deadline, locale) : noticesText.notRegistered}</span>
                                                                         </div>
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Referanse:</span>{' '}
-                                                                            <span>{notice.reference_number || 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.referenceLabel}:</span>{' '}
+                                                                            <span>{notice.reference_number || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Kontaktperson:</span>{' '}
-                                                                            <span>{notice.contact_person_name || 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.contactPersonLabel}:</span>{' '}
+                                                                            <span>{notice.contact_person_name || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         <div>
-                                                                            <span className="font-medium text-slate-700">Kontakt e-post:</span>{' '}
-                                                                            <span>{notice.contact_person_email || 'Ikke registrert'}</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.contactEmailLabel}:</span>{' '}
+                                                                            <span>{notice.contact_person_email || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         <div className="sm:col-span-2">
-                                                                            <span className="font-medium text-slate-700">Ekstern lenke:</span>{' '}
+                                                                            <span className="font-medium text-slate-700">{noticesText.externalLinkLabel}:</span>{' '}
                                                                             {notice.external_url ? (
                                                                                 <a
                                                                                     href={notice.external_url}
@@ -2192,70 +2357,70 @@ export default function NoticeIndex({
                                                                                     rel="noreferrer"
                                                                                     className="font-medium text-violet-700 transition hover:text-violet-800"
                                                                                 >
-                                                                                    {noticeExternalLinkLabel(notice)}
+                                                                                    {noticeExternalLinkLabel(notice, noticesText)}
                                                                                 </a>
                                                                             ) : (
-                                                                                <span>Ikke registrert</span>
+                                                                                <span>{noticesText.notRegistered}</span>
                                                                             )}
                                                                         </div>
                                                                         {notice.notes && !isEditingDeadlines ? (
                                                                             <div className="sm:col-span-2">
-                                                                                <span className="font-medium text-slate-700">Notater:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.notesLabel}:</span>{' '}
                                                                                 <span className="whitespace-pre-line">{notice.notes}</span>
                                                                             </div>
                                                                         ) : null}
                                                                     </div>
-                                                                ) : (
-                                                                    <div className="grid gap-2 sm:grid-cols-2">
-                                                                        <div>
-                                                                            <span className="font-medium text-slate-700">Lagret av:</span>{' '}
-                                                                            <span>{notice.saved_by_name || 'Ikke registrert'}</span>
+                                                                        ) : (
+                                                                            <div className="grid gap-2 sm:grid-cols-2">
+                                                                                <div>
+                                                                            <span className="font-medium text-slate-700">{noticesText.savedByLabel}:</span>{' '}
+                                                                            <span>{notice.saved_by_name || noticesText.notRegistered}</span>
                                                                         </div>
                                                                         {notice.saved_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Lagret:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.savedLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' })}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.questions_rfi_deadline_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Spørsmål RFI:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.questionsRfiLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.questions_rfi_deadline_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.rfi_submission_deadline_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Innlevering RFI:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.rfiLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.rfi_submission_deadline_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.questions_rfp_deadline_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Spørsmål RFP:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.questionsRfpLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.questions_rfp_deadline_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.rfp_submission_deadline_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Innlevering RFP:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.rfpLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.rfp_submission_deadline_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.award_date_at ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Tildeling:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.awardLabel}:</span>{' '}
                                                                                 <span>{formatDate(notice.award_date_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {isHistoryMode && notice.selected_supplier_name ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Valgt leverandør:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.selectedSupplierLabel}:</span>{' '}
                                                                                 <span>{notice.selected_supplier_name}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {isHistoryMode && notice.contract_value_mnok !== null && notice.contract_value_mnok !== undefined ? (
                                                                             <div>
-                                                                                <span className="font-medium text-slate-700">Avtaleverdi:</span>{' '}
+                                                                                <span className="font-medium text-slate-700">{noticesText.contractValueLabel}:</span>{' '}
                                                                                 <span>{formatMnokValue(notice.contract_value_mnok, locale)}</span>
                                                                             </div>
                                                                         ) : null}
@@ -2266,17 +2431,17 @@ export default function NoticeIndex({
                                                                         ) : null}
                                                                         {needsHistorySelection ? (
                                                                             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2">
-                                                                                Eksisterende historikkdata mangler strukturert oppfølgingsmodell. Velg anskaffelsestype og oppfølging før du lagrer på nytt.
+                                                                                {noticesText.historyNeedsSelection}
                                                                             </div>
                                                                         ) : null}
                                                                         {isHistoryMode && notice.next_process_date_at ? (
                                                                             <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 sm:col-span-2">
-                                                                                <div className="text-sm font-medium text-violet-900">Dato for neste oppfølging</div>
+                                                                                <div className="text-sm font-medium text-violet-900">{noticesText.nextFollowUpTitle}</div>
                                                                                 <div className="mt-1 text-sm text-violet-700">{formatDate(notice.next_process_date_at, locale)}</div>
                                                                             </div>
                                                                         ) : isHistoryMode ? (
                                                                             <div className="sm:col-span-2">
-                                                                                <span className="font-medium text-slate-700">Ingen planlagt oppfølging</span>
+                                                                                <span className="font-medium text-slate-700">{noticesText.noPlannedFollowUp}</span>
                                                                             </div>
                                                                         ) : null}
                                                                     </div>
@@ -2292,7 +2457,7 @@ export default function NoticeIndex({
                                                             >
                                                                 <div className="space-y-3">
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Frist spørsmål RFI</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineQuestionsRfiLabel}</span>
                                                                         <input
                                                                             type="date"
                                                                             value={deadlineForm.data.questions_rfi_deadline_at}
@@ -2305,7 +2470,7 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Innlevering RFI</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineRfiSubmissionLabel}</span>
                                                                         <input
                                                                             type="date"
                                                                             value={deadlineForm.data.rfi_submission_deadline_at}
@@ -2318,7 +2483,7 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Frist spørsmål RFP</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineQuestionsRfpLabel}</span>
                                                                         <input
                                                                             type="date"
                                                                             value={deadlineForm.data.questions_rfp_deadline_at}
@@ -2331,7 +2496,7 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Innlevering RFP</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineRfpSubmissionLabel}</span>
                                                                         <input
                                                                             type="date"
                                                                             value={deadlineForm.data.rfp_submission_deadline_at}
@@ -2344,7 +2509,7 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Tildelingsdato</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineAwardDateLabel}</span>
                                                                         <input
                                                                             type="date"
                                                                             value={deadlineForm.data.award_date_at}
@@ -2360,10 +2525,10 @@ export default function NoticeIndex({
                                                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                                                             <div>
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
-                                                                                    Business Review
+                                                                                    {noticesText.businessReviewTitle}
                                                                                 </div>
                                                                                 <p className="mt-1 text-sm text-blue-950/75">
-                                                                                    Registrer ett eller flere BR-tidspunkter mellom RFI og RFP.
+                                                                                    {noticesText.businessReviewDescription}
                                                                                 </p>
                                                                             </div>
 
@@ -2372,7 +2537,7 @@ export default function NoticeIndex({
                                                                                 onClick={addBusinessReview}
                                                                                 className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
                                                                             >
-                                                                                Legg til BR
+                                                                                {noticesText.addBusinessReview}
                                                                             </button>
                                                                         </div>
 
@@ -2386,7 +2551,7 @@ export default function NoticeIndex({
                                                                                         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                                                                                             <label className="min-w-0 flex-1 space-y-2">
                                                                                                 <span className="text-sm font-medium text-slate-700">
-                                                                                                    Business Review {index + 1}
+                                                                                                    {noticesText.businessReviewItemLabel} {index + 1}
                                                                                                 </span>
                                                                                                 <input
                                                                                                     type="date"
@@ -2406,14 +2571,14 @@ export default function NoticeIndex({
                                                                                                 onClick={() => removeBusinessReview(index)}
                                                                                                 className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                                                             >
-                                                                                                Slett
+                                                                                                {noticesText.delete}
                                                                                             </button>
                                                                                         </div>
                                                                                     </div>
                                                                                 ))
                                                                             ) : (
                                                                                 <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-sm text-blue-900/70">
-                                                                                    Ingen Business Review er registrert ennå.
+                                                                                    {noticesText.businessReviewEmpty}
                                                                                 </div>
                                                                             )}
                                                                         </div>
@@ -2426,7 +2591,7 @@ export default function NoticeIndex({
                                                                         disabled={deadlineForm.processing}
                                                                         className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
-                                                                        {deadlineForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                                        {deadlineForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                     </button>
                                                                     <button
                                                                         type="button"
@@ -2434,7 +2599,7 @@ export default function NoticeIndex({
                                                                         disabled={deadlineForm.processing}
                                                                         className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
-                                                                        Avbryt
+                                                                        {noticesText.cancelLabel}
                                                                     </button>
                                                                 </div>
                                                             </form>
@@ -2450,7 +2615,7 @@ export default function NoticeIndex({
                                                             >
                                                                 <div className="space-y-3">
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Valgt leverandør</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.selectedSupplierLabel}</span>
                                                                         <input
                                                                             type="text"
                                                                             value={historyForm.data.selected_supplier_name}
@@ -2463,7 +2628,7 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">Avtaleverdi (MNOK)</span>
+                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.contractValueLabel}</span>
                                                                         <input
                                                                             type="text"
                                                                             inputMode="decimal"
@@ -2478,13 +2643,13 @@ export default function NoticeIndex({
 
                                                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                                                         <div className="space-y-2">
-                                                                            <span className="text-sm font-medium text-slate-700">Anskaffelsestype</span>
+                                                                            <span className="text-sm font-medium text-slate-700">{noticesText.procurementTypeLabel}</span>
                                                                             <select
                                                                                 value={historyForm.data.procurement_type}
                                                                                 onChange={(event) => updateHistoryProcurementType(event.target.value)}
                                                                                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                             >
-                                                                                <option value="">Velg anskaffelsestype</option>
+                                                                                <option value="">{noticesText.selectProcurementType}</option>
                                                                                 {historyProcurementTypeOptions.map((option) => (
                                                                                     <option key={option.value} value={option.value}>
                                                                                         {option.label}
@@ -2498,7 +2663,7 @@ export default function NoticeIndex({
 
                                                                         {shouldShowHistoryFollowUpField ? (
                                                                             <div className="space-y-2">
-                                                                                <span className="text-sm font-medium text-slate-700">Oppfølging</span>
+                                                                                <span className="text-sm font-medium text-slate-700">{noticesText.followUpLabel}</span>
                                                                                 <select
                                                                                     value={historyForm.data.follow_up_mode}
                                                                                     onChange={(event) => updateHistoryFollowUpMode(event.target.value)}
@@ -2518,7 +2683,7 @@ export default function NoticeIndex({
 
                                                                         {isHistoryFormManualOffset ? (
                                                                             <div className="space-y-2">
-                                                                                <span className="text-sm font-medium text-slate-700">Antall måneder fra i dag</span>
+                                                                                <span className="text-sm font-medium text-slate-700">{noticesText.followUpOffsetMonthsLabel}</span>
                                                                                 <input
                                                                                     type="number"
                                                                                     inputMode="numeric"
@@ -2537,7 +2702,7 @@ export default function NoticeIndex({
 
                                                                     {isHistoryFormRecurring ? (
                                                                         <label className="space-y-2">
-                                                                            <span className="text-sm font-medium text-slate-700">Avtaleperiode (måneder)</span>
+                                                                            <span className="text-sm font-medium text-slate-700">{noticesText.contractPeriodMonthsLabel}</span>
                                                                             <input
                                                                                 type="number"
                                                                                 inputMode="numeric"
@@ -2547,9 +2712,7 @@ export default function NoticeIndex({
                                                                                 onChange={(event) => historyForm.setData('contract_period_months', event.target.value)}
                                                                                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                             />
-                                                                            <p className="text-xs text-slate-500">
-                                                                                Valgfri kontraktsinformasjon. Påvirker ikke dato for neste oppfølging.
-                                                                            </p>
+                                                                            <p className="text-xs text-slate-500">{noticesText.contractPeriodHelp}</p>
                                                                             {historyForm.errors.contract_period_months ? (
                                                                                 <p className="text-sm text-rose-600">{historyForm.errors.contract_period_months}</p>
                                                                             ) : null}
@@ -2558,19 +2721,19 @@ export default function NoticeIndex({
 
                                                                     {isHistoryFormManualOffset ? (
                                                                         <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-800">
-                                                                            <div className="font-medium text-violet-900">Dato for neste oppfølging</div>
+                                                                            <div className="font-medium text-violet-900">{noticesText.nextFollowUpTitle}</div>
                                                                             <div className="mt-1 text-sm text-violet-700">
-                                                                                {historyNextFollowUpPreview ? formatDate(historyNextFollowUpPreview, locale) : 'Angi antall måneder fra i dag for å beregne dato.'}
+                                                                                {historyNextFollowUpPreview ? formatDate(historyNextFollowUpPreview, locale) : noticesText.nextFollowUpManualHint}
                                                                             </div>
                                                                             <p className="mt-1 text-xs text-violet-700">
-                                                                                Angi antall måneder fra i dag. Datoen beregnes automatisk og brukes for senere varsling.
+                                                                                {noticesText.nextFollowUpManualHelp}
                                                                             </p>
                                                                         </div>
                                                                     ) : null}
 
                                                                     {shouldShowHistoryFollowUpField && historyForm.data.follow_up_mode === 'none' ? (
                                                                         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                                                                            <span className="font-medium text-slate-700">Ingen planlagt oppfølging</span>
+                                                                            <span className="font-medium text-slate-700">{noticesText.noPlannedFollowUp}</span>
                                                                         </div>
                                                                     ) : null}
                                                                 </div>
@@ -2581,7 +2744,7 @@ export default function NoticeIndex({
                                                                         disabled={historyForm.processing}
                                                                         className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
-                                                                        {historyForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                                        {historyForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                     </button>
                                                                     <button
                                                                         type="button"
@@ -2589,7 +2752,7 @@ export default function NoticeIndex({
                                                                         disabled={historyForm.processing}
                                                                         className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
-                                                                        Avbryt
+                                                                        {noticesText.cancelLabel}
                                                                     </button>
                                                                 </div>
                                                             </form>
@@ -2605,9 +2768,9 @@ export default function NoticeIndex({
 
                         <div className="flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_8px_22px_rgba(15,23,42,0.04)] sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                                {notices.meta.from && notices.meta.to
-                                    ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)} treff fra Doffin`
-                                    : `${formatInteger(notices.meta.total ?? 0, locale)} treff fra Doffin`}
+                                    {notices.meta.from && notices.meta.to
+                                    ? `${formatInteger(notices.meta.from, locale)}–${formatInteger(notices.meta.to, locale)} av ${formatInteger(notices.meta.total, locale)} ${noticesText.hitsSuffix}`
+                                    : `${formatInteger(notices.meta.total ?? 0, locale)} ${noticesText.hitsSuffix}`}
                             </div>
                             <div className="flex gap-3">
                                 <button
@@ -2616,7 +2779,7 @@ export default function NoticeIndex({
                                     onClick={() => notices.meta.prev_page_url && router.visit(notices.meta.prev_page_url)}
                                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                    {translations.common.previous}
+                                    {common.previous}
                                 </button>
                                 <button
                                     type="button"
@@ -2624,7 +2787,7 @@ export default function NoticeIndex({
                                     onClick={() => notices.meta.next_page_url && router.visit(notices.meta.next_page_url)}
                                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
-                                    {translations.common.next}
+                                    {common.next}
                                 </button>
                             </div>
                         </div>

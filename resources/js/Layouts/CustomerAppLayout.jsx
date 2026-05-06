@@ -54,6 +54,7 @@ function emptyNotificationsState() {
 export default function CustomerAppLayout({ children, title, showPageTitle = true }) {
     const page = usePage();
     const { appName, auth, flash, translations, worklist } = page.props;
+    const navigation = translations?.navigation ?? {};
     const [showSuccess, setShowSuccess] = useState(true);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -131,14 +132,14 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     })();
 
     const mainNavigation = [
-        { key: 'overview', label: 'Bid Status', href: '/app/dashboard' },
-        { key: 'procurements', label: 'Kunngjøringer', href: '/app/notices' },
+        { key: 'overview', label: navigation.bid_status, href: '/app/dashboard' },
+        { key: 'procurements', label: navigation.notices, href: '/app/notices' },
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
-        { key: 'ai', label: 'AI', href: '/app/ai' },
-        { key: 'suppliers', label: 'Konkurrenter', href: '/app/suppliers' },
-        ...(watchProfilesHref ? [{ key: 'watch-profiles', label: 'Watch lists', href: watchProfilesHref }] : []),
-        ...(environmentHref ? [{ key: 'environment', label: 'Kundemiljø', href: environmentHref }] : []),
+        { key: 'ai', label: navigation.ai, href: '/app/ai' },
+        { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
+        ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
+        ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
     ];
 
     const secondaryNavigation = (() => {
@@ -155,17 +156,17 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                     : null;
 
             return [
-                { key: 'ai-overview', label: 'Oversikt', href: '/app/ai' },
-                { key: 'ai-work', label: 'I arbeid', href: aiWorkHref },
-                { key: 'ai-instructions', label: 'AI instrukser', href: aiInstructionsHref },
-                { key: 'knowledge-vocabulary', label: 'Selskapsvokabular', href: '/app/ai/knowledge-vocabulary' },
-                { key: 'knowledge-docs', label: 'Kunnskapsdokumenter', href: '/app/ai/knowledge-base' },
+                { key: 'ai-overview', label: navigation.overview, href: '/app/ai' },
+                { key: 'ai-work', label: navigation.worklist, href: aiWorkHref },
+                { key: 'ai-instructions', label: navigation.ai_instructions, href: aiInstructionsHref },
+                { key: 'knowledge-vocabulary', label: navigation.company_vocabulary, href: '/app/ai/knowledge-vocabulary' },
+                { key: 'knowledge-docs', label: navigation.knowledge_documents, href: '/app/ai/knowledge-base' },
             ];
         }
 
         if (activeMainArea === 'procurements') {
             return [
-                { key: 'live', label: 'Live søk', href: '/app/notices' },
+                { key: 'live', label: navigation.live_search, href: '/app/notices' },
                 { key: 'saved-searches', label: translations.frontend.saved_searches_nav, href: `${buildHref('/app/notices', { tab: 'saved-searches' })}#saved-searches`, isAnchor: true },
                 { key: 'alerts', label: translations.frontend.alerts_nav, href: buildHref('/app/notices', { tab: 'alerts' }) },
             ];
@@ -175,12 +176,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return [
                 {
                     key: 'saved',
-                    label: withMenuCount('Registrerte kunngjøringer', worklist?.saved_count),
+                    label: withMenuCount(navigation.registered_notices, worklist?.saved_count),
                     href: buildHref('/app/notices', { mode: 'saved' }),
                 },
                 {
                     key: 'history',
-                    label: withMenuCount('Historikk', worklist?.history_count),
+                    label: withMenuCount(navigation.history, worklist?.history_count),
                     href: buildHref('/app/notices', { mode: 'history' }),
                 },
             ];

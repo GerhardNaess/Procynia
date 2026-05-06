@@ -2,48 +2,31 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
-const TAB_OPTIONS = [
-    { value: 'chunks', label: 'Chunks' },
-    { value: 'metadata', label: 'Metadata' },
-    { value: 'history', label: 'Historikk' },
-];
-
-const DOCUMENT_STATUS_META = {
-    review: {
-        label: 'Trenger review',
-        className: 'bg-amber-100 text-amber-800 ring-amber-200',
-    },
-    processing: {
-        label: 'Under prosessering',
-        className: 'bg-sky-100 text-sky-700 ring-sky-200',
-    },
-    approved: {
-        label: 'Godkjent',
-        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-    },
-    failed: {
-        label: 'Feilet',
-        className: 'bg-rose-100 text-rose-700 ring-rose-200',
-    },
+const DOCUMENT_STATUS_CLASS = {
+    review: 'bg-amber-100 text-amber-800 ring-amber-200',
+    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
+    approved: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    failed: 'bg-rose-100 text-rose-700 ring-rose-200',
 };
 
-const CHUNK_REVIEW_STATUS_META = {
-    pending_review: {
-        label: 'Trenger review',
-        className: 'bg-amber-100 text-amber-800 ring-amber-200',
-    },
-    approved: {
-        label: 'Godkjent',
-        className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-    },
-    rejected: {
-        label: 'Avvist',
-        className: 'bg-rose-100 text-rose-700 ring-rose-200',
-    },
+const CHUNK_REVIEW_STATUS_CLASS = {
+    pending_review: 'bg-amber-100 text-amber-800 ring-amber-200',
+    approved: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    rejected: 'bg-rose-100 text-rose-700 ring-rose-200',
 };
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
+}
+
+function formatTemplate(template, values = {}) {
+    let output = String(template ?? '');
+
+    Object.entries(values).forEach(([key, value]) => {
+        output = output.replaceAll(`:${key}`, String(value));
+    });
+
+    return output;
 }
 
 function normalizeSearchText(value) {
@@ -104,7 +87,7 @@ function formatFileSize(bytes) {
     return `${size.toFixed(1)} ${unit}`;
 }
 
-function formatFileTypeLabel(mimeType) {
+function formatFileTypeLabel(mimeType, labels = {}) {
     const value = String(mimeType ?? '').trim().toLowerCase();
 
     if (value === '') {
@@ -119,18 +102,18 @@ function formatFileTypeLabel(mimeType) {
         value === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         || value === 'application/msword'
     ) {
-        return 'Word-dokument';
+        return labels.wordDocumentLabel ?? 'Word-dokument';
     }
 
     if (
         value === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         || value === 'application/vnd.ms-excel'
     ) {
-        return 'Excel-dokument';
+        return labels.excelDocumentLabel ?? 'Excel-dokument';
     }
 
     if (value === 'text/plain') {
-        return 'Tekstfil';
+        return labels.textFileLabel ?? 'Tekstfil';
     }
 
     return mimeType;
@@ -196,10 +179,6 @@ function getChunkReviewStatus(chunk) {
     return 'pending_review';
 }
 
-function getChunkReviewStatusMeta(chunk) {
-    return CHUNK_REVIEW_STATUS_META[getChunkReviewStatus(chunk)] ?? CHUNK_REVIEW_STATUS_META.pending_review;
-}
-
 function getGeneratedGraphicFallbackNumber(value) {
     const text = String(value ?? '').trim();
     const match = text.match(/^(?:bilde|grafikk|picture|image|graphic)\s*(\d+)$/iu);
@@ -211,7 +190,8 @@ function isGeneratedGraphicFallbackLabel(value) {
     return getGeneratedGraphicFallbackNumber(value) !== null;
 }
 
-function getGraphicDisplayTitle(chunk, graphicSequence = 0) {
+function getGraphicDisplayTitle(chunk, graphicSequence = 0, labels = {}) {
+    const graphicLabel = labels.graphicLabel ?? 'Grafikk';
     const title = String(chunk?.title ?? '').trim();
 
     if (title !== '' && !isGeneratedGraphicFallbackLabel(title)) {
@@ -233,7 +213,7 @@ function getGraphicDisplayTitle(chunk, graphicSequence = 0) {
     const storedSequence = Number.parseInt(String(chunk?.image_metadata?.graphic_sequence_in_document ?? ''), 10);
     const resolvedSequence = Number.isFinite(storedSequence) && storedSequence > 0 ? storedSequence : graphicSequence;
 
-    return resolvedSequence > 0 ? `Grafikk ${resolvedSequence}` : 'Grafikk';
+    return resolvedSequence > 0 ? `${graphicLabel} ${resolvedSequence}` : graphicLabel;
 }
 
 function getGraphicAltText(chunk) {
@@ -284,41 +264,43 @@ function getChunkEditableContent(chunk) {
     return chunk?.content ?? '';
 }
 
-function getTableDisplayTitle(chunk, tableSequence = 0) {
+function getTableDisplayTitle(chunk, tableSequence = 0, labels = {}) {
+    const tableLabel = labels.tableLabel ?? 'Tabell';
     const storedSequence = Number.parseInt(String(chunk?.table_metadata?.table_sequence_in_document ?? ''), 10);
     const resolvedSequence = Number.isFinite(storedSequence) && storedSequence > 0 ? storedSequence : tableSequence;
 
-    return resolvedSequence > 0 ? `Tabell ${resolvedSequence}` : 'Tabell';
+    return resolvedSequence > 0 ? `${tableLabel} ${resolvedSequence}` : tableLabel;
 }
 
-function getChunkDisplayTitle(chunk, index = 0, graphicSequence = 0, tableSequence = 0) {
+function getChunkDisplayTitle(chunk, index = 0, graphicSequence = 0, tableSequence = 0, labels = {}) {
     if (chunk?.chunk_type === 'image') {
-        return getGraphicDisplayTitle(chunk, graphicSequence);
+        return getGraphicDisplayTitle(chunk, graphicSequence, labels);
     }
 
     if (chunk?.chunk_type === 'table') {
-        return getTableDisplayTitle(chunk, tableSequence);
+        return getTableDisplayTitle(chunk, tableSequence, labels);
     }
 
     const title = String(chunk?.title ?? '').trim();
+    const chunkLabel = labels.chunkLabel ?? 'Chunk';
 
-    return title !== '' ? title : `Chunk ${index + 1}`;
+    return title !== '' ? title : `${chunkLabel} ${index + 1}`;
 }
 
-function getChunkTypeLabel(chunk) {
+function getChunkTypeLabel(chunk, labels = {}) {
     if (chunk?.chunk_type === 'image') {
-        return 'Grafikk';
+        return labels.graphicTypeLabel ?? labels.graphicLabel ?? 'Grafikk';
     }
 
     if (chunk?.chunk_type === 'table') {
-        return 'Tabell';
+        return labels.tableTypeLabel ?? labels.tableLabel ?? 'Tabell';
     }
 
     if (chunk?.chunk_type === 'document') {
-        return 'Dokument';
+        return labels.documentTypeLabel ?? 'Dokument';
     }
 
-    return 'Tekst';
+    return labels.textTypeLabel ?? 'Tekst';
 }
 
 /**
@@ -504,42 +486,44 @@ function StructuredTablePreview({ tableJson }) {
     );
 }
 
-function buildHistoryEntries(item, locale, status) {
+function buildHistoryEntries(item, locale, status, labels = {}) {
     const entries = [];
 
     if (item?.uploaded_at) {
         entries.push({
-            label: 'Lagt opp',
+            label: labels.historyUploadedLabel ?? 'Lagt opp',
             time: formatDateTime(item.uploaded_at, locale),
-            text: item?.uploaded_by ? `Av ${item.uploaded_by}` : 'Lastet opp i kunnskapsbasen.',
+            text: item?.uploaded_by
+                ? formatTemplate(labels.historyUploadedByPrefix ?? 'Av :name', { name: item.uploaded_by })
+                : (labels.historyUploadedText ?? 'Lastet opp i kunnskapsbasen.'),
         });
     }
 
     if (item?.updated_at && item.updated_at !== item.uploaded_at) {
         entries.push({
-            label: 'Sist endret',
+            label: labels.historyUpdatedLabel ?? 'Sist endret',
             time: formatDateTime(item.updated_at, locale),
-            text: 'Metadata eller dokumentstatus ble sist lagret.',
+            text: labels.historyUpdatedText ?? 'Metadata eller dokumentstatus ble sist lagret.',
         });
     }
 
     if (status === 'failed') {
         entries.push({
-            label: 'Ekstraksjon',
+            label: labels.historyExtractionLabel ?? 'Ekstraksjon',
             time: item?.updated_at ? formatDateTime(item.updated_at, locale) : '—',
-            text: item?.extraction_error || 'Tekstuttrekk feilet.',
+            text: item?.extraction_error || (labels.historyExtractionFailedText ?? 'Tekstuttrekk feilet.'),
         });
     } else if (status === 'processing') {
         entries.push({
-            label: 'Ekstraksjon',
+            label: labels.historyExtractionLabel ?? 'Ekstraksjon',
             time: item?.updated_at ? formatDateTime(item.updated_at, locale) : '—',
-            text: 'Dokumentet er under prosessering.',
+            text: labels.historyExtractionProcessingText ?? 'Dokumentet er under prosessering.',
         });
     } else {
         entries.push({
-            label: 'Ekstraksjon',
+            label: labels.historyExtractionLabel ?? 'Ekstraksjon',
             time: item?.updated_at ? formatDateTime(item.updated_at, locale) : '—',
-            text: 'Tekst er ekstrahert og klargjort for chunk-visning.',
+            text: labels.historyExtractionCompletedText ?? 'Tekst er ekstrahert og klargjort for chunk-visning.',
         });
     }
 
@@ -568,13 +552,63 @@ function DocumentIcon(props) {
 }
 
 export default function KnowledgeBaseShow({
-    pageTitle = 'Kunnskapsdokumenter',
+    pageTitle = null,
     knowledgeItem = null,
     indexUrl = '/app/ai/knowledge-base',
     summaryUpdateUrl = '/app/ai/knowledge-base',
     editUrl = '/app/ai/knowledge-base',
 }) {
-    const { locale = 'nb-NO' } = usePage().props;
+    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const tks = translations?.knowledge_show ?? {};
+    const knowledgeShowLabels = {
+        graphicLabel: tks.graphic_section,
+        tableLabel: tks.table_section,
+        chunkLabel: tks.chunk_label,
+        chunkNumberLabel: tks.chunk_number,
+        chunkCounterLabel: tks.chunk_counter,
+        chunkCountLabel: tks.chunk_count,
+        reviewProgressLabel: tks.review_progress,
+        wordDocumentLabel: tks.filetype_word,
+        excelDocumentLabel: tks.filetype_excel,
+        textFileLabel: tks.filetype_text,
+        historyUploadedLabel: tks.history_uploaded,
+        historyUploadedByPrefix: tks.history_uploaded_by_prefix,
+        historyUploadedText: tks.history_uploaded_text,
+        historyUpdatedLabel: tks.history_updated,
+        historyUpdatedText: tks.history_updated_text,
+        historyExtractionLabel: tks.history_extraction,
+        historyExtractionFailedText: tks.history_extraction_failed_text,
+        historyExtractionProcessingText: tks.history_extraction_processing_text,
+        historyExtractionCompletedText: tks.history_extraction_completed_text,
+        activeLabel: tks.active_label,
+        inactiveLabel: tks.inactive_label,
+        documentFallbackTitle: tks.document_fallback_title,
+        chunkTypeDocumentLabel: tks.chunk_type_document,
+        chunkTypeTextLabel: tks.chunk_type_text,
+        unknownValue: tks.unknown_value,
+    };
+
+    const DOCUMENT_STATUS_LABEL = {
+        review: tks.doc_status_review,
+        processing: tks.doc_status_processing,
+        approved: tks.doc_status_approved,
+        failed: tks.doc_status_failed,
+    };
+
+    const CHUNK_REVIEW_STATUS_META = {
+        pending_review: { label: tks.chunk_status_review, className: CHUNK_REVIEW_STATUS_CLASS.pending_review },
+        approved: { label: tks.chunk_status_approved, className: CHUNK_REVIEW_STATUS_CLASS.approved },
+        rejected: { label: tks.chunk_status_rejected, className: CHUNK_REVIEW_STATUS_CLASS.rejected },
+    };
+
+    const getChunkReviewStatusMeta = (chunk) =>
+        CHUNK_REVIEW_STATUS_META[getChunkReviewStatus(chunk)] ?? CHUNK_REVIEW_STATUS_META.pending_review;
+
+    const TAB_OPTIONS = [
+        { value: 'chunks', label: tks.tab_chunks },
+        { value: 'metadata', label: tks.tab_metadata },
+        { value: 'history', label: tks.tab_history },
+    ];
     const [activeTab, setActiveTab] = useState('chunks');
     const [selectedChunkId, setSelectedChunkId] = useState(knowledgeItem?.chunks?.[0]?.id ?? null);
     const [chunkReviewRequest, setChunkReviewRequest] = useState(null);
@@ -585,13 +619,17 @@ export default function KnowledgeBaseShow({
     const [chunkSearchQuery, setChunkSearchQuery] = useState('');
     const tabsRef = useRef(null);
 
-    const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? 'Kunnskapsdokument';
+    const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
+    const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
-    const documentStatusMeta = DOCUMENT_STATUS_META[documentStatus] ?? DOCUMENT_STATUS_META.review;
+    const documentStatusMeta = {
+        className: DOCUMENT_STATUS_CLASS[documentStatus] ?? DOCUMENT_STATUS_CLASS.review,
+        label: DOCUMENT_STATUS_LABEL[documentStatus] ?? DOCUMENT_STATUS_LABEL.review,
+    };
     const chunks = Array.isArray(knowledgeItem?.chunks) ? knowledgeItem.chunks : [];
     const totalChunksCount = Number(knowledgeItem?.chunk_count ?? chunks.length);
     const readyChunksCount = chunks.filter((chunk) => getChunkStatus(chunk) === 'ready').length;
-    const activeLabel = knowledgeItem?.is_active_label ?? (knowledgeItem?.is_active ? 'Aktiv' : 'Inaktiv');
+    const activeLabel = knowledgeItem?.is_active_label ?? (knowledgeItem?.is_active ? knowledgeShowLabels.activeLabel : knowledgeShowLabels.inactiveLabel);
     const chunkReviewCounts = chunks.reduce((accumulator, chunk) => {
         accumulator[getChunkReviewStatus(chunk)] = (accumulator[getChunkReviewStatus(chunk)] ?? 0) + 1;
 
@@ -656,6 +694,12 @@ export default function KnowledgeBaseShow({
     }, [filteredChunks, chunkSearchQuery, selectedChunkId]);
 
     const reviewProgressCount = chunkReviewCounts.approved + chunkReviewCounts.rejected;
+    const chunkCountText = totalChunksCount > 0
+        ? formatTemplate(knowledgeShowLabels.chunkCountLabel, { count: totalChunksCount })
+        : tks.no_chunks;
+    const reviewProgressText = totalChunksCount > 0
+        ? formatTemplate(knowledgeShowLabels.reviewProgressLabel, { done: reviewProgressCount, total: totalChunksCount })
+        : tks.no_chunks_available;
     const selectedChunk = chunks.find((chunk) => chunk.id === selectedChunkId) ?? chunks[0] ?? null;
     const selectedChunkIndex = selectedChunk ? chunks.findIndex((chunk) => chunk.id === selectedChunk.id) : -1;
     const selectedChunkReviewStatus = selectedChunk ? getChunkReviewStatus(selectedChunk) : 'pending_review';
@@ -698,7 +742,7 @@ export default function KnowledgeBaseShow({
         image_description: '',
     });
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
-    const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus);
+    const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus, knowledgeShowLabels);
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -938,35 +982,35 @@ export default function KnowledgeBaseShow({
     };
 
     const selectedChunkSystemMetadata = selectedChunk ? [
-        { label: 'Chunk ID', value: selectedChunk.id ?? '—' },
-        { label: 'Dokument ID', value: selectedChunk.knowledge_item_id ?? knowledgeItem?.id ?? '—' },
-        { label: 'Seksjon', value: selectedChunk.section_title || '—' },
-        { label: 'Seksjonssti', value: selectedChunk.section_path || '—' },
-        { label: 'Chunk index', value: selectedChunk.chunk_index !== null && selectedChunk.chunk_index !== undefined ? selectedChunk.chunk_index + 1 : '—' },
-        { label: 'Posisjon start', value: selectedChunk.start_offset !== null && selectedChunk.start_offset !== undefined ? selectedChunk.start_offset + 1 : '—' },
-        { label: 'Posisjon slutt', value: selectedChunk.end_offset !== null && selectedChunk.end_offset !== undefined ? selectedChunk.end_offset : '—' },
-        { label: 'Kilde', value: selectedChunk.source_filename ?? knowledgeItem?.original_filename ?? '—' },
-        { label: 'Filtype', value: selectedChunk.source_filetype ?? knowledgeItem?.mime_type ?? '—' },
-        { label: 'Review-status', value: selectedChunk.review_status_label ?? selectedChunk.review_status ?? '—' },
-        { label: 'Embeddingmodell', value: selectedChunk.embedding_model ?? '—' },
-        { label: 'Embedding generert', value: selectedChunk.embedding_generated_at ? formatDateTime(selectedChunk.embedding_generated_at, locale) : '—' },
+        { label: tks.chunk_id, value: selectedChunk.id ?? '—' },
+        { label: tks.document_id, value: selectedChunk.knowledge_item_id ?? knowledgeItem?.id ?? '—' },
+        { label: tks.section, value: selectedChunk.section_title || '—' },
+        { label: tks.section_path, value: selectedChunk.section_path || '—' },
+        { label: tks.chunk_index, value: selectedChunk.chunk_index !== null && selectedChunk.chunk_index !== undefined ? selectedChunk.chunk_index + 1 : '—' },
+        { label: tks.position_start, value: selectedChunk.start_offset !== null && selectedChunk.start_offset !== undefined ? selectedChunk.start_offset + 1 : '—' },
+        { label: tks.position_end, value: selectedChunk.end_offset !== null && selectedChunk.end_offset !== undefined ? selectedChunk.end_offset : '—' },
+        { label: tks.source, value: selectedChunk.source_filename ?? knowledgeItem?.original_filename ?? '—' },
+        { label: tks.file_extension, value: selectedChunk.source_filetype ?? knowledgeItem?.mime_type ?? '—' },
+        { label: tks.review_status, value: selectedChunk.review_status_label ?? selectedChunk.review_status ?? '—' },
+        { label: tks.embedding_model, value: selectedChunk.embedding_model ?? '—' },
+        { label: tks.embedding_generated, value: selectedChunk.embedding_generated_at ? formatDateTime(selectedChunk.embedding_generated_at, locale) : '—' },
         ...(selectedChunk.chunk_type === 'image' ? [
-            { label: 'Grafikk-URL', value: selectedChunk.image_url || '—' },
-            { label: 'Grafikkfil', value: selectedChunk.image_original_filename || '—' },
-            { label: 'Grafikkfilsti', value: selectedChunk.image_path || '—' },
-            { label: 'Lagringsdisk', value: selectedChunk.image_disk || '—' },
-            { label: 'MIME-type', value: selectedChunk.image_mime_type || '—' },
-            { label: 'Filtype', value: selectedChunkImageExtension || '—' },
-            { label: 'Grafikktype', value: selectedChunk.image_metadata?.image_kind || selectedChunk.image_metadata?.detected_type || 'unknown' },
-            { label: 'Bredde', value: selectedChunk.image_width ?? '—' },
-            { label: 'Høyde', value: selectedChunk.image_height ?? '—' },
-            { label: 'Hash', value: selectedChunk.image_hash || '—' },
-            { label: 'Grafikkmetadata', value: selectedChunk.image_metadata ? 'Tilgjengelig' : '—' },
+            { label: tks.graphic_url, value: selectedChunk.image_url || '—' },
+            { label: tks.graphic_file, value: selectedChunk.image_original_filename || '—' },
+            { label: tks.graphic_path, value: selectedChunk.image_path || '—' },
+            { label: tks.storage_disk, value: selectedChunk.image_disk || '—' },
+            { label: tks.mime_type, value: selectedChunk.image_mime_type || '—' },
+            { label: tks.file_extension, value: selectedChunkImageExtension || '—' },
+            { label: tks.graphic_kind, value: selectedChunk.image_metadata?.image_kind || selectedChunk.image_metadata?.detected_type || tks.unknown_value },
+            { label: tks.width, value: selectedChunk.image_width ?? '—' },
+            { label: tks.height, value: selectedChunk.image_height ?? '—' },
+            { label: tks.hash, value: selectedChunk.image_hash || '—' },
+            { label: tks.graphic_metadata, value: selectedChunk.image_metadata ? tks.available : '—' },
         ] : []),
     ] : [];
 
     return (
-        <CustomerAppLayout title={pageTitle} showPageTitle={false}>
+        <CustomerAppLayout title={resolvedPageTitle} showPageTitle={false}>
             <div className="space-y-7">
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -978,7 +1022,7 @@ export default function KnowledgeBaseShow({
 
                                 <div className="space-y-3">
                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                        Kunnskapsdokumenter
+                                        {tks.breadcrumb}
                                     </div>
                                     <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-slate-950">
                                         {documentTitle}
@@ -997,15 +1041,15 @@ export default function KnowledgeBaseShow({
                                             {activeLabel}
                                         </span>
                                         <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                                            {totalChunksCount > 0 ? `${totalChunksCount} chunks` : 'Ingen chunks'}
+                                            {chunkCountText}
                                         </span>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
                                         <span>
-                                            Sist oppdatert: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
+                                            {tks.last_updated}: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
                                         </span>
                                         <span>
-                                            Eier: <span className="font-medium text-slate-900">{knowledgeItem?.uploaded_by ?? 'Ukjent'}</span>
+                                            {tks.owner}: <span className="font-medium text-slate-900">{knowledgeItem?.uploaded_by ?? tks.unknown_owner}</span>
                                         </span>
                                     </div>
                                 </div>
@@ -1017,20 +1061,20 @@ export default function KnowledgeBaseShow({
                                 href={indexUrl}
                                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
-                                Tilbake
+                                {tks.back}
                             </Link>
                             <Link
                                 href={editUrl}
                                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
-                                Rediger metadata
+                                {tks.edit_metadata}
                             </Link>
                             <button
                                 type="button"
                                 onClick={openChunksTab}
                                 className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
                             >
-                                Fortsett review
+                                {tks.continue_review}
                             </button>
                         </div>
                     </div>
@@ -1041,11 +1085,11 @@ export default function KnowledgeBaseShow({
                         <form onSubmit={submitSummary} className="flex h-full flex-col">
                             <div className="flex items-center justify-between gap-3">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Dokumentoppsummering
+                                    {tks.doc_summary}
                                 </div>
                                 {summaryHasOverflow ? (
                                     <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                                        Mer
+                                        {tks.more}
                                     </span>
                                 ) : null}
                             </div>
@@ -1054,20 +1098,20 @@ export default function KnowledgeBaseShow({
                                 value={summaryForm.data.summary}
                                 onChange={(event) => summaryForm.setData('summary', event.target.value)}
                                 rows={2}
-                                placeholder="Skriv en kort oppsummering av dokumentet."
+                                placeholder={tks.summary_placeholder}
                                 className="mt-3 h-[92px] w-full resize-none rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
 
                             <div className="mt-3 flex items-end justify-between gap-3">
                                 <p className="max-w-[15rem] text-xs leading-5 text-slate-500">
-                                    Rediger direkte her.
+                                    {tks.summary_hint}
                                 </p>
                                 <button
                                     type="submit"
                                     disabled={summaryForm.processing}
                                     className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {summaryForm.processing ? 'Lagrer...' : 'Lagre'}
+                                    {summaryForm.processing ? tks.saving : tks.save}
                                 </button>
                             </div>
                         </form>
@@ -1075,7 +1119,7 @@ export default function KnowledgeBaseShow({
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                            Status / fremdrift
+                            {tks.status_progress}
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-3">
                             <span className={classNames(
@@ -1085,7 +1129,7 @@ export default function KnowledgeBaseShow({
                                 {documentStatusMeta.label}
                             </span>
                             <span className="text-sm font-medium text-slate-700">
-                                {totalChunksCount > 0 ? `${readyChunksCount} / ${totalChunksCount} chunks` : 'Ingen chunks ennå'}
+                                {totalChunksCount > 0 ? `${readyChunksCount} / ${totalChunksCount} ${tks.meta_chunks}` : tks.no_chunks_yet}
                             </span>
                         </div>
                         <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -1096,38 +1140,38 @@ export default function KnowledgeBaseShow({
                         </div>
                         <p className="mt-2 text-xs text-slate-500">
                             {totalChunksCount > 0
-                                ? `${progressPercent}% av dokumentets chunks er ferdig ekstrahert og klare for gjennomgang.`
-                                : 'Chunking eller review er ikke ferdig enda.'}
+                                ? formatTemplate(tks.extraction_progress, { percent: progressPercent })
+                                : tks.extraction_incomplete}
                         </p>
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                            Dokumentinfo
+                            {tks.doc_info}
                         </div>
                         <dl className="mt-3 space-y-3 text-sm">
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Type</dt>
+                                <dt className="text-slate-500">{tks.doc_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Aktivitet</dt>
+                                <dt className="text-slate-500">{tks.doc_activity}</dt>
                                 <dd className="text-right font-medium text-slate-950">{activeLabel}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Filstørrelse</dt>
+                                <dt className="text-slate-500">{tks.doc_file_size}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Filtype</dt>
-                                <dd className="text-right font-medium text-slate-950">{formatFileTypeLabel(knowledgeItem?.mime_type)}</dd>
+                                <dt className="text-slate-500">{tks.doc_file_type}</dt>
+                                <dd className="text-right font-medium text-slate-950">{formatFileTypeLabel(knowledgeItem?.mime_type, knowledgeShowLabels)}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Eier</dt>
-                                <dd className="text-right font-medium text-slate-950">{knowledgeItem?.uploaded_by ?? '—'}</dd>
+                                <dt className="text-slate-500">{tks.doc_owner}</dt>
+                                <dd className="text-right font-medium text-slate-950">{knowledgeItem?.uploaded_by ?? tks.unknown_owner}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">Sist oppdatert</dt>
+                                <dt className="text-slate-500">{tks.doc_last_updated}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
                             </div>
                         </dl>
@@ -1169,7 +1213,7 @@ export default function KnowledgeBaseShow({
                                     type="search"
                                     value={chunkSearchQuery}
                                     onChange={(e) => setChunkSearchQuery(e.target.value)}
-                                    placeholder="Søk i chunks…"
+                                    placeholder={tks.search_chunks}
                                     className="h-9 w-56 rounded-full border border-slate-300 bg-white pl-8 pr-4 text-sm text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                 />
                             </div>
@@ -1184,20 +1228,18 @@ export default function KnowledgeBaseShow({
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div className="flex flex-wrap gap-2">
                                         <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                                            Godkjent {chunkReviewCounts.approved}
+                                        {tks.review_approved} {chunkReviewCounts.approved}
                                         </span>
                                         <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                                            Trenger review {chunkReviewCounts.pending_review}
+                                            {tks.review_pending} {chunkReviewCounts.pending_review}
                                         </span>
                                         <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700">
-                                            Avvist {chunkReviewCounts.rejected}
+                                            {tks.review_rejected} {chunkReviewCounts.rejected}
                                         </span>
                                     </div>
 
                                     <div className="text-sm font-medium text-slate-600">
-                                        {totalChunksCount > 0
-                                            ? `${reviewProgressCount} av ${totalChunksCount} chunks er manuelt godkjent`
-                                            : 'Ingen chunks tilgjengelig'}
+                                        {reviewProgressText}
                                     </div>
                                 </div>
 
@@ -1212,10 +1254,10 @@ export default function KnowledgeBaseShow({
                             {chunks.length === 0 ? (
                                 <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
                                     <div className="text-lg font-semibold text-slate-900">
-                                        Ingen chunks er tilgjengelige ennå.
+                                        {tks.no_chunks_empty_title}
                                     </div>
                                     <p className="mt-2 text-sm text-slate-500">
-                                        Dokumentet har enten ikke blitt chunket ennå, eller tekstuttrekket ga ingen brukbare tekstbiter.
+                                        {tks.no_chunks_empty_hint}
                                     </p>
                                 </div>
                             ) : (
@@ -1224,29 +1266,29 @@ export default function KnowledgeBaseShow({
                                         <div className="flex items-center justify-between gap-3 xl:shrink-0">
                                             <div>
                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                    Chunk-liste
+                                                    {tks.chunks_list_heading}
                                                 </div>
                                                 <div className="mt-1 text-sm text-slate-500">
-                                                    Klikk en chunk for å åpne den.
+                                                    {tks.chunks_list_hint}
                                                 </div>
                                             </div>
                                             <div className="text-xs font-medium text-slate-500">
                                                 {chunkSearchQuery
-                                                    ? `${filteredChunks.length} av ${chunks.length} chunks`
-                                                    : `${chunks.length} chunks`}
+                                                    ? `${filteredChunks.length} av ${chunks.length} ${tks.meta_chunks}`
+                                                    : `${chunks.length} ${tks.meta_chunks}`}
                                             </div>
                                         </div>
 
                                         <div className="mt-4 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
                                             {filteredChunks.length === 0 && chunkSearchQuery ? (
                                                 <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-sm text-slate-500">
-                                                    Ingen chunks matcher «{chunkSearchQuery}».
+                                                    {formatTemplate(tks.no_chunks_match, { query: chunkSearchQuery })}
                                                 </div>
                                             ) : null}
                                             {filteredChunks.map((chunk) => {
                                                 const isSelected = selectedChunk?.id === chunk.id;
                                                 const reviewStatusMeta = getChunkReviewStatusMeta(chunk);
-                                                const previewText = chunk.content_preview || 'Ingen forhåndsvisning tilgjengelig.';
+                                                const previewText = chunk.content_preview || tks.no_preview;
                                                 const originalIndex = chunks.findIndex((c) => c.id === chunk.id);
                                                 const q = normalizeSearchText(chunkSearchQuery);
 
@@ -1267,20 +1309,20 @@ export default function KnowledgeBaseShow({
                                                             <div className="space-y-2">
                                                                 <div className="flex flex-wrap items-center gap-2">
                                                                     <div className="text-sm font-medium text-slate-950">
-                                                                        {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0), q)}
+                                                                        {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0, knowledgeShowLabels), q)}
                                                                     </div>
                                                                     <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                                                                        {getChunkTypeLabel(chunk)}
+                                                                        {getChunkTypeLabel(chunk, knowledgeShowLabels)}
                                                                     </span>
                                                                     {isChunkMetadataPending(chunk) ? (
                                                                         <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
                                                                             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-                                                                            Metadata genereres
+                                                                            {tks.metadata_generating}
                                                                         </span>
                                                                     ) : null}
                                                                     {isSelected ? (
                                                                         <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
-                                                                            Valgt
+                                                                            {tks.selected_badge}
                                                                         </span>
                                                                     ) : null}
                                                                 </div>
@@ -1320,7 +1362,7 @@ export default function KnowledgeBaseShow({
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-between gap-3">
                                                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                            Valgt chunk
+                                                            {tks.selected_chunk_heading}
                                                         </div>
                                                         <div className="flex shrink-0 gap-1.5">
                                                             <button
@@ -1334,9 +1376,9 @@ export default function KnowledgeBaseShow({
                                                                         : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
                                                                 )}
                                                             >
-                                                                {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'approved'
-                                                                    ? 'Lagrer...'
-                                                                    : 'Godkjenn'}
+                                                                    {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'approved'
+                                                                    ? tks.saving
+                                                                    : tks.approve}
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -1349,9 +1391,9 @@ export default function KnowledgeBaseShow({
                                                                         : 'border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
                                                                 )}
                                                             >
-                                                                {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'rejected'
-                                                                    ? 'Lagrer...'
-                                                                    : 'Avvis'}
+                                                                    {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'rejected'
+                                                                    ? tks.saving
+                                                                    : tks.reject}
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -1365,8 +1407,8 @@ export default function KnowledgeBaseShow({
                                                                 )}
                                                             >
                                                                 {chunkReviewRequest?.chunkId === selectedChunk.id && chunkReviewRequest.reviewStatus === 'pending_review'
-                                                                    ? 'Lagrer...'
-                                                                    : 'Trenger review'}
+                                                                    ? tks.saving
+                                                                    : tks.mark_review}
                                                             </button>
                                                         </div>
                                                     </div>
@@ -1381,10 +1423,12 @@ export default function KnowledgeBaseShow({
                                                             {selectedChunkReviewStatusMeta.label}
                                                         </span>
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                                                            {selectedChunkIndex >= 0 ? `Chunk ${selectedChunkIndex + 1}` : 'Chunk'}
+                                                            {selectedChunkIndex >= 0
+                                                                ? formatTemplate(knowledgeShowLabels.chunkNumberLabel, { number: selectedChunkIndex + 1 })
+                                                                : knowledgeShowLabels.chunkLabel}
                                                         </span>
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
-                                                            {getChunkTypeLabel(selectedChunk)}
+                                                            {getChunkTypeLabel(selectedChunk, knowledgeShowLabels)}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -1401,12 +1445,12 @@ export default function KnowledgeBaseShow({
                                                         ) : null}
                                                         {selectedChunk.embedding_generated_at ? (
                                                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
-                                                                Embedding klar
+                                                                {tks.embedding_ready}
                                                             </span>
                                                         ) : null}
                                                         {selectedChunk.embedding_error ? (
                                                             <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">
-                                                                Embedding feilet
+                                                                {tks.embedding_failed}
                                                             </span>
                                                         ) : null}
                                                     </div>
@@ -1414,72 +1458,72 @@ export default function KnowledgeBaseShow({
                                                     {selectedChunk.chunk_type === 'image' ? (
                                                         <div className="mt-4 max-h-[32rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Grafikk
+                                                                {tks.graphic_section}
                                                             </div>
                                                             {selectedChunk.image_url && selectedChunkImageCanPreview ? (
                                                                 <div className="mt-4 overflow-hidden rounded-[16px] border border-slate-200 bg-slate-50">
                                                                     <img
                                                                         src={selectedChunk.image_url}
-                                                                        alt={getGraphicAltText(selectedChunk) || getGraphicCaption(selectedChunk) || selectedChunkDisplayTitle || 'Grafikk'}
+                                                                        alt={getGraphicAltText(selectedChunk) || getGraphicCaption(selectedChunk) || selectedChunkDisplayTitle || tks.graphic_section}
                                                                         className="block max-h-[22rem] w-full object-contain"
                                                                     />
                                                                 </div>
                                                             ) : (
                                                                 <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                                                                     {selectedChunk.image_url && !selectedChunkImageCanPreview
-                                                                        ? 'Grafikken er ekstrahert, men formatet kan ikke forhåndsvises direkte.'
-                                                                        : 'Ingen forhåndsvisning tilgjengelig.'}
+                                                                        ? tks.graphic_not_previewable
+                                                                        : tks.no_preview}
                                                                 </div>
                                                             )}
 
                                                             <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
                                                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Grafikktekst
+                                                                        {tks.graphic_caption}
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {getGraphicCaption(selectedChunk) || 'Ingen grafikktekst registrert.'}
+                                                                        {getGraphicCaption(selectedChunk) || tks.no_graphic_caption}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
                                                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Alt-tekst
+                                                                        {tks.graphic_alt_text}
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {getGraphicAltText(selectedChunk) || 'Ingen alternativ tekst registrert.'}
+                                                                        {getGraphicAltText(selectedChunk) || tks.no_graphic_alt_text}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
                                                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        OCR
+                                                                        {tks.graphic_ocr}
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {selectedChunk.ocr_text ? 'OCR kjørt' : 'OCR ikke kjørt'}
+                                                                        {selectedChunk.ocr_text ? tks.ocr_done : tks.ocr_not_done}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
                                                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Beskrivelse
+                                                                        {tks.graphic_description_label}
                                                                     </div>
                                                                     <div className="mt-2 text-sm leading-6 text-slate-700">
-                                                                        {selectedChunk.image_description ? 'Grafikkbeskrivelse generert' : 'Grafikkbeskrivelse ikke generert'}
+                                                                        {selectedChunk.image_description ? tks.graphic_description_done : tks.graphic_description_not_done}
                                                                     </div>
                                                                 </div>
                                                             </div>
 
                                                             <div className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Søkbar tekst
+                                                                    {tks.searchable_text}
                                                                 </div>
                                                                 <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                                                    {getGraphicSearchableContent(selectedChunk) || 'Ingen søkbar tekst tilgjengelig.'}
+                                                                    {getGraphicSearchableContent(selectedChunk) || tks.no_searchable_text}
                                                                 </pre>
                                                             </div>
 
                                                             {selectedChunk.image_metadata ? (
                                                                 <details className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
                                                                     <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Grafikkmetadata
+                                                                        {tks.graphic_metadata}
                                                                     </summary>
                                                                     <pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
                                                                         {JSON.stringify(selectedChunk.image_metadata, null, 2)}
@@ -1490,11 +1534,11 @@ export default function KnowledgeBaseShow({
                                                     ) : selectedChunk.chunk_type === 'table' ? (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Tabell
+                                                                {tks.table_section}
                                                             </div>
                                                             {selectedChunk.table_complexity === 'complex' ? (
                                                                 <div className="mt-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                                                                    Kompleks tabell – struktur er bevart og bør kvalitetssikres.
+                                                                    {tks.complex_table_warning}
                                                                 </div>
                                                             ) : null}
                                                             {selectedChunkTableWarnings.length > 0 ? (
@@ -1522,14 +1566,14 @@ export default function KnowledgeBaseShow({
                                                                 </pre>
                                                             ) : (
                                                                 <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                                                    {selectedChunk.table_markdown || 'Ingen tabellvisning tilgjengelig.'}
+                                                                    {selectedChunk.table_markdown || tks.no_table_view}
                                                                 </pre>
                                                             )}
                                                         </div>
                                                     ) : (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
                                                             <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
-                                                                {selectedChunk.content || selectedChunk.content_preview || 'Ingen forhåndsvisning tilgjengelig.'}
+                                                                {selectedChunk.content || selectedChunk.content_preview || tks.no_preview}
                                                             </p>
                                                         </div>
                                                     )}
@@ -1539,10 +1583,10 @@ export default function KnowledgeBaseShow({
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Chunk-innhold
+                                                                {tks.chunk_content_heading}
                                                             </div>
                                                             <p className="mt-1 text-sm text-slate-500">
-                                                                Endringer reindekserer kun denne chunken og regenererer metadata i bakgrunnen.
+                                                                {tks.chunk_content_hint}
                                                             </p>
                                                         </div>
 
@@ -1552,7 +1596,7 @@ export default function KnowledgeBaseShow({
                                                                 onClick={beginChunkContentEdit}
                                                                 className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                Rediger innhold
+                                                                {tks.edit_content}
                                                             </button>
                                                         ) : null}
                                                     </div>
@@ -1563,7 +1607,7 @@ export default function KnowledgeBaseShow({
                                                                 <div className="grid gap-4 sm:grid-cols-2">
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Bytt grafikk
+                                                                    {tks.replace_graphic}
                                                                         </span>
                                                                         <input
                                                                             type="file"
@@ -1577,7 +1621,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Grafikktekst
+                                                                            {tks.graphic_caption_label}
                                                                         </span>
                                                                         <input
                                                                             type="text"
@@ -1588,7 +1632,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Alt-tekst
+                                                                            {tks.alt_text_label}
                                                                         </span>
                                                                         <input
                                                                             type="text"
@@ -1599,7 +1643,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            OCR-tekst
+                                                                            {tks.ocr_text_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.ocr_text}
@@ -1613,7 +1657,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Grafikkbeskrivelse
+                                                                            {tks.graphic_description_edit_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.image_description}
@@ -1627,7 +1671,7 @@ export default function KnowledgeBaseShow({
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
                                                                         <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                            Søkbar tekst
+                                                                            {tks.searchable_text_edit_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.content}
@@ -1643,7 +1687,7 @@ export default function KnowledgeBaseShow({
                                                             ) : selectedChunk.chunk_type === 'table' ? (
                                                                 <label className="block space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tabelltekst
+                                                                        {tks.table_text_label}
                                                                     </span>
                                                                     <textarea
                                                                         value={chunkContentForm.data.table_text}
@@ -1658,7 +1702,7 @@ export default function KnowledgeBaseShow({
                                                             ) : (
                                                                 <label className="block space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tekstinnhold
+                                                                        {tks.text_content_label}
                                                                     </span>
                                                                     <textarea
                                                                         value={chunkContentForm.data.content}
@@ -1678,14 +1722,14 @@ export default function KnowledgeBaseShow({
                                                                     onClick={cancelChunkContentEdit}
                                                                     className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                 >
-                                                                    Avbryt
+                                                                    {tks.cancel}
                                                                 </button>
                                                                 <button
                                                                     type="submit"
                                                                     disabled={isChunkContentSaving}
                                                                     className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {isChunkContentSaving ? 'Lagrer...' : 'Lagre innhold'}
+                                                                    {isChunkContentSaving ? tks.saving : tks.save_content}
                                                                 </button>
                                                             </div>
                                                         </form>
@@ -1696,10 +1740,10 @@ export default function KnowledgeBaseShow({
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Produktmetadata
+                                                                {tks.product_metadata_heading}
                                                             </div>
                                                             <p className="mt-1 text-sm text-slate-500">
-                                                                Rediger kun feltene brukeren arbeider med.
+                                                                {tks.product_metadata_hint}
                                                             </p>
                                                         </div>
 
@@ -1709,7 +1753,7 @@ export default function KnowledgeBaseShow({
                                                                 onClick={beginChunkMetadataEdit}
                                                                 className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                Rediger metadata
+                                                                {tks.edit_metadata}
                                                             </button>
                                                         ) : (
                                                             <div className="flex flex-wrap gap-2">
@@ -1718,7 +1762,7 @@ export default function KnowledgeBaseShow({
                                                                     onClick={cancelChunkMetadataEdit}
                                                                     className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                 >
-                                                                    Avbryt
+                                                                    {tks.cancel}
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -1726,7 +1770,7 @@ export default function KnowledgeBaseShow({
                                                                     disabled={chunkMetadataForm.processing}
                                                                     className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {chunkMetadataForm.processing ? 'Lagrer...' : 'Lagre metadata'}
+                                                                    {chunkMetadataForm.processing ? tks.saving : tks.save_metadata}
                                                                 </button>
                                                             </div>
                                                         )}
@@ -1738,29 +1782,29 @@ export default function KnowledgeBaseShow({
                                                                 <div className="sm:col-span-2 flex items-center gap-3 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3">
                                                                     <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" />
                                                                     <p className="text-sm text-amber-800">
-                                                                        AI-metadata genereres i bakgrunnen. Last siden på nytt om litt.
+                                                                        {tks.ai_metadata_generating}
                                                                     </p>
                                                                 </div>
                                                             ) : null}
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Tittel
+                                                                    {tks.chunk_title_label}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
-                                                                    {selectedChunk.title ?? 'Ingen tittel'}
+                                                                    {selectedChunk.title ?? tks.no_title}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    AI-generert oppsummering
+                                                                    {tks.ai_summary_label}
                                                                 </div>
                                                                 <div className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                                                    {selectedChunk.ai_summary || 'Ingen oppsummering lagt til ennå.'}
+                                                                    {selectedChunk.ai_summary || tks.no_ai_summary}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Tjeneste/produkt-tag
+                                                                    {tks.service_product_tag}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
                                                                     {selectedChunk.service_product_tag || '—'}
@@ -1768,7 +1812,7 @@ export default function KnowledgeBaseShow({
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Tema-tag
+                                                                    {tks.theme_tag}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
                                                                     {selectedChunk.theme_tag || '—'}
@@ -1776,7 +1820,7 @@ export default function KnowledgeBaseShow({
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Topic
+                                                                    {tks.topic_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
                                                                     {selectedChunk.topic || '—'}
@@ -1784,7 +1828,7 @@ export default function KnowledgeBaseShow({
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Sub-topic
+                                                                    {tks.sub_topic_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
                                                                     {selectedChunk.sub_topic || '—'}
@@ -1792,7 +1836,7 @@ export default function KnowledgeBaseShow({
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
                                                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                    Keywords
+                                                                    {tks.keywords_placeholder}
                                                                 </div>
                                                                 <div className="mt-2 text-sm font-medium text-slate-950">
                                                                     {formatChunkKeywordList(selectedChunk.keywords)}
@@ -1804,95 +1848,95 @@ export default function KnowledgeBaseShow({
                                                             <div className="grid gap-4 sm:grid-cols-2">
                                                                 <label className="space-y-2 sm:col-span-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tittel
+                                                                        {tks.chunk_title_label}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.title}
                                                                         onChange={(event) => chunkMetadataForm.setData('title', event.target.value)}
-                                                                        placeholder="Gi chunken en tydelig tittel"
+                                                                        placeholder={tks.title_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        AI-generert oppsummering
+                                                                        {tks.ai_summary_label}
                                                                     </span>
                                                                     <textarea
                                                                         value={chunkMetadataForm.data.ai_summary}
                                                                         onChange={(event) => chunkMetadataForm.setData('ai_summary', event.target.value)}
                                                                         rows={4}
-                                                                        placeholder="Kort oppsummering av hva chunken handler om"
+                                                                        placeholder={tks.summary_edit_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tjeneste/produkt-tag
+                                                                        {tks.service_product_tag}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.service_product_tag}
                                                                         onChange={(event) => chunkMetadataForm.setData('service_product_tag', event.target.value)}
-                                                                        placeholder="F.eks. Prosjektstyring"
+                                                                        placeholder={tks.service_product_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Tema-tag
+                                                                        {tks.theme_tag}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.theme_tag}
                                                                         onChange={(event) => chunkMetadataForm.setData('theme_tag', event.target.value)}
-                                                                        placeholder="F.eks. Drift"
+                                                                        placeholder={tks.theme_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Topic
+                                                                        {tks.topic_placeholder}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.topic}
                                                                         onChange={(event) => chunkMetadataForm.setData('topic', event.target.value)}
-                                                                        placeholder="F.eks. Servicedesk"
+                                                                        placeholder={tks.topic_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Sub-topic
+                                                                        {tks.sub_topic_placeholder}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.sub_topic}
                                                                         onChange={(event) => chunkMetadataForm.setData('sub_topic', event.target.value)}
-                                                                        placeholder="F.eks. Lærlingordning"
+                                                                        placeholder={tks.sub_topic_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
                                                                     <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                        Keywords
+                                                                        {tks.keywords_placeholder}
                                                                     </span>
                                                                     <input
                                                                         type="text"
                                                                         value={chunkMetadataForm.data.keywords}
                                                                         onChange={(event) => chunkMetadataForm.setData('keywords', event.target.value)}
-                                                                        placeholder="Kommaseparerte nøkkelord"
+                                                                        placeholder={tks.keywords_placeholder}
                                                                         className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                     <p className="text-xs text-slate-500">
-                                                                        Lagres som en JSON-array.
+                                                                        {tks.keywords_json_hint}
                                                                     </p>
                                                                 </label>
                                                             </div>
@@ -1904,10 +1948,10 @@ export default function KnowledgeBaseShow({
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
                                                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                                                Systemdata
+                                                                {tks.system_data_heading}
                                                             </div>
                                                             <p className="mt-1 text-sm text-slate-500">
-                                                                Kun for sporbarhet og kontroll.
+                                                                {tks.system_data_hint}
                                                             </p>
                                                         </div>
 
@@ -1916,7 +1960,7 @@ export default function KnowledgeBaseShow({
                                                             onClick={() => setShowChunkSystemMetadata((current) => !current)}
                                                             className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
-                                                            {showChunkSystemMetadata ? 'Skjul systemdata' : 'Vis systemdata'}
+                                                            {showChunkSystemMetadata ? tks.hide_system_data : tks.show_system_data}
                                                         </button>
                                                     </div>
 
@@ -1938,9 +1982,9 @@ export default function KnowledgeBaseShow({
 
                                                 <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
                                                     <div className="text-sm text-slate-500">
-                                                        {selectedChunkIndex >= 0 && chunks.length > 0
-                                                            ? `Chunk ${selectedChunkIndex + 1} av ${chunks.length}`
-                                                            : 'Chunk'}
+                                                            {selectedChunkIndex >= 0 && chunks.length > 0
+                                                                ? formatTemplate(knowledgeShowLabels.chunkCounterLabel, { current: selectedChunkIndex + 1, total: chunks.length })
+                                                                : knowledgeShowLabels.chunkLabel}
                                                     </div>
 
                                                     <button
@@ -1949,19 +1993,19 @@ export default function KnowledgeBaseShow({
                                                         disabled={selectedChunkIndex < 0 || selectedChunkIndex >= chunks.length - 1}
                                                         className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {selectedChunkIndex >= 0 && selectedChunkIndex < chunks.length - 1
-                                                            ? 'Neste chunk'
-                                                            : 'Siste chunk'}
+                                                            {selectedChunkIndex >= 0 && selectedChunkIndex < chunks.length - 1
+                                                                ? tks.next_chunk
+                                                                : tks.last_chunk}
                                                     </button>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
                                                 <div className="text-lg font-semibold text-slate-900">
-                                                    Ingen chunk er valgt.
+                                                    {tks.no_chunk_selected}
                                                 </div>
                                                 <p className="mt-2 text-sm text-slate-500">
-                                                    Velg en chunk i listen for å gå gjennom innholdet.
+                                                    {tks.no_chunk_selected_hint}
                                                 </p>
                                             </div>
                                         )}
@@ -1975,37 +2019,37 @@ export default function KnowledgeBaseShow({
                         <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5">
                             <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Type</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_type}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Status</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_status}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{documentStatusMeta.label}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Aktivitet</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_activity}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{activeLabel}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Filstørrelse</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_file_size}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">MIME-type</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_mime}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.mime_type ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Eier</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_owner}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.uploaded_by ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Chunks</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_chunks}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">
-                                        {totalChunksCount > 0 ? `${readyChunksCount} av ${totalChunksCount}` : 'Ingen chunks'}
+                                        {totalChunksCount > 0 ? `${readyChunksCount} av ${totalChunksCount}` : tks.no_chunks}
                                     </dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">Sist oppdatert</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_last_updated}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
                                 </div>
                             </dl>

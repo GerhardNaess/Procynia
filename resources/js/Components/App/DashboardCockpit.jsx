@@ -19,9 +19,9 @@ function formatPercent(value, locale) {
     }).format(Number(value))} %`;
 }
 
-function formatDate(value, locale, options = {}) {
+function formatDate(value, locale, notAvailableText, options = {}) {
     if (!value) {
-        return 'Ukjent dato';
+        return notAvailableText;
     }
 
     return new Intl.DateTimeFormat(locale, {
@@ -32,9 +32,9 @@ function formatDate(value, locale, options = {}) {
     }).format(new Date(value));
 }
 
-function formatRelativeTime(value, locale = 'nb-NO') {
+function formatRelativeTime(value, locale = 'nb-NO', noActivityText) {
     if (!value) {
-        return 'Ingen aktivitet';
+        return noActivityText;
     }
 
     const date = new Date(value);
@@ -152,44 +152,9 @@ function buildMonthOptions(locale = 'nb-NO') {
     });
 }
 
-const DASHBOARD_INFO_TEXTS = {
-    'attention_deadline-soon': 'Viser saker med operative frister som nærmer seg eller er passert. Åpne kategorien for å se konkrete saker direkte.',
-    'attention_missing-bid-manager': 'Viser saker som mangler eksplisitt operativt ansvar. Åpne kategorien for å gå direkte til sakene.',
-    'attention_go-no-go-pending': 'Viser saker i beslutningsfase uten endelig utfall. Åpne kategorien for å gå direkte til sakene.',
-    'attention_inactive-seven-days': 'Viser saker uten kommentarer eller innsendinger de siste 7 dagene. Åpne kategorien for å se konkrete saker direkte.',
-    attention: 'Viser konkrete saker som bør følges opp først. Åpne en kategori for å se og åpne sakene direkte.',
-    deadlines: 'Viser markerte operative frister og Business Reviews i valgt måned. Bruk kalenderen til å finne datoer som nærmer seg eller allerede er passert.',
-    portfolio: 'Gir rask status på saksporteføljen. Bruk denne gruppen for å se totalvolum, aktive saker og saker som allerede har fått et registrert utfall.',
-    portfolio_total: 'Viser alle saker i porteføljen, både aktive saker og saker som allerede er avsluttet.',
-    portfolio_active: 'Viser saker som fortsatt følges opp operativt og ikke har nådd et registrert utfall.',
-    portfolio_outcome: 'Viser saker der utfallet er registrert, inkludert vunnet, tapt, No-Go, trukket og arkivert.',
-    bid_quality: 'Viser objektive styringsmål for ansvar, flyt og utfall i aktive og avsluttede saker.',
-    responsibility_activity: 'Viser sakene i cockpit-skopet, watch lists og siste aktivitet.',
-    responsibility_bid_manager_cases: 'Antall saker i cockpit-skopet med bid-manager.',
-    responsibility_opportunity_owner_cases: 'Antall saker i cockpit-skopet med kommersiell eier.',
-    responsibility_saved_watch_lists: 'Antall watch lists du har lagret.',
-    responsibility_contributor_cases: 'Antall saker i cockpit-skopet med aktiv bidragsyter-tilgang.',
-    responsibility_activity_14_days: 'Hvor mange aktiviteter som har skjedd på saker i cockpit-skopet de siste 14 dagene.',
-    responsibility_last_activity: 'Siste aktivitet viser siste brukerhandling på saken, som kommentar, statusendring, ansvar eller innsending.',
-    responsibility_inactive_7_days: 'Saker i cockpit-skopet som ikke har hatt aktivitet de siste 7 dagene.',
-    pipeline_stages: 'Viser volum og gjennomsnittlig tempo i hver fase.',
-    stage_discovered: 'Saker som nettopp er oppdaget og ennå ikke er startet opp.',
-    stage_qualifying: 'Saker som vurderes før videre beslutning.',
-    stage_go_no_go: 'Saker som ligger i beslutningsfasen og venter på utfall.',
-    stage_in_progress: 'Saker som er i aktivt arbeid.',
-    stage_submitted: 'Saker som er levert og nå venter på respons eller videre avklaring.',
-    stage_negotiation: 'Saker som er i dialog eller forhandling etter levering.',
-    outcomes: 'Viser hvordan porteføljen er avsluttet fordelt på utfall.',
-    outcome_won: 'Saker som er vunnet.',
-    outcome_lost: 'Saker som er tapt.',
-    outcome_no_go: 'Saker som er stoppet tidlig med No-Go.',
-    outcome_withdrawn: 'Saker som er trukket etter at arbeidet har startet.',
-    outcome_archived: 'Saker som er arkivert og avsluttet uten aktivt arbeid.',
-};
-
-function InfoButton({ infoKey, title, infoText, openInfoKey, setOpenInfoKey }) {
+function InfoButton({ infoKey, title, infoText, openInfoKey, setOpenInfoKey, texts = {} }) {
     const isOpen = openInfoKey === infoKey;
-    const resolvedInfoText = infoText ?? DASHBOARD_INFO_TEXTS[infoKey];
+    const resolvedInfoText = infoText ?? texts.info_texts?.[infoKey];
 
     if (!resolvedInfoText) {
         return null;
@@ -203,7 +168,7 @@ function InfoButton({ infoKey, title, infoText, openInfoKey, setOpenInfoKey }) {
         >
             <button
                 type="button"
-                aria-label={`Vis forklaring for ${title}`}
+                aria-label={`${texts.info_prefix} ${title}`}
                 aria-expanded={isOpen}
                 aria-describedby={isOpen ? `${infoKey}-tooltip` : undefined}
                 onClick={(event) => {
@@ -241,6 +206,7 @@ function InfoTile({
     infoText,
     openInfoKey,
     setOpenInfoKey,
+    texts = {},
     className = '',
     titleClassName = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500',
     dense = false,
@@ -255,7 +221,7 @@ function InfoTile({
                     </div>
                 </div>
                 {infoKey ? (
-                    <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
+                    <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} texts={texts} />
                 ) : null}
             </div>
             <div className={classNames(dense ? 'mt-1.5' : 'mt-2')}>
@@ -265,7 +231,7 @@ function InfoTile({
     );
 }
 
-function Card({ title, subtitle, infoKey, infoText, action, children, className = '', openInfoKey, setOpenInfoKey, dense = false }) {
+function Card({ title, subtitle, infoKey, infoText, action, children, className = '', openInfoKey, setOpenInfoKey, texts = {}, dense = false }) {
     return (
         <section className={classNames('rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_10px_30px_rgba(15,23,42,0.05)]', dense ? 'p-4' : 'p-5', className)}>
             <div className={classNames('flex items-start justify-between gap-4', dense ? 'mb-3' : 'mb-4')}>
@@ -275,7 +241,7 @@ function Card({ title, subtitle, infoKey, infoText, action, children, className 
                             {title}
                         </div>
                         {infoKey ? (
-                            <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} />
+                            <InfoButton infoKey={infoKey} title={title} infoText={infoText} openInfoKey={openInfoKey} setOpenInfoKey={setOpenInfoKey} texts={texts} />
                         ) : null}
                     </div>
                     {subtitle ? (
@@ -317,7 +283,7 @@ function SeverityDot({ severity }) {
     return <span className={classNames('mt-1.5 h-2.5 w-2.5 rounded-full', palette[severity] ?? palette.neutral)} />;
 }
 
-function AttentionCaseRow({ item }) {
+function AttentionCaseRow({ item, texts = {} }) {
     return (
         <Link
             href={item.show_url}
@@ -343,13 +309,13 @@ function AttentionCaseRow({ item }) {
                 </div>
             </div>
             <span className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700 opacity-0 transition group-hover:opacity-100">
-                Åpne sak
+                {texts.open_case}
             </span>
         </Link>
     );
 }
 
-function AttentionCategoryPanel({ item, isOpen, onToggle }) {
+function AttentionCategoryPanel({ item, isOpen, onToggle, texts = {} }) {
     const palette = {
         danger: 'border-rose-200 bg-rose-50/60',
         warning: 'border-amber-200 bg-amber-50/60',
@@ -390,12 +356,12 @@ function AttentionCategoryPanel({ item, isOpen, onToggle }) {
                     {item.items.length > 0 ? (
                         <div className="space-y-2">
                             {item.items.map((attentionCase) => (
-                                <AttentionCaseRow key={attentionCase.id} item={attentionCase} />
+                                <AttentionCaseRow key={attentionCase.id} item={attentionCase} texts={texts} />
                             ))}
                         </div>
                     ) : (
                         <div className="rounded-xl border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-slate-500">
-                            Ingen saker matcher denne kategorien akkurat nå.
+                            {texts.no_category_items}
                         </div>
                     )}
                 </div>
@@ -404,7 +370,7 @@ function AttentionCategoryPanel({ item, isOpen, onToggle }) {
     );
 }
 
-function formatMetricValue(metric, locale) {
+function formatMetricValue(metric, locale, texts = {}) {
     if (metric?.value === null || metric?.value === undefined) {
         return '—';
     }
@@ -414,11 +380,11 @@ function formatMetricValue(metric, locale) {
     }
 
     if (metric.unit === 'dager') {
-        return `${formatNumber(metric.value, locale)} dager`;
+        return `${formatNumber(metric.value, locale)} ${texts.days}`;
     }
 
     if (metric.unit === 'saker') {
-        return `${formatNumber(metric.value, locale)} saker`;
+        return `${formatNumber(metric.value, locale)} ${texts.cases}`;
     }
 
     return `${formatNumber(metric.value, locale)}${metric.unit ? ` ${metric.unit}` : ''}`;
@@ -447,7 +413,7 @@ function QualityBreakdownChips({ breakdown, locale }) {
     );
 }
 
-function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, spanFullWidth = false }) {
+function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, texts = {}, spanFullWidth = false }) {
     const palette = {
         success: 'border-emerald-200 bg-emerald-50/70',
         warning: 'border-amber-200 bg-amber-50/70',
@@ -460,13 +426,14 @@ function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, spa
             title={metric.title}
             infoKey={`bid_quality_${metric.key}`}
             infoText={metric.definition}
+            texts={texts}
             openInfoKey={openInfoKey}
             setOpenInfoKey={setOpenInfoKey}
             className={classNames('px-4 py-3', palette[metric.severity] ?? palette.neutral, spanFullWidth ? 'sm:col-span-2' : '')}
             dense
         >
             <div className="text-2xl font-semibold tracking-tight text-slate-950">
-                {formatMetricValue(metric, locale)}
+                {formatMetricValue(metric, locale, texts.units)}
             </div>
             <div className="mt-1 text-sm leading-5 text-slate-500">
                 {metric.subtitle}
@@ -478,13 +445,15 @@ function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, spa
                 {metric.numerator !== undefined && metric.denominator !== undefined ? (
                     <span>
                         {formatNumber(metric.numerator, locale)}
-                        {' av '}
+                        {' '}
+                        {texts.connector_of}
+                        {' '}
                         {formatNumber(metric.denominator, locale)}
                     </span>
                 ) : metric.sample_size !== undefined ? (
                     <span>
                         {formatNumber(metric.sample_size, locale)}
-                        {' i grunnlag'}
+                        {texts.sample_basis_suffix}
                     </span>
                 ) : null}
             </div>
@@ -495,7 +464,7 @@ function BidQualityMetricTile({ metric, locale, openInfoKey, setOpenInfoKey, spa
     );
 }
 
-function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, spanFullWidth = false }) {
+function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, texts = {}, spanFullWidth = false }) {
     const series = Array.isArray(metric.series) ? metric.series : [];
     const maxMedian = Math.max(...series.map((point) => Number(point.median_days ?? 0)), 1);
 
@@ -504,6 +473,7 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, span
             title={metric.title}
             infoKey={`bid_quality_${metric.key}`}
             infoText={metric.definition}
+            texts={texts}
             openInfoKey={openInfoKey}
             setOpenInfoKey={setOpenInfoKey}
             className={classNames('px-4 py-3', 'border-slate-200 bg-slate-50/70', spanFullWidth ? 'sm:col-span-2' : '')}
@@ -512,10 +482,10 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, span
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-950">
-                        {metric.subtitle ?? 'Utvikling siste 12 måneder'}
+                        {metric.subtitle ?? texts.default_trend_subtitle}
                     </div>
                     <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
-                        Median dager per måned. Grunnlag vises per datapunkt.
+                        {texts.trend_hint}
                     </div>
                 </div>
                 <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
@@ -533,12 +503,12 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, span
                             <div
                                 key={point.month}
                                 className="flex min-w-0 flex-col items-center"
-                                title={`${point.label} ${point.month} · median ${formatNumber(point.median_days, locale)} dager · grunnlag ${formatNumber(point.sample_size, locale)}`}
+                                title={`${point.label} ${point.month} · ${texts.tooltips?.median_label} ${formatNumber(point.median_days, locale)} ${texts.units?.days} · ${texts.tooltips?.basis_label} ${formatNumber(point.sample_size, locale)}`}
                             >
                                 <div className="mb-1 text-[11px] font-semibold text-slate-900">
                                     {formatNumber(point.median_days, locale)}
                                     {' '}
-                                    d
+                                    {texts.units?.days_short}
                                 </div>
                                 <div className="flex h-32 w-full items-end rounded-xl bg-slate-100 px-1.5">
                                     <div
@@ -550,7 +520,7 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, span
                                     {point.label}
                                 </div>
                                 <div className="text-center text-[10px] text-slate-400">
-                                    n=
+                                    {texts.tooltips?.sample_prefix}
                                     {formatNumber(point.sample_size, locale)}
                                 </div>
                             </div>
@@ -559,18 +529,18 @@ function BidQualityTrendTile({ metric, locale, openInfoKey, setOpenInfoKey, span
                 </div>
             ) : (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                    Ingen månedlige datapunkter med gyldig grunnlag.
+                    {texts.no_monthly_points}
                 </div>
             )}
         </InfoTile>
     );
 }
 
-function DeadlinePopover({ items, locale }) {
+function DeadlinePopover({ items, locale, texts = {}, commonText = {} }) {
     return (
         <div className="absolute left-0 top-full z-20 mt-2 hidden w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-[0_20px_40px_rgba(15,23,42,0.12)] group-hover:block group-focus-within:block">
             <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Frister denne dagen
+                {texts.title}
             </div>
             <div className="space-y-2">
                 {items.map((item) => (
@@ -585,10 +555,10 @@ function DeadlinePopover({ items, locale }) {
                         <div className="mt-1 text-xs leading-5 text-slate-500">
                             {item.deadline_type_label}
                             {' · '}
-                            {formatDate(item.date, locale, { day: 'numeric', month: 'short' })}
+                            {formatDate(item.date, locale, commonText.not_available, { day: 'numeric', month: 'short' })}
                         </div>
                         <div className="mt-1 text-xs leading-5 text-slate-500">
-                            {item.bid_manager_name ?? 'Ingen bid-manager'}
+                            {item.bid_manager_name ?? texts.no_bid_manager}
                             {item.phase_label ? ` · ${item.phase_label}` : ''}
                         </div>
                     </Link>
@@ -598,12 +568,29 @@ function DeadlinePopover({ items, locale }) {
     );
 }
 
-export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
+export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}, commonText = {} }) {
+    const dashboardText = texts ?? {};
+    const sharedText = commonText ?? {};
+    const {
+        page_title: pageTitle,
+        page_subtitle: pageSubtitle,
+        sections: sectionsText = {},
+        calendar: calendarText = {},
+        actions: actionsText = {},
+        empty_states: emptyStatesText = {},
+        metrics: metricsText = {},
+        units: unitsText = {},
+        popovers: popoversText = {},
+    } = dashboardText;
     const [openInfoKey, setOpenInfoKey] = useState(null);
     const [openAttentionKey, setOpenAttentionKey] = useState(null);
     const portfolio = cockpit?.portfolio ?? { total: 0, active: 0, outcome: 0 };
     const attentionItems = cockpit?.attention?.items ?? [];
-    const bidQuality = cockpit?.bid_quality ?? { title: 'Bid-kvalitet og styring', subtitle: '', items: [] };
+    const bidQuality = cockpit?.bid_quality ?? {
+        title: sectionsText.bid_quality?.title,
+        subtitle: sectionsText.bid_quality?.subtitle,
+        items: [],
+    };
     const deadlines = cockpit?.deadlines ?? { month_start: null, month_label: '', items: [], upcoming: [] };
     const pipeline = cockpit?.pipeline ?? { stages: [], outcomes: [] };
     const responsibility = cockpit?.responsibility_activity ?? {
@@ -642,23 +629,24 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
         <div className="space-y-5">
             <section className="space-y-1.5">
                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                    Bid Status
+                    {pageTitle}
                 </h1>
                 <p className="max-w-4xl text-[15px] leading-7 text-slate-500">
-                    Porteføljeoversikten gir deg et samlet cockpit-blikk på hvor sakene ligger i bid-prosessen akkurat nå.
+                    {pageSubtitle}
                 </p>
             </section>
 
             <div className="grid gap-5 xl:grid-cols-12 xl:items-stretch">
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
-                        title="Oppmerksomhet nå"
-                        subtitle="Klikk en kategori for å se konkrete saker og åpne dem direkte."
+                        title={sectionsText.attention?.title}
+                        subtitle={sectionsText.attention?.subtitle}
                         infoKey="attention"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full border-rose-200 bg-rose-50/70"
                         dense
+                        texts={dashboardText}
                     >
                         <div className="space-y-2">
                             {attentionItems.length > 0 ? attentionItems.map((item) => (
@@ -667,10 +655,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                     item={item}
                                     isOpen={openAttentionKey === item.key}
                                     onToggle={() => setOpenAttentionKey((current) => (current === item.key ? null : item.key))}
+                                    texts={{
+                                        open_case: actionsText.open_case,
+                                        no_category_items: emptyStatesText.no_category_items,
+                                    }}
                                 />
                             )) : (
                                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                                    Ingen saker krever umiddelbar oppmerksomhet.
+                                    {emptyStatesText.attention}
                                 </div>
                             )}
                         </div>
@@ -679,13 +671,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-6 h-full flex flex-col">
                     <Card
-                        title="Bidkalender"
-                        subtitle={`Markerte frister og Business Reviews for ${calendar.monthLabel}`}
+                        title={sectionsText.deadlines?.title}
+                        subtitle={`${sectionsText.deadlines?.subtitle_prefix} ${calendar.monthLabel}`}
                         infoKey="deadlines"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full border-violet-200 bg-violet-50/60"
                         dense
+                        texts={dashboardText}
                     >
                         <div className="space-y-3">
                             <div className="rounded-2xl border border-slate-200 bg-white p-2.5">
@@ -694,7 +687,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
-                                                aria-label="Forrige måned"
+                                                aria-label={calendarText.previous_month}
                                                 onClick={() => setVisibleMonthStart((current) => addMonths(current, -1))}
                                                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                                             >
@@ -705,7 +698,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                             </div>
                                             <button
                                                 type="button"
-                                                aria-label="Neste måned"
+                                                aria-label={calendarText.next_month}
                                                 onClick={() => setVisibleMonthStart((current) => addMonths(current, 1))}
                                                 className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
                                             >
@@ -713,14 +706,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                             </button>
                                         </div>
                                         <div className="text-[11px] text-slate-500">
-                                            Hold over markerte dager for detaljer
+                                            {calendarText.hover_hint}
                                         </div>
                                     </div>
 
                                     <div className="grid gap-2 md:grid-cols-[minmax(0,0.9fr)_minmax(0,0.8fr)_minmax(0,1.1fr)]">
                                         <label className="block">
                                             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                Måned
+                                                {calendarText.month_label}
                                             </span>
                                             <select
                                                 value={String(visibleMonthStart.getMonth())}
@@ -740,7 +733,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                                         <label className="block">
                                             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                År
+                                                {calendarText.year_label}
                                             </span>
                                             <select
                                                 value={calendar.yearValue}
@@ -760,7 +753,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                                         <div>
                                             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="deadline-date-jump">
-                                                Gå til dato
+                                                {calendarText.jump_label}
                                             </label>
                                             <div className="flex gap-2">
                                                 <input
@@ -783,7 +776,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                                     }}
                                                     className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
                                                 >
-                                                    Vis
+                                                    {actionsText.show}
                                                 </button>
                                             </div>
                                         </div>
@@ -791,7 +784,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                 </div>
 
                                 <div className="mt-2 grid grid-cols-7 gap-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                    {['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'].map((label) => (
+                                    {calendarText.weekdays?.map((label) => (
                                         <div key={label} className="px-1 py-0.5 text-center">
                                             {label}
                                         </div>
@@ -827,7 +820,10 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                                 </div>
 
                                                 {items.length > 0 ? (
-                                                    <DeadlinePopover items={items} locale={locale} />
+                                                    <DeadlinePopover items={items} locale={locale} texts={{
+                                                        title: popoversText.deadlines_title,
+                                                        no_bid_manager: emptyStatesText.no_bid_manager,
+                                                    }} commonText={sharedText} />
                                                 ) : null}
                                             </button>
                                         );
@@ -842,30 +838,31 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
             <div className="grid gap-4 xl:grid-cols-12">
                 <div className="xl:col-span-3">
                     <Card
-                        title="Porteføljeoversikt"
-                        subtitle="Viser hvor mange saker dere har totalt, hvor mange som fortsatt er aktive, og hvor mange som allerede har fått et registrert utfall."
+                        title={sectionsText.portfolio?.title}
+                        subtitle={sectionsText.portfolio?.subtitle}
                         infoKey="portfolio"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
+                        texts={dashboardText}
                     >
                         <div className="grid gap-3">
                             {[
                                 {
-                                    label: 'Saker totalt',
-                                    description: 'Alle saker i porteføljen.',
+                                    label: metricsText.portfolio_total_title,
+                                    description: metricsText.portfolio_total_description,
                                     value: portfolio.total,
                                     infoKey: 'portfolio_total',
                                 },
                                 {
-                                    label: 'Aktive saker',
-                                    description: 'Saker som fortsatt følges opp.',
+                                    label: metricsText.portfolio_active_title,
+                                    description: metricsText.portfolio_active_description,
                                     value: portfolio.active,
                                     infoKey: 'portfolio_active',
                                 },
                                 {
-                                    label: 'Saker med registrert utfall',
-                                    description: 'Saker der resultatet allerede er registrert.',
+                                    label: metricsText.portfolio_outcome_title,
+                                    description: metricsText.portfolio_outcome_description,
                                     value: portfolio.outcome,
                                     infoKey: 'portfolio_outcome',
                                 },
@@ -892,13 +889,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-5">
                     <Card
-                        title={bidQuality.title ?? 'Bid-kvalitet og styring'}
-                        subtitle={bidQuality.subtitle ?? 'Objektive styringsmål for ansvar, flyt og utfall i cockpit-skopet.'}
+                        title={bidQuality.title}
+                        subtitle={bidQuality.subtitle}
                         infoKey="bid_quality"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
                         dense
+                        texts={dashboardText}
                     >
                         <div className="grid gap-2 sm:grid-cols-2">
                             {(bidQuality.items ?? []).map((metric) => (
@@ -909,6 +907,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         locale={locale}
                                         openInfoKey={openInfoKey}
                                         setOpenInfoKey={setOpenInfoKey}
+                                        texts={dashboardText}
                                         spanFullWidth
                                     />
                                 ) : (
@@ -918,6 +917,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         locale={locale}
                                         openInfoKey={openInfoKey}
                                         setOpenInfoKey={setOpenInfoKey}
+                                        texts={dashboardText}
                                     />
                                 )
                             ))}
@@ -925,7 +925,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                         {(bidQuality.items ?? []).length === 0 ? (
                             <div className="mt-2 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                                Ingen bid-kvalitetsmålinger er tilgjengelige akkurat nå.
+                                {emptyStatesText.no_bid_quality}
                             </div>
                         ) : null}
                     </Card>
@@ -933,32 +933,35 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-4">
                     <Card
-                        title="Ansvar & Aktivitet"
-                        subtitle="Saker i cockpit-skopet, watch lists og siste aktivitet."
+                        title={sectionsText.responsibility_activity?.title}
+                        subtitle={sectionsText.responsibility_activity?.subtitle}
                         infoKey="responsibility_activity"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
+                        texts={dashboardText}
                     >
                         <div className="space-y-3">
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Saker med bid-manager"
+                                    title={metricsText.responsibility_bid_manager_cases}
                                     infoKey="responsibility_bid_manager_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.bid_manager_cases_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                                 <InfoTile
-                                    title="Saker med kommersiell eier"
+                                    title={metricsText.responsibility_opportunity_owner_cases}
                                     infoKey="responsibility_opportunity_owner_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.opportunity_owner_cases_count ?? 0, locale)}
@@ -968,22 +971,24 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Lagrede watch lists"
+                                    title={metricsText.responsibility_saved_watch_lists}
                                     infoKey="responsibility_saved_watch_lists"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.saved_watch_lists_count ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                                 <InfoTile
-                                    title="Saker med bidragsyter"
+                                    title={metricsText.responsibility_contributor_cases}
                                     infoKey="responsibility_contributor_cases"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-slate-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.contributor_cases_count ?? 0, locale)}
@@ -993,36 +998,39 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Siste aktivitet"
+                                    title={metricsText.responsibility_last_activity}
                                     infoKey="responsibility_last_activity"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-violet-50/70 px-4 py-3 sm:col-span-2"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-1 text-base font-semibold text-slate-950">
-                                        {formatRelativeTime(responsibility.activity.last_activity_at, locale)}
+                                        {formatRelativeTime(responsibility.activity.last_activity_at, locale, emptyStatesText.no_activity)}
                                     </div>
                                 </InfoTile>
                             </div>
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <InfoTile
-                                    title="Aktivitet siste 14 dager"
+                                    title={metricsText.responsibility_activity_14_days}
                                     infoKey="responsibility_activity_14_days"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-violet-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.activity.activity_count_14_days ?? 0, locale)}
                                     </div>
                                 </InfoTile>
                                 <InfoTile
-                                    title="Uten aktivitet 7 dager"
+                                    title={metricsText.responsibility_inactive_7_days}
                                     infoKey="responsibility_inactive_7_days"
                                     openInfoKey={openInfoKey}
                                     setOpenInfoKey={setOpenInfoKey}
                                     className="border-slate-200 bg-amber-50/70 px-4 py-3"
+                                    texts={dashboardText}
                                 >
                                     <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
                                         {formatNumber(responsibility.activity.inactive_7_days_count ?? 0, locale)}
@@ -1037,13 +1045,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
             <div className="grid gap-4 xl:grid-cols-12">
                 <div className="xl:col-span-8">
                     <Card
-                        title="Pipeline-stadier"
-                        subtitle="Flyt, tempo og hvor sakene stopper opp."
+                        title={sectionsText.pipeline_stages?.title}
+                        subtitle={sectionsText.pipeline_stages?.subtitle}
                         infoKey="pipeline_stages"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
                         dense
+                        texts={dashboardText}
                     >
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                             {pipelineStages.map((stage) => {
@@ -1059,11 +1068,12 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                         className="h-full border-slate-200 bg-slate-50/70 px-3 py-2.5"
                                         titleClassName="text-sm font-semibold text-slate-950"
                                         dense
+                                        texts={dashboardText}
                                     >
                                         <div className="flex items-center justify-between gap-2">
                                             <div>
                                                 <div className="text-[11px] leading-4 text-slate-500">
-                                                    Gjennomsnittlig alder i fase
+                                                    {metricsText.pipeline_average_age_label}
                                                 </div>
                                             </div>
                                             <div className="text-right">
@@ -1071,7 +1081,7 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
                                                     {formatNumber(stage.count, locale)}
                                                 </div>
                                                 <div className="text-[11px] leading-4 text-slate-500">
-                                                    {stage.average_age_hours === null ? 'Ingen måling' : `${formatNumber(stage.average_age_hours, locale)} t i snitt`}
+                                                    {stage.average_age_hours === null ? emptyStatesText.no_measurement : `${formatNumber(stage.average_age_hours, locale)} ${unitsText.hours_short} ${unitsText.average_suffix}`}
                                                 </div>
                                             </div>
                                         </div>
@@ -1091,13 +1101,14 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO' }) {
 
                 <div className="xl:col-span-4">
                     <Card
-                        title="Utfall"
-                        subtitle="Avsluttede saker og historikk."
+                        title={sectionsText.outcomes?.title}
+                        subtitle={sectionsText.outcomes?.subtitle}
                         infoKey="outcomes"
                         openInfoKey={openInfoKey}
                         setOpenInfoKey={setOpenInfoKey}
                         className="h-full"
                         dense
+                        texts={dashboardText}
                     >
                         <div className="grid gap-2 sm:grid-cols-2">
                             {(outcomes ?? []).map((item) => {

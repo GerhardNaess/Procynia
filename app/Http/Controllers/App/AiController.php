@@ -1211,7 +1211,7 @@ class AiController extends Controller
             'id' => $notice->id,
             'title' => $notice->title,
             'reference' => $notice->reference_number ?: $notice->external_id,
-            'owner_name' => $notice->bidManager?->name ?? $notice->opportunityOwner?->name ?? 'Not assigned',
+            'owner_name' => $notice->bidManager?->name ?? $notice->opportunityOwner?->name ?? __('procynia.ai.not_assigned'),
             'stage_label' => $notice->bid_status_label,
             'ai_status' => $this->analysisStatusFor($notice),
             'updated_at' => optional($notice->updated_at)?->toIso8601String(),

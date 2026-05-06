@@ -532,7 +532,7 @@ function normalizeGroundingSource(value) {
     };
 }
 
-function EvidenceSourceModal({ evidence = null, onClose }) {
+function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
     if (!evidence || typeof onClose !== 'function') {
         return null;
     }
@@ -542,6 +542,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
         ?? source?.content_preview
         ?? evidence.evidence_quote
         ?? evidence.evidence_reference
+        ?? aiText.evidence_no_excerpt
         ?? 'Ingen utdrag er tilgjengelig for dette beviset.';
 
     return (
@@ -549,7 +550,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
             className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4"
             role="dialog"
             aria-modal="true"
-            aria-label="Bevisvisning"
+            aria-label={aiText.evidence_modal_title}
             onClick={(event) => {
                 if (event.target === event.currentTarget) {
                     onClose();
@@ -560,7 +561,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
                 <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div className="space-y-1">
                         <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-600">
-                            Bevis
+                            {aiText.evidence_title}
                         </div>
                         <h2 className="text-xl font-semibold text-slate-950">
                             {evidence.requirement_point ?? '—'}
@@ -576,7 +577,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
                         type="button"
                         onClick={onClose}
                         className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
-                        aria-label="Lukk bevisvisning"
+                        aria-label={aiText.evidence_modal_close}
                     >
                         ×
                     </button>
@@ -586,31 +587,31 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
                     <div className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
                         <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                Kilde
+                                {aiText.evidence_source_title}
                             </div>
                             <div className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
                                 <div>
-                                    <span className="font-semibold text-slate-900">Dokument:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_document_label}</span>{' '}
                                     {source?.document_title ?? '—'}
                                 </div>
                                 <div>
-                                    <span className="font-semibold text-slate-900">Seksjon:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_section_label}</span>{' '}
                                     {source?.section_title ?? '—'}
                                 </div>
                                 <div>
-                                    <span className="font-semibold text-slate-900">Seksjonssti:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_section_path_label}</span>{' '}
                                     {source?.section_path ?? '—'}
                                 </div>
                                 <div>
-                                    <span className="font-semibold text-slate-900">Chunk:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_chunk_label}</span>{' '}
                                     {source?.chunk_index ?? '—'}
                                 </div>
                                 <div>
-                                    <span className="font-semibold text-slate-900">Dokument-ID:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_document_id_label}</span>{' '}
                                     {source?.knowledge_item_id ?? '—'}
                                 </div>
                                 <div>
-                                    <span className="font-semibold text-slate-900">Chunk-ID:</span>{' '}
+                                    <span className="font-semibold text-slate-900">{aiText.evidence_chunk_id_label}</span>{' '}
                                     {source?.knowledge_item_chunk_id ?? '—'}
                                 </div>
                             </div>
@@ -618,7 +619,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
 
                         <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                Utdrag
+                                {aiText.evidence_excerpt_title}
                             </div>
                             <div className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
                                 {contentPreview}
@@ -629,7 +630,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
                     <aside className="space-y-4 lg:max-h-[calc(90vh-12rem)] lg:overflow-y-auto lg:pr-1">
                         <section className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                                Bevislinje
+                                {aiText.evidence_line_title}
                             </div>
                             <div className="mt-2 text-sm leading-6 text-slate-700">
                                 {evidence.evidence_reference ? (
@@ -659,7 +660,7 @@ function EvidenceSourceModal({ evidence = null, onClose }) {
                             onClick={onClose}
                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
-                            Lukk
+                            {aiText.evidence_close}
                         </button>
                     </div>
                 </div>
@@ -1508,10 +1509,258 @@ export default function AiShow({
     } = usePage().props;
     const tai = translations?.ai ?? {};
 
+    const AI_STATUS_META = {
+        not_started: {
+            label: tai.ai_status_not_started,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        ready: {
+            label: tai.ai_status_ready,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        in_review: {
+            label: tai.ai_status_in_review,
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+    };
+
+    const DOCUMENT_STATUS_META = {
+        uploaded: {
+            label: tai.document_status_uploaded,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        text_extracted: {
+            label: tai.document_status_text_extracted,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        queued: {
+            label: tai.document_status_queued,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        processing: {
+            label: tai.document_status_processing,
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+        merging: {
+            label: tai.document_status_merging,
+            className: 'bg-sky-100 text-sky-700 ring-sky-200',
+        },
+        completed: {
+            label: tai.document_status_completed,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        failed: {
+            label: tai.document_status_failed,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const REQUIREMENT_TYPE_META = {
+        mandatory: {
+            label: tai.requirement_type_mandatory,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+        documentation: {
+            label: tai.requirement_type_documentation,
+            className: 'bg-sky-100 text-sky-700 ring-sky-200',
+        },
+        administrative: {
+            label: tai.requirement_type_administrative,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        unspecified: {
+            label: tai.requirement_type_unspecified,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+    };
+
+    const REQUIREMENT_SOURCE_TYPE_META = {
+        ai_candidate: {
+            label: tai.requirement_source_ai_candidate,
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+        manual: {
+            label: tai.requirement_source_manual,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+    };
+
+    const REQUIREMENT_APPROVAL_STATUS_META = {
+        draft: {
+            label: tai.requirement_approval_draft,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        approved: {
+            label: tai.requirement_approval_approved,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        rejected: {
+            label: tai.requirement_approval_rejected,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const REQUIREMENT_APPROVAL_ACTIONS = {
+        draft: [
+            {
+                label: tai.approval_action_approve,
+                value: 'confirmed',
+                className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
+            },
+            {
+                label: tai.approval_action_reject_delete,
+                value: 'rejected',
+                className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
+            },
+        ],
+        approved: [
+            {
+                label: tai.approval_action_to_draft,
+                value: 'pending',
+                className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+            },
+            {
+                label: tai.approval_action_reject_delete,
+                value: 'rejected',
+                className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
+            },
+        ],
+        rejected: [
+            {
+                label: tai.approval_action_restore,
+                value: 'pending',
+                className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+            },
+        ],
+    };
+
+    const WORK_STATUS_META = {
+        not_started: {
+            label: tai.work_status_not_started,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        in_progress: {
+            label: tai.work_status_in_progress,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        done: {
+            label: tai.work_status_done,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+    };
+
+    const EVIDENCE_SELECTION_STATUS_META = {
+        suggested: {
+            label: tai.evidence_selection_suggested,
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+        selected: {
+            label: tai.evidence_selection_selected,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        rejected: {
+            label: tai.evidence_selection_rejected,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const EVIDENCE_SELECTION_ACTIONS = [
+        {
+            label: tai.evidence_selection_action_suggested,
+            value: 'suggested',
+            className: 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
+        },
+        {
+            label: tai.evidence_selection_action_select,
+            value: 'selected',
+            className: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
+        },
+        {
+            label: tai.evidence_selection_action_reject,
+            value: 'rejected',
+            className: 'border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
+        },
+    ];
+
+    const ASSESSMENT_STATUS_META = {
+        completed: {
+            label: tai.assessment_status_completed,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        failed: {
+            label: tai.assessment_status_failed,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const COVERAGE_STATUS_META = {
+        covered: {
+            label: tai.coverage_status_covered,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        partial: {
+            label: tai.coverage_status_partial,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        missing: {
+            label: tai.coverage_status_missing,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const RISK_LEVEL_META = {
+        low: {
+            label: tai.risk_level_low,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        medium: {
+            label: tai.risk_level_medium,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        high: {
+            label: tai.risk_level_high,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const KNOWLEDGE_GROUNDING_META = {
+        green: {
+            label: tai.knowledge_grounding_green,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        amber: {
+            label: tai.knowledge_grounding_amber,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        red: {
+            label: tai.knowledge_grounding_red,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    const KNOWLEDGE_GROUNDING_JUDGE_META = {
+        supported: {
+            label: tai.knowledge_grounding_judge_supported,
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        partial: {
+            label: tai.knowledge_grounding_judge_partial,
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        unsupported: {
+            label: tai.knowledge_grounding_judge_unsupported,
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+        failed: {
+            label: tai.knowledge_grounding_judge_failed,
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+    };
+
     const WORK_STATUS_OPTIONS = [
-        { value: 'not_started', label: tai.work_status_not_started ?? 'Ikke startet' },
-        { value: 'in_progress', label: tai.work_status_in_progress ?? 'Under arbeid' },
-        { value: 'done', label: tai.work_status_done ?? 'Ferdig' },
+        { value: 'not_started', label: tai.work_status_not_started },
+        { value: 'in_progress', label: tai.work_status_in_progress },
+        { value: 'done', label: tai.work_status_done },
     ];
     const fileInputRef = useRef(null);
     const [reviewingRequirementId, setReviewingRequirementId] = useState(null);
@@ -1586,7 +1835,7 @@ export default function AiShow({
     const requirementEditError = Object.values(requirementEditForm.errors).find(Boolean) ?? null;
     const selectedDocumentsLabel = documentUploadForm.data.documents.length > 0
         ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
-        : (tai.no_files_selected ?? 'Ingen filer valgt ennå.');
+        : tai.no_files_selected;
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
@@ -1873,7 +2122,7 @@ export default function AiShow({
         setAnswerBasisSelectionError(null);
 
         if (!requirement.answer_draft_generate_url) {
-            setAnswerDraftError(tai.answer_draft_cannot_generate ?? 'Svarutkast kan ikke genereres for dette kravet.');
+            setAnswerDraftError(tai.answer_draft_cannot_generate);
             return;
         }
 
@@ -2127,7 +2376,7 @@ export default function AiShow({
         }
 
         if (!activeRequirement.answer_draft_save_url) {
-            setAnswerDraftError(tai.answer_draft_cannot_save ?? 'Svarutkast kan ikke lagres for dette kravet.');
+            setAnswerDraftError(tai.answer_draft_cannot_save);
             return;
         }
 
@@ -2138,7 +2387,7 @@ export default function AiShow({
         const normalizedText = normalizeAnswerDraftText(activeRequirementDraft.text).trim();
 
         if (normalizedText === '') {
-            setAnswerDraftError(tai.answer_draft_cannot_be_empty ?? 'Svarutkastet kan ikke være tomt.');
+            setAnswerDraftError(tai.answer_draft_cannot_be_empty);
             return;
         }
 
@@ -2292,7 +2541,7 @@ export default function AiShow({
                     <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-3">
                             <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                                {caseData?.title ?? 'AI-sak'}
+                                {caseData?.title ?? tai.ai_case_title}
                             </h1>
                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
                                 {aiStatusMeta.label}
@@ -2300,16 +2549,16 @@ export default function AiShow({
                         </div>
                         <div className="flex flex-wrap gap-2 text-sm text-slate-500">
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                                Referanse: {caseData?.reference ?? '—'}
+                                {tai.case_reference_prefix} {caseData?.reference ?? '—'}
                             </span>
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                                Ansvarlig: {caseData?.owner ?? '—'}
+                                {tai.case_owner_prefix} {caseData?.owner ?? '—'}
                             </span>
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                                Fase: {caseData?.stage ?? '—'}
+                                {tai.case_phase_prefix} {caseData?.stage ?? '—'}
                             </span>
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
-                                Oppdatert: {updatedAtLabel}
+                                {tai.case_updated_prefix} {updatedAtLabel}
                             </span>
                         </div>
                     </div>
@@ -2319,27 +2568,27 @@ export default function AiShow({
                     <div className="space-y-5">
                         <div className="space-y-2">
                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                Anbudsdokumenter
+                                {tai.documents_section_overline}
                             </div>
                             <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                Anbudsdokumenter
+                                {tai.documents_section_title}
                             </h2>
                             <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                Last opp konkurransegrunnlag, kravspesifikasjoner eller vedlegg som Procynia skal bruke til å ekstrahere kravkandidater.
+                                {tai.documents_section_description}
                             </p>
                         </div>
 
                         <form onSubmit={submitDocuments} className="space-y-4">
                             <div className="space-y-2">
                                 <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
-                                    Velg filer
+                                    {tai.choose_files}
                                 </label>
                                 <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                                     <label
                                         htmlFor="ai-documents"
                                         className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700"
                                     >
-                                        Velg filer
+                                        {tai.choose_files}
                                     </label>
                                     <span className="min-w-0 flex-1 text-sm text-slate-500">
                                         {selectedDocumentsLabel}
@@ -2353,7 +2602,7 @@ export default function AiShow({
                                         }
                                         className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                     >
-                                        {documentUploadForm.processing ? 'Laster opp...' : 'Last opp og ekstraher krav'}
+                                        {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
                                     </button>
                                     <input
                                         id="ai-documents"
@@ -2366,7 +2615,7 @@ export default function AiShow({
                                     />
                                 </div>
                                 <p className="text-xs leading-5 text-slate-500">
-                                    Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
+                                    {tai.allowed_file_types}
                                 </p>
                                 {documentError ? (
                                     <p className="text-sm text-rose-600">{documentError}</p>
@@ -2381,16 +2630,16 @@ export default function AiShow({
                         <div className="flex flex-wrap items-start justify-between gap-4">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Kravkandidater
+                                    {tai.requirements_section_overline}
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                    Kravkandidater
+                                    {tai.requirements_section_title}
                                 </h2>
                                 <p className="max-w-3xl text-sm leading-6 text-slate-500">
-                                    Mulige krav identifisert i opplastede anbudsdokumenter. Godkjente krav blir operative arbeidskrav.
+                                    {tai.requirements_section_description}
                                 </p>
                                 <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                    {requirementCountLabel} totalt
+                                    {requirementCountLabel} {tai.requirements_total_suffix}
                                 </span>
                             </div>
 
@@ -2402,7 +2651,7 @@ export default function AiShow({
                                     aria-expanded={showManualRequirementForm}
                                     className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {showManualRequirementForm ? 'Skjul skjema' : 'Legg til krav'}
+                                    {showManualRequirementForm ? tai.hide_requirement_form : tai.show_requirement_form}
                                 </button>
 
                                 <button
@@ -2410,7 +2659,7 @@ export default function AiShow({
                                     onClick={() => setShowAdvancedAI((value) => !value)}
                                     className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                                 >
-                                    {showAdvancedAI ? 'Skjul avansert' : 'Avansert'}
+                                    {showAdvancedAI ? tai.hide_advanced : tai.advanced}
                                 </button>
 
                                 {showAdvancedAI ? (
@@ -2421,7 +2670,7 @@ export default function AiShow({
                                             disabled={!evidenceRefreshUrl || requirementUpdatesLocked}
                                             className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
-                                            {refreshingEvidence ? 'Oppdaterer...' : 'Oppdater kilder'}
+                                            {refreshingEvidence ? tai.refreshing : tai.refresh_sources}
                                         </button>
 
                                         <button
@@ -2430,7 +2679,7 @@ export default function AiShow({
                                             disabled={!assessmentRefreshUrl || requirementUpdatesLocked}
                                             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
-                                            {refreshingAssessments ? 'Analyserer...' : 'Analyser krav'}
+                                            {refreshingAssessments ? tai.analyzing : tai.analyze_requirements}
                                         </button>
                                     </>
                                 ) : null}
@@ -2442,13 +2691,13 @@ export default function AiShow({
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="space-y-1">
                                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-violet-600">
-                                        Legg til krav
+                                        {tai.manual_requirement_overline}
                                     </div>
                                     <h3 className="text-sm font-semibold tracking-tight text-slate-950">
-                                        Opprett et nytt krav manuelt
+                                        {tai.manual_requirement_title}
                                     </h3>
                                     <p className="text-xs leading-5 text-slate-500">
-                                        Bruk dette når AI ikke foreslår kravet, eller når krav-ID må korrigeres før videre arbeid.
+                                        {tai.manual_requirement_description}
                                     </p>
                                 </div>
                                 <button
@@ -2456,14 +2705,14 @@ export default function AiShow({
                                     disabled={manualRequirementForm.processing || !requirementsStoreUrl || requirementUpdatesLocked}
                                     className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
-                                    {manualRequirementForm.processing ? 'Lagrer...' : 'Legg til krav'}
+                                    {manualRequirementForm.processing ? tai.saving : tai.manual_requirement_submit}
                                 </button>
                             </div>
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <label className="block space-y-1">
                                     <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        Krav-ID
+                                        {tai.requirement_id_label}
                                     </span>
                                     <input
                                         type="text"
@@ -2471,7 +2720,7 @@ export default function AiShow({
                                         onChange={(event) => manualRequirementForm.setData('requirement_identifier', event.target.value)}
                                         disabled={manualRequirementForm.processing || requirementUpdatesLocked}
                                         className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                        placeholder="For eksempel 3.2"
+                                        placeholder={tai.requirement_id_placeholder}
                                     />
                                     {manualRequirementForm.errors.requirement_identifier ? (
                                         <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_identifier}</p>
@@ -2480,7 +2729,7 @@ export default function AiShow({
 
                                 <label className="block space-y-1">
                                     <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        Kravtype
+                                        {tai.requirement_type_label}
                                     </span>
                                     <select
                                         value={manualRequirementForm.data.requirement_type}
@@ -2502,7 +2751,7 @@ export default function AiShow({
 
                             <label className="block space-y-1">
                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    Kravtekst
+                                    {tai.requirement_text_label}
                                 </span>
                                 <textarea
                                     value={manualRequirementForm.data.requirement_text}
@@ -2510,7 +2759,7 @@ export default function AiShow({
                                     rows={4}
                                     disabled={manualRequirementForm.processing || requirementUpdatesLocked}
                                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    placeholder="Skriv kravet slik brukeren skal se det."
+                                    placeholder={tai.requirement_text_placeholder}
                                 />
                                 {manualRequirementForm.errors.requirement_text ? (
                                     <p className="text-sm text-rose-600">{manualRequirementForm.errors.requirement_text}</p>
@@ -2526,10 +2775,10 @@ export default function AiShow({
                         {requirementRows.length === 0 ? (
                             <div className="mt-5 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                 <div className="text-lg font-semibold text-slate-900">
-                                    Ingen kravkandidater er ekstrahert ennå.
+                                    {tai.requirements_empty_title}
                                 </div>
                                 <p className="mt-2 text-sm text-slate-500">
-                                    Kravkandidater vises her når dokumentteksten inneholder tydelige kravsignaler.
+                                    {tai.requirements_empty_hint}
                                 </p>
                             </div>
                         ) : (
@@ -2541,7 +2790,7 @@ export default function AiShow({
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
                                     const assignedUserId = requirement.assigned_user?.id ? String(requirement.assigned_user.id) : '';
-                                    const assignedUserLabel = requirement.assigned_user?.name ?? (tai.not_assigned ?? 'Ikke tildelt');
+                                    const assignedUserLabel = requirement.assigned_user?.name ?? tai.not_assigned;
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
@@ -2641,10 +2890,10 @@ export default function AiShow({
                                                         </div>
                                                         <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                                                             <span>
-                                                                {isApprovedRequirement ? 'Arbeidslag' : 'Analysselag'}
+                                                                {isApprovedRequirement ? tai.workstream_approved : tai.workstream_pending}
                                                             </span>
                                                             <span>
-                                                                Revisjoner: {revisionCount}
+                                                                {tai.revisions_prefix} {revisionCount}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -2659,14 +2908,14 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-expanded={requirementPromptEditorOpen}
                                                                     aria-controls={`requirement-prompt-${requirement.id}`}
-                                                                    title={tai.open_prompt_for_requirement ?? 'Åpne individuell prompt for dette kravet'}
+                                                                    title={tai.open_prompt_for_requirement}
                                                                     className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                         requirementPromptEditorOpen || requirementHasUserPrompt
                                                                             ? 'border-violet-300 bg-violet-50 text-violet-700'
                                                                             : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'
                                                                     }`}
                                                                 >
-                                                                    Prompt
+                                                                    {tai.prompt_button}
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -2675,10 +2924,10 @@ export default function AiShow({
                                                                     }}
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
-                                                                    title={tai.generate_draft_for_requirement ?? 'Generer svarutkast for dette kravet'}
+                                                                    title={tai.generate_draft_for_requirement}
                                                                     className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {tai.create_answer ?? 'Lag svar'}
+                                                                    {tai.create_answer}
                                                                 </button>
                                                             </>
                                                         ) : (
@@ -2696,7 +2945,7 @@ export default function AiShow({
                                                                 {requirement.work_status_label ?? workStatusMeta.label}
                                                             </span>
                                                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-                                                                Tildelt: {assignedUserLabel}
+                                                                {tai.assigned_prefix} {assignedUserLabel}
                                                             </span>
                                                         </>
                                                     ) : null}
@@ -2716,7 +2965,7 @@ export default function AiShow({
                                                                     href={sourceDocumentUrl}
                                                                     className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                                 >
-                                                                    Forhåndsvis kilde: {sourceDocumentLabel}
+                                                                    {tai.preview_source_prefix} {sourceDocumentLabel}
                                                                 </a>
                                                             );
                                                         }
@@ -2727,7 +2976,7 @@ export default function AiShow({
                                                                 disabled
                                                                 className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-medium text-slate-400 opacity-60"
                                                             >
-                                                                Forhåndsvis kilde: {sourceDocumentLabel}
+                                                                {tai.preview_source_prefix} {sourceDocumentLabel}
                                                             </button>
                                                         );
                                                     })()}
@@ -2739,10 +2988,10 @@ export default function AiShow({
                                                             className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700"
                                                             htmlFor={`requirement-prompt-${requirement.id}`}
                                                         >
-                                                            Individuell prompt
+                                                            {tai.requirement_prompt_title}
                                                         </label>
                                                         <p className="mt-1 text-sm leading-6 text-slate-600">
-                                                            Denne instruksen legges til Procynias standardprompt når du trykker Lag svar.
+                                                            {tai.prompt_instruction_hint}
                                                         </p>
                                                         <textarea
                                                             id={`requirement-prompt-${requirement.id}`}
@@ -2752,7 +3001,7 @@ export default function AiShow({
                                                             rows={4}
                                                             disabled={answerDraftGeneratingRequirementId === requirement.id}
                                                             className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                            placeholder={tai.example_prompt_placeholder ?? 'Eksempel: Skriv ca. 700 ord, bruk mer formelt språk, legg vekt på samhandling med Kunden og forklar hvordan Leverandøren sikrer fremdrift.'}
+                                                            placeholder={tai.example_prompt_placeholder}
                                                         />
                                                     </div>
                                                 ) : null}
@@ -2762,7 +3011,7 @@ export default function AiShow({
                                                         <div className="space-y-4 border-t border-slate-200/80 pt-4">
                                                             <div className="flex flex-wrap items-center justify-between gap-3">
                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Kilder
+                                                                    {tai.sources_section_title}
                                                                 </div>
                                                                 <button
                                                                     type="button"
@@ -2777,7 +3026,7 @@ export default function AiShow({
                                                                     }
                                                                     className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? (tai.generating ?? 'Genererer...') : (tai.regenerate ?? 'Generer på nytt')}
+                                                                    {answerDraftGeneratingRequirementId === activeRequirement.id ? tai.generating : tai.regenerate}
                                                                 </button>
                                                             </div>
 
@@ -2790,7 +3039,7 @@ export default function AiShow({
                                                             {activeRequirementSelectedAnswerBasisItems.length > 0 ? (
                                                                 <div className="space-y-2">
                                                                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                        {tai.selected_sources ?? 'Valgte kilder'}
+                                                                        {tai.selected_sources}
                                                                     </div>
                                                                     <div className="space-y-2">
                                                                         {activeRequirementSelectedAnswerBasisItems.map((answerBasisItem) => {
@@ -2820,7 +3069,7 @@ export default function AiShow({
                                                                                             disabled={isToggling || !isSelected}
                                                                                             className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                                                         >
-                                                                                            Fjern
+                                                                                            {tai.remove_button}
                                                                                         </button>
                                                                                     </div>
                                                                                 </div>
@@ -2830,18 +3079,18 @@ export default function AiShow({
                                                                 </div>
                                                             ) : (
                                                                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                    Ingen kilder er valgt for dette kravet ennå.
+                                                                    {tai.no_selected_sources}
                                                                 </div>
                                                             )}
 
                                                             <div className="space-y-2">
-                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Velg kilder
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                    {tai.choose_sources}
                                                                 </div>
 
                                                                 {answerBasisItems.length === 0 ? (
                                                                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                        Ingen kilder er tilgjengelige for dette kravet ennå.
+                                                                        {tai.no_available_sources}
                                                                     </div>
                                                                 ) : (
                                                                     <div className="space-y-2">
@@ -2888,7 +3137,7 @@ export default function AiShow({
                                                                                                     : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
                                                                                             }`}
                                                                                         >
-                                                                                            {isSelected ? 'Fjern' : 'Legg til'}
+                                                                                            {isSelected ? tai.remove_button : tai.add_button}
                                                                                         </button>
                                                                                     </div>
                                                                                 </div>
@@ -2900,7 +3149,7 @@ export default function AiShow({
                                                         </div>
                                                     ) : (
                                                         <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                            Svarutkastet vises her og kan redigeres direkte. Velg Avansert for kilder og vurderinger.
+                                                            {tai.answer_draft_placeholder}
                                                         </div>
                                                     )
                                                 ) : null}
@@ -2908,7 +3157,7 @@ export default function AiShow({
                                                 {hasOriginalDifference ? (
                                                     <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3">
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                            Opprinnelig forslag
+                                                            {tai.original_proposal}
                                                         </div>
                                                         <p className="mt-2 text-sm leading-6 text-slate-700">
                                                             {originalRequirementText ?? '—'}
@@ -2921,7 +3170,7 @@ export default function AiShow({
                                                         <div className="grid gap-4 md:grid-cols-2">
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Krav-ID
+                                                                    {tai.requirement_id_label}
                                                                 </span>
                                                                 <input
                                                                     type="text"
@@ -2937,7 +3186,7 @@ export default function AiShow({
 
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Kravtype
+                                                                    {tai.requirement_type_label}
                                                                 </span>
                                                                 <select
                                                                     value={requirementEditForm.data.requirement_type}
@@ -2959,7 +3208,7 @@ export default function AiShow({
 
                                                         <label className="block space-y-1">
                                                             <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                Kravtekst
+                                                                {tai.requirement_text_label}
                                                             </span>
                                                             <textarea
                                                                 value={requirementEditForm.data.requirement_text}
@@ -2983,7 +3232,7 @@ export default function AiShow({
                                                                 disabled={requirementEditForm.processing}
                                                                 className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
-                                                                {requirementEditForm.processing ? 'Lagrer...' : 'Lagre endringer'}
+                                                                {requirementEditForm.processing ? tai.saving : tai.save_requirement_changes}
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -2991,7 +3240,7 @@ export default function AiShow({
                                                                 disabled={requirementEditForm.processing}
                                                                 className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
-                                                                Avbryt
+                                                                {tai.cancel}
                                                             </button>
                                                         </div>
                                                     </form>
@@ -3001,15 +3250,15 @@ export default function AiShow({
                                                     <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                Vurdering
+                                                                {tai.assessment_overline}
                                                             </div>
                                                             {hasAssessment && assessmentCompleted ? (
                                                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                    Vurdert {assessmentDateLabel}
+                                                                    {tai.review_completed_at_prefix} {assessmentDateLabel}
                                                                 </span>
                                                             ) : hasAssessment && assessmentFailed ? (
                                                                 <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                    Feilet
+                                                                    {tai.assessment_failed_label}
                                                                 </span>
                                                             ) : null}
                                                         </div>
@@ -3046,7 +3295,7 @@ export default function AiShow({
                                                                         <div className="grid gap-3 md:grid-cols-2">
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                    Oppsummering
+                                                                                    {tai.assessment_summary_label}
                                                                                 </div>
                                                                                 <p className="mt-2 text-sm leading-6 text-slate-700">
                                                                                     {assessment.requirement_summary ?? '—'}
@@ -3055,7 +3304,7 @@ export default function AiShow({
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                    Begrunnelse
+                                                                                    {tai.assessment_reasoning_label}
                                                                                 </div>
                                                                                 <p className="mt-2 text-sm leading-6 text-slate-700">
                                                                                     {assessment.coverage_rationale ?? '—'}
@@ -3064,7 +3313,7 @@ export default function AiShow({
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                    Manglende grunnlag
+                                                                                    {tai.assessment_missing_basis_label}
                                                                                 </div>
                                                                                 <p className="mt-2 text-sm leading-6 text-slate-700">
                                                                                     {assessment.missing_information ?? '—'}
@@ -3073,7 +3322,7 @@ export default function AiShow({
 
                                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                                    Anbefalt neste steg
+                                                                                    {tai.assessment_next_step_label}
                                                                                 </div>
                                                                                 <p className="mt-2 text-sm leading-6 text-slate-700">
                                                                                     {assessment.recommended_next_step ?? '—'}
@@ -3083,17 +3332,17 @@ export default function AiShow({
                                                                     </div>
                                                                 ) : (
                                                                     <div className="rounded-2xl border border-rose-200 bg-rose-50/40 px-4 py-3 text-sm leading-6 text-rose-700">
-                                                                        Vurdering feilet for dette kravet. Kjør analyse på nytt for å forsøke igjen.
+                                                                        {tai.assessment_failed_message}
                                                                     </div>
                                                                 )
                                                             ) : (
                                                                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                    Vurdering er ikke generert ennå. Bruk &quot;Analyser krav&quot; for å vurdere dette kravet.
+                                                                    {tai.assessment_not_generated_message}
                                                                 </div>
                                                             )
                                                         ) : (
                                                             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                                Vurdering vises når kravet er godkjent.
+                                                                {tai.assessment_visible_when_approved}
                                                             </div>
                                                         )}
                                                     </div>
@@ -3103,11 +3352,11 @@ export default function AiShow({
                                                     <div className="space-y-3 border-t border-slate-200/80 pt-4">
                                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                Kilder
+                                                                {tai.sources_section_title}
                                                             </div>
                                                             {isApprovedRequirement ? (
                                                                 <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                    Persistert
+                                                                    {tai.persisted_badge}
                                                                 </span>
                                                             ) : null}
                                                         </div>
@@ -3117,8 +3366,8 @@ export default function AiShow({
                                                                 {evidenceRows.map((evidence) => {
                                                                     const evidenceStatusMeta = EVIDENCE_SELECTION_STATUS_META[evidence.selection_status] ?? EVIDENCE_SELECTION_STATUS_META.suggested;
                                                                     const evidenceChunkLabel = typeof evidence.knowledge_chunk?.chunk_index === 'number'
-                                                                        ? `Tekstbit ${Number(evidence.knowledge_chunk.chunk_index) + 1}`
-                                                                        : 'Tekstbit —';
+                                                                        ? `${tai.evidence_text_chunk_label} ${Number(evidence.knowledge_chunk.chunk_index) + 1}`
+                                                                        : `${tai.evidence_text_chunk_label} —`;
                                                                     const evidenceUpdating = updatingEvidenceId === evidence.id;
 
                                                                     return (
@@ -3134,7 +3383,7 @@ export default function AiShow({
                                                                         >
                                                                             <div className="flex flex-wrap items-center gap-2">
                                                                                 <div className="font-medium text-slate-950">
-                                                                                    {evidence.knowledge_item?.original_filename ?? 'Ukjent dokument'}
+                                                                                    {evidence.knowledge_item?.original_filename ?? tai.unknown_document_title}
                                                                                 </div>
                                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {evidence.knowledge_item?.document_type_label ?? evidence.knowledge_item?.document_type ?? '—'}
@@ -3144,7 +3393,7 @@ export default function AiShow({
                                                                                 </span>
                                                                                 {evidence.is_primary ? (
                                                                                     <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                                                        Primær
+                                                                                        {tai.evidence_primary_label}
                                                                                     </span>
                                                                                 ) : null}
                                                                             </div>
@@ -3154,10 +3403,10 @@ export default function AiShow({
                                                                                     {evidence.selection_status_label ?? evidenceStatusMeta.label}
                                                                                 </span>
                                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                                    Rank {Number(evidence.match_rank ?? 0)}
+                                                                                    {tai.evidence_rank_label} {Number(evidence.match_rank ?? 0)}
                                                                                 </span>
                                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                                    Score {Number(evidence.match_score ?? 0)}
+                                                                                    {tai.evidence_score_label} {Number(evidence.match_score ?? 0)}
                                                                                 </span>
                                                                                 <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
                                                                                     {evidenceChunkLabel}
@@ -3191,7 +3440,7 @@ export default function AiShow({
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm text-slate-500">
-                                                                Ingen kilder lagret ennå. Oppdater kilder for å finne relevante dokumenter.
+                                                                {tai.no_sources_yet}
                                                             </p>
                                                         )}
                                                     </div>
@@ -3202,7 +3451,7 @@ export default function AiShow({
                                                         <div className="grid w-full gap-3 md:grid-cols-2">
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Arbeidsstatus
+                                                                    {tai.work_status_label}
                                                                 </span>
                                                                 <select
                                                                     value={workStatus}
@@ -3219,7 +3468,7 @@ export default function AiShow({
                                                             </label>
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Tildelt til
+                                                                    {tai.assigned_to_label}
                                                                 </span>
                                                                 <select
                                                                     value={assignedUserId}
@@ -3227,9 +3476,7 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
-                                                                    <option value="">
-                                                                        Ikke tildelt
-                                                                    </option>
+                                                                    <option value="">{tai.unassigned}</option>
                                                                     {assignedUserOptions.map((option) => (
                                                                         <option key={option.value} value={option.value}>
                                                                             {option.label}
@@ -3247,7 +3494,7 @@ export default function AiShow({
                                                             disabled={requirementUpdatesLocked && !isEditingThisRequirement}
                                                             className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
-                                                            Rediger
+                                                            {tai.edit_requirement}
                                                         </button>
 
                                                         {approvalActions.map((action) => (
@@ -3275,23 +3522,23 @@ export default function AiShow({
                         <div className="flex h-full min-h-0 flex-col gap-5">
                             <div className="space-y-2">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                    Svarutkast
+                                    {tai.answer_draft_overline}
                                 </div>
                                 <h2 className="text-xl font-semibold tracking-tight text-slate-950">
-                                    I arbeid
+                                    {tai.answer_draft_title}
                                 </h2>
                                 <p className="text-sm leading-6 text-slate-500">
-                                    Klikk et krav for å åpne svarutkastet. Trykk Lag svar for å generere et nytt.
+                                    {tai.answer_draft_description}
                                 </p>
                             </div>
 
                             {!activeRequirement ? (
                                 <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
                                     <div className="text-lg font-semibold text-slate-900">
-                                        Ingen aktivt svarutkast ennå.
+                                        {tai.no_active_answer_draft_title}
                                     </div>
                                     <p className="mt-2 text-sm text-slate-500">
-                                        Klikk på et kravkort for å åpne svarutkastet her.
+                                        {tai.no_active_answer_draft_description}
                                     </p>
                                 </div>
                             ) : (
@@ -3302,7 +3549,7 @@ export default function AiShow({
                                 }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-600">
-                                            {tai.answer_draft_for_requirement ?? 'Svarutkast for krav'} {activeRequirementDisplayIdentifier}
+                                            {tai.answer_draft_for_requirement} {activeRequirementDisplayIdentifier}
                                         </div>
 
                                         <div className="flex flex-wrap items-center gap-2 pr-3">
@@ -3312,7 +3559,7 @@ export default function AiShow({
                                                     onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
                                                     className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
                                                 >
-                                                    {answerDraftReaderExpanded ? (tai.normal_reader ?? 'Normal leseplate') : (tai.larger_reader ?? 'Større leseplate')}
+                                                    {answerDraftReaderExpanded ? tai.normal_reader : tai.larger_reader}
                                                 </button>
                                             ) : null}
                                         </div>
@@ -3320,7 +3567,7 @@ export default function AiShow({
 
                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? (
                                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
-                                            {tai.generating_answer_draft ?? 'Genererer svarutkast ...'}
+                                            {tai.generating_answer_draft}
                                         </div>
                                     ) : null}
 
@@ -3333,13 +3580,13 @@ export default function AiShow({
                                     {activeRequirementBlockedMissingKnowledge ? (
                                         <div className="rounded-2xl border border-rose-200 bg-white px-4 py-5 text-sm leading-6 text-slate-700">
                                             <div className="text-sm font-semibold text-slate-950">
-                                                {activeRequirementMissingKnowledge?.message ?? 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget er for svakt.'}
+                                                {activeRequirementMissingKnowledge?.message ?? tai.requirement_blocked_message}
                                             </div>
                                             <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                Opprett og last opp et kunnskapsdokument som dekker dette kravet.
+                                                {tai.document_processed_hint}
                                             </p>
                                             <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                Procynia fant noe relatert kunnskap, men ikke dokumentasjon som dekker kravet direkte.
+                                                {tai.requirements_empty_hint}
                                             </p>
 
                                             {activeRequirementMissingKnowledge?.missing_knowledge_summary ? (
@@ -3350,11 +3597,11 @@ export default function AiShow({
 
                                             <div className="mt-4 space-y-2 rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                 <div>
-                                                    <span className="font-semibold text-slate-900">Anbefalt dokumentnavn:</span>{' '}
-                                                    {activeRequirementMissingKnowledge?.recommended_document_title ?? 'Dokumentasjon for udekket krav'}
+                                                    <span className="font-semibold text-slate-900">{tai.recommended_document_label}</span>{' '}
+                                                    {activeRequirementMissingKnowledge?.recommended_document_title ?? tai.unknown_document_title}
                                                 </div>
                                                 <div>
-                                                    <span className="font-semibold text-slate-900">Foreslått filnavn:</span>{' '}
+                                                    <span className="font-semibold text-slate-900">{tai.suggested_filename_label}</span>{' '}
                                                     {activeRequirementMissingKnowledge?.suggested_filename ?? 'dokumentasjon-for-udekket-krav.docx'}
                                                 </div>
                                             </div>
@@ -3363,10 +3610,10 @@ export default function AiShow({
                                                 || (activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0
                                                 || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
                                                 <div className="mt-4 space-y-3">
-                                                    {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
+                                                            {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
                                                         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                Direkte støttet
+                                                                {tai.knowledge_grounding_judge_supported}
                                                             </div>
                                                             <ul className="mt-3 space-y-2">
                                                                 {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
@@ -3397,16 +3644,16 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => openEvidenceSource(point)}
                                                                                             className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-xs font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                                                                                            aria-label={`Åpne bevisdetaljer for ${evidenceLabel}`}
+                                                                                            aria-label={`${tai.evidence_title} ${evidenceLabel}`}
                                                                                         >
-                                                                                            Bevis: {evidenceLabel}
+                                                                                            {tai.evidence_title}: {evidenceLabel}
                                                                                         </button>
                                                                                     );
                                                                                 }
 
                                                                                 return (
                                                                                     <span className="block text-xs text-slate-500">
-                                                                                        Bevis: {evidenceLabel}
+                                                                                        {tai.evidence_title}: {evidenceLabel}
                                                                                     </span>
                                                                                 );
                                                                             })()}
@@ -3417,10 +3664,10 @@ export default function AiShow({
                                                         </div>
                                                     ) : null}
 
-                                                    {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
+                                                            {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
                                                         <div className="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                                                Relatert, men ikke tilstrekkelig
+                                                                {tai.knowledge_grounding_judge_partial}
                                                             </div>
                                                             <ul className="mt-3 space-y-2">
                                                                 {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
@@ -3433,10 +3680,10 @@ export default function AiShow({
                                                         </div>
                                                     ) : null}
 
-                                                    {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
+                                                            {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
                                                         <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
                                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                Mangler dokumentasjon for
+                                                                {tai.knowledge_grounding_judge_unsupported}
                                                             </div>
                                                             <ul className="mt-3 space-y-2">
                                                                 {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
@@ -3459,7 +3706,7 @@ export default function AiShow({
                                             ) : null}
 
                                             <p className="mt-4 text-sm leading-6 text-slate-600">
-                                                Når dokumentet er lagt til og behandlet, kan du kjøre «Lag svar» på nytt.
+                                                {tai.document_processed_hint}
                                             </p>
 
                                             {activeRequirementMissingKnowledgeJudgeMeta ? (
@@ -3480,7 +3727,7 @@ export default function AiShow({
                                         <div className="flex flex-col gap-5">
                                             <div className="flex flex-col gap-2">
                                                 <textarea
-                                                    aria-label={`${tai.answer_draft_for_requirement ?? 'Svarutkast for krav'} ${activeRequirementDisplayIdentifier}`}
+                                                    aria-label={`${tai.answer_draft_for_requirement} ${activeRequirementDisplayIdentifier}`}
                                                     value={activeRequirementDraft?.text ?? ''}
                                                     onChange={(event) => updateActiveAnswerDraftText(event.target.value)}
                                                     rows={16}
@@ -3489,7 +3736,7 @@ export default function AiShow({
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
                                                     className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
-                                                    placeholder={tai.answer_draft_placeholder ?? 'Svarutkastet vises her og kan redigeres direkte.'}
+                                                    placeholder={tai.answer_draft_placeholder}
                                                 />
                                             </div>
 
@@ -3518,10 +3765,10 @@ export default function AiShow({
                                                 <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-violet-200 bg-violet-50/40 p-4">
                                                     <div className="flex flex-col gap-1">
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-700">
-                                                            Brukt tabellgrunnlag
+                                                            {tai.table_evidence_overline}
                                                         </div>
                                                         <p className="text-sm leading-6 text-slate-600">
-                                                            Tabellen under er brukt som grunnlag for svarutkastet.
+                                                            {tai.table_evidence_description}
                                                         </p>
                                                     </div>
 
@@ -3530,7 +3777,7 @@ export default function AiShow({
                                                             const sourceTitle = String(source?.title ?? '').trim()
                                                                 || String(source?.heading_path ?? '').trim()
                                                                 || String(source?.document_title ?? source?.knowledge_item_title ?? '').trim()
-                                                                || 'Tabellgrunnlag';
+                                                                || tai.table_evidence_label;
                                                             const sourceDocumentTitle = String(source?.document_title ?? source?.knowledge_item_title ?? '').trim();
                                                             const summaryForRetrieval = String(source?.summary_for_retrieval ?? '').trim();
                                                             const tableText = String(source?.table_text ?? '').trim();
@@ -3552,7 +3799,7 @@ export default function AiShow({
                                                                         </div>
 
                                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                                                                            Tabell
+                                                                            {tai.table_evidence_label}
                                                                         </span>
                                                                     </div>
 
@@ -3579,7 +3826,7 @@ export default function AiShow({
                                                                         </pre>
                                                                     ) : (
                                                                         <p className="mt-4 text-sm leading-6 text-slate-500">
-                                                                            Ingen tabellvisning tilgjengelig.
+                                                                            {tai.table_no_view}
                                                                         </p>
                                                                     )}
                                                                 </div>
@@ -3601,7 +3848,7 @@ export default function AiShow({
                                                 <div className="text-xs text-slate-500">
                                                     {activeRequirementDraft?.generatedAt ? (
                                                         <>
-                                                            {tai.generated ?? 'Generert'}{' '}
+                                                            {tai.generated}{' '}
                                                             {new Intl.DateTimeFormat(locale, {
                                                                 day: '2-digit',
                                                                 month: 'short',
@@ -3611,21 +3858,21 @@ export default function AiShow({
                                                             }).format(new Date(activeRequirementDraft.generatedAt))}
                                                         </>
                                                     ) : (
-                                                        (tai.answer_draft_not_generated ?? 'Svarutkast er ikke generert ennå.')
+                                                        tai.answer_draft_not_generated
                                                     )}
-                                                    {activeRequirementDraft?.isDirty ? ` ${tai.unsaved_changes ?? 'Ulagrede endringer.'}` : ''}
+                                                    {activeRequirementDraft?.isDirty ? ` ${tai.unsaved_changes}` : ''}
                                                 </div>
 
                                                 <div className="flex flex-wrap items-center gap-2">
                                                     {answerDraftCopyStatus === 'failed' ? (
                                                         <span className="text-xs font-semibold text-rose-600">
-                                                            Kunne ikke kopiere
+                                                            {tai.copy_failed}
                                                         </span>
                                                     ) : null}
 
                                                     {answerDraftCopyStatus === 'empty' ? (
                                                         <span className="text-xs font-semibold text-slate-500">
-                                                            Ingenting å kopiere
+                                                            {tai.copy_empty}
                                                         </span>
                                                     ) : null}
 
@@ -3639,7 +3886,7 @@ export default function AiShow({
                                                         }
                                                         className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {answerDraftCopyStatus === 'copied' ? 'Kopiert' : 'Kopier til Word'}
+                                                        {answerDraftCopyStatus === 'copied' ? tai.copied : tai.copy_to_word}
                                                     </button>
 
                                                     <button
@@ -3654,7 +3901,7 @@ export default function AiShow({
                                                     }
                                                     className="inline-flex items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    {answerDraftSavingRequirementId === activeRequirement.id ? 'Lagrer...' : 'Lagre endring'}
+                                                    {answerDraftSavingRequirementId === activeRequirement.id ? tai.saving : tai.save_answer_draft}
                                                     </button>
                                                 </div>
                                             </div>
@@ -3662,10 +3909,10 @@ export default function AiShow({
                                     ) : (
                                         <div className="flex min-h-0 flex-1 flex-col justify-start rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5">
                                             <div className="text-sm font-semibold text-slate-900">
-                                                Ingen svarutkast er opprettet ennå.
+                                                {tai.no_answer_draft_title}
                                             </div>
                                             <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                Bruk eventuelt Prompt-knappen på kravkortet, og trykk Lag svar for å generere et utkast for akkurat dette kravet.
+                                                {tai.use_prompt_again_hint}
                                             </p>
                                         </div>
                                     )}

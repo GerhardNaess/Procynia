@@ -87,42 +87,42 @@ function bidStatusBadgeClassName(status) {
     }
 }
 
-function bidRoleLabel(role) {
+function bidRoleLabel(role, text) {
     switch (role) {
         case 'bid_manager':
-            return 'Bid-manager';
+            return text.bidRoleManager;
         case 'viewer':
-            return 'Lesetilgang';
+            return text.bidRoleViewer;
         case 'contributor':
         default:
-            return 'Bid-bidragsyter';
+            return text.bidRoleContributor;
     }
 }
 
-function accessRoleLabel(role) {
+function accessRoleLabel(role, text) {
     switch (role) {
         case 'viewer':
-            return 'Lesetilgang';
+            return text.bidRoleViewer;
         case 'contributor':
         default:
-            return 'Bid-bidragsyter';
+            return text.bidRoleContributor;
     }
 }
 
-function noticeSourceTypeLabel(notice) {
+function noticeSourceTypeLabel(notice, text) {
     if (notice.source_type_label) {
         return notice.source_type_label;
     }
 
     return notice.source_type === 'private_request'
-        ? 'Privat forespørsel'
-        : 'Offentlig kunngjøring';
+        ? text.sourcePrivateRequest
+        : text.sourcePublicNotice;
 }
 
-function noticeExternalLinkLabel(notice) {
+function noticeExternalLinkLabel(notice, text) {
     return notice.source_type === 'private_request'
-        ? 'Åpne lenke'
-        : 'Åpne i Doffin';
+        ? text.openLink
+        : text.openInDoffin;
 }
 
 function noticeSourceBadgeClassName(notice) {
@@ -131,28 +131,28 @@ function noticeSourceBadgeClassName(notice) {
         : 'bg-slate-100 text-slate-700 ring-slate-200';
 }
 
-function statusActionLabel(status) {
+function statusActionLabel(status, text) {
     switch (status) {
         case 'qualifying':
-            return 'Gå til kvalifisering';
+            return text.goToQualifying;
         case 'go_no_go':
-            return 'Gå til Go / No-Go';
+            return text.goToGoNoGo;
         case 'in_progress':
-            return 'Gå til under arbeid';
+            return text.goToInProgress;
         case 'submitted':
-            return 'Gå til sendt';
+            return text.goToSubmitted;
         case 'negotiation':
-            return 'Gå til forhandling';
+            return text.goToNegotiation;
         case 'won':
-            return 'Marker som vunnet';
+            return text.markAsWon;
         case 'lost':
-            return 'Marker som tapt';
+            return text.markAsLost;
         case 'no_go':
-            return 'Sett som No-Go';
+            return text.setNoGo;
         case 'withdrawn':
-            return 'Trekk saken';
+            return text.withdrawCase;
         case 'archived':
-            return 'Arkiver saken';
+            return text.archiveCaseAction;
         default:
             return status;
     }
@@ -188,117 +188,117 @@ function filterVisibleStatusActions(currentStatus, actions) {
     return actions;
 }
 
-function lifecycleGuidance(status, isArchived) {
+function lifecycleGuidance(status, isArchived, text) {
     if (isArchived) {
         return {
-            phaseTitle: 'Arkivert sak',
-            description: 'Saken ligger utenfor aktiv bid-flyt og er kun tilgjengelig som historikk.',
-            closureRule: 'Ingen videre statusendringer er tilgjengelige her.',
-            nextStepDescription: 'Saken er ferdig behandlet.',
+            phaseTitle: text.phaseArchivedTitle,
+            description: text.phaseArchivedDescription,
+            closureRule: text.phaseArchivedClosureRule,
+            nextStepDescription: text.phaseArchivedNextStep,
         };
     }
 
     switch (status) {
         case 'discovered':
             return {
-                phaseTitle: 'Tidlig screening',
-                description: 'Saken er registrert, men ikke kvalifisert ennå.',
-                closureRule: 'No-Go vises ikke i dette steget. Første operative handling er å starte kvalifisering.',
-                nextStepDescription: 'Start kvalifisering av saken.',
+                phaseTitle: text.phaseDiscoveredTitle,
+                description: text.phaseDiscoveredDescription,
+                closureRule: text.phaseDiscoveredClosureRule,
+                nextStepDescription: text.phaseDiscoveredNextStep,
             };
         case 'qualifying':
             return {
-                phaseTitle: 'Innledende vurdering pågår',
-                description: 'Vurder relevans, kapasitet og om saken bør løftes videre til Go / No-Go.',
-                closureRule: 'Her kan saken enten løftes videre eller avsluttes som No-Go.',
-                nextStepDescription: 'Gå videre til Go / No-Go-vurdering.',
+                phaseTitle: text.phaseQualifyingTitle,
+                description: text.phaseQualifyingDescription,
+                closureRule: text.phaseQualifyingClosureRule,
+                nextStepDescription: text.phaseQualifyingNextStep,
             };
         case 'go_no_go':
             return {
-                phaseTitle: 'Go / No-Go-vurdering',
-                description: 'Dette er beslutningspunktet før aktivt tilbudsarbeid starter.',
-                closureRule: 'No-Go er fortsatt gyldig her. Når saken flyttes videre, overtar Trukket som senere avslutning.',
-                nextStepDescription: 'Flytt saken til under arbeid når beslutningen er tatt.',
+                phaseTitle: text.phaseGoNoGoTitle,
+                description: text.phaseGoNoGoDescription,
+                closureRule: text.phaseGoNoGoClosureRule,
+                nextStepDescription: text.phaseGoNoGoNextStep,
             };
         case 'in_progress':
             return {
-                phaseTitle: 'Aktivt tilbudsarbeid',
-                description: 'Teamet jobber nå aktivt med leveranse, innhold og koordinering.',
-                closureRule: 'No-Go gjelder ikke lenger. Trukket er riktig avslutning dersom saken stoppes nå.',
-                nextStepDescription: 'Flytt saken til sendt når tilbudet er levert.',
+                phaseTitle: text.phaseInProgressTitle,
+                description: text.phaseInProgressDescription,
+                closureRule: text.phaseInProgressClosureRule,
+                nextStepDescription: text.phaseInProgressNextStep,
             };
         case 'submitted':
             return {
-                phaseTitle: 'Tilbudet er levert',
-                description: 'Saken kan nå gå videre til forhandling eller avsluttes med et utfall.',
-                closureRule: 'Trukket er gyldig her. No-Go er ikke lenger en tilgjengelig avslutning.',
-                nextStepDescription: 'Flytt saken til forhandling når dialogen etter levering starter.',
+                phaseTitle: text.phaseSubmittedTitle,
+                description: text.phaseSubmittedDescription,
+                closureRule: text.phaseSubmittedClosureRule,
+                nextStepDescription: text.phaseSubmittedNextStep,
             };
         case 'negotiation':
             return {
-                phaseTitle: 'Forhandling pågår',
-                description: 'Det pågår dialog, avklaringer eller justeringer etter innsending.',
-                closureRule: 'Trukket er fortsatt gyldig her fordi arbeidet allerede har startet.',
-                nextStepDescription: 'Velg utfall for saken.',
+                phaseTitle: text.phaseNegotiationTitle,
+                description: text.phaseNegotiationDescription,
+                closureRule: text.phaseNegotiationClosureRule,
+                nextStepDescription: text.phaseNegotiationNextStep,
             };
         case 'no_go':
             return {
-                phaseTitle: 'Tidlig avsluttet',
-                description: 'Saken ble avsluttet som No-Go før aktivt tilbudsarbeid startet.',
-                closureRule: 'No-Go brukes for tidlig stopp i kvalifisering eller Go / No-Go.',
-                nextStepDescription: 'Saken kan arkiveres.',
+                phaseTitle: text.phaseNoGoTitle,
+                description: text.phaseNoGoDescription,
+                closureRule: text.phaseNoGoClosureRule,
+                nextStepDescription: text.phaseNoGoNextStep,
             };
         case 'withdrawn':
             return {
-                phaseTitle: 'Senere avsluttet',
-                description: 'Saken ble trukket etter at arbeidet hadde startet.',
-                closureRule: 'Trukket brukes etter Go / No-Go og er derfor forskjellig fra No-Go.',
-                nextStepDescription: 'Saken kan arkiveres.',
+                phaseTitle: text.phaseWithdrawnTitle,
+                description: text.phaseWithdrawnDescription,
+                closureRule: text.phaseWithdrawnClosureRule,
+                nextStepDescription: text.phaseWithdrawnNextStep,
             };
         case 'won':
             return {
-                phaseTitle: 'Avsluttet som vunnet',
-                description: 'Tilbudsprosessen er avsluttet med positivt utfall.',
-                closureRule: 'Dette er et endelig utfall, ikke en tidlig avslutning.',
-                nextStepDescription: 'Saken kan arkiveres.',
+                phaseTitle: text.phaseWonTitle,
+                description: text.phaseWonDescription,
+                closureRule: text.phaseWonClosureRule,
+                nextStepDescription: text.phaseWonNextStep,
             };
         case 'lost':
             return {
-                phaseTitle: 'Avsluttet som tapt',
-                description: 'Tilbudsprosessen er avsluttet med negativt utfall.',
-                closureRule: 'Dette er et endelig utfall, ikke en tidlig avslutning.',
-                nextStepDescription: 'Saken kan arkiveres.',
+                phaseTitle: text.phaseLostTitle,
+                description: text.phaseLostDescription,
+                closureRule: text.phaseLostClosureRule,
+                nextStepDescription: text.phaseLostNextStep,
             };
         default:
             return {
-                phaseTitle: 'Standard bid-flyt',
-                description: 'Saken følger den etablerte faseflyten for bid-arbeid.',
-                closureRule: 'Backend avgjør hvilke overganger som er gyldige fra dette punktet.',
-                nextStepDescription: 'Ingen videre handling er tilgjengelig akkurat nå.',
+                phaseTitle: text.phaseDefaultTitle,
+                description: text.phaseDefaultDescription,
+                closureRule: text.phaseDefaultClosureRule,
+                nextStepDescription: text.phaseDefaultNextStep,
             };
     }
 }
 
-function closureActionGuidance(actionStatus) {
+function closureActionGuidance(actionStatus, text) {
     switch (actionStatus) {
         case 'no_go':
             return {
                 className: 'border-amber-200 bg-amber-50 text-amber-800',
-                text: 'Bruk No-Go kun for en tidlig avslutning før aktivt tilbudsarbeid har startet.',
+                text: text.closureNoGo,
             };
         case 'withdrawn':
             return {
                 className: 'border-rose-200 bg-rose-50 text-rose-800',
-                text: 'Bruk Trukket kun etter at saken har gått videre fra Go / No-Go og arbeidet har startet.',
+                text: text.closureWithdrawn,
             };
         default:
             return null;
     }
 }
 
-function deadlineStateLabel(notice, locale) {
+function deadlineStateLabel(notice, locale, text) {
     if (!notice.next_deadline_at) {
-        return notice.deadline ? formatDate(notice.deadline, locale) : 'Ikke registrert';
+        return notice.deadline ? formatDate(notice.deadline, locale) : text.notRegistered;
     }
 
     const prefix = notice.next_deadline_type ? `${notice.next_deadline_type} ` : '';
@@ -346,17 +346,17 @@ function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle,
     );
 }
 
-function PhaseCommentCard({ comment, locale }) {
+function PhaseCommentCard({ comment, locale, text }) {
     return (
         <article className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                         <div className="text-sm font-semibold text-slate-950">
-                            {comment.user?.name || 'Ukjent bruker'}
+                            {comment.user?.name || text.unknownUser}
                         </div>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                            {comment.user?.bid_role_label || 'Bid-bidragsyter'}
+                            {comment.user?.bid_role_label || text.bidRoleContributor}
                         </span>
                     </div>
                     <div className="text-xs text-slate-500">
@@ -382,6 +382,7 @@ export default function SavedNoticeShow({ notice }) {
     const page = usePage();
     const { auth, errors = {}, translations = {} } = page.props;
     const tsn = translations?.saved_notice ?? {};
+    const common = translations?.common ?? {};
     const locale = document.documentElement.lang || 'no-NO';
     const infoItems = notice.info_items;
     const infoItemDefaults = infoItems.defaults;
@@ -457,8 +458,8 @@ export default function SavedNoticeShow({ notice }) {
     const caseAccessRoleOptions = caseAccess.access_role_options ?? [];
     const caseAccessEntries = caseAccess.accesses ?? [];
     const caseAccessSummary = caseAccessEntries.length > 0
-        ? `${caseAccessEntries.length} aktive brukere`
-        : 'Ingen aktive';
+        ? tsn.case_access_active_users.replace(':count', String(caseAccessEntries.length))
+        : tsn.case_access_none_active;
     const canManageCaseAccess = caseAccess.can_manage
         ?? (
             auth?.user?.id
@@ -469,9 +470,9 @@ export default function SavedNoticeShow({ notice }) {
         );
     const activeClosureAction = statusActions.find((action) => action.status === openClosureStatus) ?? null;
     const noStatusActionsMessage = notice.archived_at
-        ? 'Saken ligger i historikk og kan ikke endres videre her.'
-        : 'Ingen flere handlinger er tilgjengelige for denne saken.';
-    const currentUserBidRoleLabel = bidRoleLabel(auth?.user?.bid_role);
+        ? tsn.no_more_actions_archived
+        : tsn.no_more_actions;
+    const currentUserBidRoleLabel = bidRoleLabel(auth?.user?.bid_role, tsn);
     const currentOpportunityOwnerId = notice.opportunity_owner?.id ? String(notice.opportunity_owner.id) : '';
     const currentBidManagerId = notice.bid_manager?.id ? String(notice.bid_manager.id) : '';
     const isOpportunityOwnerDirty = opportunityOwnerForm.data.opportunity_owner_user_id !== currentOpportunityOwnerId;
@@ -483,15 +484,15 @@ export default function SavedNoticeShow({ notice }) {
         : '';
     const primaryAction = statusActions.find((action) => action.status === primaryActionStatus(notice.bid_status)) ?? null;
     const secondaryActions = statusActions.filter((action) => action.status !== primaryAction?.status);
-    const guidance = lifecycleGuidance(notice.bid_status, Boolean(notice.archived_at));
+    const guidance = lifecycleGuidance(notice.bid_status, Boolean(notice.archived_at), tsn);
     const commentPhaseOptions = [
-        { status: 'qualifying', number: '2', label: 'Kvalifiseres' },
-        { status: 'go_no_go', number: '3', label: 'Go / No-Go' },
-        { status: 'in_progress', number: '4', label: 'Under arbeid' },
-        { status: 'negotiation', number: '6', label: 'Forhandling' },
+        { status: 'qualifying', number: '2', label: tsn.phaseOptionQualifying },
+        { status: 'go_no_go', number: '3', label: tsn.phaseOptionGoNoGo },
+        { status: 'in_progress', number: '4', label: tsn.phaseOptionInProgress },
+        { status: 'negotiation', number: '6', label: tsn.phaseOptionNegotiation },
     ].map((option) => ({
         ...option,
-        guidance: lifecycleGuidance(option.status, Boolean(notice.archived_at)),
+        guidance: lifecycleGuidance(option.status, Boolean(notice.archived_at), tsn),
     }));
     const activeCommentPhaseOption = commentPhaseOptions.find((option) => option.status === notice.bid_status) ?? null;
     const phaseCommentEntries = notice.phase_comments?.comments ?? [];
@@ -510,24 +511,24 @@ export default function SavedNoticeShow({ notice }) {
     const phaseCommentStoreUrl = notice.phase_comments?.store_url ?? null;
     const canCommentOnCase = Boolean(notice.phase_comments?.can_comment);
     const isPrivateRequest = notice.source_type === 'private_request';
-    const sourceTypeLabel = noticeSourceTypeLabel(notice);
-    const externalLinkLabel = noticeExternalLinkLabel(notice);
+    const sourceTypeLabel = noticeSourceTypeLabel(notice, tsn);
+    const externalLinkLabel = noticeExternalLinkLabel(notice, tsn);
     const sourceBadgeClassName = noticeSourceBadgeClassName(notice);
-    const deadlineSummary = deadlineStateLabel(notice, locale);
+    const deadlineSummary = deadlineStateLabel(notice, locale, tsn);
     const businessReviews = notice.business_reviews ?? [];
     const infoItemEntries = infoItems.items;
     const infoItemSummary = infoItemEntries.length > 0
-        ? `${infoItemEntries.length} registrerte aksjoner og oppfølginger`
-        : 'Ingen registrerte aksjoner eller oppfølginger';
+        ? tsn.registered_actions_summary.replace(':count', String(infoItemEntries.length))
+        : tsn.no_registered_actions;
     const infoItemTypeOptions = infoItems.type_options;
     const infoItemDirectionOptions = infoItems.direction_options;
     const infoItemChannelOptions = infoItems.channel_options;
     const infoItemStatusOptions = infoItems.status_options;
     const infoItemOwnerOptions = infoItems.owner_options;
-    const bidManagerSummary = notice.bid_manager?.name || 'Ikke satt';
-    const opportunityOwnerSummary = notice.opportunity_owner?.name || 'Ikke satt';
-    const administrationSummary = notice.archived_at ? 'Saken er arkivert' : 'Sekundære handlinger';
-    const nextDecisionSummary = primaryAction ? statusActionLabel(primaryAction.status) : noStatusActionsMessage;
+    const bidManagerSummary = notice.bid_manager?.name || tsn.not_set;
+    const opportunityOwnerSummary = notice.opportunity_owner?.name || tsn.not_set;
+    const administrationSummary = notice.archived_at ? tsn.archived_case_summary : tsn.secondary_actions;
+    const nextDecisionSummary = primaryAction ? statusActionLabel(primaryAction.status, tsn) : noStatusActionsMessage;
     const activeCommentPhaseLabel = activeCommentPhaseOption
         ? `${activeCommentPhaseOption.number} ${activeCommentPhaseOption.label}`
         : guidance.phaseTitle;
@@ -861,12 +862,12 @@ export default function SavedNoticeShow({ notice }) {
                                 </span>
                                 {notice.archived_at && notice.history_type_label ? (
                                     <span className="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                                        Type: {notice.history_type_label}
+                                        {tsn.type_prefix} {notice.history_type_label}
                                     </span>
                                 ) : null}
                                 {notice.archived_at ? (
                                     <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-200">
-                                        {tsn.archived ?? 'Arkivert'}
+                                        {tsn.archived}
                                     </span>
                                 ) : null}
                             </div>
@@ -874,7 +875,7 @@ export default function SavedNoticeShow({ notice }) {
                             <div className="space-y-1.5">
                                 <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{notice.title}</h1>
                                 <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                                    {notice.organization_name || (tsn.organization_unknown ?? 'Oppdragsgiver ikke registrert')}
+                                    {notice.organization_name || tsn.organization_unknown}
                                 </p>
                             </div>
                         </div>
@@ -901,13 +902,13 @@ export default function SavedNoticeShow({ notice }) {
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
-                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.status_panel ?? 'Statuspanel'}</h2>
-                                    <p className="mt-1 text-sm text-slate-500">{tsn.status_panel_subtitle ?? 'Operativ status, ansvar og nøkkeldatoer.'}</p>
+                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.status_panel}</h2>
+                                    <p className="mt-1 text-sm text-slate-500">{tsn.status_panel_subtitle}</p>
                                 </div>
 
                                 <div className="space-y-3">
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.current_status ?? 'Nåværende status'}</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.current_status}</div>
                                         <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
                                         <div className="mt-2 text-sm font-medium text-slate-900">{guidance.phaseTitle}</div>
                                         <p className="mt-1 text-sm leading-6 text-slate-600">{guidance.description}</p>
@@ -915,45 +916,45 @@ export default function SavedNoticeShow({ notice }) {
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.responsible ?? 'Ansvarlige'}</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.responsible}</div>
                                         <div className="mt-3 space-y-3">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.bid_manager_label ?? 'Bid-manager'}</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || (tsn.not_set ?? 'Ikke satt')}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.bid_manager_label}</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || tsn.not_set}</div>
                                                 {notice.bid_manager?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
-                                                        {tsn.global_bid_role ?? 'Global bid-rolle'}: {bidRoleLabel(notice.bid_manager.bid_role)}
+                                                        {tsn.global_bid_role}: {bidRoleLabel(notice.bid_manager.bid_role, tsn)}
                                                     </div>
                                                 ) : null}
                                             </div>
 
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.opportunity_owner_label ?? 'Kommersiell eier'}</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || (tsn.not_set ?? 'Ikke satt')}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.opportunity_owner_label}</div>
+                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || tsn.not_set}</div>
                                                 {notice.opportunity_owner?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
-                                                        {tsn.global_bid_role ?? 'Global bid-rolle'}: {bidRoleLabel(notice.opportunity_owner.bid_role)}
+                                                        {tsn.global_bid_role}: {bidRoleLabel(notice.opportunity_owner.bid_role, tsn)}
                                                     </div>
                                                 ) : null}
                                             </div>
 
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.your_global_bid_role ?? 'Din globale bid-rolle'}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.your_global_bid_role}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{currentUserBidRoleLabel}</div>
-                                                <div className="mt-1 text-xs text-slate-500">{tsn.role_applies_to_account ?? 'Gjelder brukerkontoen din, ikke denne saken.'}</div>
+                                                <div className="mt-1 text-xs text-slate-500">{tsn.role_applies_to_account}</div>
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.key_dates ?? 'Sentrale datoer'}</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.key_dates}</div>
                                         <div className="mt-3 space-y-3">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.submitted_date ?? 'Sendt dato'}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.submitted_date}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_submitted_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.closed_date ?? 'Lukket dato'}</div>
+                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.closed_date}</div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
                                             </div>
                                         </div>
@@ -967,11 +968,11 @@ export default function SavedNoticeShow({ notice }) {
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
                                 <div>
-                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.information ?? 'Informasjon'}</h2>
+                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.information}</h2>
                                     <p className="mt-1 text-sm text-slate-500">
                                         {isPrivateRequest
-                                            ? (tsn.private_request_subtitle ?? 'Manuell forespørsel med relevant kontakt- og fristinformasjon.')
-                                            : (tsn.notice_subtitle ?? 'Sakens innhold, oppsummering og fasebundet kontekst.')}
+                                            ? tsn.private_request_subtitle
+                                            : tsn.notice_subtitle}
                                     </p>
                                 </div>
 
@@ -979,22 +980,22 @@ export default function SavedNoticeShow({ notice }) {
                                     isEditingDeadlines ? (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered ?? 'Registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
                                                 <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : (tsn.not_registered ?? 'Ikke registrert')}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="reference_number">
-                                                    {tsn.reference ?? 'Referanse'}
+                                                    {tsn.reference}
                                                 </label>
                                                 <input
                                                     id="reference_number"
@@ -1009,7 +1010,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_name">
-                                                    {tsn.contact_person ?? 'Kontaktperson'}
+                                                    {tsn.contact_person}
                                                 </label>
                                                 <input
                                                     id="contact_person_name"
@@ -1024,7 +1025,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </div>
                                             <div className="space-y-1.5">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="contact_person_email">
-                                                    {tsn.contact_email ?? 'Kontakt e-post'}
+                                                    {tsn.contact_email}
                                                 </label>
                                                 <input
                                                     id="contact_person_email"
@@ -1038,7 +1039,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 ) : null}
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link ?? 'Ekstern lenke'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
@@ -1049,14 +1050,12 @@ export default function SavedNoticeShow({ notice }) {
                                                         >
                                                             {externalLinkLabel}
                                                         </a>
-                                                    ) : (
-                                                        tsn.not_registered ?? 'Ikke registrert'
-                                                    )}
+                                                    ) : tsn.not_registered}
                                                 </div>
                                             </div>
                                             <div className="space-y-1.5 md:col-span-2">
                                                 <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor="notes">
-                                                    {tsn.notes ?? 'Notater'}
+                                                    {tsn.notes}
                                                 </label>
                                                 <textarea
                                                     id="notes"
@@ -1064,7 +1063,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     onChange={(event) => deadlineForm.setData('notes', event.target.value)}
                                                     rows={4}
                                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                    placeholder={tsn.notes_placeholder ?? 'Valgfritt notat'}
+                                                    placeholder={tsn.notes_placeholder}
                                                 />
                                                 {deadlineForm.errors.notes ? (
                                                     <p className="text-sm text-rose-600">{deadlineForm.errors.notes}</p>
@@ -1074,33 +1073,33 @@ export default function SavedNoticeShow({ notice }) {
                                     ) : (
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered ?? 'Registrert'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.registered}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
                                                 <div className="text-sm font-medium text-slate-900">{notice.organization_name || notice.buyer_name || '—'}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : (tsn.not_registered ?? 'Ikke registrert')}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.reference ?? 'Referanse'}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || (tsn.not_registered ?? 'Ikke registrert')}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.reference}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.reference_number || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_person ?? 'Kontaktperson'}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || (tsn.not_registered ?? 'Ikke registrert')}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_person}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_name || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_email ?? 'Kontakt e-post'}</div>
-                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || (tsn.not_registered ?? 'Ikke registrert')}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contact_email}</div>
+                                                <div className="text-sm font-medium text-slate-900">{notice.contact_person_email || tsn.not_registered}</div>
                                             </div>
                                             <div className="space-y-1 md:col-span-2">
-                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link ?? 'Ekstern lenke'}</div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.external_link}</div>
                                                 <div className="text-sm font-medium text-slate-900">
                                                     {notice.external_url ? (
                                                         <a
@@ -1111,9 +1110,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         >
                                                             {externalLinkLabel}
                                                         </a>
-                                                    ) : (
-                                                        tsn.not_registered ?? 'Ikke registrert'
-                                                    )}
+                                                    ) : tsn.not_registered}
                                                 </div>
                                             </div>
                                         </div>
@@ -1121,27 +1118,27 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : (
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.announcement ?? 'Kunngjøring'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.announcement}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.notice_id || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority ?? 'Oppdragsgiver'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.contracting_authority}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.organization_name || '—'}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.published ?? 'Publisert'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.published}</div>
                                             <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline ?? 'Frist'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
                                             <div className="text-sm font-medium text-slate-900">{formatDate(notice.deadline, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.next_deadline ?? 'Neste leveringsfrist'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.next_deadline}</div>
                                             <div className="text-sm font-medium text-slate-900">{deadlineStateLabel(notice, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.cpv ?? 'CPV'}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.cpv}</div>
                                             <div className="text-sm font-medium text-slate-900">{notice.cpv_code || '—'}</div>
                                         </div>
                                     </div>
@@ -1152,10 +1149,10 @@ export default function SavedNoticeShow({ notice }) {
                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                             <div>
                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
-                                                    Business Review
+                                                    {tsn.business_review_title}
                                                 </div>
                                                 <p className="mt-1 text-sm text-blue-950/75">
-                                                    Registrer ett eller flere BR-tidspunkter mellom RFI og RFP.
+                                                    {tsn.business_review_description}
                                                 </p>
                                             </div>
 
@@ -1164,7 +1161,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 onClick={addBusinessReview}
                                                 className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
                                             >
-                                                Legg til BR
+                                                {tsn.business_review_add}
                                             </button>
                                         </div>
 
@@ -1178,7 +1175,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
                                                             <label className="min-w-0 flex-1 space-y-2">
                                                                 <span className="text-sm font-medium text-slate-700">
-                                                                    Business Review {index + 1}
+                                                                    {tsn.business_review_item_label} {index + 1}
                                                                 </span>
                                                                 <input
                                                                     type="date"
@@ -1198,14 +1195,14 @@ export default function SavedNoticeShow({ notice }) {
                                                                 onClick={() => removeBusinessReview(index)}
                                                                 className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                             >
-                                                                Slett
+                                                                {tsn.delete}
                                                             </button>
                                                         </div>
                                                     </div>
                                                 ))
                                             ) : (
                                                 <div className="rounded-2xl border border-dashed border-blue-200 bg-white px-4 py-4 text-sm text-blue-900/70">
-                                                    Ingen Business Review er registrert ennå.
+                                                    {tsn.business_review_empty}
                                                 </div>
                                             )}
                                         </div>
@@ -1213,7 +1210,7 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : businessReviews.length > 0 ? (
                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
-                                            Business Review
+                                            {tsn.business_review_title}
                                         </div>
                                         <div className="mt-3 space-y-3">
                                             {businessReviews.map((review) => (
@@ -1234,15 +1231,15 @@ export default function SavedNoticeShow({ notice }) {
                                 ) : null}
 
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.summary ?? 'Oppsummering'}</div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.summary}</div>
                                     <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
-                                        {notice.summary || (tsn.no_summary ?? 'Ingen oppsummering er registrert ennå.')}
+                                        {notice.summary || tsn.no_summary}
                                     </div>
                                 </div>
 
                                 {isPrivateRequest && notice.notes && !isEditingDeadlines ? (
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.notes ?? 'Notater'}</div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.notes}</div>
                                         <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
                                             {notice.notes}
                                         </div>
@@ -1256,8 +1253,8 @@ export default function SavedNoticeShow({ notice }) {
                                 <div>
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div className="min-w-0">
-                                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">Fasekommentarer</h2>
-                                            <p className="mt-1 text-sm text-slate-500">Aktiv fase: {activeCommentPhaseLabel}</p>
+                                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.phase_comment_title}</h2>
+                                            <p className="mt-1 text-sm text-slate-500">{tsn.phase_comment_active_label}: {activeCommentPhaseLabel}</p>
                                         </div>
 
                                         <div className="flex flex-wrap justify-end gap-2">
@@ -1289,7 +1286,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         </span>
                                                         {isCurrentPhase ? (
                                                             <span className="rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet-700">
-                                                                Aktiv
+                                                                {tsn.active_label}
                                                             </span>
                                                         ) : (
                                                             <span className="text-[10px] leading-none">
@@ -1305,7 +1302,7 @@ export default function SavedNoticeShow({ notice }) {
 
                                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                                     <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        Aktiv fase
+                                        {tsn.active_phase_label}
                                     </div>
                                     <div className="mt-2 text-sm font-semibold text-slate-950">
                                         {guidance.phaseTitle}
@@ -1318,11 +1315,11 @@ export default function SavedNoticeShow({ notice }) {
                                     <div className="mt-4 space-y-3">
                                         {activePhaseCommentEntries.length > 0 ? (
                                             activePhaseCommentEntries.map((comment) => (
-                                                <PhaseCommentCard key={comment.id} comment={comment} locale={locale} />
+                                                <PhaseCommentCard key={comment.id} comment={comment} locale={locale} text={tsn} />
                                             ))
                                         ) : (
                                             <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                                                Ingen kommentarer er registrert for aktiv fase ennå.
+                                                {tsn.phase_comment_empty}
                                             </div>
                                         )}
                                     </div>
@@ -1336,19 +1333,19 @@ export default function SavedNoticeShow({ notice }) {
                                             className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
                                         >
                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                Ny kommentar
+                                                {tsn.phase_comment_new}
                                             </div>
 
                                             <label className="space-y-1.5">
                                                 <span className="text-sm font-medium text-slate-800">
-                                                    Kommentar for aktiv fase
+                                                    {tsn.phase_comment_form_label}
                                                 </span>
                                                 <textarea
                                                     value={phaseCommentForm.data.comment}
                                                     onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
                                                     rows={4}
                                                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                    placeholder="Skriv en kommentar for denne fasen"
+                                                    placeholder={tsn.phase_comment_placeholder}
                                                 />
                                             </label>
 
@@ -1362,7 +1359,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
                                                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    {phaseCommentForm.processing ? 'Lagrer...' : 'Lagre kommentar'}
+                                                    {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
                                                 </button>
                                             </div>
                                         </form>
@@ -1387,7 +1384,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div>
                                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                            Fase {phaseOption.number}
+                                                            {tsn.phase_prefix} {phaseOption.number}
                                                         </div>
                                                         <h3 className="mt-1 text-sm font-semibold text-slate-950">
                                                             {phaseOption.label}
@@ -1399,7 +1396,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         onClick={() => toggleCommentPhase(phaseOption.status)}
                                                         className="inline-flex min-h-8 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
-                                                        Skjul
+                                                        {tsn.phase_comment_hide}
                                                     </button>
                                                 </div>
 
@@ -1411,7 +1408,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     </div>
                                                 ) : (
                                                     <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                                                        Ingen kommentarer er registrert for denne fasen ennå.
+                                                        {tsn.phase_comment_empty_for_phase}
                                                     </div>
                                                 )}
                                             </section>
@@ -1422,12 +1419,12 @@ export default function SavedNoticeShow({ notice }) {
                         </section>
 
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="space-y-2">
-                                    <div>
-                                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">Infosenter</h2>
-                                        <p className="mt-1 text-sm text-slate-500">Opprett og følg opp aksjoner, avklaringer og beslutninger i saken.</p>
-                                    </div>
+                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.info_center_title}</h2>
+                                                    <p className="mt-1 text-sm text-slate-500">{tsn.info_center_description}</p>
+                                                </div>
                                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
                                         {infoItemSummary}
                                     </p>
@@ -1438,7 +1435,7 @@ export default function SavedNoticeShow({ notice }) {
                                     onClick={openInfoItemCreator}
                                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                 >
-                                    Ny aksjon
+                                    {tsn.new_action}
                                 </button>
                             </div>
 
@@ -1452,13 +1449,13 @@ export default function SavedNoticeShow({ notice }) {
                                 >
                                     <div className="grid gap-4 md:grid-cols-2">
                                         <label className="space-y-2 md:col-span-2">
-                                            <span className="text-sm font-medium text-slate-700">Emne</span>
+                                            <span className="text-sm font-medium text-slate-700">{tsn.subject_label}</span>
                                             <input
                                                 type="text"
                                                 value={infoItemForm.data.subject}
                                                 onChange={(event) => infoItemForm.setData('subject', event.target.value)}
                                                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                placeholder="Hva gjelder oppfølgingen?"
+                                                placeholder={tsn.subject_placeholder}
                                             />
                                             {infoItemForm.errors.subject ? (
                                                 <p className="text-sm text-rose-600">{infoItemForm.errors.subject}</p>
@@ -1466,13 +1463,13 @@ export default function SavedNoticeShow({ notice }) {
                                         </label>
 
                                         <label className="space-y-2 md:col-span-2">
-                                            <span className="text-sm font-medium text-slate-700">Beskrivelse / oppfølging</span>
+                                            <span className="text-sm font-medium text-slate-700">{tsn.description_label}</span>
                                             <textarea
                                                 value={infoItemForm.data.body}
                                                 onChange={(event) => infoItemForm.setData('body', event.target.value)}
                                                 rows={5}
                                                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                placeholder="Beskriv aksjonen, avklaringen eller beslutningen"
+                                                placeholder={tsn.description_placeholder}
                                             />
                                             {infoItemForm.errors.body ? (
                                                 <p className="text-sm text-rose-600">{infoItemForm.errors.body}</p>
@@ -1480,13 +1477,13 @@ export default function SavedNoticeShow({ notice }) {
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">Ansvarlig</span>
+                                            <span className="text-sm font-medium text-slate-700">{tsn.owner_label}</span>
                                             <select
                                                 value={infoItemForm.data.owner_user_id}
                                                 onChange={(event) => infoItemForm.setData('owner_user_id', event.target.value)}
                                                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
-                                                <option value="">Ingen ansvarlig</option>
+                                                <option value="">{tsn.no_owner}</option>
                                                 {infoItemOwnerOptions.map((option) => (
                                                     <option key={option.value} value={option.value}>
                                                         {option.label}
@@ -1499,7 +1496,7 @@ export default function SavedNoticeShow({ notice }) {
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">Oppfølgingsfrist</span>
+                                            <span className="text-sm font-medium text-slate-700">{tsn.follow_up_deadline_label}</span>
                                             <input
                                                 type="date"
                                                 value={infoItemForm.data.response_due_at}
@@ -1512,7 +1509,7 @@ export default function SavedNoticeShow({ notice }) {
                                         </label>
 
                                         <label className="space-y-2">
-                                            <span className="text-sm font-medium text-slate-700">Status</span>
+                                            <span className="text-sm font-medium text-slate-700">{tsn.status_label}</span>
                                             <select
                                                 value={infoItemForm.data.status}
                                                 onChange={(event) => infoItemForm.setData('status', event.target.value)}
@@ -1537,9 +1534,9 @@ export default function SavedNoticeShow({ notice }) {
                                                 className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
                                             />
                                             <div className="space-y-1">
-                                                <span className="block text-sm font-medium text-slate-700">Krever svar og oppfølging</span>
+                                                <span className="block text-sm font-medium text-slate-700">{tsn.requires_response_label}</span>
                                                 <p className="text-xs text-slate-500">
-                                                    Bruk når oppfølgingen må ha svar før den kan lukkes.
+                                                    {tsn.requires_response_help}
                                                 </p>
                                             </div>
                                         </label>
@@ -1547,14 +1544,14 @@ export default function SavedNoticeShow({ notice }) {
 
                                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                                         <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                            Klassifisering
+                                            {tsn.classification_title}
                                         </div>
                                         <p className="mt-1 text-sm text-slate-500">
-                                            Velg hvordan oppfølgingen skal kategoriseres i saken.
+                                            {tsn.classification_help}
                                         </p>
                                         <div className="mt-4 grid gap-4 md:grid-cols-3">
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">Type</span>
+                                                <span className="text-sm font-medium text-slate-700">{tsn.type_label}</span>
                                                 <select
                                                     value={infoItemForm.data.type}
                                                     onChange={(event) => infoItemForm.setData('type', event.target.value)}
@@ -1572,7 +1569,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </label>
 
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">Retning</span>
+                                                <span className="text-sm font-medium text-slate-700">{tsn.direction_label}</span>
                                                 <select
                                                     value={infoItemForm.data.direction}
                                                     onChange={(event) => infoItemForm.setData('direction', event.target.value)}
@@ -1590,7 +1587,7 @@ export default function SavedNoticeShow({ notice }) {
                                             </label>
 
                                             <label className="space-y-2">
-                                                <span className="text-sm font-medium text-slate-700">Kanal</span>
+                                                <span className="text-sm font-medium text-slate-700">{tsn.channel_label}</span>
                                                 <select
                                                     value={infoItemForm.data.channel}
                                                     onChange={(event) => infoItemForm.setData('channel', event.target.value)}
@@ -1615,7 +1612,7 @@ export default function SavedNoticeShow({ notice }) {
                                             disabled={infoItemForm.processing || infoItemForm.data.body.trim() === ''}
                                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
-                                            {infoItemForm.processing ? 'Lagrer...' : 'Lagre aksjon'}
+                                            {infoItemForm.processing ? tsn.save_action_saving : tsn.save_action}
                                         </button>
                                         <button
                                             type="button"
@@ -1623,7 +1620,7 @@ export default function SavedNoticeShow({ notice }) {
                                             disabled={infoItemForm.processing}
                                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
-                                            Avbryt
+                                            {common.cancel}
                                         </button>
                                     </div>
                                 </form>
@@ -1661,7 +1658,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         </div>
 
                                                         <div className="text-sm font-semibold text-slate-950">
-                                                            {item.subject || 'Uten emne'}
+                                                            {item.subject || tsn.no_subject}
                                                         </div>
 
                                                         <div className="whitespace-pre-line text-sm leading-6 text-slate-700">
@@ -1671,22 +1668,22 @@ export default function SavedNoticeShow({ notice }) {
                                                         <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                                                             {item.owner ? (
                                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                    Ansvarlig: {item.owner.name}
+                                                                    {tsn.owner_prefix} {item.owner.name}
                                                                 </span>
                                                             ) : null}
                                                             {item.status !== 'closed' && item.requires_response ? (
                                                                 <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
-                                                                    Venter på svar
+                                                                    {tsn.awaiting_response}
                                                                 </span>
                                                             ) : null}
                                                             {item.response_due_at ? (
                                                                 <span className="rounded-full bg-violet-50 px-2.5 py-1 font-medium text-violet-700">
-                                                                    Oppfølgingsfrist: {formatDate(item.response_due_at, locale)}
+                                                                    {tsn.follow_up_deadline_prefix} {formatDate(item.response_due_at, locale)}
                                                                 </span>
                                                             ) : null}
                                                             {item.closed_at ? (
                                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                    Lukket {formatDate(item.closed_at, locale, { hour: '2-digit', minute: '2-digit' })}
+                                                                    {tsn.closed_prefix} {formatDate(item.closed_at, locale, { hour: '2-digit', minute: '2-digit' })}
                                                                 </span>
                                                             ) : null}
                                                         </div>
@@ -1694,7 +1691,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         {isClosed && item.closure_comment ? (
                                                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                    Kommentar ved lukking
+                                                                    {tsn.close_comment_label}
                                                                 </div>
                                                                 <div className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
                                                                     {item.closure_comment}
@@ -1705,10 +1702,10 @@ export default function SavedNoticeShow({ notice }) {
 
                                                     <div className="shrink-0 space-y-2 text-xs text-slate-500 lg:text-right">
                                                         <div className="font-medium text-slate-700">
-                                                            Opprettet {formatDate(item.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
+                                                            {tsn.created_prefix} {formatDate(item.created_at, locale, { hour: '2-digit', minute: '2-digit' })}
                                                         </div>
                                                         <div>
-                                                            {item.created_by ? `Av ${item.created_by.name}` : 'Av —'}
+                                                            {item.created_by ? `${tsn.by_prefix} ${item.created_by.name}` : `${tsn.by_prefix} —`}
                                                         </div>
 
                                                         {canCloseItem ? (
@@ -1717,7 +1714,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 onClick={() => openInfoItemCloser(item)}
                                                                 className="inline-flex min-h-8 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
                                                             >
-                                                                {isCloseFormOpen ? 'Skjul lukking' : 'Lukk aksjon'}
+                                                                {isCloseFormOpen ? tsn.close_action_hide : tsn.close_action}
                                                             </button>
                                                         ) : null}
                                                     </div>
@@ -1734,10 +1731,10 @@ export default function SavedNoticeShow({ notice }) {
                                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                             <div>
                                                                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
-                                                                    Lukk aksjon
+                                                                    {tsn.close_action_title}
                                                                 </div>
                                                                 <p className="mt-1 text-sm text-slate-600">
-                                                                    Kommentar ved lukking er valgfri, men anbefales for historikken.
+                                                                    {tsn.close_action_help}
                                                                 </p>
                                                             </div>
 
@@ -1746,21 +1743,21 @@ export default function SavedNoticeShow({ notice }) {
                                                                 onClick={cancelInfoItemCloser}
                                                                 className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
-                                                                Avbryt
+                                                                {common.cancel}
                                                             </button>
                                                         </div>
 
                                                         <label className="mt-4 block space-y-2">
-                                                            <span className="text-sm font-medium text-slate-700">Kommentar ved lukking</span>
+                                                            <span className="text-sm font-medium text-slate-700">{tsn.close_action_comment_label}</span>
                                                             <textarea
                                                                 value={closeInfoItemForm.data.closure_comment}
                                                                 onChange={(event) => closeInfoItemForm.setData('closure_comment', event.target.value)}
                                                                 rows={3}
                                                                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-300 focus:ring-4 focus:ring-emerald-100"
-                                                                placeholder="Beskriv kort hva som ble gjort eller avklart"
+                                                                placeholder={tsn.close_action_placeholder}
                                                             />
                                                             <p className="text-xs leading-5 text-slate-500">
-                                                                Notatet blir liggende i historikken sammen med lukket status.
+                                                                {tsn.close_action_note}
                                                             </p>
                                                             {closeInfoItemForm.errors.closure_comment ? (
                                                                 <p className="text-sm text-rose-600">{closeInfoItemForm.errors.closure_comment}</p>
@@ -1773,7 +1770,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 disabled={closeInfoItemForm.processing}
                                                                 className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
-                                                                {closeInfoItemForm.processing ? 'Lukker...' : 'Lagre og lukk aksjon'}
+                                                                {closeInfoItemForm.processing ? tsn.close_action_saving : tsn.close_action_save}
                                                             </button>
                                                         </div>
                                                     </form>
@@ -1784,7 +1781,7 @@ export default function SavedNoticeShow({ notice }) {
                                 </div>
                             ) : (
                                 <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                                    Ingen aksjoner eller oppfølginger er registrert ennå. Opprett første aksjon for å fordele ansvar og sette frist.
+                                    {tsn.no_actions_yet}
                                 </div>
                             )}
                         </section>
@@ -1793,14 +1790,14 @@ export default function SavedNoticeShow({ notice }) {
                             <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                     <div>
-                                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">Forhandlingsrunder</h2>
-                                        <p className="mt-1 text-sm text-slate-500">Registrerte innsendinger for denne saken.</p>
+                                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.submissions_title}</h2>
+                                        <p className="mt-1 text-sm text-slate-500">{tsn.submissions_subtitle}</p>
                                     </div>
                                 </div>
 
                                 {notice.submissions.length === 0 ? (
-                                    <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
-                                        Ingen innsendinger er registrert ennå.
+                                        <div className="mt-5 rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+                                        {tsn.no_submissions}
                                     </div>
                                 ) : (
                                     <div className="mt-5 space-y-3">
@@ -1813,7 +1810,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     <div>
                                                         <div className="text-sm font-semibold text-slate-950">{submission.label}</div>
                                                         <div className="mt-1 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                                                            Runde {submission.sequence_number}
+                                                            {tsn.round_prefix} {submission.sequence_number}
                                                         </div>
                                                     </div>
 
@@ -1823,7 +1820,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             submission.submitted_at ? 'text-slate-900' : 'text-slate-500',
                                                         )}
                                                     >
-                                                        {submission.submitted_at ? formatDate(submission.submitted_at, locale, { hour: '2-digit', minute: '2-digit' }) : 'Ikke registrert'}
+                                                        {submission.submitted_at ? formatDate(submission.submitted_at, locale, { hour: '2-digit', minute: '2-digit' }) : tsn.not_registered}
                                                     </div>
                                                 </div>
                                             </article>
@@ -1838,13 +1835,13 @@ export default function SavedNoticeShow({ notice }) {
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-4">
                                 <div>
-                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">Aksjoner</h2>
-                                    <p className="mt-1 text-sm text-slate-500">Alt du kan gjøre på saken akkurat nå.</p>
+                                    <h2 className="text-lg font-semibold tracking-tight text-slate-950">{tsn.actions_title}</h2>
+                                    <p className="mt-1 text-sm text-slate-500">{tsn.actions_subtitle}</p>
                                 </div>
 
                                 <div className="space-y-3">
                                     <ActionAccordionSection
-                                        title="Neste beslutning"
+                                        title={tsn.next_decision_title}
                                         summary={nextDecisionSummary}
                                         hint={guidance.phaseTitle}
                                         isOpen={openActionSection === 'decision'}
@@ -1869,7 +1866,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         actionButtonClassName(primaryAction.tone, primaryAction.status),
                                                     )}
                                                 >
-                                                    {statusActionLabel(primaryAction.status)}
+                                                    {statusActionLabel(primaryAction.status, tsn)}
                                                 </button>
                                             ) : null}
 
@@ -1886,7 +1883,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 actionButtonClassName(action.tone, action.status),
                                                             )}
                                                         >
-                                                            {statusActionLabel(action.status)}
+                                                            {statusActionLabel(action.status, tsn)}
                                                         </button>
                                                     ))}
                                                 </div>
@@ -1907,15 +1904,15 @@ export default function SavedNoticeShow({ notice }) {
                                                 }}
                                                 className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
                                             >
-                                                {closureActionGuidance(activeClosureAction.status) ? (
-                                                    <div className={classNames('rounded-xl border px-3 py-3 text-sm font-medium', closureActionGuidance(activeClosureAction.status)?.className)}>
-                                                        {closureActionGuidance(activeClosureAction.status)?.text}
+                                                {closureActionGuidance(activeClosureAction.status, tsn) ? (
+                                                    <div className={classNames('rounded-xl border px-3 py-3 text-sm font-medium', closureActionGuidance(activeClosureAction.status, tsn)?.className)}>
+                                                        {closureActionGuidance(activeClosureAction.status, tsn)?.text}
                                                     </div>
                                                 ) : null}
 
                                                 <div className="space-y-1.5">
                                                     <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_reason">
-                                                        Avslutningsårsak
+                                                        {tsn.close_reason_label}
                                                     </label>
                                                     <select
                                                         id="bid_closure_reason"
@@ -1923,7 +1920,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         onChange={(event) => statusForm.setData('bid_closure_reason', event.target.value)}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
-                                                        <option value="">Velg avslutningsårsak</option>
+                                                        <option value="">{tsn.close_reason_placeholder}</option>
                                                         {closureReasonOptions.map((option) => (
                                                             <option key={option.value} value={option.value}>
                                                                 {option.label}
@@ -1937,7 +1934,7 @@ export default function SavedNoticeShow({ notice }) {
 
                                                 <div className="space-y-1.5">
                                                     <label className="text-sm font-medium text-slate-800" htmlFor="bid_closure_note">
-                                                        Notat
+                                                        {tsn.close_note_label}
                                                     </label>
                                                     <textarea
                                                         id="bid_closure_note"
@@ -1945,7 +1942,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         onChange={(event) => statusForm.setData('bid_closure_note', event.target.value)}
                                                         rows={3}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                        placeholder="Valgfritt notat"
+                                                        placeholder={tsn.close_note_placeholder}
                                                     />
                                                 </div>
 
@@ -1955,7 +1952,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         disabled={isStatusActionProcessing}
                                                         className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {isStatusActionProcessing ? 'Oppdaterer...' : statusActionLabel(activeClosureAction.status)}
+                                                        {isStatusActionProcessing ? tsn.updating : statusActionLabel(activeClosureAction.status, tsn)}
                                                     </button>
                                                     <button
                                                         type="button"
@@ -1963,7 +1960,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         disabled={isStatusActionProcessing}
                                                         className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        Avbryt
+                                                        {common.cancel}
                                                     </button>
                                                 </div>
                                             </form>
@@ -1976,15 +1973,15 @@ export default function SavedNoticeShow({ notice }) {
                                                 disabled={submissionForm.processing}
                                                 className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
-                                                {submissionForm.processing ? 'Registrerer...' : 'Legg til ny innsending'}
+                                                {submissionForm.processing ? tsn.registering : tsn.add_submission}
                                             </button>
                                         ) : null}
                                     </ActionAccordionSection>
 
                                     <ActionAccordionSection
-                                        title="Deadlines"
+                                        title={tsn.deadlines_title}
                                         summary={deadlineSummary}
-                                        hint="Oppdater ved endring"
+                                        hint={tsn.deadlines_hint}
                                         isOpen={openActionSection === 'deadlines'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'deadlines' ? null : 'deadlines'))}
                                     >
@@ -1994,7 +1991,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 onClick={openDeadlineEditor}
                                                 className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                             >
-                                                Oppdater deadlines
+                                                {tsn.deadlines_update}
                                             </button>
                                         ) : null}
 
@@ -2007,12 +2004,12 @@ export default function SavedNoticeShow({ notice }) {
                                                 className="space-y-3"
                                             >
                                                 {[
-                                                    { key: 'questions_deadline_at', label: 'Frist spørsmål' },
-                                                    { key: 'questions_rfi_deadline_at', label: 'Frist spørsmål RFI' },
-                                                    { key: 'rfi_submission_deadline_at', label: 'Innlevering RFI' },
-                                                    { key: 'questions_rfp_deadline_at', label: 'Frist spørsmål RFP' },
-                                                    { key: 'rfp_submission_deadline_at', label: 'Innlevering RFP' },
-                                                    { key: 'award_date_at', label: 'Tildelingsdato' },
+                                                    { key: 'questions_deadline_at', label: tsn.deadline_questions_label },
+                                                    { key: 'questions_rfi_deadline_at', label: tsn.deadline_questions_rfi_label },
+                                                    { key: 'rfi_submission_deadline_at', label: tsn.deadline_rfi_submission_label },
+                                                    { key: 'questions_rfp_deadline_at', label: tsn.deadline_questions_rfp_label },
+                                                    { key: 'rfp_submission_deadline_at', label: tsn.deadline_rfp_submission_label },
+                                                    { key: 'award_date_at', label: tsn.deadline_award_date_label },
                                                 ].map((field) => (
                                                     <label key={field.key} className="space-y-2">
                                                         <span className="text-sm font-medium text-slate-700">{field.label}</span>
@@ -2034,7 +2031,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         disabled={!isDeadlineDirty || deadlineForm.processing}
                                                         className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        {deadlineForm.processing ? 'Lagrer...' : 'Lagre'}
+                                                {deadlineForm.processing ? common.loading : common.save}
                                                     </button>
                                                     <button
                                                         type="button"
@@ -2042,7 +2039,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         disabled={deadlineForm.processing}
                                                         className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                        Avbryt
+                                                        {common.cancel}
                                                     </button>
                                                 </div>
                                             </form>
@@ -2050,9 +2047,9 @@ export default function SavedNoticeShow({ notice }) {
                                     </ActionAccordionSection>
 
                                     <ActionAccordionSection
-                                        title="Sakens bid-manager"
+                                        title={tsn.bid_manager_section_title}
                                         summary={bidManagerSummary}
-                                        hint="Operativt ansvar"
+                                        hint={tsn.bid_manager_section_hint}
                                         isOpen={openActionSection === 'bid-manager'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'bid-manager' ? null : 'bid-manager'))}
                                     >
@@ -2066,7 +2063,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <input type="hidden" name="_method" value="patch" />
                                                 <div className="space-y-1.5">
                                                     <label className="text-sm font-medium text-slate-800" htmlFor="bid_manager_user_id">
-                                                        Sakens bid-manager
+                                                        {tsn.bid_manager_section_title}
                                                     </label>
                                                     <select
                                                         id="bid_manager_user_id"
@@ -2075,7 +2072,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         onChange={(event) => bidManagerForm.setData('bid_manager_user_id', event.target.value)}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
-                                                        <option value="">Ikke satt</option>
+                                                        <option value="">{tsn.not_set}</option>
                                                         {bidManagerOptions.map((option) => (
                                                             <option key={option.value} value={option.value}>
                                                                 {option.label}
@@ -2083,7 +2080,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         ))}
                                                     </select>
                                                     <p className="text-xs text-slate-400">
-                                                        Velg operativt ansvarlig for tilbudsprosessen. Kun brukere med global bid-rolle Bid-manager kan velges.
+                                                        {tsn.bid_manager_help}
                                                     </p>
                                                     {(bidManagerForm.errors.bid_manager_user_id || errors.bid_manager_user_id) ? (
                                                         <p className="text-sm text-rose-600">{bidManagerForm.errors.bid_manager_user_id ?? errors.bid_manager_user_id}</p>
@@ -2095,16 +2092,16 @@ export default function SavedNoticeShow({ notice }) {
                                                     disabled={!isBidManagerDirty}
                                                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    Lagre bid-manager
+                                                    {bidManagerForm.processing ? tsn.bid_manager_saving : tsn.bid_manager_save}
                                                 </button>
                                             </form>
                                         ) : null}
                                     </ActionAccordionSection>
 
                                     <ActionAccordionSection
-                                        title="Sakens kommersielle eier"
+                                        title={tsn.opportunity_owner_section_title}
                                         summary={opportunityOwnerSummary}
-                                        hint="Kommersielt ansvar"
+                                        hint={tsn.opportunity_owner_section_hint}
                                         isOpen={openActionSection === 'opportunity-owner'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'opportunity-owner' ? null : 'opportunity-owner'))}
                                     >
@@ -2118,7 +2115,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 <input type="hidden" name="_method" value="patch" />
                                                 <div className="space-y-1.5">
                                                     <label className="text-sm font-medium text-slate-800" htmlFor="opportunity_owner_user_id">
-                                                        Sakens kommersielle eier
+                                                        {tsn.opportunity_owner_section_title}
                                                     </label>
                                                     <select
                                                         id="opportunity_owner_user_id"
@@ -2127,7 +2124,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         onChange={(event) => opportunityOwnerForm.setData('opportunity_owner_user_id', event.target.value)}
                                                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                     >
-                                                        <option value="">Ikke satt</option>
+                                                        <option value="">{tsn.not_set}</option>
                                                         {opportunityOwnerOptions.map((option) => (
                                                             <option key={option.value} value={option.value}>
                                                                 {option.label}
@@ -2135,7 +2132,7 @@ export default function SavedNoticeShow({ notice }) {
                                                         ))}
                                                     </select>
                                                     <p className="text-xs text-slate-400">
-                                                        Velg selger eller kommersielt ansvarlig for saken. Global bid-rolle vises kun som brukerinfo.
+                                                        {tsn.opportunity_owner_help}
                                                     </p>
                                                     {(opportunityOwnerForm.errors.opportunity_owner_user_id || errors.opportunity_owner_user_id) ? (
                                                         <p className="text-sm text-rose-600">{opportunityOwnerForm.errors.opportunity_owner_user_id ?? errors.opportunity_owner_user_id}</p>
@@ -2147,16 +2144,16 @@ export default function SavedNoticeShow({ notice }) {
                                                     disabled={!isOpportunityOwnerDirty}
                                                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
-                                                    Lagre kommersiell eier
+                                                    {opportunityOwnerForm.processing ? tsn.opportunity_owner_saving : tsn.opportunity_owner_save}
                                                 </button>
                                             </form>
                                         ) : null}
                                     </ActionAccordionSection>
 
                                     <ActionAccordionSection
-                                        title="Eksplisitt saksadgang"
+                                        title={tsn.case_access_section_title}
                                         summary={caseAccessSummary}
-                                        hint="Saksspesifikk tilgang"
+                                        hint={tsn.case_access_section_hint}
                                         isOpen={openActionSection === 'case-access'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'case-access' ? null : 'case-access'))}
                                     >
@@ -2171,8 +2168,8 @@ export default function SavedNoticeShow({ notice }) {
                                                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                                 <div className="space-y-2">
                                                                     <div>
-                                                                        <div className="text-sm font-semibold text-slate-950">
-                                                                            {access.user?.name || 'Ukjent bruker'}
+                                                    <div className="text-sm font-semibold text-slate-950">
+                                                                            {access.user?.name || tsn.unknown_user}
                                                                         </div>
                                                                         <div className="text-xs text-slate-500">
                                                                             {access.user?.email || '—'}
@@ -2181,10 +2178,10 @@ export default function SavedNoticeShow({ notice }) {
 
                                                                     <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                                                                         <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                            {accessRoleLabel(access.access_role)}
+                                                                            {accessRoleLabel(access.access_role, tsn)}
                                                                         </span>
                                                                         <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-                                                                            Gitt av {access.granted_by?.name || '—'}
+                                                                            {tsn.access_granted_by} {access.granted_by?.name || '—'}
                                                                         </span>
                                                                         <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
                                                                             {access.granted_at ? formatDate(access.granted_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
@@ -2198,7 +2195,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                         onClick={() => revokeCaseAccess(access.revoke_url)}
                                                                         className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
                                                                     >
-                                                                        Tilbakekall
+                                                                        {tsn.access_revoke}
                                                                     </button>
                                                                 ) : null}
                                                             </div>
@@ -2207,7 +2204,7 @@ export default function SavedNoticeShow({ notice }) {
                                                 </div>
                                             ) : (
                                                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-                                                    Ingen eksplisitt saksadgang er gitt ennå.
+                                                    {tsn.case_access_empty}
                                                 </div>
                                             )}
 
@@ -2216,7 +2213,7 @@ export default function SavedNoticeShow({ notice }) {
                                                     <div className="grid gap-4">
                                                         <div className="space-y-1.5">
                                                             <label className="text-sm font-medium text-slate-800" htmlFor="case_access_user_id">
-                                                                Bruker
+                                                                {tsn.case_access_user_label}
                                                             </label>
                                                             <select
                                                                 id="case_access_user_id"
@@ -2225,7 +2222,7 @@ export default function SavedNoticeShow({ notice }) {
                                                                 onChange={(event) => caseAccessForm.setData('user_id', event.target.value)}
                                                                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                                             >
-                                                                <option value="">Velg bid-bidragsyter eller lesetilgang</option>
+                                                                <option value="">{tsn.case_access_user_placeholder}</option>
                                                                 {caseAccessUserOptions.map((option) => (
                                                                     <option key={option.value} value={option.value}>
                                                                         {option.label}
@@ -2239,7 +2236,7 @@ export default function SavedNoticeShow({ notice }) {
 
                                                         <div className="space-y-1.5">
                                                             <label className="text-sm font-medium text-slate-800" htmlFor="case_access_role">
-                                                                Tilgangsnivå
+                                                                {tsn.case_access_role_label}
                                                             </label>
                                                             <select
                                                                 id="case_access_role"
@@ -2250,7 +2247,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             >
                                                                 {caseAccessRoleOptions.map((option) => (
                                                                     <option key={option.value} value={option.value}>
-                                                                        {accessRoleLabel(option.value)}
+                                                                        {accessRoleLabel(option.value, tsn)}
                                                                     </option>
                                                                 ))}
                                                             </select>
@@ -2266,22 +2263,22 @@ export default function SavedNoticeShow({ notice }) {
                                                             disabled={!isCaseAccessDirty || caseAccessForm.processing || !caseAccess.store_url}
                                                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
-                                                            {caseAccessForm.processing ? 'Lagrer...' : 'Gi tilgang'}
+                                                            {caseAccessForm.processing ? tsn.case_access_saving : tsn.case_access_save}
                                                         </button>
                                                     </div>
                                                 </form>
                                             ) : (
                                                 <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-                                                    Du har ikke tilgang til å administrere eksplisitt saksadgang for denne saken.
+                                                    {tsn.case_access_no_permission}
                                                 </div>
                                             )}
                                         </div>
                                     </ActionAccordionSection>
 
                                     <ActionAccordionSection
-                                        title="Administrasjon"
+                                        title={tsn.administration_title}
                                         summary={administrationSummary}
-                                        hint="Sekundære handlinger"
+                                        hint={tsn.administration_hint}
                                         isOpen={openActionSection === 'administration'}
                                         onToggle={() => setOpenActionSection((current) => (current === 'administration' ? null : 'administration'))}
                                     >
@@ -2294,10 +2291,10 @@ export default function SavedNoticeShow({ notice }) {
                                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                         <div>
                                                             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                                                                Flytt til historikk
+                                                                {tsn.archive_move_title}
                                                             </div>
                                                             <p className="mt-1 text-sm text-slate-600">
-                                                                Velg type før saken arkiveres i historikk.
+                                                                {tsn.archive_move_help}
                                                             </p>
                                                         </div>
 
@@ -2306,18 +2303,18 @@ export default function SavedNoticeShow({ notice }) {
                                                             onClick={cancelArchiveSavedNoticeForm}
                                                             className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
-                                                            Avbryt
+                                                            {common.cancel}
                                                         </button>
                                                     </div>
 
                                                     <label className="mt-4 block space-y-2">
-                                                        <span className="text-sm font-medium text-slate-700">Type</span>
+                                                        <span className="text-sm font-medium text-slate-700">{tsn.archive_type_label}</span>
                                                         <select
                                                             value={archiveHistoryForm.data.history_type}
                                                             onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
                                                             className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         >
-                                                            <option value="">Velg type</option>
+                                                            <option value="">{tsn.archive_type_placeholder}</option>
                                                             {historyTypeOptions.map((option) => (
                                                                 <option key={option.value} value={option.value}>
                                                                     {option.label}
@@ -2336,7 +2333,7 @@ export default function SavedNoticeShow({ notice }) {
                                                             disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
                                                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
-                                                            {archiveHistoryForm.processing ? 'Flytter...' : 'Lagre og flytt til historikk'}
+                                                            {archiveHistoryForm.processing ? tsn.archive_saving : tsn.archive_save}
                                                         </button>
                                                     </div>
                                                 </form>
@@ -2347,13 +2344,13 @@ export default function SavedNoticeShow({ notice }) {
                                                         onClick={openArchiveSavedNoticeForm}
                                                         className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                     >
-                                                        Arkiver sak
+                                                        {tsn.archive_case_action}
                                                     </button>
                                                 </div>
                                             )
                                         ) : !notice.archived_at ? (
                                             <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-                                                Du har ikke tilgang til å flytte denne saken til historikk.
+                                                {tsn.archive_not_allowed}
                                             </div>
                                         ) : null}
                                     </ActionAccordionSection>
