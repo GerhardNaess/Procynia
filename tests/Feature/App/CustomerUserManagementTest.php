@@ -205,6 +205,24 @@ class CustomerUserManagementTest extends TestCase
         $this->assertTrue(Hash::check('SecretPass123!', (string) $user->password));
     }
 
+    public function test_customer_admin_cannot_create_users_when_included_user_limit_is_reached(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $response = $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'For Mye',
+            'email' => 'for.mye@example.test',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+        ]);
+
+        $response->assertSessionHasErrors('name');
+        $this->assertDatabaseMissing('users', [
+            'email' => 'for.mye@example.test',
+        ]);
+    }
+
     public function test_customer_admin_can_create_a_user_with_explicit_bid_role(): void
     {
         $context = $this->customerAdminContext();
@@ -729,6 +747,25 @@ class CustomerUserManagementTest extends TestCase
         $this->assertDatabaseHas('users', [
             'id' => $target->id,
             'is_active' => true,
+        ]);
+    }
+
+    public function test_customer_admin_cannot_reactivate_user_when_included_user_limit_is_reached(): void
+    {
+        $context = $this->customerAdminContext();
+        $target = User::factory()->create([
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => false,
+        ]);
+
+        $response = $this->patchWithCsrf($context['admin'], "/app/users/{$target->id}/toggle-active");
+
+        $response->assertSessionHas('error', 'Kunden har nådd antall inkluderte brukere i abonnementet.');
+        $this->assertDatabaseHas('users', [
+            'id' => $target->id,
+            'is_active' => false,
         ]);
     }
 

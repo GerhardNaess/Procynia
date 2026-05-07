@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Services\Billing\BillingService;
+use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -17,6 +19,7 @@ class BillingController extends Controller
         abort_unless($user->isSystemOwner(), 403);
 
         $customer = $user->customer;
+        $billingService = app(BillingService::class);
         $subscription = $customer->subscription('default');
 
         $subscriptionData = null;
@@ -31,14 +34,15 @@ class BillingController extends Controller
             $subscriptionData = [
                 'status' => $subscription->stripe_status,
                 'plan' => $customer->subscription_plan,
-                'plan_label' => $this->planLabel($customer->subscription_plan),
+                'plan_label' => $customer->planName(),
+                'billing_interval' => $customer->billing_interval,
                 'current_period_end' => $stripeSubscription
                     ? date('Y-m-d', $stripeSubscription->current_period_end)
                     : null,
-                'cancel_at_period_end' => $stripeSubscription
-                    ? $stripeSubscription->cancel_at_period_end
-                    : false,
+                'cancel_at_period_end' => $stripeSubscription?->cancel_at_period_end ?? false,
                 'trial_ends_at' => $customer->trial_ends_at?->toDateString(),
+                'included_users' => $customer->included_users,
+                'included_ai_credits' => $customer->included_ai_credits,
             ];
         }
 
@@ -50,6 +54,9 @@ class BillingController extends Controller
                 'currency' => strtoupper($invoice->rawInvoice()->currency),
                 'status' => $invoice->paid ? 'paid' : 'open',
                 'date' => $invoice->date()->toDateString(),
+                'date_sort' => $invoice->date()->timestamp,
+                'month' => $invoice->date()->locale('nb')->translatedFormat('F Y'),
+                'month_sort' => $invoice->date()->format('Y-m'),
                 'invoice_pdf' => $invoice->invoice_pdf,
                 'hosted_invoice_url' => $invoice->hosted_invoice_url,
             ])->values()->all(),
@@ -57,10 +64,51 @@ class BillingController extends Controller
             false,
         );
 
+        $billingLines = $billingService->activeBillingLines($customer)
+            ->map(fn ($line) => [
+                'id' => $line->id,
+                'description' => $line->description,
+                'quantity' => $line->quantity,
+                'status' => $line->status,
+                'source' => $line->source,
+                'user_id' => $line->user_id,
+                'user_name' => $line->user?->name,
+                'billing_product' => $line->billingProduct?->name,
+                'billing_product_key' => $line->billingProduct?->key,
+                'billing_price' => $line->billingPrice?->name,
+                'billing_price_key' => $line->billingPrice?->key,
+                'interval' => $line->billingPrice?->interval,
+                'stripe_subscription_item_id' => $line->stripe_subscription_item_id,
+                'stripe_invoice_id' => $line->stripe_invoice_id,
+                'starts_at' => $line->starts_at?->toDateString(),
+                'ends_at' => $line->ends_at?->toDateString(),
+            ])
+            ->values()
+            ->all();
+
+        $serviceLevels = $billingService->activeServiceLevels($customer)
+            ->map(fn ($level) => [
+                'id' => $level->id,
+                'user_id' => $level->user_id,
+                'user_name' => $level->user?->name,
+                'billing_product' => $level->billingProduct?->name,
+                'billing_product_key' => $level->billingProduct?->key,
+                'billing_price' => $level->billingPrice?->name,
+                'billing_price_key' => $level->billingPrice?->key,
+                'level_key' => $level->level_key,
+                'status' => $level->status,
+                'assigned_by' => $level->assignedByUser?->name,
+                'starts_at' => $level->starts_at?->toDateString(),
+                'ends_at' => $level->ends_at?->toDateString(),
+            ])
+            ->values()
+            ->all();
+
         return Inertia::render('App/Billing/Index', [
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
-            'plans' => config('billing.plans'),
+            'billing_lines' => $billingLines,
+            'service_levels' => $serviceLevels,
         ]);
     }
 
@@ -70,15 +118,11 @@ class BillingController extends Controller
 
         abort_unless($user->isSystemOwner(), 403);
 
-        $customer = $user->customer;
-        $subscription = $customer->subscription('default');
+        app(SubscriptionService::class)->cancel($user->customer);
 
-        if ($subscription && $subscription->active()) {
-            $subscription->cancel();
-        }
-
-        return redirect()->route('app.billing.index')
-            ->with('success', __('procynia.billing.cancel_success'));
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', 'Abonnementet er satt til å avsluttes ved periodeslutt.');
     }
 
     public function resume(Request $request): RedirectResponse
@@ -87,23 +131,10 @@ class BillingController extends Controller
 
         abort_unless($user->isSystemOwner(), 403);
 
-        $customer = $user->customer;
-        $subscription = $customer->subscription('default');
+        app(SubscriptionService::class)->resume($user->customer);
 
-        if ($subscription && $subscription->onGracePeriod()) {
-            $subscription->resume();
-        }
-
-        return redirect()->route('app.billing.index')
-            ->with('success', __('procynia.billing.resume_success'));
-    }
-
-    private function planLabel(?string $planKey): string
-    {
-        if (! $planKey) {
-            return '';
-        }
-
-        return config("billing.plans.{$planKey}.label", $planKey);
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', 'Abonnementet er gjenopptatt.');
     }
 }

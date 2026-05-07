@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\Department;
 use App\Models\User;
+use App\Services\Billing\BillingEntitlementService;
 use App\Support\CustomerContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
@@ -19,6 +20,7 @@ class UserController extends Controller
 {
     public function __construct(
         private readonly CustomerContext $customerContext,
+        private readonly BillingEntitlementService $billingEntitlementService,
     ) {
     }
 
@@ -94,6 +96,14 @@ class UserController extends Controller
         [$actor, $customerId] = $this->customerBidManagerContext($request);
 
         $this->abortIfBidManagerAttemptsProtectedUserFields($actor, $request);
+
+        $customer = $actor->customer;
+
+        if ($customer && ! $this->billingEntitlementService->canAddUser($customer)) {
+            throw ValidationException::withMessages([
+                'name' => 'Kunden har nådd antall inkluderte brukere i abonnementet.',
+            ]);
+        }
 
         $validated = $request->validate($this->storeValidationRules($actor));
 
@@ -255,6 +265,10 @@ class UserController extends Controller
         }
 
         $nextActive = ! (bool) $record->is_active;
+
+        if ($nextActive && $actor->customer && ! $this->billingEntitlementService->canAddUser($actor->customer) && ! $record->is_active) {
+            return back()->with('error', 'Kunden har nådd antall inkluderte brukere i abonnementet.');
+        }
 
         if ($this->wouldRemoveLastActiveSystemOwner($record, $record->resolvedBidRole(), $nextActive)) {
             return back()->with('error', 'Kunden må ha minst én aktiv systemeier.');

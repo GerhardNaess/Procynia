@@ -1,0 +1,323 @@
+<?php
+
+namespace Tests\Unit\Services;
+
+use App\Models\BillingEvent;
+use App\Models\BillingPrice;
+use App\Models\BillingProduct;
+use App\Models\Customer;
+use App\Models\CustomerBillingLine;
+use App\Models\CustomerUserServiceLevel;
+use App\Models\Language;
+use App\Models\Nationality;
+use App\Models\User;
+use App\Services\Billing\BillingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+use Mockery;
+
+class BillingServiceTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->useProjectPostgresConnection();
+        DB::beginTransaction();
+    }
+
+    protected function tearDown(): void
+    {
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        DB::disconnect(DB::getDefaultConnection());
+
+        parent::tearDown();
+    }
+
+    public function test_add_recurring_line_creates_local_billing_line_and_audit_event(): void
+    {
+        $customer = $this->createCustomer();
+        $customer->forceFill(['stripe_id' => 'cus_test_123'])->save();
+
+        $product = BillingProduct::query()->create([
+            'key' => 'addon_report',
+            'name' => 'Rapport',
+            'description' => 'Løpende tillegg.',
+            'category' => BillingProduct::CATEGORY_ADDON,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+            'metadata' => [],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'addon_report_monthly',
+            'name' => 'Rapport — Månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 25000,
+            'stripe_price_id' => 'price_addon_report',
+            'tier_key' => 'report',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => [],
+        ]);
+
+        $this->partialMock(BillingService::class, function ($mock): void {
+            $mock->shouldReceive('recalculateSubscriptionItems')
+                ->once()
+                ->andReturn([
+                    'subscription' => null,
+                    'items' => [],
+                ]);
+        });
+
+        $service = app(BillingService::class);
+        $line = $service->addRecurringLine($customer, $price, 3);
+
+        $this->assertInstanceOf(CustomerBillingLine::class, $line);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'quantity' => 3,
+            'status' => 'active',
+            'source' => 'admin',
+        ]);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'event_type' => 'recurring_line_added',
+        ]);
+    }
+
+    public function test_ensure_stripe_customer_uses_customer_helper_when_missing_stripe_id(): void
+    {
+        $customer = $this->createCustomer();
+
+        $mockCustomer = Mockery::mock($customer)->makePartial();
+        $mockCustomer->shouldReceive('createOrGetStripeCustomer')
+            ->once()
+            ->with(['name' => $customer->name])
+            ->andReturnNull();
+        $mockCustomer->shouldReceive('refresh')
+            ->once()
+            ->andReturnSelf();
+
+        $service = app(BillingService::class);
+        $result = $service->ensureStripeCustomer($mockCustomer);
+
+        $this->assertSame($mockCustomer, $result);
+        $this->assertDatabaseHas('billing_events', [
+            'event_type' => 'stripe_customer_created',
+            'description' => 'Stripe-kunde ble opprettet.',
+        ]);
+    }
+
+    public function test_assign_user_service_level_creates_level_and_local_line(): void
+    {
+        $customer = $this->createCustomer();
+        $customer->forceFill(['stripe_id' => 'cus_test_456'])->save();
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test_ai_offer',
+            'name' => 'AI-tilbud',
+            'description' => 'Brukerbasert tjeneste.',
+            'category' => BillingProduct::CATEGORY_USER_SERVICE,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_USER,
+            'is_active' => true,
+            'sort_order' => 2,
+            'metadata' => ['features' => ['ai_offer']],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test_ai_offer_monthly',
+            'name' => 'AI-tilbud — Månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 49000,
+            'stripe_price_id' => 'price_ai_offer',
+            'tier_key' => 'ai_offer',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => ['features' => ['ai_offer']],
+        ]);
+
+        $user = User::query()->create([
+            'name' => 'AI Bruker',
+            'email' => 'ai.bruker@example.test',
+            'password' => bcrypt('SecretPass123!'),
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $assignedBy = User::query()->create([
+            'name' => 'Admin',
+            'email' => 'admin@example.test',
+            'password' => bcrypt('SecretPass123!'),
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+
+        $this->partialMock(BillingService::class, function ($mock): void {
+            $mock->shouldReceive('recalculateSubscriptionItems')
+                ->once()
+                ->andReturn([
+                    'subscription' => null,
+                    'items' => [],
+                ]);
+        });
+
+        $service = app(BillingService::class);
+        $level = $service->assignUserServiceLevel($customer, $user, $price, $assignedBy);
+
+        $this->assertInstanceOf(CustomerUserServiceLevel::class, $level);
+        $this->assertDatabaseHas('customer_user_service_levels', [
+            'customer_id' => $customer->id,
+            'user_id' => $user->id,
+            'billing_price_id' => $price->id,
+            'status' => 'active',
+            'level_key' => 'ai_offer',
+        ]);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'user_id' => $user->id,
+            'billing_price_id' => $price->id,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'event_type' => 'user_service_level_assigned',
+        ]);
+    }
+
+    public function test_add_one_time_charge_can_be_queued_without_immediate_invoice(): void
+    {
+        $customer = $this->createCustomer();
+        $customer->forceFill(['stripe_id' => 'cus_test_789'])->save();
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test_onboarding',
+            'name' => 'Onboarding',
+            'description' => 'Engangsoppdrag.',
+            'category' => BillingProduct::CATEGORY_ONE_OFF,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 3,
+            'metadata' => [],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test_onboarding_one_time',
+            'name' => 'Onboarding — Engangs',
+            'interval' => BillingPrice::INTERVAL_ONE_TIME,
+            'currency' => 'nok',
+            'unit_amount' => 125000,
+            'stripe_price_id' => null,
+            'tier_key' => 'onboarding',
+            'is_recurring' => false,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => [],
+        ]);
+
+        $service = app(BillingService::class);
+        $line = $service->addOneTimeCharge($customer, $price, 2, 'Oppstartsmøte og datavask', false);
+
+        $this->assertInstanceOf(CustomerBillingLine::class, $line);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'quantity' => 2,
+            'status' => 'active',
+            'stripe_invoice_id' => null,
+        ]);
+        $this->assertDatabaseHas('billing_events', [
+            'customer_id' => $customer->id,
+            'event_type' => 'one_time_charge_added',
+        ]);
+    }
+
+    private function createCustomer(string $name = 'Procynia AS'): Customer
+    {
+        $language = Language::query()->firstOrCreate(
+            ['code' => 'no'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],
+        );
+
+        $nationality = Nationality::query()->firstOrCreate(
+            ['code' => 'NO'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO'],
+        );
+
+        return Customer::query()->create([
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
+            'is_active' => true,
+        ]);
+    }
+
+    private function useProjectPostgresConnection(): void
+    {
+        $connectionName = 'feature_pgsql';
+
+        config([
+            "database.connections.{$connectionName}" => [
+                'driver' => 'pgsql',
+                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
+                'port' => $this->projectEnv('DB_PORT', '5432'),
+                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
+                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
+                'password' => $this->projectEnv('DB_PASSWORD', ''),
+                'charset' => 'utf8',
+                'prefix' => '',
+                'prefix_indexes' => true,
+                'search_path' => 'public',
+                'sslmode' => 'prefer',
+            ],
+            'database.default' => $connectionName,
+        ]);
+
+        DB::purge($connectionName);
+        DB::setDefaultConnection($connectionName);
+        DB::reconnect($connectionName);
+    }
+
+    private function projectEnv(string $key, string $default): string
+    {
+        static $values = null;
+
+        if (! is_array($values)) {
+            $values = [];
+
+            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $trimmed = trim($line);
+
+                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
+                    continue;
+                }
+
+                [$envKey, $envValue] = explode('=', $trimmed, 2);
+                $values[trim($envKey)] = trim($envValue, " \t\n\r\0\x0B\"'");
+            }
+        }
+
+        return (string) ($values[$key] ?? $default);
+    }
+}

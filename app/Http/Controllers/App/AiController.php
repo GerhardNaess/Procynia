@@ -29,6 +29,7 @@ use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementAssessmentService;
@@ -691,6 +692,12 @@ class AiController extends Controller
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
+
+        abort_unless(
+            $record->customer && app(BillingEntitlementService::class)->canUseAiOffer($record->customer),
+            403,
+            'Kunden har ikke aktiv AI-tilgang.',
+        );
 
         Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.', [
             'route_name' => $request->route()?->getName(),
