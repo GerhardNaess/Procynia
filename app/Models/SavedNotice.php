@@ -325,6 +325,11 @@ class SavedNotice extends Model
         return $this->belongsTo(User::class, 'saved_by_user_id');
     }
 
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
     public function isPublicNotice(): bool
     {
         return (string) ($this->source_type ?? self::SOURCE_TYPE_PUBLIC_NOTICE) === self::SOURCE_TYPE_PUBLIC_NOTICE;

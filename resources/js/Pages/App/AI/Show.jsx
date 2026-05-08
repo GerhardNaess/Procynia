@@ -1495,7 +1495,6 @@ export default function AiShow({
     requirements_count: requirementsCount = 0,
     requirements = [],
     requirements_store_url: requirementsStoreUrl = '',
-    requirements_destroy_all_url: requirementsDestroyAllUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
@@ -1802,8 +1801,6 @@ export default function AiShow({
     const [selectedEvidence, setSelectedEvidence] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
-    const [deleteAllConfirming, setDeleteAllConfirming] = useState(false);
-    const [deleteAllProcessing, setDeleteAllProcessing] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
@@ -2537,25 +2534,6 @@ export default function AiShow({
         });
     };
 
-    const confirmDeleteAll = () => {
-        if (!requirementsDestroyAllUrl || requirementUpdatesLocked) {
-            return;
-        }
-
-        setDeleteAllProcessing(true);
-
-        router.delete(requirementsDestroyAllUrl, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setDeleteAllConfirming(false);
-                setDeleteAllProcessing(false);
-            },
-            onError: () => {
-                setDeleteAllProcessing(false);
-            },
-        });
-    };
-
     return (
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
@@ -2665,7 +2643,7 @@ export default function AiShow({
                                 </span>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowManualRequirementForm((value) => !value)}
@@ -2705,50 +2683,8 @@ export default function AiShow({
                                         </button>
                                     </>
                                 ) : null}
-
-                                {requirementsDestroyAllUrl && requirementRows.length > 0 && !deleteAllConfirming ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => setDeleteAllConfirming(true)}
-                                        disabled={requirementUpdatesLocked}
-                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {tai.delete_all_requirements ?? 'Slett alle'}
-                                    </button>
-                                ) : null}
                             </div>
                         </div>
-
-                        {deleteAllConfirming ? (
-                            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4">
-                                <p className="text-sm font-semibold text-rose-900">
-                                    {tai.delete_all_confirm_title ?? 'Slett alle kravkandidater?'}
-                                </p>
-                                <p className="mt-1 text-sm text-rose-700">
-                                    {tai.delete_all_confirm_message ?? 'Dette fjerner alle kravkandidater for denne saken. Handlingen kan ikke angres.'}
-                                </p>
-                                <div className="mt-4 flex gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={confirmDeleteAll}
-                                        disabled={deleteAllProcessing}
-                                        className="inline-flex items-center justify-center rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {deleteAllProcessing
-                                            ? (tai.deleting ?? 'Sletter…')
-                                            : (tai.delete_all_confirm_button ?? 'Ja, slett alle')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDeleteAllConfirming(false)}
-                                        disabled={deleteAllProcessing}
-                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {tai.cancel ?? 'Avbryt'}
-                                    </button>
-                                </div>
-                            </div>
-                        ) : null}
 
                         {showManualRequirementForm ? (
                             <form onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
