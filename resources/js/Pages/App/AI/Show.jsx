@@ -1793,6 +1793,7 @@ export default function AiShow({
     const [answerDraftCopyStatus, setAnswerDraftCopyStatus] = useState(null);
     const [answerDraftError, setAnswerDraftError] = useState(null);
     const [answerDraftReaderExpanded, setAnswerDraftReaderExpanded] = useState(false);
+    const [answerDraftMissingKnowledgeDetailsExpanded, setAnswerDraftMissingKnowledgeDetailsExpanded] = useState(false);
     const [answerDraftPromptsByRequirementId, setAnswerDraftPromptsByRequirementId] = useState({});
     const [promptEditorOpenRequirementId, setPromptEditorOpenRequirementId] = useState(null);
     const [answerBasisSelectionSavingRequirementId, setAnswerBasisSelectionSavingRequirementId] = useState(null);
@@ -1995,9 +1996,29 @@ export default function AiShow({
         ?? '—';
     const activeRequirementKnowledgeGrounding = activeRequirementDraft?.knowledgeGrounding ?? null;
     const activeRequirementMissingKnowledge = activeRequirementDraft?.missingKnowledge ?? null;
-    const activeRequirementMissingKnowledgeJudgeMeta = activeRequirementMissingKnowledge?.judge_status
-        ? KNOWLEDGE_GROUNDING_JUDGE_META[activeRequirementMissingKnowledge.judge_status] ?? null
-        : null;
+    const activeRequirementMissingKnowledgeSummary = typeof activeRequirementMissingKnowledge?.missing_knowledge_summary === 'string'
+        ? activeRequirementMissingKnowledge.missing_knowledge_summary.trim()
+        : '';
+    const activeRequirementMissingKnowledgeReasoning = typeof activeRequirementMissingKnowledge?.reasoning_summary === 'string'
+        ? activeRequirementMissingKnowledge.reasoning_summary.trim()
+        : '';
+    const activeRequirementMissingKnowledgeExplanation = typeof activeRequirementMissingKnowledge?.message === 'string'
+        ? activeRequirementMissingKnowledge.message.trim()
+        : '';
+    const activeRequirementMissingKnowledgeRecommendedDocumentTitle = typeof activeRequirementMissingKnowledge?.recommended_document_title === 'string'
+        ? activeRequirementMissingKnowledge.recommended_document_title.trim()
+        : '';
+    const activeRequirementMissingKnowledgeSuggestedFilename = typeof activeRequirementMissingKnowledge?.suggested_filename === 'string'
+        ? activeRequirementMissingKnowledge.suggested_filename.trim()
+        : '';
+    const activeRequirementMissingKnowledgeHasDetails = activeRequirementMissingKnowledge !== null
+        && (
+            activeRequirementMissingKnowledgeSummary !== ''
+            || activeRequirementMissingKnowledgeReasoning !== ''
+            || (activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0
+            || (activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0
+            || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0
+        );
     const activeRequirementAnswerBasisItemIds = activeRequirementKey !== null
         ? answerBasisSelectionsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerBasisSelectionState(activeRequirement)
         : [];
@@ -2016,6 +2037,10 @@ export default function AiShow({
 
     useEffect(() => {
         setAnswerDraftReaderExpanded(false);
+    }, [activeRequirementKey]);
+
+    useEffect(() => {
+        setAnswerDraftMissingKnowledgeDetailsExpanded(false);
     }, [activeRequirementKey]);
 
     const handleDocumentChange = (event) => {
@@ -3544,7 +3569,7 @@ export default function AiShow({
                             ) : (
                                 <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-2 ${
                                     activeRequirementBlockedMissingKnowledge
-                                        ? 'border-rose-200 bg-rose-50/40'
+                                        ? 'border-amber-200 bg-amber-50/50'
                                         : 'border-violet-200 bg-violet-50/40'
                                 }`}>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3578,148 +3603,169 @@ export default function AiShow({
                                     ) : null}
 
                                     {activeRequirementBlockedMissingKnowledge ? (
-                                        <div className="rounded-2xl border border-rose-200 bg-white px-4 py-5 text-sm leading-6 text-slate-700">
-                                            <div className="text-sm font-semibold text-slate-950">
-                                                {activeRequirementMissingKnowledge?.message ?? tai.requirement_blocked_message}
+                                        <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                            <div className="flex flex-wrap items-start gap-3">
+                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                    {tai.coverage_status_missing}
+                                                </span>
+                                                <div className="min-w-0 flex-1 text-sm font-semibold text-slate-950">
+                                                    {tai.requirement_blocked_message}
+                                                </div>
                                             </div>
-                                            <p className="mt-2 text-sm leading-6 text-slate-600">
-                                                {tai.document_processed_hint}
-                                            </p>
-                                            <p className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                {tai.requirements_empty_hint}
-                                            </p>
 
-                                            {activeRequirementMissingKnowledge?.missing_knowledge_summary ? (
-                                                <p className="mt-3 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">
-                                                    {activeRequirementMissingKnowledge.missing_knowledge_summary}
+                                            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-4 text-sm leading-6 text-slate-700">
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                    {tai.assessment_next_step_label}
+                                                </div>
+                                                <p className="mt-2 text-sm leading-6 text-slate-700">
+                                                    {tai.blocked_knowledge_intro}
                                                 </p>
-                                            ) : null}
 
-                                            <div className="mt-4 space-y-2 rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
-                                                <div>
-                                                    <span className="font-semibold text-slate-900">{tai.recommended_document_label}</span>{' '}
-                                                    {activeRequirementMissingKnowledge?.recommended_document_title ?? tai.unknown_document_title}
-                                                </div>
-                                                <div>
-                                                    <span className="font-semibold text-slate-900">{tai.suggested_filename_label}</span>{' '}
-                                                    {activeRequirementMissingKnowledge?.suggested_filename ?? 'dokumentasjon-for-udekket-krav.docx'}
-                                                </div>
+                                                {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' || activeRequirementMissingKnowledgeSuggestedFilename !== '' ? (
+                                                    <div className="mt-3 space-y-2 rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm leading-6 text-slate-700">
+                                                        {activeRequirementMissingKnowledgeRecommendedDocumentTitle !== '' ? (
+                                                            <div>
+                                                                <span className="font-semibold text-slate-900">{tai.recommended_document_label}</span>{' '}
+                                                                {activeRequirementMissingKnowledgeRecommendedDocumentTitle}
+                                                            </div>
+                                                        ) : null}
+
+                                                        {activeRequirementMissingKnowledgeSuggestedFilename !== '' ? (
+                                                            <div>
+                                                                <span className="font-semibold text-slate-900">{tai.suggested_filename_label}</span>{' '}
+                                                                {activeRequirementMissingKnowledgeSuggestedFilename}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                ) : null}
+
+                                                <p className="mt-3 text-sm leading-6 text-slate-600">
+                                                    {tai.document_processed_hint}
+                                                </p>
                                             </div>
 
-                                            {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0
-                                                || (activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0
-                                                || (activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
-                                                <div className="mt-4 space-y-3">
+                                            {activeRequirementMissingKnowledgeHasDetails ? (
+                                                <div className="mt-4">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setAnswerDraftMissingKnowledgeDetailsExpanded((currentState) => !currentState)}
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                                                        aria-expanded={answerDraftMissingKnowledgeDetailsExpanded}
+                                                    >
+                                                        {answerDraftMissingKnowledgeDetailsExpanded
+                                                            ? tai.blocked_knowledge_details_hide
+                                                            : tai.blocked_knowledge_details_show}
+                                                    </button>
+
+                                                    {answerDraftMissingKnowledgeDetailsExpanded ? (
+                                                        <div className="mt-3 space-y-4 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
+                                                            {activeRequirementMissingKnowledgeExplanation !== ''
+                                                                && activeRequirementMissingKnowledgeExplanation !== tai.requirement_blocked_message ? (
+                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                    {activeRequirementMissingKnowledgeExplanation}
+                                                                </p>
+                                                            ) : null}
+
+                                                            {activeRequirementMissingKnowledgeSummary !== '' ? (
+                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                    {activeRequirementMissingKnowledgeSummary}
+                                                                </p>
+                                                            ) : activeRequirementMissingKnowledgeReasoning !== '' ? (
+                                                                <p className="text-sm leading-6 text-slate-700">
+                                                                    {activeRequirementMissingKnowledgeReasoning}
+                                                                </p>
+                                                            ) : null}
+
                                                             {(activeRequirementMissingKnowledge?.directly_supported_points?.length ?? 0) > 0 ? (
-                                                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                                                                {tai.knowledge_grounding_judge_supported}
-                                                            </div>
-                                                            <ul className="mt-3 space-y-2">
-                                                                {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
-                                                                    <li key={`${point}-${index}`} className="flex gap-2">
-                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                                                                        <span className="space-y-1">
-                                                                            <span className="block font-medium text-slate-900">
-                                                                                {point?.requirement_point ?? '—'}
-                                                                            </span>
-                                                                            {point?.support_summary ? (
-                                                                                <span className="block text-slate-700">
-                                                                                    {point.support_summary}
-                                                                                </span>
-                                                                            ) : null}
-                                                                            {(() => {
-                                                                                const evidenceLabel = point?.evidence_reference
-                                                                                    ?? point?.evidence_quote
-                                                                                    ?? point?.source?.source_label
-                                                                                    ?? null;
-
-                                                                                if (evidenceLabel === null) {
-                                                                                    return null;
-                                                                                }
-
-                                                                                if (point?.source?.open_url) {
-                                                                                    return (
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => openEvidenceSource(point)}
-                                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-xs font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                                                                                            aria-label={`${tai.evidence_title} ${evidenceLabel}`}
-                                                                                        >
-                                                                                            {tai.evidence_title}: {evidenceLabel}
-                                                                                        </button>
-                                                                                    );
-                                                                                }
-
-                                                                                return (
-                                                                                    <span className="block text-xs text-slate-500">
-                                                                                        {tai.evidence_title}: {evidenceLabel}
+                                                                <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                        {tai.directly_supported_label}
+                                                                    </div>
+                                                                    <ul className="space-y-2">
+                                                                        {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
+                                                                            <li key={`${point}-${index}`} className="flex gap-2">
+                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                                                                <span className="space-y-1">
+                                                                                    <span className="block font-medium text-slate-900">
+                                                                                        {point?.requirement_point ?? '—'}
                                                                                     </span>
-                                                                                );
-                                                                            })()}
-                                                                        </span>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        </div>
-                                                    ) : null}
+                                                                                    {point?.support_summary ? (
+                                                                                        <span className="block text-slate-700">
+                                                                                            {point.support_summary}
+                                                                                        </span>
+                                                                                    ) : null}
+                                                                                    {(() => {
+                                                                                        const evidenceLabel = point?.evidence_reference
+                                                                                            ?? point?.evidence_quote
+                                                                                            ?? point?.source?.source_label
+                                                                                            ?? null;
+
+                                                                                        if (evidenceLabel === null) {
+                                                                                            return null;
+                                                                                        }
+
+                                                                                        if (point?.source?.open_url) {
+                                                                                            return (
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={() => openEvidenceSource(point)}
+                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-xs font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                                                                    aria-label={`${tai.evidence_title} ${evidenceLabel}`}
+                                                                                                >
+                                                                                                    {tai.evidence_title}: {evidenceLabel}
+                                                                                                </button>
+                                                                                            );
+                                                                                        }
+
+                                                                                        return (
+                                                                                            <span className="block text-xs text-slate-500">
+                                                                                                {tai.evidence_title}: {evidenceLabel}
+                                                                                            </span>
+                                                                                        );
+                                                                                    })()}
+                                                                                </span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            ) : null}
 
                                                             {(activeRequirementMissingKnowledge?.related_but_insufficient_points?.length ?? 0) > 0 ? (
-                                                        <div className="rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
-                                                                {tai.knowledge_grounding_judge_partial}
-                                                            </div>
-                                                            <ul className="mt-3 space-y-2">
-                                                                {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
-                                                                    <li key={`${point}-${index}`} className="flex gap-2">
-                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                                                                        <span>{point}</span>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        </div>
-                                                    ) : null}
+                                                                <div className="space-y-2 rounded-2xl border border-amber-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                                        {tai.related_insufficient_label}
+                                                                    </div>
+                                                                    <p className="text-sm leading-6 text-slate-600">
+                                                                        {tai.blocked_related_knowledge}
+                                                                    </p>
+                                                                    <ul className="space-y-2">
+                                                                        {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
+                                                                            <li key={`${point}-${index}`} className="flex gap-2">
+                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                                                                                <span>{point}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            ) : null}
 
                                                             {(activeRequirementMissingKnowledge?.unsupported_points?.length ?? 0) > 0 ? (
-                                                        <div className="rounded-2xl border border-rose-100 bg-rose-50/70 px-4 py-4 text-sm leading-6 text-slate-700">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
-                                                                {tai.knowledge_grounding_judge_unsupported}
-                                                            </div>
-                                                            <ul className="mt-3 space-y-2">
-                                                                {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
-                                                                    <li key={`${point}-${index}`} className="flex gap-2">
-                                                                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
-                                                                        <span>{point}</span>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
+                                                                <div className="space-y-2 rounded-2xl border border-rose-100 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                        {tai.unsupported_points_label}
+                                                                    </div>
+                                                                    <ul className="space-y-2">
+                                                                        {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
+                                                                            <li key={`${point}-${index}`} className="flex gap-2">
+                                                                                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+                                                                                <span>{point}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                     ) : null}
-                                                </div>
-                                            ) : null}
-
-                                            {activeRequirementMissingKnowledge?.reasoning_summary
-                                                && activeRequirementMissingKnowledge?.judge_status !== 'failed' ? (
-                                                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                    {activeRequirementMissingKnowledge.reasoning_summary}
-                                                </div>
-                                            ) : null}
-
-                                            <p className="mt-4 text-sm leading-6 text-slate-600">
-                                                {tai.document_processed_hint}
-                                            </p>
-
-                                            {activeRequirementMissingKnowledgeJudgeMeta ? (
-                                                <div className="mt-4 flex justify-end">
-                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${activeRequirementMissingKnowledgeJudgeMeta.className}`}>
-                                                        {activeRequirementMissingKnowledgeJudgeMeta.label}
-                                                    </span>
-                                                </div>
-                                            ) : activeRequirementKnowledgeGrounding ? (
-                                                <div className="mt-4 flex justify-end">
-                                                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
-                                                        {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
-                                                    </span>
                                                 </div>
                                             ) : null}
                                         </div>
