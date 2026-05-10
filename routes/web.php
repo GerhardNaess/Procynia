@@ -170,4 +170,5 @@ Route::prefix('app')
         Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
         Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
         Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
+        Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
     });
