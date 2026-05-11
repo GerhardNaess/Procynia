@@ -6,6 +6,7 @@ use App\Models\Customer;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
 
 class PlanDistributionWidget extends TableWidget
@@ -18,10 +19,12 @@ class PlanDistributionWidget extends TableWidget
     {
         return $table
             ->heading('Planfordeling')
+            ->defaultKeySort(false)
             ->query(
                 Customer::query()
                     ->selectRaw('subscription_plan, billing_interval, count(*) as customer_count')
                     ->groupBy('subscription_plan', 'billing_interval')
+                    ->reorder()
                     ->orderByRaw("CASE subscription_plan WHEN 'enterprise' THEN 0 WHEN 'ultra' THEN 1 WHEN 'max' THEN 2 WHEN 'pro' THEN 3 ELSE 4 END"),
             )
             ->columns([
@@ -56,5 +59,15 @@ class PlanDistributionWidget extends TableWidget
                     ->alignEnd(),
             ])
             ->paginated(false);
+    }
+
+    public function getTableRecordKey(Model | array $record): string
+    {
+        if (is_array($record)) {
+            return (string) ($record['key']
+                ?? (($record['subscription_plan'] ?? 'unknown').'|'.($record['billing_interval'] ?? 'unknown')));
+        }
+
+        return (string) ($record->subscription_plan ?? 'unknown').'|'.(string) ($record->billing_interval ?? 'unknown');
     }
 }

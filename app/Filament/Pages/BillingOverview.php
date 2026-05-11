@@ -9,6 +9,7 @@ use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use UnitEnum;
 
 class BillingOverview extends Page
 {
@@ -16,7 +17,11 @@ class BillingOverview extends Page
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
 
-    protected static ?int $navigationSort = 2;
+    protected static ?string $navigationLabel = 'Oversikt';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Fakturering';
+
+    protected static ?int $navigationSort = 1;
 
     public array $customers = [];
 
@@ -44,7 +49,7 @@ class BillingOverview extends Page
 
     public static function getNavigationLabel(): string
     {
-        return 'Fakturering';
+        return 'Oversikt';
     }
 
     public function getTitle(): string

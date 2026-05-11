@@ -43,11 +43,21 @@ class MrrWidget extends StatsOverviewWidget
                     ->each(function ($line) use (&$mrr): void {
                         $price = $line->billingPrice;
 
-                        if (! $price instanceof BillingPrice || ! $price->is_recurring || $price->unit_amount === null) {
+                        if (! $price instanceof BillingPrice || ! $price->is_recurring) {
                             return;
                         }
 
-                        $lineAmount = (int) $price->unit_amount * max(1, (int) $line->quantity);
+                        $unitAmount = data_get($line->metadata, 'custom_unit_amount');
+
+                        if (! is_numeric($unitAmount)) {
+                            $unitAmount = $price->unit_amount;
+                        }
+
+                        if ($unitAmount === null) {
+                            return;
+                        }
+
+                        $lineAmount = (int) $unitAmount * max(1, (int) $line->quantity);
 
                         if ($price->interval === BillingPrice::INTERVAL_YEARLY) {
                             $mrr += $lineAmount / 12;
