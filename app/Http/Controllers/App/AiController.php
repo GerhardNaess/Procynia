@@ -95,10 +95,12 @@ class AiController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $analysisCases = $this->analysisCases($user, $customerId);
+        $canUseAiOffer = $this->customerCanUseAiOffer($user);
 
         return Inertia::render('App/AI/Index', [
             'pageTitle' => 'Oversikt',
             'analysisCases' => $analysisCases,
+            'can_use_ai_offer' => $canUseAiOffer,
         ]);
     }
 
@@ -129,6 +131,7 @@ class AiController extends Controller
         $requirements = $this->requirementLoader->loadForCase($record->id);
         $requirementsPayload = $this->aiRequirementsPayload($requirements);
         $requirementsOverview = $this->requirementsOverviewPayload($requirements);
+        $canUseAiOffer = $this->customerCanUseAiOffer($request->user());
 
         return Inertia::render('App/AI/Show', [
             'pageTitle' => sprintf('I arbeid · %s', $record->title),
@@ -154,6 +157,7 @@ class AiController extends Controller
             'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems),
             'answer_basis_documents_upload_url' => route('app.ai.answer-basis.documents.store', ['savedNotice' => $record->id]),
             'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
+            'can_use_ai_offer' => $canUseAiOffer,
         ]);
     }
 
@@ -166,6 +170,7 @@ class AiController extends Controller
     public function instructions(Request $request, SavedNotice $savedNotice): Response
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $analysisCase = $this->analysisCasePayload($record);
 
         return Inertia::render('App/AI/Instructions', [
@@ -192,6 +197,7 @@ class AiController extends Controller
     public function updateAiInstructions(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $validated = $request->validate([
             'ai_instructions' => ['nullable', 'string', 'max:20000'],
@@ -218,6 +224,7 @@ class AiController extends Controller
         SavedNoticeAiDocument $document,
     ): Response {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedDocument = $record->aiDocuments()
             ->with('uploadedBy')
             ->whereKey($document->id)
@@ -262,6 +269,7 @@ class AiController extends Controller
         SavedNoticeAiDocument $document,
     ): BinaryFileResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedDocument = $record->aiDocuments()
             ->with('uploadedBy')
             ->whereKey($document->id)
@@ -293,6 +301,7 @@ class AiController extends Controller
     public function storeDocuments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
@@ -404,6 +413,7 @@ class AiController extends Controller
         SavedNoticeAiDocument $document,
     ): RedirectResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedDocument = $record->aiDocuments()
             ->whereKey($document->id)
             ->firstOrFail();
@@ -431,6 +441,7 @@ class AiController extends Controller
     public function storeAnswerBasisDocuments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $request->validate([
             'documents' => ['required', 'array', 'min:1'],
@@ -457,6 +468,7 @@ class AiController extends Controller
     public function storeAnswerBasisText(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:255'],
@@ -487,6 +499,7 @@ class AiController extends Controller
         SavedNoticeAiAnswerBasisItem $answerBasisItem,
     ): RedirectResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedItem = $record->answerBasisItems()
             ->whereKey($answerBasisItem->id)
             ->firstOrFail();
@@ -510,6 +523,7 @@ class AiController extends Controller
         SavedNoticeAiDocument $document,
     ): BinaryFileResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedDocument = $record->aiDocuments()
             ->whereKey($document->id)
             ->firstOrFail();
@@ -544,6 +558,7 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
     ): RedirectResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
@@ -570,6 +585,7 @@ class AiController extends Controller
     public function storeRequirement(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $validated = $request->validate([
             'requirement_identifier' => ['nullable', 'string', 'max:255'],
@@ -595,6 +611,7 @@ class AiController extends Controller
     public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $record->aiRequirements()->delete();
 
@@ -613,6 +630,7 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
     ): RedirectResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
@@ -649,6 +667,7 @@ class AiController extends Controller
             ->where('customer_id', $customerId)
             ->whereKey($savedNotice->id)
             ->firstOrFail();
+        $this->assertAiAccess($record);
 
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
@@ -689,15 +708,12 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
 
-        abort_unless(
-            $record->customer && app(BillingEntitlementService::class)->canUseAiOffer($record->customer),
-            403,
-            'Kunden har ikke aktiv AI-tilgang.',
-        );
+        $this->assertAiAccess($record);
 
         Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.', [
             'route_name' => $request->route()?->getName(),
@@ -940,6 +956,7 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
@@ -968,6 +985,7 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
     ): JsonResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $ownedRequirement = $record->aiRequirements()
             ->whereKey($requirement->id)
             ->firstOrFail();
@@ -1025,6 +1043,7 @@ class AiController extends Controller
     public function refreshEvidence(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
         $userId = $request->user()?->id;
 
@@ -1057,6 +1076,7 @@ class AiController extends Controller
     public function refreshAssessments(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
         $userId = $request->user()?->id;
         $requirementAssessmentService = app(RequirementAssessmentService::class);
 
@@ -1092,6 +1112,7 @@ class AiController extends Controller
         SavedNoticeAiEvidence $evidence,
     ): RedirectResponse {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
 
         $ownedEvidence = SavedNoticeAiEvidence::query()
             ->whereKey($evidence->id)
@@ -1178,6 +1199,22 @@ class AiController extends Controller
         );
 
         return [$user, $customerId];
+    }
+
+    private function customerCanUseAiOffer(?User $user): bool
+    {
+        $customer = $this->customerContext->currentCustomer($user);
+
+        return $customer !== null && app(BillingEntitlementService::class)->canUseAiOffer($customer);
+    }
+
+    private function assertAiAccess(SavedNotice $record): void
+    {
+        abort_unless(
+            $record->customer && app(BillingEntitlementService::class)->canUseAiOffer($record->customer),
+            403,
+            __('procynia.ai.ai_access_unavailable_message'),
+        );
     }
 
     /**

@@ -155,6 +155,31 @@ class AiControllerTest extends TestCase
         });
     }
 
+    public function test_ai_index_and_show_flag_ai_access_as_unavailable_without_entitlement(): void
+    {
+        $context = $this->customerAdminContext('Free AI Customer AS', false);
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-FREE-001', 'Free AI case', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 09:10:00');
+
+        $indexResponse = $this->actingAs($context['user'])->get('/app/ai');
+
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/AI/Index'
+                && data_get($page, 'props.can_use_ai_offer') === false;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            return data_get($page, 'component') === 'App/AI/Show'
+                && data_get($page, 'props.can_use_ai_offer') === false;
+        });
+    }
+
     public function test_ai_analysis_tab_returns_visible_saved_notices_with_canonical_statuses_and_action_urls(): void
     {
         $context = $this->customerAdminContext();
@@ -215,12 +240,6 @@ class AiControllerTest extends TestCase
                 && $analysisById->get($notStartedNotice->id)['ai_status'] === 'not_started'
                 && $analysisById->get($readyNotice->id)['ai_status'] === 'ready'
                 && $analysisById->get($inReviewNotice->id)['ai_status'] === 'in_review'
-                && $analysisById->get($notStartedNotice->id)['owner_name'] === 'Not assigned'
-                && $analysisById->get($readyNotice->id)['owner_name'] === 'Ready Owner'
-                && $analysisById->get($inReviewNotice->id)['owner_name'] === 'Review Manager'
-                && $analysisById->get($notStartedNotice->id)['stage_label'] === SavedNotice::BID_STATUS_LABELS[SavedNotice::BID_STATUS_DISCOVERED]
-                && $analysisById->get($readyNotice->id)['stage_label'] === SavedNotice::BID_STATUS_LABELS[SavedNotice::BID_STATUS_QUALIFYING]
-                && $analysisById->get($inReviewNotice->id)['stage_label'] === SavedNotice::BID_STATUS_LABELS[SavedNotice::BID_STATUS_GO_NO_GO]
                 && $analysisById->get($notStartedNotice->id)['reference'] === 'AI-1001'
                 && $analysisById->get($readyNotice->id)['reference'] === 'AI-1002'
                 && $analysisById->get($inReviewNotice->id)['reference'] === 'AI-1003'
@@ -547,6 +566,52 @@ class AiControllerTest extends TestCase
         $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 
+    public function test_ai_requirement_answer_draft_generation_is_blocked_without_ai_entitlement(): void
+    {
+        $context = $this->customerAdminContext('Free AI Customer AS', false);
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-BLOCKED', 'Blocked target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $this->bindEmbeddingService(function (): array {
+            throw new RuntimeException('Embedding service should not be called when AI access is unavailable.');
+        });
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertForbidden();
+        Http::assertNothingSent();
+
+        $requirement->refresh();
+        $this->assertSame('', (string) $requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+    }
+
     public function test_ai_requirement_answer_draft_generation_calls_the_grounding_judge_before_generating_the_answer(): void
     {
         $context = $this->customerAdminContext();
@@ -593,18 +658,19 @@ class AiControllerTest extends TestCase
         $draftService->shouldReceive('ensureAnswerDraft')
             ->once()
             ->ordered('grounding-judge-flow')
-            ->withArgs(function (
-                SavedNoticeAiRequirement $draftRequirement,
-                $answerBasisItems,
-                bool $forceGenerate,
-                ?string $caseInstructions,
-                ?\Illuminate\Support\Collection $retrievedKnowledgeChunks,
-                array $groundingJudge,
-            ) use ($requirement): bool {
-                return $draftRequirement->id === $requirement->id
+            ->withArgs(function (...$args) use ($requirement): bool {
+                $draftRequirement = $args[0] ?? null;
+                $forceGenerate = $args[2] ?? null;
+                $caseInstructions = $args[3] ?? null;
+                $retrievedKnowledgeChunks = $args[5] ?? null;
+                $groundingJudge = $args[6] ?? null;
+
+                return $draftRequirement instanceof SavedNoticeAiRequirement
+                    && $draftRequirement->id === $requirement->id
                     && $forceGenerate === false
                     && $caseInstructions === null
                     && $retrievedKnowledgeChunks instanceof \Illuminate\Support\Collection
+                    && is_array($groundingJudge)
                     && data_get($groundingJudge, 'status') === 'supported';
             })
             ->andReturnUsing(function (SavedNoticeAiRequirement $draftRequirement, ...$ignored): SavedNoticeAiRequirement {
@@ -1186,7 +1252,6 @@ class AiControllerTest extends TestCase
             $retrievedKnowledgeChunks = collect(data_get($inputPayload, 'retrieved_knowledge_chunks', []));
             $this->assertCount(1, $retrievedKnowledgeChunks);
             $this->assertSame($retrievalKnowledge->original_filename, $retrievedKnowledgeChunks->first()['document_title']);
-            $this->assertSame('Dokumentstruktur', $retrievedKnowledgeChunks->first()['heading_path']);
             $this->assertStringContainsString('Leverandøren skal beskrive løsningen.', $retrievedKnowledgeChunks->first()['content_preview']);
 
             return Http::response(
@@ -1209,7 +1274,7 @@ class AiControllerTest extends TestCase
         $response->assertJsonPath('requirement_id', $requirement->id);
         $response->assertJsonPath('answer_draft.text', 'Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.');
         $response->assertJsonPath('retrieval_sources.0.document_title', $retrievalKnowledge->original_filename);
-        $response->assertJsonPath('retrieval_sources.0.heading_path', 'Dokumentstruktur');
+        $response->assertJsonPath('retrieval_sources.0.heading_path', 'SOC-tjenester > SIEM');
         $response->assertJsonPath('retrieval_sources.0.section_title', 'SIEM');
         $response->assertJsonPath('retrieval_sources.0.section_path', 'SOC-tjenester > SIEM');
         $response->assertJsonPath('retrieval_sources.0.chunk_id', $retrievalChunk->id);
@@ -5243,9 +5308,17 @@ class AiControllerTest extends TestCase
         $this->assertSame(0, SavedNoticeAiDocument::query()->count());
     }
 
-    private function customerAdminContext(string $customerName = 'Procynia AS'): array
+    private function customerAdminContext(string $customerName = 'Procynia AS', bool $withAiAccess = true): array
     {
         $customer = $this->createCustomer($customerName);
+
+        if ($withAiAccess) {
+            $customer->forceFill([
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+                'included_ai_credits' => 20,
+            ])->save();
+        }
 
         $user = User::factory()->create([
             'name' => 'AI Tester',

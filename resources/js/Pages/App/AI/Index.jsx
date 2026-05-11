@@ -26,9 +26,16 @@ function formatDate(value, locale) {
  * Side effects: Navigation to cases happens through Inertia links.
  */
 export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) {
-    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const {
+        locale = 'nb-NO',
+        translations = {},
+        auth = {},
+        can_use_ai_offer: canUseAiOffer = true,
+    } = usePage().props;
     const tai = translations?.ai ?? {};
     const rows = Array.isArray(analysisCases) ? analysisCases : [];
+    const currentUser = auth.user ?? null;
+    const billingHref = currentUser?.is_system_owner ? '/app/billing' : null;
 
     const AI_STATUS_LABEL = {
         not_started: tai.ai_status_not_started ?? 'Ikke startet',
@@ -50,6 +57,25 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                         {tai.index_subtitle ?? 'Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.'}
                     </p>
                 </section>
+
+                {!canUseAiOffer ? (
+                    <section className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
+                        <div className="font-semibold">
+                            {tai.ai_access_unavailable_title ?? 'AI er ikke tilgjengelig'}
+                        </div>
+                        <p className="mt-1">
+                            {tai.ai_access_unavailable_message ?? 'AI er ikke tilgjengelig for abonnementet ditt. System Owner kan aktivere eller endre abonnement under Fakturering.'}
+                        </p>
+                        {billingHref ? (
+                            <a
+                                href={billingHref}
+                                className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                            >
+                                {tai.ai_access_billing_cta ?? 'Gå til Fakturering'}
+                            </a>
+                        ) : null}
+                    </section>
+                ) : null}
 
                 <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">

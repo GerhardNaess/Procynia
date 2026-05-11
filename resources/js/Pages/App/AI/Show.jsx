@@ -669,6 +669,27 @@ function EvidenceSourceModal({ evidence = null, onClose, aiText = {} }) {
     );
 }
 
+function AiAccessNotice({ aiText = {}, billingHref = '' }) {
+    return (
+        <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
+            <div className="font-semibold">
+                {aiText.ai_access_unavailable_title}
+            </div>
+            <p className="mt-1 text-amber-900/90">
+                {aiText.ai_access_unavailable_message}
+            </p>
+            {billingHref ? (
+                <a
+                    href={billingHref}
+                    className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
+                >
+                    {aiText.ai_access_billing_cta}
+                </a>
+            ) : null}
+        </div>
+    );
+}
+
 function normalizeStringList(value) {
     if (!Array.isArray(value)) {
         return [];
@@ -1506,8 +1527,12 @@ export default function AiShow({
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
         translations = {},
+        auth = {},
+        can_use_ai_offer: canUseAiOffer = true,
     } = usePage().props;
     const tai = translations?.ai ?? {};
+    const currentUser = auth.user ?? null;
+    const billingHref = currentUser?.is_system_owner ? '/app/billing' : '';
 
     const AI_STATUS_META = {
         not_started: {
@@ -2060,7 +2085,7 @@ export default function AiShow({
     const submitDocuments = (event) => {
         event.preventDefault();
 
-        if (!documentsUploadUrl || documentUploadForm.processing) {
+        if (!canUseAiOffer || !documentsUploadUrl || documentUploadForm.processing) {
             return;
         }
 
@@ -2133,6 +2158,11 @@ export default function AiShow({
     };
 
     const requestAnswerDraftGeneration = async (requirement, { force = false } = {}) => {
+        if (!canUseAiOffer) {
+            setAnswerDraftError(tai.ai_access_unavailable_message);
+            return;
+        }
+
         if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
             return;
         }
@@ -2201,6 +2231,11 @@ export default function AiShow({
     };
 
     const openRequirementAnswerWorkspace = (requirement) => {
+        if (!canUseAiOffer) {
+            setAnswerDraftError(tai.ai_access_unavailable_message);
+            return;
+        }
+
         if (!requirement || !requirement.answer_draft_generate_url || requirement.approval_status === 'rejected') {
             return;
         }
@@ -2522,7 +2557,7 @@ export default function AiShow({
      * Side effects: Sends a POST request that regenerates deterministic evidence rows on the server.
      */
     const refreshEvidence = () => {
-        if (!evidenceRefreshUrl || requirementUpdatesLocked) {
+        if (!canUseAiOffer || !evidenceRefreshUrl || requirementUpdatesLocked) {
             return;
         }
 
@@ -2544,7 +2579,7 @@ export default function AiShow({
      * Side effects: Sends a POST request that regenerates the requirement assessments on the server.
      */
     const refreshAssessments = () => {
-        if (!assessmentRefreshUrl || requirementUpdatesLocked) {
+        if (!canUseAiOffer || !assessmentRefreshUrl || requirementUpdatesLocked) {
             return;
         }
 
@@ -2589,6 +2624,10 @@ export default function AiShow({
                     </div>
                 </section>
 
+                {!canUseAiOffer ? (
+                    <AiAccessNotice aiText={tai} billingHref={billingHref} />
+                ) : null}
+
                 <section className="mb-5 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                     <div className="space-y-5">
                         <div className="space-y-2">
@@ -2603,50 +2642,56 @@ export default function AiShow({
                             </p>
                         </div>
 
-                        <form onSubmit={submitDocuments} className="space-y-4">
-                            <div className="space-y-2">
-                                <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
-                                    {tai.choose_files}
-                                </label>
-                                <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                                    <label
-                                        htmlFor="ai-documents"
-                                        className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700"
-                                    >
+                        {canUseAiOffer ? (
+                            <form onSubmit={submitDocuments} className="space-y-4">
+                                <div className="space-y-2">
+                                    <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
                                         {tai.choose_files}
                                     </label>
-                                    <span className="min-w-0 flex-1 text-sm text-slate-500">
-                                        {selectedDocumentsLabel}
-                                    </span>
-                                    <button
-                                        type="submit"
-                                        disabled={
-                                            documentUploadForm.processing
-                                            || !documentsUploadUrl
-                                            || documentUploadForm.data.documents.length === 0
-                                        }
-                                        className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
-                                    </button>
-                                    <input
-                                        id="ai-documents"
-                                        ref={fileInputRef}
-                                        type="file"
-                                        multiple
-                                        accept=".pdf,.doc,.docx,.xls,.xlsx"
-                                        onChange={handleDocumentChange}
-                                        className="sr-only"
-                                    />
+                                    <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                        <label
+                                            htmlFor="ai-documents"
+                                            className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700"
+                                        >
+                                            {tai.choose_files}
+                                        </label>
+                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                            {selectedDocumentsLabel}
+                                        </span>
+                                        <button
+                                            type="submit"
+                                            disabled={
+                                                documentUploadForm.processing
+                                                || !documentsUploadUrl
+                                                || documentUploadForm.data.documents.length === 0
+                                            }
+                                            className="ml-auto inline-flex shrink-0 items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {documentUploadForm.processing ? tai.uploading : tai.upload_and_extract_requirements}
+                                        </button>
+                                        <input
+                                            id="ai-documents"
+                                            ref={fileInputRef}
+                                            type="file"
+                                            multiple
+                                            accept=".pdf,.doc,.docx,.xls,.xlsx"
+                                            onChange={handleDocumentChange}
+                                            className="sr-only"
+                                        />
+                                    </div>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        {tai.allowed_file_types}
+                                    </p>
+                                    {documentError ? (
+                                        <p className="text-sm text-rose-600">{documentError}</p>
+                                    ) : null}
                                 </div>
-                                <p className="text-xs leading-5 text-slate-500">
-                                    {tai.allowed_file_types}
-                                </p>
-                                {documentError ? (
-                                    <p className="text-sm text-rose-600">{documentError}</p>
-                                ) : null}
+                            </form>
+                        ) : (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
+                                {tai.ai_access_unavailable_message}
                             </div>
-                        </form>
+                        )}
                     </div>
                 </section>
 
@@ -2687,7 +2732,7 @@ export default function AiShow({
                                     {showAdvancedAI ? tai.hide_advanced : tai.advanced}
                                 </button>
 
-                                {showAdvancedAI ? (
+                                {canUseAiOffer && showAdvancedAI ? (
                                     <>
                                         <button
                                             type="button"
@@ -2844,7 +2889,8 @@ export default function AiShow({
                                         : '—';
                                     const showEvidenceSection = showAdvancedAI && (isApprovedRequirement || evidenceRows.length > 0);
                                     const isActiveRequirement = String(activeRequirementId) === String(requirement.id);
-                                    const canOpenAnswerWorkspace = Boolean(requirement.answer_draft_generate_url)
+                                    const canOpenAnswerWorkspace = canUseAiOffer
+                                        && Boolean(requirement.answer_draft_generate_url)
                                         && approvalStatus !== 'rejected';
                                     const requirementDraftState = answerDraftsByRequirementId[String(requirement.id)] ?? buildRequirementAnswerDraftState(requirement);
                                     const hasExistingAnswerDraft = (
@@ -3558,14 +3604,20 @@ export default function AiShow({
                             </div>
 
                             {!activeRequirement ? (
-                                <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
-                                    <div className="text-lg font-semibold text-slate-900">
-                                        {tai.no_active_answer_draft_title}
+                                canUseAiOffer ? (
+                                    <div className="flex min-h-0 flex-1 flex-col justify-start rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
+                                        <div className="text-lg font-semibold text-slate-900">
+                                            {tai.no_active_answer_draft_title}
+                                        </div>
+                                        <p className="mt-2 text-sm text-slate-500">
+                                            {tai.no_active_answer_draft_description}
+                                        </p>
                                     </div>
-                                    <p className="mt-2 text-sm text-slate-500">
-                                        {tai.no_active_answer_draft_description}
-                                    </p>
-                                </div>
+                                ) : (
+                                    <AiAccessNotice aiText={tai} billingHref={billingHref} />
+                                )
+                            ) : !canUseAiOffer ? (
+                                <AiAccessNotice aiText={tai} billingHref={billingHref} />
                             ) : (
                                 <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto rounded-[22px] border p-4 pr-2 ${
                                     activeRequirementBlockedMissingKnowledge
