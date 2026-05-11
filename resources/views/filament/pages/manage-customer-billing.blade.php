@@ -49,6 +49,8 @@
         $hasActiveStripeSubscription = filled($subscriptionData) && in_array($subscriptionData['status'] ?? null, ['active', 'trialing'], true);
         $billingLinesCount = count($billingLines);
         $serviceLevelsCount = count($serviceLevels);
+        $customerSpecificPricesCount = count($customerSpecificPrices);
+        $activeCustomerSpecificPricesCount = collect($customerSpecificPrices)->filter(fn (array $line): bool => ($line['status'] ?? null) === 'active')->count();
         $activeBillingLinesCount = collect($billingLines)->filter(fn (array $line): bool => in_array($line['status'] ?? null, ['active', 'pending_cancel'], true))->count();
         $activeServiceLevelsCount = collect($serviceLevels)->filter(fn (array $level): bool => ($level['status'] ?? null) === 'active')->count();
         $pendingOneTimeLinesCount = collect($billingLines)->filter(fn (array $line): bool => ($line['interval'] ?? null) === \App\Models\BillingPrice::INTERVAL_ONE_TIME && blank($line['stripe_invoice_id'] ?? null) && ($line['status'] ?? null) === 'active')->count();
@@ -205,6 +207,20 @@
                     <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Interne Procynia-billing-linjer</div>
                     <div class="mt-2 text-3xl font-semibold text-gray-950 dark:text-white">{{ $billingLinesCount }}</div>
                     <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Interne linjer for tjenester og tilgang. Ikke økonomisk fasit.</div>
+                    <div class="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Kilde: Procynia</div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Kundespesifikke priser</div>
+                    <div class="mt-2 text-3xl font-semibold text-gray-950 dark:text-white">{{ $customerSpecificPricesCount }}</div>
+                    <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Avtalte prislinjer som ikke endrer katalogprisene.</div>
+                    <div class="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Kilde: Procynia</div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Aktive kundespesifikke priser</div>
+                    <div class="mt-2 text-3xl font-semibold text-gray-950 dark:text-white">{{ $activeCustomerSpecificPricesCount }}</div>
+                    <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Aktive avtaler som fortsatt gjelder for kunden.</div>
                     <div class="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Kilde: Procynia</div>
                 </div>
 
@@ -501,6 +517,71 @@
                     </div>
                 @else
                     <p class="text-sm text-gray-500">Ingen interne Procynia-billing-linjer registrert ennå.</p>
+                @endif
+            </div>
+        </x-filament::section>
+
+        <x-filament::section heading="Kundespesifikke priser">
+            <div class="space-y-3 text-left">
+                <p class="max-w-3xl text-sm text-gray-600 dark:text-gray-400">
+                    Her ligger avtalte priser per kunde. Standard katalogpris beholdes uendret, mens avtalte beløp ligger på kundens egne billing-linjer.
+                </p>
+
+                @if (count($customerSpecificPrices) > 0)
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead class="border-b border-gray-200 dark:border-gray-700">
+                                <tr>
+                                    <th class="pb-2 font-medium text-gray-500">Tjeneste</th>
+                                    <th class="pb-2 font-medium text-gray-500">Standardpris</th>
+                                    <th class="pb-2 font-medium text-gray-500">Avtalt pris</th>
+                                    <th class="pb-2 font-medium text-gray-500">Intervall</th>
+                                    <th class="pb-2 font-medium text-gray-500">Mengde</th>
+                                    <th class="pb-2 font-medium text-gray-500">Bruker</th>
+                                    <th class="pb-2 font-medium text-gray-500">Status</th>
+                                    <th class="pb-2 font-medium text-gray-500">Periode</th>
+                                    <th class="pb-2 font-medium text-gray-500">Notat</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                @foreach ($customerSpecificPrices as $line)
+                                    @php
+                                        $lineStatus = (string) ($line['status'] ?? '—');
+                                        $lineStatusClass = match ($lineStatus) {
+                                            'active' => 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100',
+                                            'pending_cancel' => 'bg-warning-100 text-warning-800 dark:bg-warning-500/20 dark:text-warning-100',
+                                            'cancelled', 'ended' => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+                                            default => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+                                        };
+                                    @endphp
+                                    <tr>
+                                        <td class="py-2 font-medium">{{ $line['billing_price'] ?? $line['billing_product'] ?? '—' }}</td>
+                                        <td class="py-2">{{ $line['standard_amount_label'] ?? 'Ikke satt' }}</td>
+                                        <td class="py-2">{{ $line['custom_amount_label'] ?? 'Ikke satt' }}</td>
+                                        <td class="py-2">{{ $line['interval_label'] ?? '—' }}</td>
+                                        <td class="py-2">{{ $line['quantity'] ?? 1 }}</td>
+                                        <td class="py-2">{{ $line['user_name'] ?? 'Kunde' }}</td>
+                                        <td class="py-2">
+                                            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $lineStatusClass }}">
+                                                {{ $line['status_label'] ?? $lineStatus }}
+                                            </span>
+                                        </td>
+                                        <td class="py-2">
+                                            <div class="text-xs text-gray-600 dark:text-gray-400">
+                                                <div>Start: {{ $line['starts_at'] ?? '—' }}</div>
+                                                <div>Slutt: {{ $line['ends_at'] ?? 'Aktiv' }}</div>
+                                            </div>
+                                        </td>
+                                        <td class="py-2">
+                                            {{ filled($line['notes'] ?? null) ? $line['notes'] : '—' }}
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @else
+                    <p class="text-sm text-gray-500">Ingen kundespesifikke priser registrert ennå.</p>
                 @endif
             </div>
         </x-filament::section>

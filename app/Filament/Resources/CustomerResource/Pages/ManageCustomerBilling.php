@@ -5,16 +5,20 @@ namespace App\Filament\Resources\CustomerResource\Pages;
 use App\Filament\Resources\CustomerResource;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
+use App\Models\CustomerBillingLine;
 use App\Models\Customer;
 use App\Models\User;
 use App\Services\Billing\BillingService;
 use App\Services\SubscriptionService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Get;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
 use Throwable;
@@ -35,6 +39,8 @@ class ManageCustomerBilling extends Page
 
     public array $serviceLevels = [];
 
+    public array $customerSpecificPrices = [];
+
     public string $invoiceSort = 'month_desc';
 
     public int $activeUsersCount = 0;
@@ -42,6 +48,10 @@ class ManageCustomerBilling extends Page
     public int $openStripeInvoicesCount = 0;
 
     public ?string $oldestOpenStripeInvoiceLabel = null;
+
+    public int $customerSpecificPricesCount = 0;
+
+    public int $activeCustomerSpecificPricesCount = 0;
 
     public string $stripeOutstandingTotalLabel = 'Ikke tilgjengelig fra Stripe';
 
@@ -367,6 +377,179 @@ class ManageCustomerBilling extends Page
                 ->button(),
 
             ActionGroup::make([
+                Action::make('add_customer_specific_price')
+                    ->label('Legg til kundespesifikk pris')
+                    ->icon('heroicon-o-tag')
+                    ->form([
+                        Select::make('billing_price_id')
+                            ->label('Tjeneste / standardpris')
+                            ->options($this->customerSpecificPriceOptions())
+                            ->searchable()
+                            ->preload()
+                            ->live()
+                            ->required(),
+                        Select::make('user_id')
+                            ->label('Bruker (valgfritt)')
+                            ->options($this->customerUserOptions())
+                            ->searchable()
+                            ->preload(),
+                        Placeholder::make('standard_price_display')
+                            ->label('Standardpris')
+                            ->content(fn (Get $get): string => $this->selectedStandardPriceLabel($get('billing_price_id')))
+                            ->columnSpanFull(),
+                        Placeholder::make('standard_interval_display')
+                            ->label('Intervall')
+                            ->content(fn (Get $get): string => $this->selectedStandardIntervalLabel($get('billing_price_id')))
+                            ->columnSpanFull(),
+                        TextInput::make('custom_amount')
+                            ->label('Avtalt kundepris (øre)')
+                            ->numeric()
+                            ->minValue(0)
+                            ->required()
+                            ->helperText('Bruk øre. 149000 = 1 490 kr.'),
+                        TextInput::make('quantity')
+                            ->label('Antall')
+                            ->numeric()
+                            ->minValue(1)
+                            ->default(1)
+                            ->required(),
+                        Textarea::make('notes')
+                            ->label('Internt notat')
+                            ->rows(3)
+                            ->maxLength(1000)
+                            ->columnSpanFull(),
+                    ])
+                    ->action(function (array $data): void {
+                        try {
+                            $service = app(BillingService::class);
+                            $price = BillingPrice::query()->findOrFail((int) $data['billing_price_id']);
+                            $user = ! blank($data['user_id'] ?? null)
+                                ? User::query()->whereKey((int) $data['user_id'])->firstOrFail()
+                                : null;
+
+                            $service->addCustomerSpecificPrice(
+                                $this->record,
+                                $price,
+                                (int) $data['custom_amount'],
+                                (int) $data['quantity'],
+                                $user,
+                                filled($data['notes'] ?? null) ? (string) $data['notes'] : null,
+                            );
+
+                            $this->refreshBillingData();
+
+                            Notification::make()
+                                ->title('Kundespesifikk pris lagt til')
+                                ->success()
+                                ->send();
+                        } catch (Throwable $e) {
+                            Notification::make()
+                                ->title('Feil ved kundespesifikk pris')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+
+                Action::make('replace_customer_specific_price')
+                    ->label('Oppdater kundespesifikk pris')
+                    ->icon('heroicon-o-pencil-square')
+                    ->form([
+                        Select::make('customer_billing_line_id')
+                            ->label('Eksisterende prislinje')
+                            ->options($this->customerSpecificPriceLineOptions())
+                            ->searchable()
+                            ->preload()
+                            ->required(),
+                        TextInput::make('custom_amount')
+                            ->label('Ny avtalt kundepris (øre)')
+                            ->numeric()
+                            ->minValue(0)
+                            ->required()
+                            ->helperText('Bruk øre. 149000 = 1 490 kr.'),
+                        TextInput::make('quantity')
+                            ->label('Antall')
+                            ->numeric()
+                            ->minValue(1)
+                            ->default(1)
+                            ->required(),
+                        Textarea::make('notes')
+                            ->label('Internt notat')
+                            ->rows(3)
+                            ->maxLength(1000)
+                            ->columnSpanFull(),
+                    ])
+                    ->action(function (array $data): void {
+                        try {
+                            $line = $this->record->billingLines()
+                                ->customerSpecificPrice()
+                                ->whereKey((int) $data['customer_billing_line_id'])
+                                ->firstOrFail();
+
+                            app(BillingService::class)->replaceCustomerSpecificPrice(
+                                $line,
+                                (int) $data['custom_amount'],
+                                (int) $data['quantity'],
+                                filled($data['notes'] ?? null) ? (string) $data['notes'] : null,
+                            );
+
+                            $this->refreshBillingData();
+
+                            Notification::make()
+                                ->title('Kundespesifikk pris oppdatert')
+                                ->success()
+                                ->send();
+                        } catch (Throwable $e) {
+                            Notification::make()
+                                ->title('Feil ved oppdatering av kundespesifikk pris')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+
+                Action::make('deactivate_customer_specific_price')
+                    ->label('Deaktiver kundespesifikk pris')
+                    ->icon('heroicon-o-power')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->form([
+                        Select::make('customer_billing_line_id')
+                            ->label('Aktiv prislinje')
+                            ->options($this->activeCustomerSpecificPriceLineOptions())
+                            ->searchable()
+                            ->preload()
+                            ->required(),
+                    ])
+                    ->action(function (array $data): void {
+                        try {
+                            $line = $this->record->billingLines()
+                                ->customerSpecificPrice()
+                                ->where('status', 'active')
+                                ->whereKey((int) $data['customer_billing_line_id'])
+                                ->firstOrFail();
+
+                            app(BillingService::class)->deactivateCustomerSpecificPrice($line);
+                            $this->refreshBillingData();
+
+                            Notification::make()
+                                ->title('Kundespesifikk pris deaktivert')
+                                ->success()
+                                ->send();
+                        } catch (Throwable $e) {
+                            Notification::make()
+                                ->title('Feil ved deaktivering av kundespesifikk pris')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+            ])
+                ->label('Kundespesifikke priser')
+                ->icon('heroicon-o-tag')
+                ->button(),
+
+            ActionGroup::make([
                 Action::make('remove_recurring_line')
                     ->label('Fjern intern billing-linje')
                     ->icon('heroicon-o-minus')
@@ -502,6 +685,104 @@ class ManageCustomerBilling extends Page
             ->all();
     }
 
+    private function customerSpecificPriceOptions(): array
+    {
+        return app(BillingService::class)->recurringPriceOptions();
+    }
+
+    private function customerSpecificPriceLineOptions(bool $activeOnly = false): array
+    {
+        return collect($this->customerSpecificPrices)
+            ->filter(fn (array $line): bool => ! $activeOnly || ($line['status'] ?? null) === 'active')
+            ->mapWithKeys(function (array $line): array {
+                $standard = $line['billing_price'] ?? $line['billing_product'] ?? 'Kundespesifikk pris';
+                $standardAmount = $line['standard_amount_label'] ?? 'Ikke satt';
+                $customAmount = $line['custom_amount_label'] ?? 'Ikke satt';
+                $status = $line['status_label'] ?? 'Ukjent';
+                $user = filled($line['user_name'] ?? null) ? 'Bruker: ' . $line['user_name'] : null;
+
+                return [
+                    $line['id'] => trim(implode(' · ', array_filter([
+                        $standard,
+                        "Standard: {$standardAmount}",
+                        "Avtalt: {$customAmount}",
+                        $user,
+                        $status,
+                    ]))),
+                ];
+            })
+            ->all();
+    }
+
+    private function activeCustomerSpecificPriceLineOptions(): array
+    {
+        return $this->customerSpecificPriceLineOptions(true);
+    }
+
+    private function selectedStandardPriceLabel(mixed $billingPriceId): string
+    {
+        if (blank($billingPriceId)) {
+            return 'Velg en standardpris for å se utgangspunktet.';
+        }
+
+        $price = BillingPrice::query()->with('product')->find($billingPriceId);
+
+        if (! $price instanceof BillingPrice) {
+            return 'Fant ikke valgt standardpris.';
+        }
+
+        $amount = $this->formatAmount($price->unit_amount);
+        $interval = $this->billingIntervalLabel($price->interval);
+
+        return trim("{$price->name} · {$amount} / {$interval}");
+    }
+
+    private function selectedStandardIntervalLabel(mixed $billingPriceId): string
+    {
+        if (blank($billingPriceId)) {
+            return 'Intervall følger valgt standardpris.';
+        }
+
+        $price = BillingPrice::query()->find($billingPriceId);
+
+        if (! $price instanceof BillingPrice) {
+            return 'Fant ikke valgt standardpris.';
+        }
+
+        return $this->billingIntervalLabel($price->interval);
+    }
+
+    private function billingIntervalLabel(?string $interval): string
+    {
+        return match ($interval) {
+            BillingPrice::INTERVAL_YEARLY => 'Årlig',
+            BillingPrice::INTERVAL_ONE_TIME => 'Engangs',
+            BillingPrice::INTERVAL_MONTHLY => 'Månedlig',
+            default => filled($interval) ? ucfirst((string) $interval) : 'Ikke satt',
+        };
+    }
+
+    private function customerSpecificStatusLabel(?string $status): string
+    {
+        return match ($status) {
+            'active' => 'Aktiv',
+            'pending_cancel' => 'Avsluttes',
+            'ended' => 'Inaktiv',
+            'cancelled' => 'Inaktiv',
+            'draft' => 'Kladd',
+            default => filled($status) ? ucfirst($status) : 'Ukjent',
+        };
+    }
+
+    private function formatAmount(mixed $amount): string
+    {
+        if (! is_int($amount) && ! is_numeric($amount)) {
+            return 'Ikke satt';
+        }
+
+        return number_format(((int) $amount) / 100, 0, ',', ' ') . ' kr';
+    }
+
     private function refreshBillingData(): void
     {
         $this->record = $this->record->fresh();
@@ -572,6 +853,41 @@ class ManageCustomerBilling extends Page
             ])
             ->values()
             ->all();
+
+        $this->customerSpecificPrices = $billingService->customerSpecificPriceLines($customer)
+            ->map(function (CustomerBillingLine $line): array {
+                $price = $line->billingPrice;
+                $standardAmount = $price?->unit_amount;
+                $customAmount = data_get($line->metadata, 'custom_unit_amount');
+
+                return [
+                    'id' => $line->id,
+                    'user_name' => $line->user?->name,
+                    'billing_product' => $line->billingProduct?->name,
+                    'billing_price' => $line->billingPrice?->name,
+                    'billing_price_key' => $line->billingPrice?->key,
+                    'quantity' => $line->quantity,
+                    'status' => $line->status,
+                    'status_label' => $this->customerSpecificStatusLabel($line->status),
+                    'interval' => $line->billingPrice?->interval,
+                    'interval_label' => $this->billingIntervalLabel($line->billingPrice?->interval),
+                    'standard_amount' => $standardAmount,
+                    'standard_amount_label' => $this->formatAmount($standardAmount),
+                    'custom_amount' => is_numeric($customAmount) ? (int) $customAmount : null,
+                    'custom_amount_label' => $this->formatAmount(is_numeric($customAmount) ? (int) $customAmount : null),
+                    'currency' => strtoupper((string) ($price?->currency ?? 'nok')),
+                    'notes' => data_get($line->metadata, 'notes'),
+                    'starts_at' => $line->starts_at?->format('Y-m-d H:i'),
+                    'ends_at' => $line->ends_at?->format('Y-m-d H:i'),
+                ];
+            })
+            ->values()
+            ->all();
+
+        $this->customerSpecificPricesCount = count($this->customerSpecificPrices);
+        $this->activeCustomerSpecificPricesCount = collect($this->customerSpecificPrices)
+            ->filter(fn (array $line): bool => ($line['status'] ?? null) === 'active')
+            ->count();
 
         $this->invoices = rescue(
             fn () => $customer->invoices()->map(function ($invoice) {
