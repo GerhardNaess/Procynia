@@ -8,11 +8,13 @@ use App\Filament\Resources\BillingPriceResource\Pages\ListBillingPrices;
 use App\Filament\Resources\BillingPriceResource\Pages\ViewBillingPrice;
 use App\Models\BillingPrice;
 use App\Models\BillingProduct;
+use App\Filament\Resources\BillingProductResource;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\Resource;
@@ -40,9 +42,9 @@ class BillingPriceResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
-    protected static ?string $modelLabel = 'varelinje';
+    protected static ?string $modelLabel = 'tjeneste';
 
-    protected static ?string $pluralModelLabel = 'varelinjer';
+    protected static ?string $pluralModelLabel = 'tjenester';
 
     protected static ?string $recordRouteKeyName = 'billing_prices.id';
 
@@ -64,9 +66,12 @@ class BillingPriceResource extends Resource
 
         return $schema
             ->components([
-                Section::make('Varelinje')
+                Section::make('Tjenestekatalog')
                     ->columns(2)
-                    ->schema(self::priceFormFields($includeProductSelect, $selectedProductId)),
+                    ->schema(self::catalogFormFields($includeProductSelect, $selectedProductId)),
+                Section::make('Avansert')
+                    ->columns(2)
+                    ->schema(self::advancedFormFields()),
             ]);
     }
 
@@ -74,15 +79,9 @@ class BillingPriceResource extends Resource
     {
         return $schema
             ->components([
-                Section::make('Informasjon')
+                Section::make('Tjenestekatalog')
                     ->columns(2)
                     ->schema([
-                        \Filament\Infolists\Components\TextEntry::make('product.name')
-                            ->label('Tilhører plan'),
-                        \Filament\Infolists\Components\TextEntry::make('product.category')
-                            ->label('Type')
-                            ->badge()
-                            ->state(fn (BillingPrice $record): string => self::lineItemTypeLabel($record)),
                         \Filament\Infolists\Components\TextEntry::make('interval')
                             ->label('Faktureringsintervall')
                             ->badge()
@@ -90,20 +89,33 @@ class BillingPriceResource extends Resource
                         \Filament\Infolists\Components\TextEntry::make('unit_amount')
                             ->label('Pris')
                             ->state(fn (BillingPrice $record): string => self::lineItemPriceLabel($record)),
+                        \Filament\Infolists\Components\TextEntry::make('product.category')
+                            ->label('Type')
+                            ->badge()
+                            ->state(fn (BillingPrice $record): string => self::lineItemTypeLabel($record)),
                         \Filament\Infolists\Components\TextEntry::make('included_quantity')
-                            ->label('Inkludert antall')
-                            ->state(fn (BillingPrice $record): string => self::includedLabel($record)),
-                        \Filament\Infolists\Components\TextEntry::make('product.description')
-                            ->label('Beskrivelse')
+                            ->label('Inkludert mengder')
                             ->columnSpanFull()
-                            ->wrap()
-                            ->placeholder('Ingen beskrivelse'),
+                            ->state(fn (BillingPrice $record): string => self::includedLabel($record)),
+                        \Filament\Infolists\Components\TextEntry::make('is_active')
+                            ->label('Status')
+                            ->badge()
+                            ->state(fn (BillingPrice $record): string => $record->is_active ? 'Aktiv' : 'Inaktiv'),
+                        \Filament\Infolists\Components\TextEntry::make('visibility')
+                            ->label('Synlig for salg')
+                            ->badge()
+                            ->state(fn (BillingPrice $record): string => self::saleVisibilityLabel($record)),
                         \Filament\Infolists\Components\TextEntry::make('created_at')
                             ->label('Opprettet')
                             ->dateTime('d.m.Y H:i'),
                         \Filament\Infolists\Components\TextEntry::make('updated_at')
                             ->label('Sist oppdatert')
                             ->dateTime('d.m.Y H:i'),
+                        \Filament\Infolists\Components\TextEntry::make('product.description')
+                            ->label('Beskrivelse')
+                            ->columnSpanFull()
+                            ->wrap()
+                            ->placeholder('Ingen beskrivelse'),
                     ]),
                 Section::make('Stripe')
                     ->columns(2)
@@ -116,18 +128,6 @@ class BillingPriceResource extends Resource
                             ->badge()
                             ->state(fn (BillingPrice $record): string => self::stripeConnectionLabel($record)),
                     ]),
-                Section::make('Status')
-                    ->columns(2)
-                    ->schema([
-                        \Filament\Infolists\Components\TextEntry::make('is_active')
-                            ->label('Status')
-                            ->badge()
-                            ->state(fn (BillingPrice $record): string => $record->is_active ? 'Aktiv' : 'Inaktiv'),
-                        \Filament\Infolists\Components\TextEntry::make('visibility')
-                            ->label('Synlig for salg')
-                            ->badge()
-                            ->state(fn (BillingPrice $record): string => self::saleVisibilityLabel($record)),
-                    ]),
             ]);
     }
 
@@ -139,10 +139,6 @@ class BillingPriceResource extends Resource
             ->columns([
                 TextColumn::make('name')
                     ->label('Navn')
-                    ->searchable()
-                    ->sortable(),
-                TextColumn::make('product.name')
-                    ->label('Plan / tjeneste')
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('product.category')
@@ -170,10 +166,10 @@ class BillingPriceResource extends Resource
             ])
             ->filters([
                 SelectFilter::make('billing_product_id')
-                    ->label('Plan / tjeneste')
+                    ->label('Tjeneste')
                     ->options(fn (): array => self::productOptions()),
                 SelectFilter::make('product_category')
-                    ->label('Kategori')
+                    ->label('Type')
                     ->options(fn (): array => self::lineItemTypeOptions())
                     ->query(function (Builder $query, array $data): Builder {
                         $category = $data['value'] ?? null;
@@ -315,20 +311,20 @@ class BillingPriceResource extends Resource
 
     public static function includedLabel(BillingPrice $record): string
     {
-        $quantity = (int) ($record->included_quantity ?? 0);
+        $users = (int) ($record->included_quantity ?? 0);
+        $aiOffers = (int) ($record->included_ai_offers ?? 0);
 
-        if ($quantity <= 0) {
-            return '–';
+        $parts = [];
+
+        if ($users > 0) {
+            $parts[] = number_format($users, 0, ',', ' ') . ' ' . ($users === 1 ? 'bruker' : 'brukere');
         }
 
-        $unit = match ($record->product?->category) {
-            BillingProduct::CATEGORY_BASE_PLAN => $quantity === 1 ? 'bruker' : 'brukere',
-            BillingProduct::CATEGORY_USER_SEAT, BillingProduct::CATEGORY_USER_SERVICE => $quantity === 1 ? 'bruker' : 'brukere',
-            BillingProduct::CATEGORY_ADDON, BillingProduct::CATEGORY_ONE_OFF, BillingProduct::CATEGORY_ENTERPRISE => 'stk',
-            default => 'stk',
-        };
+        if ($aiOffers > 0) {
+            $parts[] = number_format($aiOffers, 0, ',', ' ') . ' AI-tilbud';
+        }
 
-        return number_format($quantity, 0, ',', ' ') . ' ' . $unit;
+        return $parts !== [] ? implode(', ', $parts) : '–';
     }
 
     public static function stripeConnectionLabel(BillingPrice $record): string
@@ -350,13 +346,14 @@ class BillingPriceResource extends Resource
         $data['currency'] = strtolower(trim((string) ($data['currency'] ?? 'nok'))) ?: 'nok';
         $data['unit_amount'] = filled($data['unit_amount'] ?? null) ? (int) $data['unit_amount'] : null;
         $data['included_quantity'] = max(0, (int) ($data['included_quantity'] ?? 0));
+        $data['included_ai_offers'] = max(0, (int) ($data['included_ai_offers'] ?? 0));
         $data['is_recurring'] = ($data['interval'] ?? null) !== BillingPrice::INTERVAL_ONE_TIME;
 
-        if (blank($data['stripe_price_id'] ?? null)) {
+        if (array_key_exists('stripe_price_id', $data) && blank($data['stripe_price_id'])) {
             $data['stripe_price_id'] = null;
         }
 
-        if (blank($data['tier_key'] ?? null)) {
+        if (array_key_exists('tier_key', $data) && blank($data['tier_key'])) {
             $data['tier_key'] = null;
         }
 
@@ -364,9 +361,9 @@ class BillingPriceResource extends Resource
     }
 
     /**
-     * @return array<int, object|string>
+     * @return array<int, object>
      */
-    private static function priceFormFields(bool $includeProductSelect, ?int $selectedProductId = null): array
+    private static function catalogFormFields(bool $includeProductSelect, ?int $selectedProductId = null): array
     {
         $fields = [];
 
@@ -378,21 +375,27 @@ class BillingPriceResource extends Resource
                 ->default($selectedProductId)
                 ->searchable()
                 ->preload()
-                ->helperText($selectedProductId ? 'Forhåndsvalgt fra tjenestekatalogen.' : 'Velg hvilken plan eller tjeneste denne varelinjen hører til.');
+                ->hidden(fn (string $operation): bool => $operation === 'edit')
+                ->helperText($selectedProductId ? 'Forhåndsvalgt fra tjenestekatalogen.' : 'Velg hvilken plan eller tjeneste denne katalogoppføringen hører til.');
         }
-
-        $fields[] = TextInput::make('key')
-            ->label('Intern nøkkel')
-            ->required()
-            ->maxLength(255)
-            ->unique(ignoreRecord: true)
-            ->disabled(fn (string $operation): bool => $operation === 'edit')
-            ->helperText('Intern nøkkel. Opprett ny varelinje ved prisendring.');
 
         $fields[] = TextInput::make('name')
             ->label('Navn')
             ->required()
             ->maxLength(255);
+
+        $fields[] = TextInput::make('product_category_label')
+            ->label('Type')
+            ->disabled()
+            ->dehydrated(false)
+            ->hidden(fn (string $operation): bool => $operation !== 'edit')
+            ->helperText('Settes ved opprettelse og kan ikke endres.');
+
+        $fields[] = Textarea::make('product_description')
+            ->label('Beskrivelse')
+            ->rows(3)
+            ->columnSpanFull()
+            ->hidden(fn (string $operation): bool => $operation !== 'edit');
 
         $fields[] = Select::make('interval')
             ->label('Intervall')
@@ -406,35 +409,95 @@ class BillingPriceResource extends Resource
             ->default('nok');
 
         $fields[] = TextInput::make('unit_amount')
-            ->label('Pris (øre)')
-            ->numeric()
-            ->minValue(0)
+            ->label('Pris')
+            ->suffix('kr')
             ->required()
-            ->helperText('Bruk øre som lagring. 99 000 = 990 kr.');
+            ->helperText('Angi pris i kroner. Lagres internt i øre.')
+            ->formatStateUsing(function ($state): string {
+                if ($state === null || $state === '') {
+                    return '';
+                }
 
-        $fields[] = TextInput::make('stripe_price_id')
-            ->label('Stripe Price ID')
-            ->maxLength(255)
-            ->disabled(fn (string $operation): bool => $operation === 'edit')
-            ->helperText('Stripe price-id hvis varelinjen er koblet til Stripe.');
+                return number_format((int) $state / 100, 2, ',', ' ');
+            })
+            ->dehydrateStateUsing(function ($state): ?int {
+                if (blank($state)) {
+                    return null;
+                }
 
-        $fields[] = TextInput::make('tier_key')
-            ->label('Tier-nøkkel')
-            ->maxLength(255)
-            ->helperText('Intern plan- eller nivånøkkel.');
+                $normalized = str_replace([' ', ','], ['', '.'], (string) $state);
+
+                return (int) round((float) $normalized * 100);
+            })
+            ->rules([
+                function () {
+                    return function (string $_attribute, mixed $value, \Closure $fail): void {
+                        $normalized = str_replace([' ', ','], ['', '.'], (string) $value);
+
+                        if (! is_numeric($normalized)) {
+                            $fail('Prisen må være et gyldig tall.');
+                        } elseif ((float) $normalized < 0) {
+                            $fail('Prisen kan ikke være negativ.');
+                        }
+                    };
+                },
+            ]);
 
         $fields[] = TextInput::make('included_quantity')
-            ->label('Inkludert antall')
+            ->label('Inkludert antall brukere')
             ->numeric()
             ->minValue(0)
             ->default(0)
             ->required()
-            ->helperText('Bruk 0 hvis dette ikke er relevant.');
+            ->helperText('Antall brukere som er inkludert i denne prisen.');
+
+        $fields[] = TextInput::make('included_ai_offers')
+            ->label('Inkludert antall AI-tilbud')
+            ->numeric()
+            ->minValue(0)
+            ->default(0)
+            ->required()
+            ->helperText('Antall tilbud som kan lages med bruk av AI.');
 
         $fields[] = Toggle::make('is_active')
             ->label('Aktiv')
             ->default(true);
 
         return $fields;
+    }
+
+    /**
+     * @return array<int, object>
+     */
+    private static function advancedFormFields(): array
+    {
+        return [
+            TextInput::make('key')
+                ->label('Intern nøkkel')
+                ->required()
+                ->maxLength(255)
+                ->unique(ignoreRecord: true)
+                ->disabled(fn (string $operation): bool => $operation === 'edit')
+                ->helperText('Intern nøkkel. Opprett ny oppføring ved prisendring.'),
+
+            TextInput::make('stripe_price_id')
+                ->label('Stripe Price ID')
+                ->maxLength(255)
+                ->disabled(fn (string $operation): bool => $operation === 'edit')
+                ->helperText('Stripe price-id hvis tjenesten er koblet til Stripe.'),
+
+            TextInput::make('tier_key')
+                ->label('Tier-nøkkel')
+                ->maxLength(255)
+                ->helperText('Intern plan- eller nivånøkkel.'),
+
+            TextInput::make('product_sort_order')
+                ->label('Visningsrekkefølge')
+                ->numeric()
+                ->minValue(0)
+                ->default(0)
+                ->hidden(fn (string $operation): bool => $operation !== 'edit')
+                ->helperText('Lavere tall vises først i katalogen.'),
+        ];
     }
 }

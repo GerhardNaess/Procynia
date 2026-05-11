@@ -104,7 +104,7 @@ class BillingProductPricesPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Tjenestekatalog');
-        $response->assertSee('Ny varelinje');
+        $response->assertSee('Legg til');
         $response->assertSee('Ultra månedlig');
         $response->assertSee('Ultra årlig');
         $response->assertSee('Onboarding');
@@ -154,13 +154,15 @@ class BillingProductPricesPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('Ultra månedlig detalj');
         $response->assertSee('Abonnementsplan');
-        $response->assertSee('Tilhører plan');
+        // Tjenestekatalog-seksjon
         $response->assertSee('Faktureringsintervall');
         $response->assertSee('Pris');
-        $response->assertSee('Inkludert antall');
+        $response->assertSee('Type');
+        $response->assertSee('Inkludert mengder');
         $response->assertSee('Beskrivelse');
         $response->assertSee('Opprettet');
         $response->assertSee('Sist oppdatert');
+        // Stripe-seksjon
         $response->assertSee('Stripe Price ID');
         $response->assertSee('Ikke koblet');
         $response->assertSee('Status for Stripe-kobling');
@@ -170,6 +172,103 @@ class BillingProductPricesPageTest extends TestCase
         $response->assertSee('Rediger');
         $response->assertSee('Dupliser');
         $response->assertSee('Sett inaktiv');
+        // Tjenesteinformasjon skal ikke vises
+        $response->assertDontSee('Tjenesteinformasjon');
+        $response->assertDontSee('Tjenestenavn');
+        $response->assertDontSee('Tjenestebeskrivelse');
+        $response->assertDontSee('Tjenestestatus');
+    }
+
+    public function test_edit_side_har_riktig_tjenestekatalog_struktur(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_struktur_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra struktur',
+            'description' => 'Beskrivelse for struktur-test.',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_struktur_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra struktur månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 649000,
+            'included_quantity' => 5,
+            'included_ai_offers' => 2,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+
+        // Krav 1: Seksjonen heter "Tjenestekatalog"
+        $response->assertSee('Tjenestekatalog');
+
+        // Krav 2: Ingen seksjon "Tjenesteinformasjon"
+        $response->assertDontSee('Tjenesteinformasjon');
+
+        // Krav 3: Ingen label "Tjenestenavn"
+        $response->assertDontSee('Tjenestenavn');
+
+        // Krav 4: Ingen label "Tjeneste aktiv"
+        $response->assertDontSee('Tjeneste aktiv');
+
+        // Krav 5: Ingen label "Tjenestebeskrivelse"
+        $response->assertDontSee('Tjenestebeskrivelse');
+
+        // Krav 6+7: "Kategori" vises ikke, "Type" vises
+        $response->assertDontSee('>Kategori<');
+        $response->assertSee('Type');
+
+        // Krav 8+9: "Sortering" vises ikke, "Visningsrekkefølge" brukes
+        $response->assertDontSee('>Sortering<');
+        $response->assertSee('Visningsrekkefølge');
+
+        // Krav 12+13: Inkluderte mengder med riktig hjelpetekst
+        $response->assertSee('Inkludert antall brukere');
+        $response->assertSee('Antall brukere som er inkludert i denne prisen.');
+        $response->assertSee('Inkludert antall AI-tilbud');
+        $response->assertSee('Antall tilbud som kan lages med bruk av AI.');
+
+        // Krav 11: Pris i kroner vises
+        $response->assertSee('Pris');
+        $response->assertSee('kr');
+    }
+
+    public function test_edit_side_har_kun_én_aktiv_bryter(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_aktiv_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra aktiv',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_aktiv_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra aktiv månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        // Krav 10: Bare én "Aktiv"-bryter (og ingen "Tjeneste aktiv")
+        $response->assertSee('Aktiv');
+        $response->assertDontSee('Tjeneste aktiv');
     }
 
     public function test_varelinje_edit_page_lager_endringer(): void
@@ -199,12 +298,13 @@ class BillingProductPricesPageTest extends TestCase
             'included_quantity' => 15,
         ]);
 
+        // Prisfeltet forventer nå kroner: 6990,00 kr = 699000 øre
         $component = Livewire::actingAs($admin)
             ->test(EditBillingPrice::class, [
                 'record' => $price->getKey(),
             ])
             ->set('data.name', 'Ultra månedlig oppdatert')
-            ->set('data.unit_amount', 699000)
+            ->set('data.unit_amount', '6990,00')
             ->set('data.included_quantity', 20)
             ->set('data.is_active', false)
             ->call('save');
@@ -218,6 +318,125 @@ class BillingProductPricesPageTest extends TestCase
             'unit_amount' => 699000,
             'included_quantity' => 20,
             'is_active' => false,
+        ]);
+    }
+
+    public function test_prisfeltet_viser_kroner_ikke_ore_i_edit_formen(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_display_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra visning',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_display_yearly_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra årlig visning',
+            'interval' => BillingPrice::INTERVAL_YEARLY,
+            'currency' => 'nok',
+            'unit_amount' => 5192000,
+            'stripe_price_id' => 'price_ultra_yearly_display',
+            'tier_key' => 'ultra',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 15,
+        ]);
+
+        $component = Livewire::actingAs($admin)
+            ->test(EditBillingPrice::class, ['record' => $price->getKey()]);
+
+        // 5192000 øre = 51 920,00 kr — formatStateUsing konverterer til kronervisning
+        $component->assertSet('data.unit_amount', '51 920,00');
+    }
+
+    public function test_lagring_av_51920_kroner_gir_5192000_ore_i_databasen(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_save_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra lagring',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_save_yearly_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra årlig lagring',
+            'interval' => BillingPrice::INTERVAL_YEARLY,
+            'currency' => 'nok',
+            'unit_amount' => 100,
+            'stripe_price_id' => null,
+            'tier_key' => 'ultra',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 15,
+        ]);
+
+        // Test 51 920,00 kr → 5192000 øre og 6 490,00 kr → 649000 øre
+        foreach ([['51 920,00', 5192000], ['6 490,00', 649000]] as [$kroner, $expectedOre]) {
+            Livewire::actingAs($admin)
+                ->test(EditBillingPrice::class, ['record' => $price->getKey()])
+                ->set('data.unit_amount', $kroner)
+                ->call('save')
+                ->assertHasNoErrors();
+
+            $this->assertDatabaseHas('billing_prices', [
+                'id' => $price->id,
+                'unit_amount' => $expectedOre,
+            ]);
+        }
+    }
+
+    public function test_stripe_price_id_og_key_er_lest_for_redigering(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_locked_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra låst',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $originalKey = 'ultra_locked_monthly_'.Str::lower(Str::random(8));
+        $originalStripeId = 'price_locked_monthly';
+
+        $price = $this->createPrice($product, [
+            'key' => $originalKey,
+            'name' => 'Ultra låst månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 649000,
+            'stripe_price_id' => $originalStripeId,
+            'tier_key' => 'ultra',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 15,
+        ]);
+
+        // Forsøk å sette key og stripe_price_id — de er disabled på edit og skal ikke endre seg
+        Livewire::actingAs($admin)
+            ->test(EditBillingPrice::class, ['record' => $price->getKey()])
+            ->set('data.key', 'annen_nokkel')
+            ->set('data.stripe_price_id', 'price_annen')
+            ->set('data.unit_amount', '6490,00')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('billing_prices', [
+            'id' => $price->id,
+            'key' => $originalKey,
+            'stripe_price_id' => $originalStripeId,
         ]);
     }
 
@@ -277,6 +496,242 @@ class BillingProductPricesPageTest extends TestCase
 
         $editResponse->assertOk();
         $viewResponse->assertOk();
+    }
+
+    public function test_edit_formen_viser_riktige_labels_og_hjelpetekster_for_inkluderte_mengder(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_labels_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra labels',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_labels_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra labels månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 649000,
+            'included_quantity' => 5,
+            'included_ai_offers' => 0,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('Inkludert antall brukere');
+        $response->assertSee('Antall brukere som er inkludert i denne prisen.');
+        $response->assertSee('Inkludert antall AI-tilbud');
+        $response->assertSee('Antall tilbud som kan lages med bruk av AI.');
+        $response->assertDontSee('Inkludert antall"');
+        $response->assertDontSee('Bruk 0 hvis dette ikke er relevant.');
+    }
+
+    public function test_varelinje_kan_lagres_med_inkluderte_brukere_og_ai_tilbud(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_quantities_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra mengder',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_quantities_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra mengder månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 649000,
+            'included_quantity' => 0,
+            'included_ai_offers' => 0,
+            'is_active' => true,
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(EditBillingPrice::class, ['record' => $price->getKey()])
+            ->set('data.unit_amount', '6490,00')
+            ->set('data.included_quantity', 15)
+            ->set('data.included_ai_offers', 10)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('billing_prices', [
+            'id' => $price->id,
+            'included_quantity' => 15,
+            'included_ai_offers' => 10,
+            'unit_amount' => 649000,
+        ]);
+    }
+
+    public function test_inkludert_label_viser_riktig_kombinasjon(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_label_combo_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra combo',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        // Begge satt: viser "N brukere, M AI-tilbud"
+        $this->createPrice($product, [
+            'key' => 'combo_both_'.Str::lower(Str::random(8)),
+            'name' => 'Begge satt',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'included_quantity' => 15,
+            'included_ai_offers' => 10,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('index'));
+        $response->assertSee('15 brukere, 10 AI-tilbud');
+
+        // Bare brukere: viser "N brukere"
+        $this->createPrice($product, [
+            'key' => 'combo_users_only_'.Str::lower(Str::random(8)),
+            'name' => 'Bare brukere',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'included_quantity' => 5,
+            'included_ai_offers' => 0,
+            'is_active' => true,
+        ]);
+
+        $response2 = $this->actingAs($admin)->get(BillingPriceResource::getUrl('index'));
+        $response2->assertSee('5 brukere');
+
+        // Ingen satt: viser "–"
+        $this->createPrice($product, [
+            'key' => 'combo_none_'.Str::lower(Str::random(8)),
+            'name' => 'Ingen inkludert',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'included_quantity' => 0,
+            'included_ai_offers' => 0,
+            'is_active' => true,
+        ]);
+
+        $response3 = $this->actingAs($admin)->get(BillingPriceResource::getUrl('index'));
+        $response3->assertSee('–');
+    }
+
+    public function test_eksisterende_varelinjer_har_default_0_for_included_ai_offers(): void
+    {
+        $product = $this->createProduct([
+            'key' => 'base_legacy_'.Str::lower(Str::random(6)),
+            'name' => 'Legacy plan',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        // Opprett uten å sette included_ai_offers — skal bruke default 0
+        $price = $this->createPrice($product, [
+            'key' => 'legacy_price_'.Str::lower(Str::random(8)),
+            'name' => 'Legacy månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'included_quantity' => 15,
+            'is_active' => true,
+        ]);
+
+        $this->assertDatabaseHas('billing_prices', [
+            'id' => $price->id,
+            'included_ai_offers' => 0,
+        ]);
+    }
+
+    public function test_beskrivelse_og_visningsrekkefølge_kan_redigeres_fra_tjenestekatalog(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_ultra_prod_edit_'.Str::lower(Str::random(6)),
+            'name' => 'Ultra original',
+            'description' => 'Original beskrivelse.',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 5,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'ultra_prod_edit_'.Str::lower(Str::random(8)),
+            'name' => 'Ultra månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 649000,
+            'included_quantity' => 15,
+            'included_ai_offers' => 0,
+            'is_active' => true,
+        ]);
+
+        // Admin redigerer beskrivelse og visningsrekkefølge fra Tjenestekatalog
+        Livewire::actingAs($admin)
+            ->test(EditBillingPrice::class, ['record' => $price->getKey()])
+            ->set('data.product_description', 'Oppdatert beskrivelse.')
+            ->set('data.product_sort_order', 10)
+            ->set('data.unit_amount', '6490,00')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // Produktet oppdateres
+        $this->assertDatabaseHas('billing_products', [
+            'id' => $product->id,
+            'description' => 'Oppdatert beskrivelse.',
+            'sort_order' => 10,
+        ]);
+
+        // Prisen er uendret
+        $this->assertDatabaseHas('billing_prices', [
+            'id' => $price->id,
+            'unit_amount' => 649000,
+        ]);
+    }
+
+    public function test_edit_formen_forhåndsutfyller_tjenesteinformasjon(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key' => 'base_prefill_'.Str::lower(Str::random(6)),
+            'name' => 'Prefill tjeneste',
+            'description' => 'Prefill beskrivelse.',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 3,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key' => 'prefill_monthly_'.Str::lower(Str::random(8)),
+            'name' => 'Prefill månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount' => 649000,
+            'included_quantity' => 5,
+            'is_active' => true,
+        ]);
+
+        $component = Livewire::actingAs($admin)
+            ->test(EditBillingPrice::class, ['record' => $price->getKey()]);
+
+        $component->assertSet('data.product_description', 'Prefill beskrivelse.');
+        $component->assertSet('data.product_sort_order', 3);
     }
 
     private function internalAdmin(): User
