@@ -71,6 +71,11 @@ class BillingEntitlementService
             ->count();
     }
 
+    public function canUseFeature(Customer $customer, string $featureKey): bool
+    {
+        return $this->customerHasFeature($customer, $featureKey);
+    }
+
     public function canAddUser(Customer $customer): bool
     {
         $included = $this->includedUsers($customer);
@@ -84,6 +89,6 @@ class BillingEntitlementService
 
     public function canUseAiOffer(Customer $customer): bool
     {
-        return $this->includedAiCredits($customer) > 0 || $this->customerHasFeature($customer, 'ai_offer');
+        return $this->includedAiCredits($customer) > 0 || $this->canUseFeature($customer, 'ai_offer');
     }
 }

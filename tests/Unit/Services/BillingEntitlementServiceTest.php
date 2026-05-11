@@ -59,6 +59,7 @@ class BillingEntitlementServiceTest extends TestCase
         $service = app(BillingEntitlementService::class);
 
         $this->assertFalse($service->canUseAiOffer($customer));
+        $this->assertFalse($service->canUseFeature($customer, 'ai_offer'));
 
         $customer->forceFill([
             'subscription_plan' => Customer::PLAN_PRO,
@@ -66,6 +67,7 @@ class BillingEntitlementServiceTest extends TestCase
         ])->save();
 
         $this->assertTrue($service->canUseAiOffer($customer));
+        $this->assertFalse($service->canUseFeature($customer, 'ai_offer'));
 
         $product = BillingProduct::query()->create([
             'key' => 'ai_offer_addon',
@@ -110,6 +112,7 @@ class BillingEntitlementServiceTest extends TestCase
 
         $this->assertTrue($service->customerHasFeature($customer, 'ai_offer'));
         $this->assertTrue($service->canUseAiOffer($customer));
+        $this->assertTrue($service->canUseFeature($customer, 'ai_offer'));
     }
 
     private function createCustomer(string $name = 'Procynia AS'): Customer

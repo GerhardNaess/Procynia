@@ -115,14 +115,16 @@ class BillingService
         $this->assertRecurringPrice($price);
         $customer = $this->ensureStripeCustomer($customer);
 
-        $line = CustomerBillingLine::query()->updateOrCreate(
-            [
-                'customer_id' => $customer->id,
-                'billing_price_id' => $price->id,
-                'user_id' => $user?->id,
-                'status' => 'active',
-            ],
-            [
+        $line = CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $price->id)
+            ->where('user_id', $user?->id)
+            ->where('status', 'active')
+            ->where('source', $source)
+            ->first();
+
+        if ($line) {
+            $line->fill([
                 'billing_product_id' => $price->billing_product_id,
                 'description' => $price->name,
                 'quantity' => max(1, $quantity),
@@ -136,8 +138,29 @@ class BillingService
                     'billing_price_key' => $price->key,
                     'billing_product_key' => $price->product?->key,
                 ],
-            ]
-        );
+            ]);
+            $line->save();
+        } else {
+            $line = CustomerBillingLine::create([
+                'customer_id' => $customer->id,
+                'billing_product_id' => $price->billing_product_id,
+                'billing_price_id' => $price->id,
+                'user_id' => $user?->id,
+                'description' => $price->name,
+                'quantity' => max(1, $quantity),
+                'status' => 'active',
+                'starts_at' => now(),
+                'ends_at' => null,
+                'stripe_subscription_id' => $customer->subscription('default')?->stripe_id,
+                'stripe_subscription_item_id' => $this->stripeSubscriptionItemIdForPrice($customer, $price->stripe_price_id),
+                'stripe_invoice_id' => null,
+                'source' => $source,
+                'metadata' => [
+                    'billing_price_key' => $price->key,
+                    'billing_product_key' => $price->product?->key,
+                ],
+            ]);
+        }
 
         $this->recalculateSubscriptionItems($customer);
         $this->recordEvent($customer, 'recurring_line_added', $source, "Lagt til linje {$price->key}.", null, $line->fresh()->toArray());
@@ -154,6 +177,7 @@ class BillingService
             ->where('billing_price_id', $price->id)
             ->where('status', 'active')
             ->whereNull('user_id')
+            ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
             ->firstOrFail();
 
         $before = $line->toArray();
@@ -179,6 +203,138 @@ class BillingService
 
         $this->recalculateSubscriptionItems($customer);
         $this->recordEvent($customer, 'recurring_line_removed', 'admin', "Fjernet linje {$line->id}.", $before, $line->fresh()->toArray());
+
+        return $line->fresh();
+    }
+
+    public function customerSpecificPriceLines(Customer $customer): Collection
+    {
+        return $customer->billingLines()
+            ->with(['billingProduct', 'billingPrice', 'user'])
+            ->customerSpecificPrice()
+            ->orderByDesc('starts_at')
+            ->orderByDesc('created_at')
+            ->get();
+    }
+
+    public function addCustomerSpecificPrice(
+        Customer $customer,
+        BillingPrice $price,
+        int $customUnitAmount,
+        int $quantity = 1,
+        ?User $user = null,
+        ?string $notes = null,
+    ): CustomerBillingLine {
+        $this->assertRecurringPrice($price);
+
+        $customer = $customer->fresh();
+        $customUnitAmount = max(0, $customUnitAmount);
+        $quantity = max(1, $quantity);
+
+        $existing = CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $price->id)
+            ->where('user_id', $user?->id)
+            ->where('source', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
+            ->whereIn('status', ['active', 'pending_cancel'])
+            ->orderByDesc('starts_at')
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($existing) {
+            $this->deactivateCustomerSpecificPrice($existing, 'customer_specific_price_replaced');
+        }
+
+        $line = CustomerBillingLine::create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $price->billing_product_id,
+            'billing_price_id' => $price->id,
+            'user_id' => $user?->id,
+            'description' => $price->name,
+            'quantity' => $quantity,
+            'status' => 'active',
+            'starts_at' => now(),
+            'ends_at' => null,
+            'source' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'metadata' => $this->customerSpecificPriceMetadata($price, $customUnitAmount, $notes),
+        ]);
+
+        $this->recordEvent(
+            $customer,
+            'customer_specific_price_added',
+            'admin',
+            "La til kundespesifikk pris for {$price->key}.",
+            null,
+            $line->fresh()->toArray(),
+        );
+
+        return $line->fresh();
+    }
+
+    public function replaceCustomerSpecificPrice(
+        CustomerBillingLine $line,
+        int $customUnitAmount,
+        int $quantity = 1,
+        ?string $notes = null,
+    ): CustomerBillingLine {
+        if ($line->source !== CustomerBillingLine::SOURCE_CUSTOMER_PRICE) {
+            throw new RuntimeException('Linjen er ikke markert som kundespesifikk pris.');
+        }
+
+        $customer = $line->customer()->firstOrFail();
+        $price = $line->billingPrice()->firstOrFail();
+        $before = $line->toArray();
+
+        $this->deactivateCustomerSpecificPrice($line, 'customer_specific_price_replaced');
+
+        $newLine = CustomerBillingLine::create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $price->billing_product_id,
+            'billing_price_id' => $price->id,
+            'user_id' => $line->user_id,
+            'description' => $price->name,
+            'quantity' => max(1, $quantity),
+            'status' => 'active',
+            'starts_at' => now(),
+            'ends_at' => null,
+            'source' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'metadata' => $this->customerSpecificPriceMetadata($price, max(0, $customUnitAmount), $notes),
+        ]);
+
+        $this->recordEvent(
+            $customer,
+            'customer_specific_price_replaced',
+            'admin',
+            "Oppdaterte kundespesifikk pris for {$price->key}.",
+            $before,
+            $newLine->fresh()->toArray(),
+        );
+
+        return $newLine->fresh();
+    }
+
+    public function deactivateCustomerSpecificPrice(CustomerBillingLine $line, string $eventType = 'customer_specific_price_deactivated'): CustomerBillingLine
+    {
+        if ($line->source !== CustomerBillingLine::SOURCE_CUSTOMER_PRICE) {
+            throw new RuntimeException('Linjen er ikke markert som kundespesifikk pris.');
+        }
+
+        $customer = $line->customer()->first();
+        $before = $line->toArray();
+
+        $line->update([
+            'status' => 'ended',
+            'ends_at' => now(),
+        ]);
+
+        $this->recordEvent(
+            $customer,
+            $eventType,
+            'admin',
+            "Deaktiverte kundespesifikk pris {$line->id}.",
+            $before,
+            $line->fresh()->toArray(),
+        );
 
         return $line->fresh();
     }
@@ -368,35 +524,56 @@ class BillingService
                 $syncedItems[] = $priceId;
                 $syncedStripeItemIds[] = $stripeItemId;
 
-                CustomerBillingLine::query()
-                    ->updateOrCreate(
-                        [
-                            'customer_id' => $customer->id,
-                            'billing_price_id' => $billingPrice->id,
-                            'user_id' => null,
+                $line = CustomerBillingLine::query()
+                    ->where('customer_id', $customer->id)
+                    ->where('billing_price_id', $billingPrice->id)
+                    ->whereNull('user_id')
+                    ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
+                    ->first();
+
+                if ($line) {
+                    $line->update([
+                        'billing_product_id' => $billingPrice->billing_product_id,
+                        'description' => $billingPrice->name,
+                        'quantity' => (int) ($item->quantity ?? 1),
+                        'status' => $stripeSubscription->cancel_at_period_end ? 'pending_cancel' : 'active',
+                        'starts_at' => now(),
+                        'ends_at' => null,
+                        'stripe_subscription_id' => $subscription->stripe_id,
+                        'stripe_subscription_item_id' => $stripeItemId,
+                        'source' => 'webhook',
+                        'metadata' => [
+                            'billing_price_key' => $billingPrice->key,
+                            'billing_product_key' => $billingPrice->product?->key,
                         ],
-                        [
-                            'billing_product_id' => $billingPrice->billing_product_id,
-                            'description' => $billingPrice->name,
-                            'quantity' => (int) ($item->quantity ?? 1),
-                            'status' => $stripeSubscription->cancel_at_period_end ? 'pending_cancel' : 'active',
-                            'starts_at' => now(),
-                            'ends_at' => null,
-                            'stripe_subscription_id' => $subscription->stripe_id,
-                            'stripe_subscription_item_id' => $stripeItemId,
-                            'source' => 'webhook',
-                            'metadata' => [
-                                'billing_price_key' => $billingPrice->key,
-                                'billing_product_key' => $billingPrice->product?->key,
-                            ],
-                        ]
-                    );
+                    ]);
+                } else {
+                    CustomerBillingLine::create([
+                        'customer_id' => $customer->id,
+                        'billing_product_id' => $billingPrice->billing_product_id,
+                        'billing_price_id' => $billingPrice->id,
+                        'user_id' => null,
+                        'description' => $billingPrice->name,
+                        'quantity' => (int) ($item->quantity ?? 1),
+                        'status' => $stripeSubscription->cancel_at_period_end ? 'pending_cancel' : 'active',
+                        'starts_at' => now(),
+                        'ends_at' => null,
+                        'stripe_subscription_id' => $subscription->stripe_id,
+                        'stripe_subscription_item_id' => $stripeItemId,
+                        'source' => 'webhook',
+                        'metadata' => [
+                            'billing_price_key' => $billingPrice->key,
+                            'billing_product_key' => $billingPrice->product?->key,
+                        ],
+                    ]);
+                }
             }
 
             $query = $customer->billingLines()
                 ->whereNull('user_id')
                 ->whereIn('status', ['active', 'pending_cancel'])
-                ->whereHas('billingPrice', fn ($priceQuery) => $priceQuery->where('interval', '!=', BillingPrice::INTERVAL_ONE_TIME));
+                ->whereHas('billingPrice', fn ($priceQuery) => $priceQuery->where('interval', '!=', BillingPrice::INTERVAL_ONE_TIME))
+                ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE);
 
             if ($syncedStripeItemIds === []) {
                 $query->update([
@@ -593,6 +770,7 @@ class BillingService
         return $customer->billingLines()
             ->with(['billingProduct', 'billingPrice', 'user'])
             ->whereIn('status', ['active', 'pending_cancel'])
+            ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
             ->orderBy('created_at')
             ->get();
     }
@@ -632,6 +810,7 @@ class BillingService
         $customer->billingLines()
             ->with('billingPrice')
             ->whereIn('status', ['active', 'pending_cancel'])
+            ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
             ->get()
             ->each(function (CustomerBillingLine $line) use (&$items): void {
                 $price = $line->billingPrice;
@@ -707,18 +886,21 @@ class BillingService
             ->whereIn('status', ['active', 'pending_cancel'])
             ->whereHas('billingPrice.product', fn ($productQuery) => $productQuery->where('category', BillingProduct::CATEGORY_BASE_PLAN))
             ->where('billing_price_id', '!=', $price->id)
+            ->where('source', '!=', CustomerBillingLine::SOURCE_CUSTOMER_PRICE)
             ->update([
                 'status' => 'ended',
                 'ends_at' => now(),
             ]);
 
-        $line = CustomerBillingLine::query()->updateOrCreate(
-            [
-                'customer_id' => $customer->id,
-                'billing_price_id' => $price->id,
-                'user_id' => null,
-            ],
-            [
+        $line = CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $price->id)
+            ->whereNull('user_id')
+            ->where('source', $source)
+            ->first();
+
+        if ($line) {
+            $line->update([
                 'billing_product_id' => $price->billing_product_id,
                 'description' => $price->name,
                 'quantity' => 1,
@@ -735,8 +917,30 @@ class BillingService
                     'plan_key' => $planKey,
                     'billing_interval' => $interval,
                 ],
-            ]
-        );
+            ]);
+        } else {
+            $line = CustomerBillingLine::create([
+                'customer_id' => $customer->id,
+                'billing_product_id' => $price->billing_product_id,
+                'billing_price_id' => $price->id,
+                'user_id' => null,
+                'description' => $price->name,
+                'quantity' => 1,
+                'status' => 'active',
+                'starts_at' => now(),
+                'ends_at' => null,
+                'stripe_subscription_id' => $customer->subscription('default')?->stripe_id,
+                'stripe_subscription_item_id' => $this->stripeSubscriptionItemIdForPrice($customer, $price->stripe_price_id),
+                'stripe_invoice_id' => null,
+                'source' => $source,
+                'metadata' => [
+                    'billing_price_key' => $price->key,
+                    'billing_product_key' => $price->product?->key,
+                    'plan_key' => $planKey,
+                    'billing_interval' => $interval,
+                ],
+            ]);
+        }
 
         return $line->fresh();
     }
@@ -880,6 +1084,24 @@ class BillingService
         if (! $price->is_active || $price->interval !== BillingPrice::INTERVAL_ONE_TIME) {
             throw new RuntimeException('Valgt pris er ikke satt opp som engangspris.');
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function customerSpecificPriceMetadata(BillingPrice $price, int $customUnitAmount, ?string $notes = null): array
+    {
+        return [
+            'pricing_mode' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'billing_price_key' => $price->key,
+            'billing_product_key' => $price->product?->key,
+            'standard_unit_amount' => $price->unit_amount,
+            'custom_unit_amount' => $customUnitAmount,
+            'standard_currency' => $price->currency,
+            'custom_currency' => $price->currency,
+            'standard_interval' => $price->interval,
+            'notes' => $notes,
+        ];
     }
 
     private function recordEvent(?Customer $customer, string $eventType, string $source, string $description, ?array $before = null, ?array $after = null, ?string $stripeEventId = null, ?User $user = null): void

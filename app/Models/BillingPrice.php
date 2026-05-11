@@ -22,6 +22,7 @@ class BillingPrice extends Model
             'is_recurring' => 'boolean',
             'is_active' => 'boolean',
             'included_quantity' => 'integer',
+            'included_ai_offers' => 'integer',
             'metadata' => 'array',
         ];
     }

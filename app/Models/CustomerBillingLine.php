@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CustomerBillingLine extends Model
 {
+    public const SOURCE_CUSTOMER_PRICE = 'customer_price';
+
     protected $guarded = [];
 
     protected function casts(): array
@@ -53,5 +55,10 @@ class CustomerBillingLine extends Model
     public function scopeOneTime(Builder $query): Builder
     {
         return $query->whereHas('billingPrice', fn (Builder $priceQuery) => $priceQuery->where('interval', BillingPrice::INTERVAL_ONE_TIME));
+    }
+
+    public function scopeCustomerSpecificPrice(Builder $query): Builder
+    {
+        return $query->where('source', self::SOURCE_CUSTOMER_PRICE);
     }
 }

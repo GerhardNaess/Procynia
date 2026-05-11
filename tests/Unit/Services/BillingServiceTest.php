@@ -252,6 +252,124 @@ class BillingServiceTest extends TestCase
         ]);
     }
 
+    public function test_customer_specific_price_lines_are_kept_separate_from_standard_billing_lines(): void
+    {
+        $customer = $this->createCustomer();
+        $customer->forceFill(['stripe_id' => 'cus_test_custom_price'])->save();
+
+        $product = BillingProduct::query()->create([
+            'key' => 'addon_consulting',
+            'name' => 'Konsulenttillegg',
+            'description' => 'Tilpasset kundearrangement.',
+            'category' => BillingProduct::CATEGORY_ADDON,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 4,
+            'metadata' => [],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'addon_consulting_monthly',
+            'name' => 'Konsulenttillegg — Månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 199000,
+            'stripe_price_id' => 'price_consulting_standard',
+            'tier_key' => 'consulting',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => [],
+        ]);
+
+        $service = app(BillingService::class);
+        $customLine = $service->addCustomerSpecificPrice($customer, $price, 149000, 2, null, 'Avtalt rabatt');
+
+        $this->assertSame(CustomerBillingLine::SOURCE_CUSTOMER_PRICE, $customLine->source);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'id' => $customLine->id,
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'source' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'status' => 'active',
+            'quantity' => 2,
+        ]);
+        $this->assertSame(149000, data_get($customLine->metadata, 'custom_unit_amount'));
+        $this->assertSame(199000, data_get($customLine->metadata, 'standard_unit_amount'));
+        $this->assertSame('Avtalt rabatt', data_get($customLine->metadata, 'notes'));
+
+        $this->assertCount(0, $service->activeBillingLines($customer));
+        $this->assertCount(1, $service->customerSpecificPriceLines($customer));
+
+        $this->partialMock(BillingService::class, function ($mock): void {
+            $mock->shouldReceive('recalculateSubscriptionItems')
+                ->once()
+                ->andReturn([
+                    'subscription' => null,
+                    'items' => [],
+                ]);
+        });
+
+        $standardLine = app(BillingService::class)->addRecurringLine($customer, $price, 1);
+
+        $this->assertNotSame($customLine->id, $standardLine->id);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'source' => 'admin',
+            'status' => 'active',
+        ]);
+        $this->assertCount(1, $service->customerSpecificPriceLines($customer));
+        $this->assertCount(1, $service->activeBillingLines($customer));
+    }
+
+    public function test_customer_specific_price_lines_preserve_history_when_replaced_and_deactivated(): void
+    {
+        $customer = $this->createCustomer();
+
+        $product = BillingProduct::query()->create([
+            'key' => 'addon_retainer',
+            'name' => 'Retainer',
+            'description' => 'Løpende kundetilpasning.',
+            'category' => BillingProduct::CATEGORY_ADDON,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 5,
+            'metadata' => [],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'addon_retainer_monthly',
+            'name' => 'Retainer — Månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 249000,
+            'stripe_price_id' => 'price_retainer_standard',
+            'tier_key' => 'retainer',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => [],
+        ]);
+
+        $service = app(BillingService::class);
+        $first = $service->addCustomerSpecificPrice($customer, $price, 189000, 1, null, 'Første avtale');
+        $second = $service->replaceCustomerSpecificPrice($first, 169000, 3, 'Ny avtale');
+
+        $this->assertSame('ended', $first->fresh()->status);
+        $this->assertNotSame($first->id, $second->id);
+        $this->assertSame('active', $second->fresh()->status);
+        $this->assertSame(169000, data_get($second->metadata, 'custom_unit_amount'));
+        $this->assertSame(3, $second->quantity);
+
+        $service->deactivateCustomerSpecificPrice($second);
+
+        $this->assertSame('ended', $second->fresh()->status);
+        $this->assertCount(2, $service->customerSpecificPriceLines($customer));
+    }
+
     private function createCustomer(string $name = 'Procynia AS'): Customer
     {
         $language = Language::query()->firstOrCreate(
