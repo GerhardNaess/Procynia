@@ -10,6 +10,7 @@ use App\Models\CustomerUserServiceLevel;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\SubscriptionService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
@@ -185,6 +186,98 @@ class BillingControllerTest extends TestCase
             'billing_price_id' => $price->id,
             'status' => 'pending_cancel',
         ]);
+    }
+
+    public function test_system_owner_receives_plan_change_data_on_billing_page(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        $response = $this->actingAs($context['owner'])->get('/app/billing');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $availablePlans = collect(data_get($page, 'props.available_plans', []));
+
+            return data_get($page, 'component') === 'App/Billing/Index'
+                && data_get($page, 'props.customer_plan.plan') === 'free'
+                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'pro')
+                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'max')
+                && $availablePlans->contains(fn (array $plan): bool => $plan['key'] === 'ultra');
+        });
+    }
+
+    public function test_non_system_owner_cannot_change_plan(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $response = $this->actingAs($context['user'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertForbidden();
+    }
+
+    public function test_plan_change_validates_selected_plan_and_interval(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'invalid_plan',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertSessionHasErrors(['plan']);
+
+        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'invalid_interval',
+        ]);
+
+        $response->assertSessionHasErrors(['interval']);
+    }
+
+    public function test_plan_change_uses_existing_subscription_service_logic(): void
+    {
+        $context = $this->systemOwnerContext();
+        $customer = $context['customer'];
+
+        $this->partialMock(SubscriptionService::class, function ($mock) use ($customer): void {
+            $mock->shouldReceive('changePlan')
+                ->once()
+                ->withArgs(function (Customer $passedCustomer, string $plan, string $interval) use ($customer): bool {
+                    return $passedCustomer->is($customer)
+                        && $plan === 'pro'
+                        && $interval === 'monthly';
+                })
+                ->andReturnNull();
+        });
+
+        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertRedirect('/app/billing');
+        $response->assertSessionHas('success', __('procynia.billing.plan_change.success'));
+    }
+
+    public function test_plan_change_service_errors_are_handled_controlled(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        $this->partialMock(SubscriptionService::class, function ($mock): void {
+            $mock->shouldReceive('changePlan')
+                ->once()
+                ->andThrow(new \RuntimeException('Boom'));
+        });
+
+        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertSessionHasErrors(['plan']);
     }
 
     private function systemOwnerContext(string $customerName = 'Procynia AS'): array

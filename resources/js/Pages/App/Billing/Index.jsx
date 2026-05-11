@@ -99,16 +99,20 @@ function ConfirmDialog({ isOpen, title, message, onConfirm, onCancel, confirmLab
 export default function BillingIndex() {
     const page = usePage().props;
     const {
+        available_plans: availablePlans = [],
+        customer_plan: customerPlan = {},
         subscription,
         invoices = [],
         billing_lines: billingLines = [],
         service_levels: serviceLevels = [],
         translations = {},
+        errors = {},
         flash,
         locale = 'nb-NO',
     } = page;
 
     const tb = translations.billing ?? {};
+    const planChangeText = tb.plan_change ?? {};
     const summaryText = tb.summary ?? {};
     const alertText = tb.alerts ?? {};
     const subscriptionText = tb.stripe_subscription ?? {};
@@ -126,12 +130,28 @@ export default function BillingIndex() {
 
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
+    const [planChangeOpen, setPlanChangeOpen] = useState(false);
+    const [planChangeStep, setPlanChangeStep] = useState('selection');
+    const [selectedPlanKey, setSelectedPlanKey] = useState('');
+    const [selectedInterval, setSelectedInterval] = useState('monthly');
 
     const sortedInvoices = [...invoices].sort((left, right) => (right.date_sort ?? 0) - (left.date_sort ?? 0));
     const hasActiveStripeSubscription = subscription ? isActiveStripeSubscription(subscription.status) : false;
     const hasProcyniaServices = billingLines.length > 0;
     const hasProcyniaLevels = serviceLevels.length > 0;
     const openStripeInvoices = sortedInvoices.filter((invoice) => invoice.status !== 'paid');
+    const currentPlanKey = normalizeKey(subscription?.plan ?? customerPlan.plan);
+    const currentPlanLabel = subscription?.plan_label
+        ?? customerPlan.plan_label
+        ?? planChangeText.current_plan
+        ?? 'Nåværende plan';
+    const currentIntervalKey = normalizeKey(subscription?.billing_interval ?? customerPlan.billing_interval ?? 'monthly');
+    const canChangePlan = availablePlans.length > 0 && currentPlanKey !== 'enterprise';
+    const selectedPlan = availablePlans.find((plan) => normalizeKey(plan.key) === selectedPlanKey) ?? null;
+    const selectedPlanIntervals = selectedPlan?.intervals ?? [];
+    const selectedIntervalOption = selectedPlanIntervals.find((option) => normalizeKey(option.interval) === selectedInterval)
+        ?? selectedPlanIntervals[0]
+        ?? null;
 
     const formatDate = (dateStr) => {
         if (!dateStr) {
@@ -175,6 +195,29 @@ export default function BillingIndex() {
         return (template ?? ':count åpne Stripe-fakturaer').replace(':count', String(count));
     };
 
+    const formatMoney = (value) => new Intl.NumberFormat(locale).format(Number(value ?? 0));
+
+    const formatPlanIntervalPrice = (value, interval) => {
+        if (value === null || value === undefined) {
+            return summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe';
+        }
+
+        const intervalUnit = normalizeKey(interval) === 'yearly'
+            ? (planChangeText.yearly_unit ?? 'year')
+            : (planChangeText.monthly_unit ?? 'month');
+
+        return `${formatMoney(value)} kr/${intervalUnit}`;
+    };
+
+    const buildPlanLabel = (plan) => {
+        const intervalPrices = (plan.intervals ?? [])
+            .map((interval) => formatPlanIntervalPrice(interval.price_nok, interval.interval))
+            .join(' · ');
+        const currentBadge = plan.is_current ? ` (${planChangeText.current_badge ?? 'Nåværende'})` : '';
+
+        return `${plan.name}${intervalPrices ? ` — ${intervalPrices}` : ''}${currentBadge}`;
+    };
+
     const stripeSubscriptionValue = hasActiveStripeSubscription
         ? (subscription?.plan_label ?? summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe')
         : (summaryText.no_active_subscription ?? 'Ingen aktiv Stripe-subscription');
@@ -187,6 +230,23 @@ export default function BillingIndex() {
     const procyniaLevelsValue = formatCount(serviceLevels.length);
 
     const showProcyniaStripeWarning = !hasActiveStripeSubscription && (hasProcyniaServices || hasProcyniaLevels);
+    const currentIntervalLabel = currentIntervalKey === 'yearly'
+        ? (planChangeText.yearly ?? 'Årlig')
+        : (planChangeText.monthly ?? 'Månedlig');
+    const selectedPlanSummary = selectedPlan ? {
+        name: selectedPlan.name,
+        intervalLabel: selectedIntervalOption?.label
+            ?? (normalizeKey(selectedInterval) === 'yearly'
+                ? (planChangeText.yearly ?? 'Årlig')
+                : (planChangeText.monthly ?? 'Månedlig')),
+        priceLabel: selectedIntervalOption
+            ? formatPlanIntervalPrice(selectedIntervalOption.price_nok, selectedIntervalOption.interval)
+            : null,
+    } : null;
+    const isSamePlanSelection = normalizeKey(selectedPlanKey) === currentPlanKey
+        && normalizeKey(selectedInterval) === currentIntervalKey;
+    const canConfirmPlanChange = Boolean(selectedPlanKey && selectedInterval && !isSamePlanSelection);
+    const planChangeError = errors.plan ?? errors.interval ?? '';
 
     const handleCancel = () => {
         router.post('/app/billing/cancel', {}, {
@@ -202,12 +262,77 @@ export default function BillingIndex() {
         });
     };
 
+    const openPlanChangeModal = () => {
+        if (!availablePlans.length) {
+            return;
+        }
+
+        const initialPlan = availablePlans.find((plan) => normalizeKey(plan.key) === currentPlanKey) ?? availablePlans[0];
+        const initialInterval = initialPlan?.intervals?.find((interval) => normalizeKey(interval.interval) === currentIntervalKey)?.interval
+            ?? initialPlan?.intervals?.[0]?.interval
+            ?? 'monthly';
+
+        setSelectedPlanKey(initialPlan?.key ?? '');
+        setSelectedInterval(normalizeKey(initialInterval));
+        setPlanChangeStep('selection');
+        setPlanChangeOpen(true);
+    };
+
+    const openPlanChangeConfirmation = () => {
+        if (!canConfirmPlanChange) {
+            return;
+        }
+
+        setPlanChangeStep('confirm');
+    };
+
+    const closePlanChangeModal = () => {
+        setPlanChangeOpen(false);
+        setPlanChangeStep('selection');
+    };
+
+    const handlePlanSelection = (planKey) => {
+        const nextPlan = availablePlans.find((plan) => normalizeKey(plan.key) === normalizeKey(planKey));
+
+        setSelectedPlanKey(planKey);
+
+        if (!nextPlan) {
+            return;
+        }
+
+        const preferredInterval = nextPlan.intervals?.find((interval) => normalizeKey(interval.interval) === selectedInterval)?.interval
+            ?? nextPlan.intervals?.[0]?.interval
+            ?? 'monthly';
+
+        setSelectedInterval(normalizeKey(preferredInterval));
+    };
+
+    const handlePlanChangeSubmit = () => {
+        if (!canConfirmPlanChange) {
+            return;
+        }
+
+        router.post('/app/billing/change-plan', {
+            plan: selectedPlanKey,
+            interval: selectedInterval,
+        }, {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: closePlanChangeModal,
+        });
+    };
+
     return (
         <CustomerAppLayout title={tb.title ?? 'Fakturering og abonnement'}>
             <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
                 {flash?.success && (
                     <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
                         {flash.success}
+                    </div>
+                )}
+                {flash?.error && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                        {flash.error}
                     </div>
                 )}
 
@@ -307,6 +432,14 @@ export default function BillingIndex() {
                             </dl>
 
                             <div className="flex flex-wrap gap-3 pt-2">
+                                {canChangePlan && (
+                                    <button
+                                        onClick={openPlanChangeModal}
+                                        className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                                    >
+                                        {planChangeText.button ?? 'Endre plan'}
+                                    </button>
+                                )}
                                 {subscription.status === 'active' && !subscription.cancel_at_period_end && (
                                     <button
                                         onClick={() => setConfirmCancel(true)}
@@ -326,9 +459,19 @@ export default function BillingIndex() {
                             </div>
                         </div>
                     ) : (
-                        <p className="mt-4 text-sm leading-6 text-slate-600">
-                            {subscriptionText.empty ?? 'Ingen aktiv Stripe-subscription. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.'}
-                        </p>
+                        <div className="mt-4 space-y-3">
+                            <p className="text-sm leading-6 text-slate-600">
+                                {subscriptionText.empty ?? 'Ingen aktiv Stripe-subscription. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.'}
+                            </p>
+                            {canChangePlan && (
+                                <button
+                                    onClick={openPlanChangeModal}
+                                    className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                                >
+                                    {planChangeText.button ?? 'Endre plan'}
+                                </button>
+                            )}
+                        </div>
                     )}
                 </section>
 
@@ -503,6 +646,190 @@ export default function BillingIndex() {
                     )}
                 </section>
             </div>
+
+            {planChangeOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+                    <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+                        <div className="space-y-2">
+                            <h3 className="text-lg font-semibold text-slate-900">
+                                {planChangeStep === 'confirm'
+                                    ? (planChangeText.confirm ?? 'Bekreft planendring')
+                                    : (planChangeText.heading ?? 'Endre plan')}
+                            </h3>
+                            <p className="text-sm leading-6 text-slate-600">
+                                {planChangeStep === 'confirm'
+                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
+                                    : (planChangeText.description ?? 'Velg en ny plan. Fakturering håndteres via Stripe.')}
+                            </p>
+                            {planChangeStep === 'confirm' && (
+                                <p className="text-sm leading-6 text-slate-600">
+                                    {planChangeText.confirm_note ?? 'Endringen behandles via Stripe og kan påvirke videre fakturering.'}
+                                </p>
+                            )}
+                        </div>
+
+                        {planChangeError && (
+                            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                {planChangeError}
+                            </div>
+                        )}
+
+                        {planChangeStep === 'selection' ? (
+                            <>
+                                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                        {planChangeText.current_plan ?? 'Nåværende plan'}
+                                    </div>
+                                    <div className="mt-2 text-sm font-semibold text-slate-900">
+                                        {currentPlanLabel}
+                                    </div>
+                                    <div className="mt-1 text-sm text-slate-600">
+                                        {planChangeText.current_interval ?? 'Nåværende faktureringsintervall'}: {currentIntervalLabel}
+                                    </div>
+                                </div>
+
+                                <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700">
+                                            {planChangeText.select_plan ?? 'Velg ny plan'}
+                                        </label>
+                                        <select
+                                            value={selectedPlanKey}
+                                            onChange={(event) => handlePlanSelection(event.target.value)}
+                                            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                        >
+                                            {availablePlans.map((plan) => (
+                                                <option key={plan.key} value={plan.key}>
+                                                    {buildPlanLabel(plan)}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {errors.plan && (
+                                            <p className="mt-2 text-sm text-red-600">{errors.plan}</p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <div className="block text-sm font-medium text-slate-700">
+                                            {planChangeText.select_interval ?? 'Velg faktureringsintervall'}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            {selectedPlanIntervals.map((interval) => (
+                                                <button
+                                                    key={interval.interval}
+                                                    type="button"
+                                                    onClick={() => setSelectedInterval(normalizeKey(interval.interval))}
+                                                    className={classNames(
+                                                        'rounded-full border px-3 py-2 text-sm font-medium transition',
+                                                        normalizeKey(interval.interval) === selectedInterval
+                                                            ? 'border-blue-300 bg-blue-50 text-blue-800'
+                                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                                    )}
+                                                >
+                                                    <span className="block">{interval.label}</span>
+                                                    <span className="block text-xs font-normal text-slate-500">
+                                                        {formatPlanIntervalPrice(interval.price_nok, interval.interval)}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        {errors.interval && (
+                                            <p className="mt-2 text-sm text-red-600">{errors.interval}</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                                    <button
+                                        onClick={closePlanChangeModal}
+                                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        {planChangeText.cancel ?? 'Avbryt'}
+                                    </button>
+                                    <button
+                                        onClick={openPlanChangeConfirmation}
+                                        disabled={!canConfirmPlanChange}
+                                        className={classNames(
+                                            'rounded-lg px-4 py-2 text-sm font-medium text-white',
+                                            canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
+                                        )}
+                                    >
+                                        {planChangeText.next_step ?? 'Fortsett'}
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                                    <p className="font-medium">
+                                        {planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.'}
+                                    </p>
+                                    <p className="mt-2">
+                                        {planChangeText.confirm_note ?? 'Endringen behandles via Stripe og kan påvirke videre fakturering.'}
+                                    </p>
+                                </div>
+
+                                {selectedPlanSummary && (
+                                    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
+                                        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                            {planChangeText.summary ?? 'Oppsummering'}
+                                        </div>
+                                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                                            <div className="text-slate-500">
+                                                {planChangeText.from_plan ?? 'Fra plan'}
+                                            </div>
+                                            <div className="font-semibold text-slate-900">
+                                                {currentPlanLabel}
+                                            </div>
+                                            <div className="text-slate-500">
+                                                {planChangeText.to_plan ?? 'Til plan'}
+                                            </div>
+                                            <div className="font-semibold text-slate-900">
+                                                {selectedPlanSummary.name}
+                                            </div>
+                                            <div className="text-slate-500">
+                                                {planChangeText.billing_interval ?? 'Faktureringsintervall'}
+                                            </div>
+                                            <div className="font-semibold text-slate-900">
+                                                {selectedPlanSummary.intervalLabel}
+                                            </div>
+                                            {selectedPlanSummary.priceLabel && (
+                                                <>
+                                                    <div className="text-slate-500">
+                                                        {planChangeText.price ?? 'Pris'}
+                                                    </div>
+                                                    <div className="font-semibold text-slate-900">
+                                                        {selectedPlanSummary.priceLabel}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="mt-6 flex flex-wrap justify-end gap-3">
+                                    <button
+                                        onClick={() => setPlanChangeStep('selection')}
+                                        className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                    >
+                                        {planChangeText.back ?? 'Gå tilbake'}
+                                    </button>
+                                    <button
+                                        onClick={handlePlanChangeSubmit}
+                                        disabled={!canConfirmPlanChange}
+                                        className={classNames(
+                                            'rounded-lg px-4 py-2 text-sm font-medium text-white',
+                                            canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
+                                        )}
+                                    >
+                                        {planChangeText.confirm ?? 'Bekreft planendring'}
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <ConfirmDialog
                 isOpen={confirmCancel}

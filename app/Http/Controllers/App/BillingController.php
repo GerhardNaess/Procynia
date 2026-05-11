@@ -3,12 +3,15 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\Customer;
 use App\Services\Billing\BillingService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Illuminate\Validation\Rule;
+use Throwable;
 
 class BillingController extends Controller
 {
@@ -20,6 +23,7 @@ class BillingController extends Controller
 
         $customer = $user->customer;
         $billingService = app(BillingService::class);
+        $availablePlans = $this->availablePlanOptions($customer);
         $subscription = $customer->subscription('default');
 
         $subscriptionData = null;
@@ -105,6 +109,8 @@ class BillingController extends Controller
             ->all();
 
         return Inertia::render('App/Billing/Index', [
+            'customer_plan' => $this->customerPlanContext($customer),
+            'available_plans' => $availablePlans,
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
             'billing_lines' => $billingLines,
@@ -136,5 +142,113 @@ class BillingController extends Controller
         return redirect()
             ->route('app.billing.index')
             ->with('success', 'Abonnementet er gjenopptatt.');
+    }
+
+    public function changePlan(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        abort_unless($user->isSystemOwner(), 403);
+
+        $customer = $user->customer;
+        abort_unless($customer instanceof Customer, 404);
+
+        $availablePlans = $this->availablePlanOptions($customer);
+        $allowedPlans = array_values(array_map(
+            fn (array $plan): string => (string) $plan['key'],
+            $availablePlans
+        ));
+
+        $validated = $request->validate([
+            'plan' => ['required', 'string', Rule::in($allowedPlans)],
+            'interval' => ['required', 'string', Rule::in([Customer::BILLING_MONTHLY, Customer::BILLING_YEARLY])],
+        ], [
+            'plan.required' => __('procynia.billing.plan_change.validation_plan'),
+            'plan.in' => __('procynia.billing.plan_change.validation_plan'),
+            'interval.required' => __('procynia.billing.plan_change.validation_interval'),
+            'interval.in' => __('procynia.billing.plan_change.validation_interval'),
+        ]);
+
+        $selectedPlan = collect($availablePlans)->firstWhere('key', $validated['plan']);
+
+        if (! $selectedPlan || ! collect($selectedPlan['intervals'] ?? [])->contains(fn (array $interval): bool => ($interval['interval'] ?? null) === $validated['interval'])) {
+            return back()->withErrors([
+                'interval' => __('procynia.billing.plan_change.validation_interval'),
+            ]);
+        }
+
+        try {
+            app(SubscriptionService::class)->changePlan($customer, $validated['plan'], $validated['interval']);
+        } catch (Throwable) {
+            return back()->withErrors([
+                'plan' => __('procynia.billing.plan_change.error'),
+            ]);
+        }
+
+        return redirect()
+            ->route('app.billing.index')
+            ->with('success', __('procynia.billing.plan_change.success'));
+    }
+
+    private function customerPlanContext(Customer $customer): array
+    {
+        $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
+
+        return [
+            'plan' => $customer->subscription_plan ?? Customer::PLAN_FREE,
+            'plan_label' => $customer->planName(),
+            'billing_interval' => $billingInterval,
+            'billing_interval_label' => $billingInterval === Customer::BILLING_YEARLY
+                ? __('procynia.billing.plan_change.yearly')
+                : __('procynia.billing.plan_change.monthly'),
+        ];
+    }
+
+    private function availablePlanOptions(Customer $customer): array
+    {
+        $currentPlan = $customer->subscription_plan ?? Customer::PLAN_FREE;
+        $currentInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
+        $plans = [];
+
+        foreach (config('procynia_plans', []) as $planKey => $plan) {
+            if (in_array($planKey, [Customer::PLAN_FREE, Customer::PLAN_ENTERPRISE], true)) {
+                continue;
+            }
+
+            $intervals = [];
+
+            foreach ([Customer::BILLING_MONTHLY, Customer::BILLING_YEARLY] as $interval) {
+                $priceKey = $interval === Customer::BILLING_YEARLY ? 'yearly_price_nok' : 'monthly_price_nok';
+                $price = $plan[$priceKey] ?? null;
+
+                if ($price === null) {
+                    continue;
+                }
+
+                $intervals[] = [
+                    'interval' => $interval,
+                    'label' => $interval === Customer::BILLING_YEARLY
+                        ? __('procynia.billing.plan_change.yearly')
+                        : __('procynia.billing.plan_change.monthly'),
+                    'price_nok' => $price,
+                    'is_current' => $currentPlan === $planKey && $currentInterval === $interval,
+                ];
+            }
+
+            if ($intervals === []) {
+                continue;
+            }
+
+            $plans[] = [
+                'key' => $planKey,
+                'name' => $plan['name'] ?? ucfirst($planKey),
+                'included_users' => $plan['included_users'] ?? null,
+                'included_ai_credits' => $plan['included_ai_credits'] ?? null,
+                'is_current' => $currentPlan === $planKey,
+                'intervals' => $intervals,
+            ];
+        }
+
+        return $plans;
     }
 }
