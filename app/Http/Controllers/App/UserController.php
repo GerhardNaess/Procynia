@@ -3,13 +3,17 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\BillingPrice;
+use App\Models\BillingProduct;
+use App\Models\Customer;
 use App\Models\Department;
 use App\Models\User;
 use App\Services\Billing\BillingEntitlementService;
+use App\Services\Billing\BillingService;
 use App\Support\CustomerContext;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +25,7 @@ class UserController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly BillingEntitlementService $billingEntitlementService,
+        private readonly BillingService $billingService,
     ) {
     }
 
@@ -49,6 +54,7 @@ class UserController extends Controller
     public function create(Request $request): Response
     {
         [$actor, $customerId] = $this->customerBidManagerContext($request);
+        $customer = $actor->customer ?? Customer::findOrFail($customerId);
 
         return Inertia::render('App/Users/Create', [
             'redirectTo' => $this->pageRedirectTarget($request),
@@ -59,6 +65,9 @@ class UserController extends Controller
             'managedDepartmentOptions' => $this->managedDepartmentOptions($actor, $customerId),
             'canEditRole' => $actor->isSystemOwner(),
             'canEditBidManagerScope' => $actor->isSystemOwner(),
+            'canEditUserLicense' => $actor->isSystemOwner(),
+            'customerBilling' => $this->customerBillingPayload($customer),
+            'userLicenseOptions' => $this->userLicenseOptions($customer),
         ]);
     }
 
@@ -101,11 +110,12 @@ class UserController extends Controller
 
         if ($customer && ! $this->billingEntitlementService->canAddUser($customer)) {
             throw ValidationException::withMessages([
-                'name' => 'Kunden har nådd antall inkluderte brukere i abonnementet.',
+                'name' => __('procynia.users_form.user_limit_reached'),
             ]);
         }
 
         $validated = $request->validate($this->storeValidationRules($actor));
+        $selectedUserLicense = $this->selectedUserLicensePrice($customer, $validated['user_license_price_id'] ?? null);
 
         $targetBidRole = $actor->isSystemOwner()
             ? $validated['bid_role']
@@ -135,12 +145,15 @@ class UserController extends Controller
         DB::transaction(function () use (
             $validated,
             $customerId,
+            $customer,
             $departmentIds,
             $bidManagerScope,
             $managedDepartmentIds,
             $targetBidRole,
             $primaryAffiliationScope,
-            $primaryDepartmentId
+            $primaryDepartmentId,
+            $selectedUserLicense,
+            $actor
         ): void {
             $user = User::create([
                 'name' => Str::squish($validated['name']),
@@ -158,6 +171,15 @@ class UserController extends Controller
 
             $this->syncUserDepartments($user, $departmentIds, $primaryDepartmentId);
             $this->syncManagedDepartments($user, $bidManagerScope, $managedDepartmentIds);
+
+            if ($selectedUserLicense instanceof BillingPrice) {
+                $this->billingService->assignUserServiceLevel(
+                    $customer,
+                    $user,
+                    $selectedUserLicense,
+                    $actor instanceof User ? $actor : null,
+                );
+            }
         });
 
         return $this->successRedirect($request, 'app.users.index')
@@ -913,6 +935,126 @@ class UserController extends Controller
         return $count === 1 ? '1 avdeling' : "{$count} avdelinger";
     }
 
+    private function customerBillingPayload(Customer $customer): array
+    {
+        $subscriptionPlan = $customer->subscription_plan ?? Customer::PLAN_FREE;
+        $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
+        $hasActiveSubscription = $subscriptionPlan !== Customer::PLAN_FREE;
+        $includedUsers = $this->billingEntitlementService->includedUsers($customer);
+        $currentBillableUsers = $this->billingEntitlementService->currentBillableUsers($customer);
+
+        return [
+            'plan' => $subscriptionPlan,
+            'plan_label' => $customer->planName(),
+            'billing_interval' => $billingInterval,
+            'billing_interval_label' => $billingInterval === Customer::BILLING_YEARLY
+                ? __('procynia.billing.plan_change.yearly')
+                : __('procynia.billing.plan_change.monthly'),
+            'has_active_subscription' => $hasActiveSubscription,
+            'included_users' => $includedUsers,
+            'current_billable_users' => $currentBillableUsers,
+            'can_add_user' => $this->billingEntitlementService->canAddUser($customer),
+            'remaining_user_slots' => max(0, $includedUsers - $currentBillableUsers),
+        ];
+    }
+
+    /**
+     * @return array<int, array{value:int, label:string}>
+     */
+    private function userLicenseOptions(Customer $customer): array
+    {
+        if (! $this->customerHasActiveSubscription($customer)) {
+            return [];
+        }
+
+        $labelMap = $this->billingService->recurringPriceOptions(BillingProduct::CATEGORY_USER_SERVICE);
+
+        return BillingPrice::query()
+            ->with('product')
+            ->active()
+            ->recurring()
+            ->whereHas('product', fn ($productQuery) => $productQuery->where('category', BillingProduct::CATEGORY_USER_SERVICE))
+            ->orderBy('key')
+            ->get()
+            ->filter(fn (BillingPrice $price): bool => $this->userLicensePriceAllowed($customer, $price))
+            ->map(fn (BillingPrice $price): array => [
+                'value' => $price->id,
+                'label' => (string) ($labelMap[$price->id] ?? $price->name),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function selectedUserLicensePrice(Customer $customer, mixed $priceId): ?BillingPrice
+    {
+        if ($priceId === null || $priceId === '') {
+            return null;
+        }
+
+        if (! $this->customerHasActiveSubscription($customer)) {
+            throw ValidationException::withMessages([
+                'user_license_price_id' => __('procynia.users_form.user_license_requires_subscription'),
+            ]);
+        }
+
+        $price = BillingPrice::query()
+            ->with('product')
+            ->active()
+            ->recurring()
+            ->whereHas('product', fn ($productQuery) => $productQuery->where('category', BillingProduct::CATEGORY_USER_SERVICE))
+            ->find((int) $priceId);
+
+        if (! $price instanceof BillingPrice || ! $this->userLicensePriceAllowed($customer, $price)) {
+            throw ValidationException::withMessages([
+                'user_license_price_id' => __('procynia.users_form.user_license_invalid'),
+            ]);
+        }
+
+        return $price;
+    }
+
+    private function userLicensePriceAllowed(Customer $customer, BillingPrice $price): bool
+    {
+        if (! $this->customerHasActiveSubscription($customer)) {
+            return false;
+        }
+
+        $price->loadMissing('product');
+
+        if (! $price->is_active || ! $price->is_recurring || $price->product?->category !== BillingProduct::CATEGORY_USER_SERVICE) {
+            return false;
+        }
+
+        $features = array_values(array_filter((array) data_get($price->product?->metadata, 'features', [])));
+
+        if ($features === []) {
+            return true;
+        }
+
+        foreach ($features as $featureKey) {
+            if ($featureKey === 'ai_offer') {
+                if (! $this->billingEntitlementService->canUseAiOffer($customer)) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (! $this->billingEntitlementService->canUseFeature($customer, (string) $featureKey)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function customerHasActiveSubscription(Customer $customer): bool
+    {
+        $plan = $customer->subscription_plan ?? Customer::PLAN_FREE;
+
+        return $plan !== Customer::PLAN_FREE;
+    }
+
     private function hasOutOfScopeDepartmentIds(array $candidateIds, array $allowedIds): bool
     {
         return array_diff($candidateIds, $allowedIds) !== [];
@@ -939,6 +1081,9 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique(User::class, 'email')],
             'redirect_to' => ['nullable', 'string', 'max:2048'],
+            'user_license_price_id' => $actor->isSystemOwner()
+                ? ['nullable', 'integer']
+                : ['prohibited'],
             'role' => ['prohibited'],
             'bid_role' => $actor->isSystemOwner()
                 ? ['required', 'string', Rule::in(User::BID_ROLES)]

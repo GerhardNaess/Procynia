@@ -3,10 +3,15 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
+use App\Models\BillingPrice;
+use App\Models\BillingProduct;
 use App\Models\Department;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Models\CustomerBillingLine;
+use App\Models\CustomerUserServiceLevel;
+use App\Services\Billing\BillingService;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +66,34 @@ class CustomerUserManagementTest extends TestCase
             return data_get($page, 'props.canEditRole') === true
                 && data_get($page, 'props.canEditBidManagerScope') === true
                 && $roleValues === User::BID_ROLES;
+        });
+    }
+
+    public function test_customer_admin_can_see_subscription_and_user_license_context_on_create_page(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill([
+            'subscription_plan' => Customer::PLAN_PRO,
+            'billing_interval' => Customer::BILLING_MONTHLY,
+            'included_users' => 3,
+            'included_ai_credits' => 3,
+        ])->save();
+
+        $price = $this->createUserServicePrice($context['customer'], 'ai_offer_pro_monthly', 'AI-tilbud — Månedlig', ['ai_offer']);
+
+        $response = $this->actingAs($context['admin'])->get('/app/users/create');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($price): bool {
+            $userLicenseOptions = collect(data_get($page, 'props.userLicenseOptions', []));
+
+            return data_get($page, 'props.customerBilling.has_active_subscription') === true
+                && data_get($page, 'props.customerBilling.plan_label') === 'Pro'
+                && data_get($page, 'props.customerBilling.included_users') === 3
+                && data_get($page, 'props.customerBilling.current_billable_users') === 1
+                && data_get($page, 'props.canEditUserLicense') === true
+                && $userLicenseOptions->contains(fn (array $option): bool => $option['value'] === $price->id)
+                && ! $userLicenseOptions->contains(fn (array $option): bool => str_contains($option['label'], 'ai_offer'));
         });
     }
 
@@ -205,9 +238,84 @@ class CustomerUserManagementTest extends TestCase
         $this->assertTrue(Hash::check('SecretPass123!', (string) $user->password));
     }
 
+    public function test_customer_admin_can_create_a_user_with_a_user_service_level_when_subscription_allows_it(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill([
+            'subscription_plan' => Customer::PLAN_PRO,
+            'billing_interval' => Customer::BILLING_MONTHLY,
+            'included_users' => 3,
+            'included_ai_credits' => 3,
+        ])->save();
+
+        $price = $this->createUserServicePrice($context['customer'], 'ai_offer_pro_monthly', 'AI-tilbud — Månedlig', ['ai_offer']);
+
+        $this->partialMock(BillingService::class, function ($mock): void {
+            $mock->shouldReceive('recalculateSubscriptionItems')
+                ->once()
+                ->andReturn([
+                    'subscription' => null,
+                    'items' => [],
+                ]);
+        });
+
+        $response = $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Bruker Med Lisens',
+            'email' => 'bruker.med.lisens@example.test',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+            'user_license_price_id' => $price->id,
+        ]);
+
+        $response->assertRedirect('/app/users');
+        $this->assertDatabaseHas('users', [
+            'email' => 'bruker.med.lisens@example.test',
+            'customer_id' => $context['customer']->id,
+        ]);
+        $this->assertDatabaseHas('customer_user_service_levels', [
+            'customer_id' => $context['customer']->id,
+            'billing_price_id' => $price->id,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $context['customer']->id,
+            'billing_price_id' => $price->id,
+            'status' => 'active',
+        ]);
+    }
+
+    public function test_customer_admin_cannot_assign_a_user_service_level_without_active_subscription(): void
+    {
+        $context = $this->customerAdminContext();
+        $context['customer']->forceFill([
+            'subscription_plan' => Customer::PLAN_FREE,
+            'included_users' => 2,
+        ])->save();
+
+        $price = $this->createUserServicePrice($context['customer'], 'ai_offer_pro_monthly', 'AI-tilbud — Månedlig', ['ai_offer']);
+
+        $response = $this->postWithCsrf($context['admin'], '/app/users', [
+            'name' => 'Lisens Uten Abonnement',
+            'email' => 'lisens.uten.abonnement@example.test',
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'password' => 'SecretPass123!',
+            'password_confirmation' => 'SecretPass123!',
+            'user_license_price_id' => $price->id,
+        ]);
+
+        $response->assertSessionHasErrors('user_license_price_id');
+        $this->assertDatabaseMissing('users', [
+            'email' => 'lisens.uten.abonnement@example.test',
+        ]);
+    }
+
     public function test_customer_admin_cannot_create_users_when_included_user_limit_is_reached(): void
     {
         $context = $this->customerAdminContext();
+        $context['customer']->forceFill([
+            'included_users' => 1,
+        ])->save();
 
         $response = $this->postWithCsrf($context['admin'], '/app/users', [
             'name' => 'For Mye',
@@ -753,6 +861,9 @@ class CustomerUserManagementTest extends TestCase
     public function test_customer_admin_cannot_reactivate_user_when_included_user_limit_is_reached(): void
     {
         $context = $this->customerAdminContext();
+        $context['customer']->forceFill([
+            'included_users' => 1,
+        ])->save();
         $target = User::factory()->create([
             'role' => User::ROLE_USER,
             'bid_role' => User::BID_ROLE_CONTRIBUTOR,
@@ -1072,7 +1183,7 @@ class CustomerUserManagementTest extends TestCase
 
         $user = User::factory()->create([
             'role' => User::ROLE_USER,
-            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'bid_role' => User::BID_ROLE_VIEWER,
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
@@ -1101,6 +1212,10 @@ class CustomerUserManagementTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
+            'subscription_plan' => Customer::PLAN_MAX,
+            'billing_interval' => Customer::BILLING_MONTHLY,
+            'included_users' => 5,
+            'included_ai_credits' => 20,
         ]);
     }
 
@@ -1112,6 +1227,39 @@ class CustomerUserManagementTest extends TestCase
             'description' => null,
             'is_active' => true,
         ]);
+    }
+
+    private function createUserServicePrice(Customer $customer, string $key, string $name, array $features): BillingPrice
+    {
+        $product = BillingProduct::query()->updateOrCreate(
+            ['key' => 'product_' . $key],
+            [
+                'name' => $name,
+                'description' => 'Brukernivå for kundens abonnement.',
+                'category' => BillingProduct::CATEGORY_USER_SERVICE,
+                'billing_scope' => BillingProduct::BILLING_SCOPE_USER,
+                'is_active' => true,
+                'sort_order' => 10,
+                'metadata' => ['features' => $features],
+            ],
+        );
+
+        return BillingPrice::query()->updateOrCreate(
+            ['key' => $key],
+            [
+                'billing_product_id' => $product->id,
+                'name' => $name,
+                'interval' => BillingPrice::INTERVAL_MONTHLY,
+                'currency' => 'nok',
+                'unit_amount' => 49000,
+                'stripe_price_id' => null,
+                'tier_key' => $features[0] ?? 'standard',
+                'is_recurring' => true,
+                'is_active' => true,
+                'included_quantity' => 0,
+                'metadata' => ['features' => $features],
+            ],
+        );
     }
 
     private function postWithCsrf(User $user, string $uri, array $data = [])

@@ -59,8 +59,13 @@ export default function UsersCreate({
     managedDepartmentOptions,
     canEditRole,
     canEditBidManagerScope,
+    canEditUserLicense,
+    customerBilling = {},
+    userLicenseOptions = [],
 }) {
     const page = usePage();
+    const { translations = {} } = page.props;
+    const usersFormText = translations.users_form ?? {};
     const form = useForm({
         name: '',
         email: '',
@@ -72,6 +77,7 @@ export default function UsersCreate({
         primary_department_id: '',
         department_ids: [],
         managed_department_ids: [],
+        user_license_price_id: '',
         redirect_to: redirectTo,
     });
 
@@ -82,6 +88,12 @@ export default function UsersCreate({
     const pageErrors = page.props.errors ?? {};
     const errors = Object.keys(form.errors).length > 0 ? form.errors : pageErrors;
     const firstError = Object.values(errors)[0] ?? null;
+    const hasActiveSubscription = Boolean(customerBilling.has_active_subscription);
+    const includedUsers = Number(customerBilling.included_users ?? 0);
+    const currentBillableUsers = Number(customerBilling.current_billable_users ?? 0);
+    const canAddUser = customerBilling.can_add_user !== false;
+    const remainingUserSlots = Number(customerBilling.remaining_user_slots ?? 0);
+    const canChooseUserLicense = canEditUserLicense && hasActiveSubscription && userLicenseOptions.length > 0;
     const csrfToken = typeof document !== 'undefined'
         ? document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? ''
         : '';
@@ -150,11 +162,98 @@ export default function UsersCreate({
                 <section className="space-y-1.5">
                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Legg til bruker</h1>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                        Opprett en ny bruker for din kunde. Rollen styrer ansvarsnivået i kundemiljøet, og du setter passordet direkte ved opprettelse.
+                        {usersFormText.create_subtitle ?? 'Opprett en ny bruker for din kunde. Rollen styrer ansvarsnivået i kundemiljøet, og du setter passordet direkte ved opprettelse.'}
                     </p>
                 </section>
 
                 <div className="mx-auto max-w-3xl">
+                    <section className="space-y-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-8">
+                        <div className="space-y-2">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                {usersFormText.subscription_panel_title ?? 'Kundens abonnement og brukerlisens'}
+                            </div>
+                            <p className="text-sm leading-6 text-slate-500">
+                                {usersFormText.subscription_panel_help ?? 'Abonnementet gjelder kunden som helhet. Brukerlisens gjelder bare den enkelte brukeren. Rollen styrer bare ansvar i systemet.'}
+                            </p>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-3">
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {usersFormText.customer_subscription_label ?? 'Kundens abonnement'}
+                                </div>
+                                <div className="mt-2 text-base font-semibold text-slate-950">
+                                    {customerBilling.plan_label ?? (usersFormText.customer_subscription_free ?? 'Gratis bruker')}
+                                </div>
+                                <div className="mt-1 text-sm text-slate-500">
+                                    {customerBilling.billing_interval_label ?? ''}
+                                </div>
+                                {!hasActiveSubscription ? (
+                                    <p className="mt-3 text-sm leading-6 text-amber-800">
+                                        {usersFormText.customer_subscription_inactive ?? 'Kunden har ikke aktivt abonnement ennå. Brukeren kan opprettes, men får kun tilgang til gratis funksjonalitet frem til abonnement er aktivert.'}
+                                    </p>
+                                ) : null}
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {usersFormText.included_users_label ?? 'Inkluderte brukere'}
+                                </div>
+                                <div className="mt-2 text-base font-semibold text-slate-950">
+                                    {includedUsers > 0 ? `${currentBillableUsers} av ${includedUsers} brukt` : `${currentBillableUsers} brukt`}
+                                </div>
+                                <div className="mt-1 text-sm text-slate-500">
+                                    {canAddUser
+                                        ? (remainingUserSlots > 0
+                                            ? `${remainingUserSlots} ledige`
+                                            : (usersFormText.user_license_selected_included ?? 'Denne brukeren blir inkludert i abonnementet.'))
+                                        : (usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Fakturering.')}
+                                </div>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {usersFormText.user_license_label ?? 'Brukerlisens'}
+                                </div>
+                                {canChooseUserLicense ? (
+                                    <div className="mt-3 space-y-2">
+                                        <select
+                                            name="user_license_price_id"
+                                            value={form.data.user_license_price_id}
+                                            onChange={(event) => form.setData('user_license_price_id', event.target.value)}
+                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                        >
+                                            <option value="">{usersFormText.user_license_free ?? 'Gratis bruker'}</option>
+                                            {userLicenseOptions.map((option) => (
+                                                <option key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs leading-5 text-slate-400">
+                                            {usersFormText.user_license_help ?? 'Brukerlisensen styrer brukerens tilgang innenfor Kundens abonnement.'}
+                                        </p>
+                                        {errors.user_license_price_id ? <p className="text-sm text-rose-600">{errors.user_license_price_id}</p> : null}
+                                    </div>
+                                ) : (
+                                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                                        {!hasActiveSubscription
+                                            ? (usersFormText.user_license_requires_subscription ?? 'Kunden har ikke aktivt abonnement ennå. Brukeren får kun tilgang til gratis funksjonalitet frem til abonnement er aktivert.')
+                                            : (!canEditUserLicense
+                                                ? (usersFormText.user_license_locked ?? 'Brukerlisens settes av System Owner under Fakturering.')
+                                                : (usersFormText.user_license_no_options ?? 'Ingen brukerbaserte tjenestenivåer er tilgjengelige for denne kunden.'))}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        {canAddUser ? null : (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                {usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Fakturering.'}
+                            </div>
+                        )}
+                    </section>
+
                     <form
                         method="post"
                         action="/app/users"
