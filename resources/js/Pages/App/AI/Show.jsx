@@ -773,6 +773,16 @@ function normalizeClipboardImageUrl(imageUrl) {
     }
 }
 
+function formatLocalizedTemplate(template, replacements = {}) {
+    let value = String(template ?? '');
+
+    Object.entries(replacements).forEach(([key, replacement]) => {
+        value = value.split(`:${key}`).join(String(replacement ?? ''));
+    });
+
+    return value;
+}
+
 function formatClipboardInlineText(value) {
     return escapeClipboardHtml(value)
         .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -1516,6 +1526,7 @@ export default function AiShow({
     requirements_count: requirementsCount = 0,
     requirements = [],
     requirements_store_url: requirementsStoreUrl = '',
+    requirements_destroy_all_url: requirementsDestroyAllUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
@@ -1526,6 +1537,7 @@ export default function AiShow({
     const {
         locale = 'nb-NO',
         assigned_user_options: assignedUserOptionsProp = [],
+        assignable_users: assignableUsersProp = [],
         translations = {},
         auth = {},
         can_use_ai_offer: canUseAiOffer = true,
@@ -1792,8 +1804,15 @@ export default function AiShow({
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
     const [refreshingEvidence, setRefreshingEvidence] = useState(false);
+    const [deletingAllRequirements, setDeletingAllRequirements] = useState(false);
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
+    const [responsiblePickerRequirementId, setResponsiblePickerRequirementId] = useState(null);
+    const [responsibleSavingRequirementId, setResponsibleSavingRequirementId] = useState(null);
+    const [responsibleUpdateError, setResponsibleUpdateError] = useState(null);
+    const [responsibleUserSearch, setResponsibleUserSearch] = useState('');
+    const initialRequirementRows = Array.isArray(requirements) ? requirements : [];
+    const [requirementRows, setRequirementRows] = useState(initialRequirementRows);
     const [activeRequirementId, setActiveRequirementId] = useState(() => {
         if (currentCaseId === null || currentCaseId === undefined) {
             return null;
@@ -1805,9 +1824,7 @@ export default function AiShow({
             return null;
         }
 
-        const currentRequirements = Array.isArray(requirements) ? requirements : [];
-
-        return currentRequirements.some((requirement) => String(requirement.id) === rememberedRequirementId)
+        return initialRequirementRows.some((requirement) => String(requirement.id) === rememberedRequirementId)
             ? rememberedRequirementId
             : null;
     });
@@ -1844,9 +1861,12 @@ export default function AiShow({
     });
     const aiStatusMeta = AI_STATUS_META[aiStatus] ?? AI_STATUS_META.not_started;
     const assignedUserOptions = Array.isArray(assignedUserOptionsProp) ? assignedUserOptionsProp : [];
+    const assignableUsers = Array.isArray(assignableUsersProp) ? assignableUsersProp : [];
     const documentRows = Array.isArray(documents) ? documents : [];
     const answerBasisItems = Array.isArray(answerBasisItemsProp) ? answerBasisItemsProp : [];
-    const requirementRows = Array.isArray(requirements) ? requirements : [];
+    const extractedRequirementRows = requirementRows.filter(
+        (requirement) => String(requirement?.source_type ?? '').trim() !== 'manual',
+    );
     const answerBasisItemsById = answerBasisItems.reduce((accumulator, item) => {
         accumulator[String(item.id)] = item;
 
@@ -1870,6 +1890,7 @@ export default function AiShow({
         || answerDraftGeneratingRequirementId !== null
         || answerDraftSavingRequirementId !== null
         || answerBasisSelectionSavingRequirementId !== null
+        || deletingAllRequirements
         || updatingEvidenceId !== null
         || manualRequirementForm.processing
         || requirementEditForm.processing
@@ -1881,6 +1902,10 @@ export default function AiShow({
             year: 'numeric',
         }).format(new Date(caseData.updated_at))
         : '—';
+
+    useEffect(() => {
+        setRequirementRows(Array.isArray(requirements) ? requirements : []);
+    }, [requirements]);
 
     useEffect(() => {
         setAnswerDraftsByRequirementId((currentState) => {
@@ -2055,6 +2080,30 @@ export default function AiShow({
         : [];
     const activeRequirementTableRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'table');
     const activeRequirementImageRetrievalSources = activeRequirementRetrievalSources.filter((source) => String(source?.chunk_type ?? '').trim().toLowerCase() === 'image');
+    const responsiblePickerRequirement = responsiblePickerRequirementId !== null
+        ? requirementRows.find((requirement) => String(requirement.id) === String(responsiblePickerRequirementId)) ?? null
+        : null;
+    const responsiblePickerAssignedUserId = responsiblePickerRequirement?.assigned_user_id !== null && responsiblePickerRequirement?.assigned_user_id !== undefined
+        ? String(responsiblePickerRequirement.assigned_user_id)
+        : (responsiblePickerRequirement?.assigned_user?.id !== null && responsiblePickerRequirement?.assigned_user?.id !== undefined
+            ? String(responsiblePickerRequirement.assigned_user.id)
+            : null);
+    const responsiblePickerAssignedUser = responsiblePickerRequirement?.assigned_user ?? null;
+    const responsiblePickerAssignedUserName = String(responsiblePickerAssignedUser?.name ?? '').trim();
+    const responsiblePickerAssignedUserEmail = String(responsiblePickerAssignedUser?.email ?? '').trim();
+    const responsiblePickerHasAssignedUser = responsiblePickerAssignedUserId !== null && responsiblePickerAssignedUserId !== '';
+    const responsiblePickerSummary = responsiblePickerHasAssignedUser
+        ? `${tai.current_responsible_user}: ${responsiblePickerAssignedUserName || '—'}`
+        : `${tai.current_responsible_user}: ${tai.no_responsible_user_set}`;
+    const normalizedResponsibleUserSearch = responsibleUserSearch.trim().toLowerCase();
+    const filteredAssignableUsers = normalizedResponsibleUserSearch === ''
+        ? assignableUsers
+        : assignableUsers.filter((user) => {
+            const userName = String(user?.name ?? '').toLowerCase();
+            const userEmail = String(user?.email ?? '').toLowerCase();
+
+            return userName.includes(normalizedResponsibleUserSearch) || userEmail.includes(normalizedResponsibleUserSearch);
+        });
 
     useEffect(() => {
         setAnswerDraftCopyStatus(null);
@@ -2067,6 +2116,10 @@ export default function AiShow({
     useEffect(() => {
         setAnswerDraftMissingKnowledgeDetailsExpanded(false);
     }, [activeRequirementKey]);
+
+    useEffect(() => {
+        setResponsibleUserSearch('');
+    }, [responsiblePickerRequirementId]);
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -2115,6 +2168,96 @@ export default function AiShow({
                 manualRequirementForm.reset();
                 manualRequirementForm.clearErrors();
                 setShowManualRequirementForm(false);
+            },
+            });
+    };
+
+    const openResponsiblePicker = (requirement) => {
+        if (!requirement || requirementUpdatesLocked) {
+            return;
+        }
+
+        setResponsibleUpdateError(null);
+        setResponsibleUserSearch('');
+        setResponsiblePickerRequirementId(String(requirement.id));
+    };
+
+    const closeResponsiblePicker = () => {
+        setResponsiblePickerRequirementId(null);
+        setResponsibleUpdateError(null);
+        setResponsibleUserSearch('');
+    };
+
+    const updateRequirementAssignedUser = async (requirement, assignedUserId) => {
+        if (
+            !requirement
+            || !requirement.assigned_user_update_url
+            || requirementUpdatesLocked
+            || responsibleSavingRequirementId !== null
+        ) {
+            return;
+        }
+
+        setResponsibleSavingRequirementId(requirement.id);
+        setResponsibleUpdateError(null);
+
+        try {
+            const response = await window.axios.patch(requirement.assigned_user_update_url, {
+                assigned_user_id: assignedUserId === '' ? null : assignedUserId,
+            });
+            const updatedRequirement = response?.data?.requirement ?? null;
+            const requirementId = String(requirement.id);
+
+            if (updatedRequirement !== null && typeof updatedRequirement === 'object') {
+                setRequirementRows((currentRows) => currentRows.map((row) => (
+                    String(row.id) === requirementId ? updatedRequirement : row
+                )));
+            } else {
+                setRequirementRows((currentRows) => currentRows.map((row) => (
+                    String(row.id) === requirementId
+                        ? {
+                            ...row,
+                            assigned_user_id: response?.data?.assigned_user_id ?? null,
+                            assigned_user: response?.data?.assigned_user ?? null,
+                        }
+                        : row
+                )));
+            }
+
+            closeResponsiblePicker();
+        } catch (error) {
+            setResponsibleUpdateError(extractAxiosErrorMessage(error, tai.could_not_update_responsible_user));
+        } finally {
+            setResponsibleSavingRequirementId(null);
+        }
+    };
+
+    const destroyAllExtractedRequirements = () => {
+        if (
+            !canUseAiOffer
+            || !requirementsDestroyAllUrl
+            || extractedRequirementRows.length === 0
+            || requirementUpdatesLocked
+            || deletingAllRequirements
+        ) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `${tai.delete_all_confirm_title}\n\n${tai.delete_all_confirm_message}`,
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        setDeletingAllRequirements(true);
+
+        router.delete(requirementsDestroyAllUrl, {
+            preserveScroll: true,
+            preserveState: false,
+            onFinish: () => {
+                setDeletingAllRequirements(false);
             },
         });
     };
@@ -2753,6 +2896,17 @@ export default function AiShow({
                                         </button>
                                     </>
                                 ) : null}
+
+                                {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsDestroyAllUrl ? (
+                                    <button
+                                        type="button"
+                                        onClick={destroyAllExtractedRequirements}
+                                        disabled={requirementUpdatesLocked || deletingAllRequirements}
+                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {deletingAllRequirements ? tai.deleting : tai.delete_all_requirements}
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
 
@@ -2859,8 +3013,31 @@ export default function AiShow({
                                     const approvalActions = REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft;
                                     const workStatus = requirement.work_status ?? 'not_started';
                                     const workStatusMeta = WORK_STATUS_META[workStatus] ?? WORK_STATUS_META.not_started;
-                                    const assignedUserId = requirement.assigned_user?.id ? String(requirement.assigned_user.id) : '';
-                                    const assignedUserLabel = requirement.assigned_user?.name ?? tai.not_assigned;
+                                    const assignedUserId = requirement.assigned_user_id !== null && requirement.assigned_user_id !== undefined
+                                        ? String(requirement.assigned_user_id)
+                                        : (requirement.assigned_user?.id !== null && requirement.assigned_user?.id !== undefined
+                                            ? String(requirement.assigned_user.id)
+                                            : '');
+                                    const assignedUserName = String(requirement.assigned_user?.name ?? '').trim();
+                                    const assignedUserEmail = String(requirement.assigned_user?.email ?? '').trim();
+                                    const hasAssignedUser = assignedUserId !== '';
+                                    const responsibleButtonTitle = hasAssignedUser
+                                        ? formatLocalizedTemplate(tai.responsible_with_contact, {
+                                            name: assignedUserName || '—',
+                                            email: assignedUserEmail || '—',
+                                        })
+                                        : tai.no_responsible_user_set;
+                                    const responsibleButtonAriaLabel = hasAssignedUser
+                                        ? formatLocalizedTemplate(tai.change_responsible_user_current, {
+                                            name: assignedUserName || '—',
+                                        })
+                                        : tai.set_responsible;
+                                    const responsibleCardLabel = hasAssignedUser
+                                        ? `${tai.responsible}:`
+                                        : tai.no_responsible_user_set;
+                                    const assignedUserLabel = hasAssignedUser
+                                        ? (assignedUserName || '—')
+                                        : tai.no_responsible_user;
                                     const currentRequirementIdentifier = requirement.current_requirement_identifier ?? requirement.requirement_identifier ?? '—';
                                     const currentRequirementText = requirement.current_requirement_text ?? requirement.requirement_text ?? '';
                                     const originalRequirementIdentifier = requirement.original_requirement_identifier ?? null;
@@ -3007,6 +3184,50 @@ export default function AiShow({
                                                             </span>
                                                         )}
                                                     </div>
+                                                </div>
+
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openResponsiblePicker(requirement)}
+                                                        disabled={requirementUpdatesLocked || responsibleSavingRequirementId !== null}
+                                                        title={responsibleButtonTitle}
+                                                        aria-label={responsibleButtonAriaLabel}
+                                                        className={`flex w-full min-w-0 items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                            hasAssignedUser
+                                                                ? 'border-violet-200 bg-violet-50/70 hover:border-violet-300 hover:bg-violet-50'
+                                                                : 'border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50'
+                                                        }`}
+                                                    >
+                                                        <div className="min-w-0 text-left">
+                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                {tai.responsible}
+                                                            </div>
+                                                            {hasAssignedUser ? (
+                                                                <>
+                                                                    <div className="truncate text-sm font-semibold text-slate-950">
+                                                                        {assignedUserName || '—'}
+                                                                    </div>
+                                                                    {assignedUserEmail !== '' ? (
+                                                                        <div className="truncate text-xs text-slate-500">
+                                                                            {assignedUserEmail}
+                                                                        </div>
+                                                                    ) : null}
+                                                                </>
+                                                            ) : (
+                                                                <div className="text-sm font-semibold text-slate-700">
+                                                                    {tai.no_responsible_user_set}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
+                                                            hasAssignedUser
+                                                                ? 'bg-violet-600 text-white'
+                                                                : 'border border-slate-200 bg-slate-50 text-slate-700'
+                                                        }`}>
+                                                            {hasAssignedUser ? tai.change_responsible : tai.set_responsible}
+                                                        </span>
+                                                    </button>
                                                 </div>
 
                                                 <div className="flex flex-wrap gap-2">
@@ -4020,6 +4241,142 @@ export default function AiShow({
                     </section>
 
                 </div>
+
+                {responsiblePickerRequirement !== null ? (
+                    <div
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6"
+                        onClick={closeResponsiblePicker}
+                    >
+                        <div
+                            className="w-full max-w-2xl rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_24px_80px_rgba(15,23,42,0.25)]"
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <div className="flex items-start justify-between gap-4">
+                                <div className="space-y-1">
+                                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-500">
+                                        {tai.choose_responsible_user}
+                                    </div>
+                                    <h3 className="text-lg font-semibold tracking-tight text-slate-950">
+                                        {responsiblePickerRequirement.current_requirement_text ?? responsiblePickerRequirement.requirement_text ?? tai.set_responsible}
+                                    </h3>
+                                    <p className="text-sm text-slate-500">
+                                        {responsiblePickerRequirement.current_requirement_identifier ?? responsiblePickerRequirement.requirement_identifier ?? '—'}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeResponsiblePicker}
+                                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-950"
+                                >
+                                    ×
+                                    </button>
+                                </div>
+
+                            <div className="mt-5 space-y-3">
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950">
+                                    {responsiblePickerSummary}
+                                </div>
+
+                                <label className="block space-y-1">
+                                    <span className="sr-only">{tai.choose_responsible_user}</span>
+                                    <input
+                                        type="search"
+                                        value={responsibleUserSearch}
+                                        onChange={(event) => setResponsibleUserSearch(event.target.value)}
+                                        placeholder={tai.responsible_user_search_placeholder}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                    />
+                                </label>
+
+                                {(() => {
+                                    const isNoResponsibleSelected = !responsiblePickerHasAssignedUser;
+
+                                    return (
+                                        <button
+                                            type="button"
+                                            onClick={() => void updateRequirementAssignedUser(responsiblePickerRequirement, null)}
+                                            disabled={responsibleSavingRequirementId === responsiblePickerRequirement.id}
+                                            className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                isNoResponsibleSelected
+                                                    ? 'border-violet-300 bg-violet-50 text-violet-800'
+                                                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700'
+                                            }`}
+                                        >
+                                            <div className="min-w-0 text-left">
+                                                <div className="font-semibold">
+                                                    {tai.no_responsible_user}
+                                                </div>
+                                            <div className="text-xs text-slate-500">
+                                                {tai.remove_responsible}
+                                            </div>
+                                        </div>
+                                            {isNoResponsibleSelected ? (
+                                                <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                                    {tai.selected}
+                                                </span>
+                                            ) : null}
+                                        </button>
+                                    );
+                                })()}
+
+                                <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+                                    {assignableUsers.length > 0 ? (
+                                        filteredAssignableUsers.length > 0 ? (
+                                            filteredAssignableUsers.map((user) => {
+                                                const isSelectedResponsibleUser = responsiblePickerAssignedUserId !== null
+                                                    && String(user.id) === String(responsiblePickerAssignedUserId);
+
+                                                return (
+                                                    <button
+                                                        key={user.id}
+                                                        type="button"
+                                                        onClick={() => void updateRequirementAssignedUser(responsiblePickerRequirement, user.id)}
+                                                        disabled={responsibleSavingRequirementId === responsiblePickerRequirement.id}
+                                                        className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                            isSelectedResponsibleUser
+                                                                ? 'border-violet-300 bg-violet-50 text-violet-800'
+                                                                : 'border-slate-200 bg-white text-slate-700 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700'
+                                                        }`}
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <div className="font-semibold text-slate-950">
+                                                                {user.name}
+                                                            </div>
+                                                            <div className="truncate text-xs text-slate-500">
+                                                                {user.email}
+                                                            </div>
+                                                        </div>
+                                                        {isSelectedResponsibleUser ? (
+                                                            <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                                                {tai.selected_responsible_user}
+                                                            </span>
+                                                        ) : null}
+                                                    </button>
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                                {responsibleUserSearch.trim() !== ''
+                                                    ? tai.no_users_found
+                                                    : tai.no_responsible_user}
+                                            </div>
+                                        )
+                                    ) : (
+                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                                            {tai.no_responsible_user}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {responsibleUpdateError ? (
+                                    <p className="text-sm text-rose-600">
+                                        {responsibleUpdateError}
+                                    </p>
+                                ) : null}
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
 
                 {selectedEvidence?.source ? (
                     <EvidenceSourceModal
