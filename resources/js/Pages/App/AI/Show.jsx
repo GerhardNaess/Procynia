@@ -1811,9 +1811,30 @@ export default function AiShow({
     const [responsibleSavingRequirementId, setResponsibleSavingRequirementId] = useState(null);
     const [responsibleUpdateError, setResponsibleUpdateError] = useState(null);
     const [responsibleUserSearch, setResponsibleUserSearch] = useState('');
+    const [selectedResponsibleUserFilter, setSelectedResponsibleUserFilter] = useState('all');
+    const [expandedRequirementDetailsById, setExpandedRequirementDetailsById] = useState({});
     const initialRequirementRows = Array.isArray(requirements) ? requirements : [];
+    const initialRequirementIdFromQuery = (() => {
+        if (typeof window === 'undefined') {
+            return null;
+        }
+
+        const searchParams = new URLSearchParams(window.location.search);
+        const requirementId = searchParams.get('requirement_id');
+
+        return requirementId !== null && requirementId.trim() !== ''
+            ? requirementId.trim()
+            : null;
+    })();
+    const initialRequirementFocusIdRef = useRef(initialRequirementIdFromQuery);
     const [requirementRows, setRequirementRows] = useState(initialRequirementRows);
     const [activeRequirementId, setActiveRequirementId] = useState(() => {
+        if (initialRequirementIdFromQuery !== null) {
+            return initialRequirementRows.some((requirement) => String(requirement.id) === initialRequirementIdFromQuery)
+                ? initialRequirementIdFromQuery
+                : null;
+        }
+
         if (currentCaseId === null || currentCaseId === undefined) {
             return null;
         }
@@ -1971,6 +1992,30 @@ export default function AiShow({
     }, [activeRequirementId, currentCaseId, requirementRows]);
 
     useEffect(() => {
+        const requirementIdToFocus = initialRequirementFocusIdRef.current;
+
+        if (requirementIdToFocus === null || activeRequirementId === null) {
+            return;
+        }
+
+        if (String(activeRequirementId) !== String(requirementIdToFocus)) {
+            return;
+        }
+
+        const targetElement = document.getElementById(`ai-requirement-${activeRequirementId}`);
+
+        if (!targetElement) {
+            return;
+        }
+
+        targetElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+        });
+        initialRequirementFocusIdRef.current = null;
+    }, [activeRequirementId, requirementRows]);
+
+    useEffect(() => {
         if (!documentNeedsRefresh) {
             documentRefreshInFlightRef.current = false;
             return undefined;
@@ -2104,6 +2149,25 @@ export default function AiShow({
 
             return userName.includes(normalizedResponsibleUserSearch) || userEmail.includes(normalizedResponsibleUserSearch);
         });
+    const selectedResponsibleUserFilterValue = String(selectedResponsibleUserFilter ?? 'all');
+    const visibleRequirementRows = requirementRows.filter((requirement) => {
+        const requirementAssignedUserId = requirement.assigned_user_id !== null && requirement.assigned_user_id !== undefined && String(requirement.assigned_user_id).trim() !== ''
+            ? String(requirement.assigned_user_id)
+            : (requirement.assigned_user?.id !== null && requirement.assigned_user?.id !== undefined && String(requirement.assigned_user.id).trim() !== ''
+                ? String(requirement.assigned_user.id)
+                : null);
+
+        if (selectedResponsibleUserFilterValue === 'all') {
+            return true;
+        }
+
+        if (selectedResponsibleUserFilterValue === 'unassigned') {
+            return requirementAssignedUserId === null;
+        }
+
+        return requirementAssignedUserId !== null
+            && String(requirementAssignedUserId) === selectedResponsibleUserFilterValue;
+    });
 
     useEffect(() => {
         setAnswerDraftCopyStatus(null);
@@ -2120,6 +2184,14 @@ export default function AiShow({
     useEffect(() => {
         setResponsibleUserSearch('');
     }, [responsiblePickerRequirementId]);
+
+    useEffect(() => {
+        setSelectedResponsibleUserFilter('all');
+    }, [currentCaseId]);
+
+    useEffect(() => {
+        setExpandedRequirementDetailsById({});
+    }, [currentCaseId]);
 
     const handleDocumentChange = (event) => {
         documentUploadForm.setData('documents', Array.from(event.target.files ?? []));
@@ -2910,6 +2982,34 @@ export default function AiShow({
                             </div>
                         </div>
 
+                        <div className="mt-4 flex flex-wrap items-end justify-between gap-3 rounded-[18px] border border-slate-200 bg-slate-50/70 px-4 py-3">
+                            <label className="block min-w-[16rem] flex-1 space-y-1">
+                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {tai.responsible}
+                                </span>
+                                <select
+                                    value={selectedResponsibleUserFilterValue}
+                                    onChange={(event) => setSelectedResponsibleUserFilter(event.target.value)}
+                                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-violet-400 focus:ring-4 focus:ring-violet-100"
+                                >
+                                    <option value="all">{tai.all_requirements}</option>
+                                    <option value="unassigned">{tai.unassigned_requirements}</option>
+                                    {assignableUsers.map((user) => (
+                                        <option key={user.id} value={String(user.id)}>
+                                            {user.name}{user.email ? ` · ${user.email}` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+
+                            <div className="text-sm font-medium text-slate-500">
+                                {formatLocalizedTemplate(tai.showing_requirements, {
+                                    visible: visibleRequirementRows.length,
+                                    total: requirementRows.length,
+                                })}
+                            </div>
+                        </div>
+
                         {showManualRequirementForm ? (
                             <form onSubmit={submitManualRequirement} className="mt-5 space-y-4 rounded-[22px] border border-violet-200 bg-violet-50/40 p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3005,9 +3105,15 @@ export default function AiShow({
                                     {tai.requirements_empty_hint}
                                 </p>
                             </div>
+                        ) : visibleRequirementRows.length === 0 ? (
+                            <div className="mt-5 rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10">
+                                <div className="text-lg font-semibold text-slate-900">
+                                    {tai.no_requirements_for_selected_responsible}
+                                </div>
+                            </div>
                         ) : (
                             <div className="mt-5 max-h-[38rem] space-y-4 overflow-y-auto pr-2 lg:min-h-0 lg:max-h-none lg:flex-1">
-                                {requirementRows.map((requirement) => {
+                                {visibleRequirementRows.map((requirement) => {
                                     const sourceTypeMeta = REQUIREMENT_SOURCE_TYPE_META[requirement.source_type] ?? REQUIREMENT_SOURCE_TYPE_META.ai_candidate;
                                     const approvalStatus = requirement.approval_status ?? 'draft';
                                     const approvalActions = REQUIREMENT_APPROVAL_ACTIONS[approvalStatus] ?? REQUIREMENT_APPROVAL_ACTIONS.draft;
@@ -3032,9 +3138,6 @@ export default function AiShow({
                                             name: assignedUserName || '—',
                                         })
                                         : tai.set_responsible;
-                                    const responsibleCardLabel = hasAssignedUser
-                                        ? `${tai.responsible}:`
-                                        : tai.no_responsible_user_set;
                                     const assignedUserLabel = hasAssignedUser
                                         ? (assignedUserName || '—')
                                         : tai.no_responsible_user;
@@ -3078,10 +3181,12 @@ export default function AiShow({
                                     const requirementUserPrompt = answerDraftPromptsByRequirementId[requirementKey] ?? '';
                                     const requirementPromptEditorOpen = promptEditorOpenRequirementId === requirementKey;
                                     const requirementHasUserPrompt = normalizeAnswerDraftText(requirementUserPrompt).trim() !== '';
+                                    const requirementDetailsExpanded = Boolean(expandedRequirementDetailsById[requirementKey]);
 
                                     return (
                                         <article
                                             key={requirement.id}
+                                            id={`ai-requirement-${requirement.id}`}
                                             role={canOpenAnswerWorkspace ? 'button' : undefined}
                                             tabIndex={canOpenAnswerWorkspace ? 0 : undefined}
                                             onClick={(event) => {
@@ -3117,7 +3222,7 @@ export default function AiShow({
                                                     : 'border-slate-200 bg-white'
                                             } ${
                                                 canOpenAnswerWorkspace ? 'cursor-pointer hover:border-violet-300' : ''
-                                            } ${
+                                            } scroll-mt-24 ${
                                                 isActiveRequirement
                                                     ? 'ring-2 ring-violet-300 ring-offset-2 ring-offset-white'
                                                     : ''
@@ -3184,50 +3289,6 @@ export default function AiShow({
                                                             </span>
                                                         )}
                                                     </div>
-                                                </div>
-
-                                                <div className="flex flex-wrap gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openResponsiblePicker(requirement)}
-                                                        disabled={requirementUpdatesLocked || responsibleSavingRequirementId !== null}
-                                                        title={responsibleButtonTitle}
-                                                        aria-label={responsibleButtonAriaLabel}
-                                                        className={`flex w-full min-w-0 items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                                            hasAssignedUser
-                                                                ? 'border-violet-200 bg-violet-50/70 hover:border-violet-300 hover:bg-violet-50'
-                                                                : 'border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50'
-                                                        }`}
-                                                    >
-                                                        <div className="min-w-0 text-left">
-                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                                {tai.responsible}
-                                                            </div>
-                                                            {hasAssignedUser ? (
-                                                                <>
-                                                                    <div className="truncate text-sm font-semibold text-slate-950">
-                                                                        {assignedUserName || '—'}
-                                                                    </div>
-                                                                    {assignedUserEmail !== '' ? (
-                                                                        <div className="truncate text-xs text-slate-500">
-                                                                            {assignedUserEmail}
-                                                                        </div>
-                                                                    ) : null}
-                                                                </>
-                                                            ) : (
-                                                                <div className="text-sm font-semibold text-slate-700">
-                                                                    {tai.no_responsible_user_set}
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
-                                                            hasAssignedUser
-                                                                ? 'bg-violet-600 text-white'
-                                                                : 'border border-slate-200 bg-slate-50 text-slate-700'
-                                                        }`}>
-                                                            {hasAssignedUser ? tai.change_responsible : tai.set_responsible}
-                                                        </span>
-                                                    </button>
                                                 </div>
 
                                                 <div className="flex flex-wrap gap-2">
@@ -3440,9 +3501,7 @@ export default function AiShow({
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-                                                            {tai.answer_draft_placeholder}
-                                                        </div>
+                                                        null
                                                     )
                                                 ) : null}
 
@@ -3740,6 +3799,24 @@ export default function AiShow({
 
                                                 <div className="flex flex-wrap gap-2 border-t border-slate-200/80 pt-4">
                                                     {isApprovedRequirement ? (
+                                                        <div className="flex w-full flex-wrap justify-end gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setExpandedRequirementDetailsById((currentState) => ({
+                                                                        ...currentState,
+                                                                        [requirementKey]: !Boolean(currentState[requirementKey]),
+                                                                    }));
+                                                                }}
+                                                                aria-expanded={requirementDetailsExpanded}
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            >
+                                                                {requirementDetailsExpanded ? tai.requirement_details_less : tai.requirement_details_more}
+                                                            </button>
+                                                        </div>
+                                                    ) : null}
+
+                                                    {isApprovedRequirement && requirementDetailsExpanded ? (
                                                         <div className="grid w-full gap-3 md:grid-cols-2">
                                                             <label className="block space-y-1">
                                                                 <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
