@@ -4,6 +4,8 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\Department;
+use App\Models\Notice;
+use App\Models\NoticeDocument;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -3131,6 +3133,49 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         );
     }
 
+    public function test_archived_saved_notice_show_page_exposes_notice_documents_with_download_links(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-archived-docs',
+            'Archived bid case',
+            archived: true,
+            historyType: SavedNotice::HISTORY_TYPE_ABORTED,
+        );
+
+        $notice = Notice::query()->create([
+            'notice_id' => $savedNotice->external_id,
+            'title' => 'Archived bid case',
+            'description' => 'Archived notice description',
+            'buyer_name' => 'Procynia',
+        ]);
+
+        $document = NoticeDocument::query()->create([
+            'notice_id' => $notice->id,
+            'title' => 'Kravspesifikasjon.pdf',
+            'source_url' => 'https://example.com/kravspesifikasjon.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size' => 2048,
+            'sort_order' => 1,
+        ]);
+
+        $page = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertSame('App/Notices/SavedShow', $page['component']);
+        $this->assertCount(1, $page['props']['notice']['documents']);
+        $this->assertSame('Kravspesifikasjon.pdf', $page['props']['notice']['documents'][0]['title']);
+        $this->assertSame(
+            route('app.notices.documents.download', [
+                'notice' => $notice->id,
+                'document' => $document->id,
+            ]),
+            $page['props']['notice']['documents'][0]['download_url'],
+        );
+    }
+
     public function test_saved_notice_case_show_page_exposes_case_access_controls_for_assigned_bid_manager(): void
     {
         $context = $this->customerAdminContext();
@@ -4681,6 +4726,18 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 });
             }
 
+            if (! Schema::hasColumn('saved_notice_info_items', 'source_type')) {
+                Schema::table('saved_notice_info_items', function (Blueprint $table): void {
+                    $table->string('source_type', 80)->nullable();
+                });
+            }
+
+            if (! Schema::hasColumn('saved_notice_info_items', 'source_id')) {
+                Schema::table('saved_notice_info_items', function (Blueprint $table): void {
+                    $table->unsignedBigInteger('source_id')->nullable();
+                });
+            }
+
             return;
         }
 
@@ -4699,11 +4756,14 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('closed_at')->nullable();
             $table->text('closure_comment')->nullable();
+            $table->string('source_type', 80)->nullable();
+            $table->unsignedBigInteger('source_id')->nullable();
             $table->timestamps();
 
             $table->index(['saved_notice_id', 'created_at']);
             $table->index(['saved_notice_id', 'status']);
             $table->index(['saved_notice_id', 'response_due_at']);
+            $table->index(['saved_notice_id', 'type', 'status', 'source_type', 'source_id'], 'saved_notice_info_items_source_task_lookup_index');
         });
 
         $this->createdSavedNoticeInfoItemsTable = true;

@@ -47,6 +47,7 @@ class Customer extends Model
         'billing_interval',
         'included_users',
         'included_ai_credits',
+        'billing_discount_percent',
     ];
 
     protected function casts(): array
@@ -57,6 +58,7 @@ class Customer extends Model
             'trial_ends_at' => 'datetime',
             'included_users' => 'integer',
             'included_ai_credits' => 'integer',
+            'billing_discount_percent' => 'decimal:2',
         ];
     }
 

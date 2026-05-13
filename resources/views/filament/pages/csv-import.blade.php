@@ -3,7 +3,7 @@
         <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div class="space-y-2">
-                    <h2 class="text-lg font-semibold text-gray-900">CSV Import</h2>
+                    <h2 class="text-lg font-semibold text-gray-900">CPV Import</h2>
                     <p class="max-w-3xl text-sm text-gray-600">
                         Imports the canonical CPV catalog from <code>database/data/cpv_codes.csv</code> into the
                         <code>cpv_codes</code> table using the existing Laravel command.
@@ -11,7 +11,7 @@
                 </div>
 
                 <x-filament::button wire:click="runImport">
-                    Run CSV import
+                    Run CPV import
                 </x-filament::button>
             </div>
 

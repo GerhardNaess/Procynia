@@ -21,7 +21,7 @@ class CsvImportPageTest extends TestCase
             ->get(CsvImport::getUrl());
 
         $response->assertOk();
-        $response->assertSee('CSV Import');
+        $response->assertSee('CPV Import');
     }
 
     public function test_run_import_calls_the_canonical_cpv_import_command(): void
@@ -50,7 +50,7 @@ class CsvImportPageTest extends TestCase
             ->assertSet('lastOutput', '[DOFFIN][CPV] Import completed. created=0 updated=0 skipped=9409 total=9409')
             ->assertSet('lastError', null);
 
-        Notification::assertNotified('CSV import completed');
+        Notification::assertNotified('CPV import completed');
     }
 
     public function test_the_page_surfaces_import_failures(): void
@@ -71,7 +71,7 @@ class CsvImportPageTest extends TestCase
             ->call('runImport')
             ->assertSet('lastError', '[DOFFIN][CPV] Import failed: Catalog file was not found.');
 
-        Notification::assertNotified('CSV import failed');
+        Notification::assertNotified('CPV import failed');
     }
 
     private function internalAdmin(): User

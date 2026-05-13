@@ -34,6 +34,8 @@ class DoffinSupplierResource extends Resource
 
     protected static ?int $navigationSort = 3;
 
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function canAccess(): bool
     {
         return app(CustomerContext::class)->isInternalAdmin();

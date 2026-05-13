@@ -2190,6 +2190,24 @@ export default function AiShow({
     }, [currentCaseId]);
 
     useEffect(() => {
+        const requirementIdToFocus = initialRequirementFocusIdRef.current;
+
+        if (requirementIdToFocus === null) {
+            return;
+        }
+
+        const requirementExists = requirementRows.some((requirement) => String(requirement.id) === String(requirementIdToFocus));
+
+        if (!requirementExists) {
+            return;
+        }
+
+        if (String(activeRequirementId ?? '') !== String(requirementIdToFocus)) {
+            setActiveRequirementId(String(requirementIdToFocus));
+        }
+    }, [activeRequirementId, requirementRows]);
+
+    useEffect(() => {
         setExpandedRequirementDetailsById({});
     }, [currentCaseId]);
 

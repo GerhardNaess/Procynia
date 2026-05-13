@@ -34,6 +34,7 @@ final readonly class RequirementViewData implements JsonSerializable
         public string $editStateLabel,
         public ?string $workStatus,
         public string $workStatusLabel,
+        public ?int $assignedUserId,
         public ?string $documentFilename,
         public ?int $chunkIndex,
         public ?array $assignedUser,
@@ -47,6 +48,7 @@ final readonly class RequirementViewData implements JsonSerializable
         public ?string $reviewStatusUpdateUrl = null,
         public ?string $editUrl = null,
         public ?string $workUpdateUrl = null,
+        public ?string $assignedUserUpdateUrl = null,
     ) {
     }
 
@@ -85,11 +87,13 @@ final readonly class RequirementViewData implements JsonSerializable
             editStateLabel: $editStateLabel,
             workStatus: $requirement->work_status,
             workStatusLabel: $requirement->work_status_label,
+            assignedUserId: $requirement->assigned_user_id !== null ? (int) $requirement->assigned_user_id : null,
             documentFilename: $requirement->document?->original_filename,
             chunkIndex: $requirement->chunk?->chunk_index,
             assignedUser: $requirement->assignedUser ? [
                 'id' => $requirement->assignedUser->id,
                 'name' => $requirement->assignedUser->name,
+                'email' => $requirement->assignedUser->email,
             ] : null,
             approvedAt: optional($requirement->approved_at)?->toIso8601String(),
             approvedByUserId: $requirement->approved_by_user_id !== null ? (int) $requirement->approved_by_user_id : null,
@@ -101,6 +105,7 @@ final readonly class RequirementViewData implements JsonSerializable
             reviewStatusUpdateUrl: $urls['review_status_update_url'] ?? null,
             editUrl: $urls['edit_url'] ?? null,
             workUpdateUrl: $urls['work_update_url'] ?? null,
+            assignedUserUpdateUrl: $urls['assigned_user_update_url'] ?? null,
         );
     }
 
@@ -135,6 +140,7 @@ final readonly class RequirementViewData implements JsonSerializable
             'edit_state_label' => $this->editStateLabel,
             'work_status' => $this->workStatus,
             'work_status_label' => $this->workStatusLabel,
+            'assigned_user_id' => $this->assignedUserId,
             'document_filename' => $this->documentFilename,
             'chunk_index' => $this->chunkIndex,
             'assigned_user' => $this->assignedUser,
@@ -148,6 +154,7 @@ final readonly class RequirementViewData implements JsonSerializable
             'review_status_update_url' => $this->reviewStatusUpdateUrl,
             'edit_url' => $this->editUrl,
             'work_update_url' => $this->workUpdateUrl,
+            'assigned_user_update_url' => $this->assignedUserUpdateUrl,
         ];
     }
 

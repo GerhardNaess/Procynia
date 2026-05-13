@@ -19,7 +19,7 @@ class CsvImport extends Page
 {
     protected string $view = 'filament.pages.csv-import';
 
-    protected static ?string $navigationLabel = 'CSV Import';
+    protected static ?string $navigationLabel = 'CPV Import';
 
     protected static string|UnitEnum|null $navigationGroup = 'Imports';
 
@@ -50,6 +50,11 @@ class CsvImport extends Page
         return app(CustomerContext::class)->isInternalAdmin();
     }
 
+    public function getTitle(): string
+    {
+        return 'CPV Import';
+    }
+
     /**
      * Initialize the current catalog count.
      */
@@ -59,7 +64,7 @@ class CsvImport extends Page
     }
 
     /**
-     * Execute the canonical CSV import command.
+     * Execute the canonical CPV import command.
      */
     public function runImport(): void
     {
@@ -72,20 +77,20 @@ class CsvImport extends Page
             $this->refreshCatalogCount();
 
             if ($exitCode !== 0) {
-                throw new \RuntimeException($this->lastOutput !== '' ? $this->lastOutput : 'The CSV import command failed.');
+                throw new \RuntimeException($this->lastOutput !== '' ? $this->lastOutput : 'The CPV import command failed.');
             }
 
             Notification::make()
-                ->title('CSV import completed')
+                ->title('CPV import completed')
                 ->success()
-                ->body($this->lastOutput !== '' ? $this->lastOutput : 'The CPV CSV import completed successfully.')
+                ->body($this->lastOutput !== '' ? $this->lastOutput : 'The CPV import completed successfully.')
                 ->send();
         } catch (Throwable $throwable) {
             $this->lastError = $throwable->getMessage();
             $this->refreshCatalogCount();
 
             Notification::make()
-                ->title('CSV import failed')
+                ->title('CPV import failed')
                 ->danger()
                 ->body($this->lastError)
                 ->send();

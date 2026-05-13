@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             WatchProfileSeeder::class,
             UserNotificationSeeder::class,
+            OperatingProcedureSeeder::class,
         ]);
     }
 }

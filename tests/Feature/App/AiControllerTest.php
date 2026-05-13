@@ -8,6 +8,7 @@ use App\Models\Language;
 use App\Models\KnowledgeItem;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeInfoItem;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\BidSubmission;
 use App\Models\Nationality;
@@ -390,6 +391,7 @@ class AiControllerTest extends TestCase
         $this->assertSame('App/AI/Show', data_get($page, 'component'));
         $this->assertSame(1, data_get($page, 'props.requirements_count'));
         $this->assertSame(route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_store_url'));
+        $this->assertSame(route('app.ai.requirements.destroy-all', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_destroy_all_url'));
         $this->assertCount(1, $requirements);
         $this->assertNotNull($requirementRow);
         $this->assertSame([], data_get($requirementRow, 'answer_basis_item_ids'));
@@ -419,6 +421,63 @@ class AiControllerTest extends TestCase
             data_get($requirementRow, 'answer_draft_save_url'),
         );
         $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.generated_at'));
+    }
+
+    public function test_ai_requirement_destroy_all_removes_only_extracted_requirements_and_keeps_manual_requirements(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-DELETE', 'Delete extracted requirements target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:10:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'delete-target.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/delete-target.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Dokumenttekst for sletting.',
+            'text_extracted_at' => '2026-04-06 12:05:00',
+        ]);
+        $firstChunk = $this->createAiDocumentChunk($document, 'Ekstrahert krav 1.');
+        $secondChunk = $this->createAiDocumentChunk($document, 'Ekstrahert krav 2.', 1);
+        $manualChunk = $this->createAiDocumentChunk($document, 'Manuelt krav.', 2);
+
+        $firstExtractedRequirement = $this->createAiRequirement($savedNotice, $document, $firstChunk, [
+            'requirement_text' => 'Ekstrahert krav 1.',
+            'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
+        ]);
+        $secondExtractedRequirement = $this->createAiRequirement($savedNotice, $document, $secondChunk, [
+            'requirement_text' => 'Ekstrahert krav 2.',
+            'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE,
+        ]);
+        $manualRequirement = $this->createAiRequirement($savedNotice, $document, $manualChunk, [
+            'requirement_text' => 'Manuelt krav.',
+            'source_type' => SavedNoticeAiRequirement::SOURCE_TYPE_MANUAL,
+            'extraction_method' => SavedNoticeAiRequirement::EXTRACTION_METHOD_MANUAL,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->delete(route('app.ai.requirements.destroy-all', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('success', 'Alle ekstraherte kravkandidater er slettet.');
+        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $firstExtractedRequirement->id]);
+        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $secondExtractedRequirement->id]);
+        $this->assertDatabaseHas('saved_notice_ai_requirements', ['id' => $manualRequirement->id]);
+
+        $pageResponse = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $pageResponse->assertOk();
+        $page = $this->inertiaPageFromResponse($pageResponse);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+
+        $this->assertSame(1, data_get($page, 'props.requirements_count'));
+        $this->assertCount(1, $requirements);
+        $this->assertSame($manualRequirement->id, $requirements->first()['id']);
     }
 
     public function test_ai_case_instructions_page_includes_ai_instructions_payload_and_update_url(): void
@@ -3983,16 +4042,24 @@ class AiControllerTest extends TestCase
         $page = $this->inertiaPageFromResponse($response);
         $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
         $assignedUserOptions = collect(data_get($page, 'props.assigned_user_options', []));
+        $assignableUsers = collect(data_get($page, 'props.assignable_users', []));
 
         $this->assertSame(2, data_get($page, 'props.requirements_count'));
         $this->assertTrue($assignedUserOptions->contains(fn (array $option): bool => $option['value'] === $assignedUser->id));
+        $this->assertTrue($assignableUsers->contains(fn (array $user): bool => $user['id'] === $assignedUser->id && $user['name'] === $assignedUser->name && $user['email'] === $assignedUser->email));
         $this->assertSame(SavedNoticeAiRequirement::WORK_STATUS_IN_PROGRESS, $requirements->get($confirmedRequirement->id)['work_status']);
         $this->assertSame(
             SavedNoticeAiRequirement::WORK_STATUS_LABELS[SavedNoticeAiRequirement::WORK_STATUS_IN_PROGRESS],
             $requirements->get($confirmedRequirement->id)['work_status_label'],
         );
+        $this->assertSame($confirmedRequirement->assigned_user_id, $requirements->get($confirmedRequirement->id)['assigned_user_id']);
         $this->assertSame($assignedUser->id, $requirements->get($confirmedRequirement->id)['assigned_user']['id']);
         $this->assertSame($assignedUser->name, $requirements->get($confirmedRequirement->id)['assigned_user']['name']);
+        $this->assertSame($assignedUser->email, $requirements->get($confirmedRequirement->id)['assigned_user']['email']);
+        $this->assertSame(route('app.ai.requirements.assigned-user.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $confirmedRequirement->id,
+        ]), $requirements->get($confirmedRequirement->id)['assigned_user_update_url']);
         $this->assertSame(route('app.ai.requirements.work.update', [
             'savedNotice' => $savedNotice->id,
             'requirement' => $confirmedRequirement->id,
@@ -5203,6 +5270,349 @@ class AiControllerTest extends TestCase
         $this->assertNull($requirement->assigned_user_id);
     }
 
+    public function test_ai_requirement_assigned_user_can_be_set_and_cleared_for_visible_requirement(): void
+    {
+        $context = $this->customerAdminContext();
+        $assignedUser = User::factory()->create([
+            'name' => 'Responsible User',
+            'email' => 'responsible.user@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4008-ASSIGN', 'Responsible target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:55:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'responsible.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/responsible.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Dokumentasjon må vedlegges.',
+            'text_extracted_at' => '2026-04-06 13:56:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 3,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $assignUrl = route('app.ai.requirements.assigned-user.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => $assignedUser->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned_user_id', $assignedUser->id)
+            ->assertJsonPath('assigned_user.id', $assignedUser->id)
+            ->assertJsonPath('assigned_user.name', $assignedUser->name)
+            ->assertJsonPath('assigned_user.email', $assignedUser->email)
+            ->assertJsonPath('requirement.assigned_user_id', $assignedUser->id)
+            ->assertJsonPath('requirement.assigned_user.id', $assignedUser->id)
+            ->assertJsonPath('requirement.assigned_user.email', $assignedUser->email);
+
+        $requirement->refresh();
+        $this->assertSame($assignedUser->id, $requirement->assigned_user_id);
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => null,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned_user_id', null)
+            ->assertJsonPath('assigned_user', null)
+            ->assertJsonPath('requirement.assigned_user_id', null)
+            ->assertJsonPath('requirement.assigned_user', null);
+
+        $requirement->refresh();
+        $this->assertNull($requirement->assigned_user_id);
+    }
+
+    public function test_ai_requirement_assigned_user_creates_and_moves_an_info_center_task_without_duplicates(): void
+    {
+        $context = $this->customerAdminContext();
+        $firstAssignee = User::factory()->create([
+            'name' => 'First Assignee',
+            'email' => 'first.assignee@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        $secondAssignee = User::factory()->create([
+            'name' => 'Second Assignee',
+            'email' => 'second.assignee@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        $observer = User::factory()->create([
+            'name' => 'Observer User',
+            'email' => 'observer.user@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4008-TASK', 'Task sync target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 13:55:00');
+
+        foreach ([$firstAssignee, $secondAssignee, $observer] as $user) {
+            SavedNoticeUserAccess::query()->create([
+                'saved_notice_id' => $savedNotice->id,
+                'user_id' => $user->id,
+                'granted_by_user_id' => $context['user']->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ]);
+        }
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'task-sync.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/task-sync.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Dokumentasjon må vedlegges.',
+            'text_extracted_at' => '2026-04-06 13:56:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 3,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $assignUrl = route('app.ai.requirements.assigned-user.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => $firstAssignee->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned_user_id', $firstAssignee->id);
+
+        $infoTask = SavedNoticeInfoItem::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('type', SavedNoticeInfoItem::TYPE_AI_REQUIREMENT_RESPONSIBILITY)
+            ->where('source_type', SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT)
+            ->where('source_id', $requirement->id)
+            ->firstOrFail();
+
+        $this->assertSame(SavedNoticeInfoItem::STATUS_OPEN, $infoTask->status);
+        $this->assertSame($firstAssignee->id, $infoTask->owner_user_id);
+        $this->assertSame($context['user']->id, $infoTask->created_by_user_id);
+        $this->assertSame('Besvar krav:', Str::substr($infoTask->subject, 0, 12));
+
+        $firstInfoCenterPage = $this->actingAs($firstAssignee)->get('/app/info-center?view=my_tasks');
+        $firstInfoCenterPage->assertOk();
+        $firstInfoCenterPayload = $this->inertiaPageFromResponse($firstInfoCenterPage);
+        $firstInfoCenterItems = collect(data_get($firstInfoCenterPayload, 'props.infoCenter.items', []));
+
+        $this->assertCount(1, $firstInfoCenterItems);
+        $this->assertSame(
+            route('app.ai.show', [
+                'savedNotice' => $savedNotice->id,
+                'requirement_id' => $requirement->id,
+            ]),
+            $firstInfoCenterItems->first()['action_url'],
+        );
+        $this->assertSame(SavedNoticeInfoItem::STATUS_OPEN, $firstInfoCenterItems->first()['status']);
+
+        $observerInfoCenterPage = $this->actingAs($observer)->get('/app/info-center?view=my_tasks');
+        $observerInfoCenterPage->assertOk();
+        $observerInfoCenterPayload = $this->inertiaPageFromResponse($observerInfoCenterPage);
+        $observerInfoCenterItems = collect(data_get($observerInfoCenterPayload, 'props.infoCenter.items', []));
+        $this->assertCount(0, $observerInfoCenterItems);
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => $firstAssignee->id,
+            ])
+            ->assertOk();
+
+        $this->assertSame(
+            1,
+            SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->where('type', SavedNoticeInfoItem::TYPE_AI_REQUIREMENT_RESPONSIBILITY)
+                ->where('source_type', SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT)
+                ->where('source_id', $requirement->id)
+                ->where('status', SavedNoticeInfoItem::STATUS_OPEN)
+                ->count(),
+        );
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => $secondAssignee->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned_user_id', $secondAssignee->id);
+
+        $requirement->refresh();
+        $this->assertSame($secondAssignee->id, $requirement->assigned_user_id);
+
+        $this->assertSame(
+            1,
+            SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->where('type', SavedNoticeInfoItem::TYPE_AI_REQUIREMENT_RESPONSIBILITY)
+                ->where('source_type', SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT)
+                ->where('source_id', $requirement->id)
+                ->where('status', SavedNoticeInfoItem::STATUS_OPEN)
+                ->count(),
+        );
+
+        $firstInfoCenterPageAfterMove = $this->actingAs($firstAssignee)->get('/app/info-center?view=my_tasks');
+        $firstInfoCenterPageAfterMove->assertOk();
+        $firstInfoCenterPayloadAfterMove = $this->inertiaPageFromResponse($firstInfoCenterPageAfterMove);
+        $firstInfoCenterItemsAfterMove = collect(data_get($firstInfoCenterPayloadAfterMove, 'props.infoCenter.items', []));
+        $this->assertCount(0, $firstInfoCenterItemsAfterMove);
+
+        $secondInfoCenterPage = $this->actingAs($secondAssignee)->get('/app/info-center?view=my_tasks');
+        $secondInfoCenterPage->assertOk();
+        $secondInfoCenterPayload = $this->inertiaPageFromResponse($secondInfoCenterPage);
+        $secondInfoCenterItems = collect(data_get($secondInfoCenterPayload, 'props.infoCenter.items', []));
+
+        $this->assertCount(1, $secondInfoCenterItems);
+        $this->assertSame(
+            route('app.ai.show', [
+                'savedNotice' => $savedNotice->id,
+                'requirement_id' => $requirement->id,
+            ]),
+            $secondInfoCenterItems->first()['action_url'],
+        );
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => null,
+            ])
+            ->assertOk()
+            ->assertJsonPath('assigned_user_id', null);
+
+        $this->assertSame(
+            0,
+            SavedNoticeInfoItem::query()
+                ->where('saved_notice_id', $savedNotice->id)
+                ->where('type', SavedNoticeInfoItem::TYPE_AI_REQUIREMENT_RESPONSIBILITY)
+                ->where('source_type', SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT)
+                ->where('source_id', $requirement->id)
+                ->where('status', SavedNoticeInfoItem::STATUS_OPEN)
+                ->count(),
+        );
+
+        $secondInfoCenterPageAfterClear = $this->actingAs($secondAssignee)->get('/app/info-center?view=my_tasks');
+        $secondInfoCenterPageAfterClear->assertOk();
+        $secondInfoCenterPayloadAfterClear = $this->inertiaPageFromResponse($secondInfoCenterPageAfterClear);
+        $secondInfoCenterItemsAfterClear = collect(data_get($secondInfoCenterPayloadAfterClear, 'props.infoCenter.items', []));
+        $this->assertCount(0, $secondInfoCenterItemsAfterClear);
+    }
+
+    public function test_ai_requirement_assigned_user_rejects_foreign_customer_users_and_foreign_requirements(): void
+    {
+        $context = $this->customerAdminContext();
+        $foreignContext = $this->customerAdminContext('Foreign Customer AS');
+        $foreignUser = User::factory()->create([
+            'name' => 'Foreign User',
+            'email' => 'foreign.user@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $foreignContext['customer']->id,
+            'is_active' => true,
+        ]);
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4009-ASSIGN', 'Responsible validation target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 14:10:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'responsible-validation.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/responsible-validation.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Dokumentasjon må vedlegges.',
+            'text_extracted_at' => '2026-04-06 14:11:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 3,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $assignUrl = route('app.ai.requirements.assigned-user.update', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->patchJson($assignUrl, [
+                'assigned_user_id' => $foreignUser->id,
+            ])
+            ->assertStatus(422);
+
+        $foreignNotice = $this->createSavedNotice($foreignContext['customer']->id, 'AI-4010', 'Foreign responsible target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($foreignNotice, '2026-04-06 14:15:00');
+
+        $foreignDocument = $this->createAiDocument($foreignNotice, [
+            'uploaded_by_user_id' => $foreignContext['user']->id,
+            'original_filename' => 'foreign-responsible.docx',
+            'stored_path' => 'saved-notices/'.$foreignNotice->id.'/ai-documents/foreign-responsible.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Dokumentasjon må vedlegges.',
+            'text_extracted_at' => '2026-04-06 14:16:00',
+        ]);
+        $foreignChunk = $foreignDocument->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Dokumentasjon må vedlegges.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 3,
+        ]);
+        $foreignRequirement = $this->createAiRequirement($foreignNotice, $foreignDocument, $foreignChunk, [
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->patchJson(route('app.ai.requirements.assigned-user.update', [
+                'savedNotice' => $foreignNotice->id,
+                'requirement' => $foreignRequirement->id,
+            ]), [
+                'assigned_user_id' => null,
+            ])
+            ->assertNotFound();
+    }
+
     public function test_ai_requirement_work_status_rejects_invalid_values_and_is_scoped_to_the_visible_saved_notice(): void
     {
         $context = $this->customerAdminContext();
@@ -5551,27 +5961,41 @@ class AiControllerTest extends TestCase
      * Returns: The persisted info item model.
      * Side effects: Writes an info item row to the test database.
      */
-    private function createInfoItem(int $savedNoticeId, int $ownerUserId, int $createdByUserId, string $subject): SavedNoticeInfoItem
+    private function createInfoItem(
+        int $savedNoticeId,
+        int $ownerUserId,
+        int $createdByUserId,
+        string $subject,
+        array $overrides = [],
+    ): SavedNoticeInfoItem
     {
         $attributes = [
             'saved_notice_id' => $savedNoticeId,
-            'type' => SavedNoticeInfoItem::TYPE_NOTE,
-            'direction' => SavedNoticeInfoItem::DIRECTION_INTERNAL,
-            'channel' => SavedNoticeInfoItem::CHANNEL_MANUAL,
+            'type' => $overrides['type'] ?? SavedNoticeInfoItem::TYPE_NOTE,
+            'direction' => $overrides['direction'] ?? SavedNoticeInfoItem::DIRECTION_INTERNAL,
+            'channel' => $overrides['channel'] ?? SavedNoticeInfoItem::CHANNEL_MANUAL,
             'subject' => $subject,
-            'body' => 'AI analysis foundation item.',
-            'status' => SavedNoticeInfoItem::STATUS_OPEN,
-            'requires_response' => false,
+            'body' => $overrides['body'] ?? 'AI analysis foundation item.',
+            'status' => $overrides['status'] ?? SavedNoticeInfoItem::STATUS_OPEN,
+            'requires_response' => $overrides['requires_response'] ?? false,
             'owner_user_id' => $ownerUserId,
             'created_by_user_id' => $createdByUserId,
         ];
 
         if (Schema::hasColumn('saved_notice_info_items', 'closed_at')) {
-            $attributes['closed_at'] = null;
+            $attributes['closed_at'] = $overrides['closed_at'] ?? null;
         }
 
         if (Schema::hasColumn('saved_notice_info_items', 'closure_comment')) {
-            $attributes['closure_comment'] = null;
+            $attributes['closure_comment'] = $overrides['closure_comment'] ?? null;
+        }
+
+        if (Schema::hasColumn('saved_notice_info_items', 'source_type')) {
+            $attributes['source_type'] = $overrides['source_type'] ?? null;
+        }
+
+        if (Schema::hasColumn('saved_notice_info_items', 'source_id')) {
+            $attributes['source_id'] = $overrides['source_id'] ?? null;
         }
 
         return SavedNoticeInfoItem::query()->create($attributes);

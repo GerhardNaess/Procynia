@@ -16,6 +16,22 @@ function formatDate(value, locale, options = {}) {
     }).format(new Date(value));
 }
 
+function formatFileSize(bytes) {
+    if (!bytes) {
+        return '—';
+    }
+
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function dateInputValue(value) {
     if (!value) {
         return '';
@@ -383,9 +399,12 @@ export default function SavedNoticeShow({ notice }) {
     const { auth, errors = {}, translations = {} } = page.props;
     const tsn = translations?.saved_notice ?? {};
     const common = translations?.common ?? {};
+    const frontend = translations?.frontend ?? {};
     const locale = document.documentElement.lang || 'no-NO';
     const infoItems = notice.info_items;
     const infoItemDefaults = infoItems.defaults;
+    const documents = notice.documents ?? [];
+    const downloadAllUrl = notice.download_all_url ?? null;
     const submissionForm = useForm({});
     const statusForm = useForm({
         status: '',
@@ -1242,6 +1261,60 @@ export default function SavedNoticeShow({ notice }) {
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.notes}</div>
                                         <div className="mt-2 text-sm leading-7 text-slate-700 whitespace-pre-line">
                                             {notice.notes}
+                                        </div>
+                                    </div>
+                                ) : null}
+
+                                {documents.length > 0 ? (
+                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3">
+                                            <div>
+                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                    {frontend.documents}
+                                                </div>
+                                                <div className="mt-1 text-sm text-slate-500">
+                                                    {frontend.document_count
+                                                        ? frontend.document_count.replace(':count', String(documents.length))
+                                                        : String(documents.length)}
+                                                </div>
+                                            </div>
+
+                                            {downloadAllUrl && documents.length > 1 ? (
+                                                <a
+                                                    href={downloadAllUrl}
+                                                    className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                >
+                                                    {frontend.download_all}
+                                                </a>
+                                            ) : null}
+                                        </div>
+
+                                        <p className="mt-4 text-sm text-slate-500">
+                                            {frontend.download_instruction}
+                                        </p>
+
+                                        <div className="mt-4 divide-y divide-slate-200 rounded-2xl border border-slate-200 bg-white">
+                                            {documents.map((document) => (
+                                                <div key={document.id} className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] md:items-center">
+                                                    <div className="min-w-0">
+                                                        <div className="truncate text-sm font-medium text-slate-950">{document.title}</div>
+                                                        <div className="mt-1 text-xs text-slate-500">
+                                                            {document.created_at ? formatDate(document.created_at, locale, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-sm text-slate-500">{document.mime_type || common.not_available}</div>
+                                                    <div className="text-sm text-slate-500">{formatFileSize(document.file_size)}</div>
+                                                    <div className="flex justify-start md:justify-end">
+                                                        <a
+                                                            href={document.download_url}
+                                                            aria-label={`${frontend.download_link_aria_label_prefix ?? frontend.download_link}: ${document.title}`}
+                                                            className="inline-flex items-center text-sm font-semibold text-violet-700 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-800"
+                                                        >
+                                                            {frontend.download_link}
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                 ) : null}

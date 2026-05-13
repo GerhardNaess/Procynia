@@ -471,6 +471,18 @@ class InfoCenterController extends Controller
     {
         $savedNotice = $infoItem->savedNotice;
         $subject = trim((string) ($infoItem->subject ?? ''));
+        $actionUrl = $savedNotice ? route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]) : null;
+
+        if (
+            $savedNotice !== null
+            && $infoItem->source_type === SavedNoticeInfoItem::SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT
+            && $infoItem->source_id !== null
+        ) {
+            $actionUrl = route('app.ai.show', [
+                'savedNotice' => $savedNotice->id,
+                'requirement_id' => $infoItem->source_id,
+            ]);
+        }
 
         return [
             'id' => $infoItem->id,
@@ -491,6 +503,7 @@ class InfoCenterController extends Controller
             'owner' => $this->safeUserPayload($infoItem->owner, $customerId),
             'created_by' => $this->safeUserPayload($infoItem->createdBy, $customerId),
             'created_at' => optional($infoItem->created_at)?->toIso8601String(),
+            'action_url' => $actionUrl,
             'saved_notice' => $savedNotice ? [
                 'id' => $savedNotice->id,
                 'title' => $savedNotice->title,

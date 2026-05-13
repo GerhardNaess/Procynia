@@ -159,9 +159,7 @@ class DashboardControllerTest extends TestCase
                 'bid_manager_coverage',
                 'opportunity_owner_coverage',
                 'inactive_active_share_7d',
-                'median_cycle_time_trend_12m',
                 'win_rate_90d',
-                'outcome_distribution_90d',
             ],
             array_column($page['props']['cockpit']['bid_quality']['items'], 'key'),
         );
@@ -723,6 +721,94 @@ class DashboardControllerTest extends TestCase
         }
     }
 
+    public function test_dashboard_deadline_soon_excludes_overdue_cases_and_keeps_today_to_five_days_ahead(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
+
+        try {
+            $customer = $this->createCustomer('Procynia AS');
+            $department = $this->createDepartment($customer->id, 'Sales');
+            $user = $this->createUser(
+                $customer->id,
+                $department->id,
+                User::ROLE_CUSTOMER_ADMIN,
+                'user.deadline-soon@procynia.test',
+                User::BID_ROLE_SYSTEM_OWNER,
+            );
+
+            $todayNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730010',
+                'Deadline today',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->copy()->startOfDay()->toDateTimeString(),
+            );
+            $fiveDaysNotice = $this->createSavedNotice(
+                $customer->id,
+                '2026-730011',
+                'Deadline in five days',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->copy()->addDays(5)->startOfDay()->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-730012',
+                'Deadline in six days',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->copy()->addDays(6)->startOfDay()->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-730013',
+                'Deadline yesterday',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->copy()->subDay()->startOfDay()->toDateTimeString(),
+            );
+            $this->createSavedNotice(
+                $customer->id,
+                '2026-730014',
+                'Deadline long ago',
+                organizationalDepartmentId: $department->id,
+                bidStatus: SavedNotice::BID_STATUS_DISCOVERED,
+                bidManagerUserId: $user->id,
+                opportunityOwnerUserId: $user->id,
+                deadlineAt: now()->copy()->subDays(20)->startOfDay()->toDateTimeString(),
+            );
+
+            $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
+            $attentionItems = collect($page['props']['cockpit']['attention']['items'])->keyBy('key');
+
+            $this->assertSame(2, $attentionItems['deadline-soon']['count']);
+            $this->assertSame(2, count($attentionItems['deadline-soon']['items']));
+            $this->assertEqualsCanonicalizing(
+                ['Deadline today', 'Deadline in five days'],
+                array_column($attentionItems['deadline-soon']['items'], 'title'),
+            );
+            $this->assertNotContains('Deadline in six days', array_column($attentionItems['deadline-soon']['items'], 'title'));
+            $this->assertNotContains('Deadline yesterday', array_column($attentionItems['deadline-soon']['items'], 'title'));
+            $this->assertNotContains('Deadline long ago', array_column($attentionItems['deadline-soon']['items'], 'title'));
+            $this->assertSame(2, count($attentionItems['deadline-soon']['items']));
+            $this->assertSame(2, $attentionItems['deadline-soon']['count']);
+
+            $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $todayNotice->id]), $attentionItems['deadline-soon']['items'][0]['show_url']);
+            $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $fiveDaysNotice->id]), $attentionItems['deadline-soon']['items'][1]['show_url']);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
     public function test_dashboard_bid_quality_metrics_are_objective_and_period_based(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
@@ -828,13 +914,11 @@ class DashboardControllerTest extends TestCase
             $bidQuality = collect($page['props']['cockpit']['bid_quality']['items'])->keyBy('key');
 
             $this->assertSame(
-            [
+                [
                     'bid_manager_coverage',
                     'opportunity_owner_coverage',
                     'inactive_active_share_7d',
-                    'median_cycle_time_trend_12m',
                     'win_rate_90d',
-                    'outcome_distribution_90d',
                 ],
                 array_column($page['props']['cockpit']['bid_quality']['items'], 'key'),
             );
@@ -853,13 +937,6 @@ class DashboardControllerTest extends TestCase
             $this->assertSame(4, $bidQuality['inactive_active_share_7d']['denominator']);
             $this->assertSame(1, $bidQuality['inactive_active_share_7d']['numerator']);
 
-            $this->assertSame('siste 12 måneder', $bidQuality['median_cycle_time_trend_12m']['period']);
-            $this->assertCount(1, $bidQuality['median_cycle_time_trend_12m']['series']);
-            $this->assertSame('2026-01', $bidQuality['median_cycle_time_trend_12m']['series'][0]['month']);
-            $this->assertSame('Jan', $bidQuality['median_cycle_time_trend_12m']['series'][0]['label']);
-            $this->assertSame(10.0, $bidQuality['median_cycle_time_trend_12m']['series'][0]['median_days']);
-            $this->assertSame(4, $bidQuality['median_cycle_time_trend_12m']['series'][0]['sample_size']);
-
             $this->assertSame(50.0, $bidQuality['win_rate_90d']['value']);
             $this->assertSame(2, $bidQuality['win_rate_90d']['denominator']);
             $this->assertSame(1, $bidQuality['win_rate_90d']['numerator']);
@@ -867,25 +944,12 @@ class DashboardControllerTest extends TestCase
             $this->assertStringContainsString('Vunnet / (Vunnet + Tapt)', $bidQuality['win_rate_90d']['definition']);
             $this->assertStringNotContainsString('Avbrutt', $bidQuality['win_rate_90d']['definition']);
             $this->assertStringNotContainsString('NoGo', $bidQuality['win_rate_90d']['definition']);
-
-            $this->assertSame(4, $bidQuality['outcome_distribution_90d']['value']);
-            $this->assertSame('Vunnet 1 · Tapt 1 · Avbrutt 1 · NoGo 1', $bidQuality['outcome_distribution_90d']['subtitle']);
-            $this->assertSame(
-                [
-                    'won',
-                    'lost',
-                    'aborted',
-                    'no_go',
-                ],
-                array_column($bidQuality['outcome_distribution_90d']['breakdown'], 'key'),
-            );
-            $this->assertSame([1, 1, 1, 1], array_column($bidQuality['outcome_distribution_90d']['breakdown'], 'count'));
         } finally {
             Carbon::setTestNow();
         }
     }
 
-    public function test_dashboard_bid_quality_median_cycle_time_trends_monthly_over_twelve_months(): void
+    public function test_dashboard_bid_quality_includes_win_rate_metric_as_the_fourth_item(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-04-03 12:00:00'));
 
@@ -958,30 +1022,13 @@ class DashboardControllerTest extends TestCase
             );
 
             $page = $this->inertiaPage($this->actingAs($user)->get('/app/dashboard'));
-            $trend = $page['props']['cockpit']['bid_quality']['items'][3];
+            $metric = $page['props']['cockpit']['bid_quality']['items'][3];
 
-            $this->assertSame('median_cycle_time_trend_12m', $trend['key']);
-            $this->assertSame('siste 12 måneder', $trend['period']);
-            $this->assertSame([
-                [
-                    'month' => '2026-01',
-                    'label' => 'Jan',
-                    'median_days' => 13.0,
-                    'sample_size' => 2,
-                ],
-                [
-                    'month' => '2026-02',
-                    'label' => 'Feb',
-                    'median_days' => 10.0,
-                    'sample_size' => 1,
-                ],
-                [
-                    'month' => '2026-03',
-                    'label' => 'Mar',
-                    'median_days' => 14.0,
-                    'sample_size' => 1,
-                ],
-            ], $trend['series']);
+            $this->assertSame('win_rate_90d', $metric['key']);
+            $this->assertSame('siste 90 dager', $metric['trend_basis']);
+            $this->assertSame(50.0, $metric['value']);
+            $this->assertSame(2, $metric['denominator']);
+            $this->assertSame(1, $metric['numerator']);
         } finally {
             Carbon::setTestNow();
         }

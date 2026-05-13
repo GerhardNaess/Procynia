@@ -15,6 +15,7 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -39,6 +40,8 @@ Route::middleware('guest')->group(function (): void {
 
 Route::middleware('auth')->group(function (): void {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+    Route::get('/admin/operational-runbooks/attachments/{attachment}/download', [OperationalRunbookAttachmentDownloadController::class, 'download'])
+        ->name('admin.operational-runbook-attachments.download');
 });
 
 Route::prefix('app')
@@ -99,6 +102,8 @@ Route::prefix('app')
             ->name('ai.requirements.destroy-all');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
             ->name('ai.requirements.update');
+        Route::patch('/ai/{savedNotice}/requirements/{requirement}/assigned-user', [AiController::class, 'updateRequirementAssignedUser'])
+            ->name('ai.requirements.assigned-user.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/review-status', [AiController::class, 'updateRequirementReviewStatus'])
             ->name('ai.requirements.review-status.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/work', [AiController::class, 'updateRequirementWork'])

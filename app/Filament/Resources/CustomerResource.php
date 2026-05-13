@@ -65,6 +65,20 @@ class CustomerResource extends Resource
                             ->label(__('procynia.customer.is_active'))
                             ->default(true),
                     ]),
+                Section::make('Kunderabatt')
+                    ->columns(2)
+                    ->visible(fn (string $operation): bool => $operation === 'edit')
+                    ->schema([
+                        TextInput::make('billing_discount_percent')
+                            ->label('Kunderabatt')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(100)
+                            ->step(0.01)
+                            ->suffix('%')
+                            ->default(0)
+                            ->helperText('Rabatt som gjelder for kundens abonnementer og priser. 0 = ingen rabatt.'),
+                    ]),
                 Section::make('Første systemeier')
                     ->columns(2)
                     ->visible(fn (string $operation): bool => $operation === 'create')

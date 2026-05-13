@@ -353,7 +353,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         <>
             <Head title={title ? `${title} · ${appName}` : appName} />
             <div className="min-h-screen bg-[#f6f7fb] text-slate-900">
-                <header className="relative z-[60] border-b border-slate-200/80 bg-white/95 backdrop-blur-sm">
+                <header className="sticky top-0 z-[60] border-b border-slate-200/80 bg-white/95 backdrop-blur-sm shadow-[0_1px_0_rgba(15,23,42,0.04)]">
                     <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6 lg:px-8">
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">

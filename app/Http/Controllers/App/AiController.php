@@ -31,6 +31,7 @@ use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
+use App\Services\InfoCenter\RequirementResponsibilityTaskService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
@@ -82,6 +83,7 @@ class AiController extends Controller
         private readonly RequirementKnowledgeMatcher $requirementKnowledgeMatcher,
         private readonly DocumentPreviewService $documentPreviewService,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
+        private readonly RequirementResponsibilityTaskService $requirementResponsibilityTaskService,
     ) {
     }
 
@@ -152,6 +154,7 @@ class AiController extends Controller
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
+            'assignable_users' => $this->customerAssignableUsers((int) $record->customer_id),
             'documents_upload_url' => route('app.ai.documents.store', ['savedNotice' => $record->id]),
             'documents' => $this->aiDocumentsPayload($record),
             'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems),
@@ -613,9 +616,11 @@ class AiController extends Controller
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
-        $record->aiRequirements()->delete();
+        $record->aiRequirements()
+            ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
+            ->delete();
 
-        return back()->with('success', 'Alle kravkandidater er slettet.');
+        return back()->with('success', 'Alle ekstraherte kravkandidater er slettet.');
     }
 
     /**
@@ -648,6 +653,65 @@ class AiController extends Controller
         );
 
         return back()->with('success', 'Krav oppdatert.');
+    }
+
+    /**
+     * Purpose: Persist the responsible user for one visible requirement.
+     * Inputs: The current request, route-bound saved notice, and route-bound requirement candidate.
+     * Returns: A JSON response with the updated requirement payload.
+     * Side effects: Updates assigned_user_id in the database.
+     */
+    public function updateRequirementAssignedUser(
+        Request $request,
+        SavedNotice $savedNotice,
+        SavedNoticeAiRequirement $requirement,
+    ): JsonResponse {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $ownedRequirement = $record->aiRequirements()
+            ->whereKey($requirement->id)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'assigned_user_id' => [
+                'nullable',
+                'integer',
+                Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                    ->where('customer_id', $record->customer_id)),
+            ],
+        ]);
+
+        DB::transaction(function () use ($ownedRequirement, $validated, $request): void {
+            $ownedRequirement->forceFill([
+                'assigned_user_id' => array_key_exists('assigned_user_id', $validated) && $validated['assigned_user_id'] !== null
+                    ? (int) $validated['assigned_user_id']
+                    : null,
+            ])->save();
+
+            $this->requirementResponsibilityTaskService->syncRequirementTask($ownedRequirement, $request->user());
+        });
+
+        $ownedRequirement->load([
+            'assignedUser',
+            'document',
+            'chunk',
+            'answerBasisItems',
+            'assessment.assessedBy',
+            'evidence.knowledgeItem',
+            'evidence.knowledgeItemChunk',
+            'revisions.changedBy',
+        ])->loadCount('revisions');
+
+        return response()->json([
+            'requirement' => $this->aiRequirementPayload($ownedRequirement),
+            'assigned_user_id' => $ownedRequirement->assigned_user_id !== null ? (int) $ownedRequirement->assigned_user_id : null,
+            'assigned_user' => $ownedRequirement->assignedUser ? [
+                'id' => $ownedRequirement->assignedUser->id,
+                'name' => $ownedRequirement->assignedUser->name,
+                'email' => $ownedRequirement->assignedUser->email,
+            ] : null,
+        ]);
     }
 
     /**
@@ -686,12 +750,16 @@ class AiController extends Controller
             ],
         ]);
 
-        $ownedRequirement->forceFill([
-            'work_status' => $validated['work_status'],
-            'assigned_user_id' => isset($validated['assigned_user_id']) && $validated['assigned_user_id'] !== null
-                ? (int) $validated['assigned_user_id']
-                : null,
-        ])->save();
+        DB::transaction(function () use ($ownedRequirement, $validated, $request): void {
+            $ownedRequirement->forceFill([
+                'work_status' => $validated['work_status'],
+                'assigned_user_id' => isset($validated['assigned_user_id']) && $validated['assigned_user_id'] !== null
+                    ? (int) $validated['assigned_user_id']
+                    : null,
+            ])->save();
+
+            $this->requirementResponsibilityTaskService->syncRequirementTask($ownedRequirement, $request->user());
+        });
 
         return back();
     }
@@ -1466,52 +1534,65 @@ class AiController extends Controller
     private function aiRequirementsPayload(Collection $requirements): array
     {
         return $requirements
-            ->map(function (SavedNoticeAiRequirement $requirement): array {
-                $selectedAnswerBasisItems = collect($requirement->answerBasisItems->all());
-
-                $viewData = RequirementViewData::fromRequirement($requirement, [
-                    'review_status_update_url' => route('app.ai.requirements.review-status.update', [
-                        'savedNotice' => $requirement->saved_notice_id,
-                        'requirement' => $requirement->id,
-                    ]),
-                    'edit_url' => route('app.ai.requirements.update', [
-                        'savedNotice' => $requirement->saved_notice_id,
-                        'requirement' => $requirement->id,
-                    ]),
-                    'work_update_url' => route('app.ai.requirements.work.update', [
-                        'savedNotice' => $requirement->saved_notice_id,
-                        'requirement' => $requirement->id,
-                    ]),
-                ]);
-
-                return array_merge(
-                    $viewData->toArray(),
-                    [
-                        'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
-                        'answer_basis_item_ids' => $selectedAnswerBasisItems
-                            ->pluck('id')
-                            ->map(static fn (mixed $value): int => (int) $value)
-                            ->values()
-                            ->all(),
-                        'answer_basis_selection_sync_url' => route('app.ai.requirements.answer-basis.sync', [
-                            'savedNotice' => $requirement->saved_notice_id,
-                            'requirement' => $requirement->id,
-                        ]),
-                        'answer_draft_generate_url' => route('app.ai.requirements.answer-draft.generate', [
-                            'savedNotice' => $requirement->saved_notice_id,
-                            'requirement' => $requirement->id,
-                        ]),
-                        'answer_draft_save_url' => route('app.ai.requirements.answer-draft.update', [
-                            'savedNotice' => $requirement->saved_notice_id,
-                            'requirement' => $requirement->id,
-                        ]),
-                        'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
-                        'evidence' => $this->aiRequirementEvidencePayload($requirement),
-                    ],
-                );
-            })
+            ->map(fn (SavedNoticeAiRequirement $requirement): array => $this->aiRequirementPayload($requirement))
             ->values()
             ->all();
+    }
+
+    /**
+     * Purpose: Convert one persisted requirement row into the frontend payload used by the AI workspace.
+     * Inputs: A requirement with canonical relations loaded.
+     * Returns: A single frontend-ready requirement array.
+     * Side effects: None.
+     */
+    private function aiRequirementPayload(SavedNoticeAiRequirement $requirement): array
+    {
+        $selectedAnswerBasisItems = collect($requirement->answerBasisItems->all());
+
+        $viewData = RequirementViewData::fromRequirement($requirement, [
+            'review_status_update_url' => route('app.ai.requirements.review-status.update', [
+                'savedNotice' => $requirement->saved_notice_id,
+                'requirement' => $requirement->id,
+            ]),
+            'edit_url' => route('app.ai.requirements.update', [
+                'savedNotice' => $requirement->saved_notice_id,
+                'requirement' => $requirement->id,
+            ]),
+            'work_update_url' => route('app.ai.requirements.work.update', [
+                'savedNotice' => $requirement->saved_notice_id,
+                'requirement' => $requirement->id,
+            ]),
+            'assigned_user_update_url' => route('app.ai.requirements.assigned-user.update', [
+                'savedNotice' => $requirement->saved_notice_id,
+                'requirement' => $requirement->id,
+            ]),
+        ]);
+
+        return array_merge(
+            $viewData->toArray(),
+            [
+                'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
+                'answer_basis_item_ids' => $selectedAnswerBasisItems
+                    ->pluck('id')
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->values()
+                    ->all(),
+                'answer_basis_selection_sync_url' => route('app.ai.requirements.answer-basis.sync', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
+                'answer_draft_generate_url' => route('app.ai.requirements.answer-draft.generate', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
+                'answer_draft_save_url' => route('app.ai.requirements.answer-draft.update', [
+                    'savedNotice' => $requirement->saved_notice_id,
+                    'requirement' => $requirement->id,
+                ]),
+                'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
+                'evidence' => $this->aiRequirementEvidencePayload($requirement),
+            ],
+        );
     }
 
     /**
@@ -2648,6 +2729,27 @@ class AiController extends Controller
                 'label' => $user->is_active
                     ? sprintf('%s · %s', $user->name, $user->email)
                     : sprintf('%s · %s (inactive)', $user->name, $user->email),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Purpose: Build the list of all customer users that can be chosen as the responsible user for one requirement.
+     * Inputs: The current customer id for the visible AI case.
+     * Returns: A compact list of assignable users with identity fields.
+     * Side effects: None.
+     */
+    private function customerAssignableUsers(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->orderBy('name')
+            ->get(['id', 'name', 'email'])
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
             ])
             ->values()
             ->all();

@@ -244,6 +244,25 @@
                     <div class="mt-3 text-xs font-medium uppercase tracking-wide text-gray-500">Kilde: Procynia</div>
                     <div class="mt-2 text-sm text-gray-600 dark:text-gray-400">Basert på aktive Procynia-brukernivåer og intern tilgang.</div>
                 </div>
+
+            </div>
+        </x-filament::section>
+
+        @php
+            $discountPercent = (float) ($record->billing_discount_percent ?? 0);
+            $discountLabel = $discountPercent > 0
+                ? number_format($discountPercent, 2, ',', ' ') . ' %'
+                : 'Ingen rabatt';
+        @endphp
+        <x-filament::section heading="Kunderabatt">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <div class="text-2xl font-bold text-gray-950 dark:text-white">{{ $discountLabel }}</div>
+                    <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">Kilde: Procynia — gjelder kundens abonnementer og priser.</div>
+                </div>
+                <x-filament::button wire:click="mountAction('edit_discount')" color="gray" size="sm" icon="heroicon-m-pencil-square">
+                    Endre kunderabatt
+                </x-filament::button>
             </div>
         </x-filament::section>
 

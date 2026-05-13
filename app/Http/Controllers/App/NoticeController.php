@@ -1462,6 +1462,7 @@ class NoticeController extends Controller
         $isMutableCase = $notice->archived_at === null && $canManageCase;
         $canCreateSubmission = $isMutableCase && $notice->canCreateSubmission();
         $statusActions = $isMutableCase ? $notice->availableBidStatusActions() : [];
+        $documentsPayload = $this->savedNoticeDocumentsPayload($notice);
 
         return [
             'id' => $notice->id,
@@ -1494,6 +1495,8 @@ class NoticeController extends Controller
             'contact_person_name' => $notice->contact_person_name,
             'contact_person_email' => $notice->contact_person_email,
             'notes' => $notice->notes,
+            'documents' => $documentsPayload['documents'],
+            'download_all_url' => $documentsPayload['download_all_url'],
             'info_items' => [
                 'can_create' => true,
                 'store_url' => route('app.notices.saved.info-items.store', ['savedNotice' => $notice->id]),
@@ -1692,6 +1695,49 @@ class NoticeController extends Controller
                     ->values()
                     ->all(),
             ],
+        ];
+    }
+
+    /**
+     * Resolve the original notice documents for a saved notice.
+     *
+     * @return array{documents: array<int, array<string, mixed>>, download_all_url: ?string}
+     */
+    private function savedNoticeDocumentsPayload(SavedNotice $notice): array
+    {
+        $sourceNotice = Notice::query()
+            ->where('notice_id', (string) $notice->external_id)
+            ->with('documents')
+            ->first();
+
+        if ($sourceNotice === null) {
+            return [
+                'documents' => [],
+                'download_all_url' => null,
+            ];
+        }
+
+        $documents = $sourceNotice->documents
+            ->sortBy('sort_order')
+            ->values()
+            ->map(fn (NoticeDocument $document): array => [
+                'id' => $document->id,
+                'title' => $document->title,
+                'mime_type' => $document->mime_type,
+                'file_size' => $document->file_size,
+                'created_at' => optional($document->created_at)?->toIso8601String(),
+                'download_url' => route('app.notices.documents.download', [
+                    'notice' => $sourceNotice->id,
+                    'document' => $document->id,
+                ]),
+            ])
+            ->all();
+
+        return [
+            'documents' => $documents,
+            'download_all_url' => count($documents) > 1
+                ? route('app.notices.documents.download-all', ['notice' => $sourceNotice->id])
+                : null,
         ];
     }
 

@@ -202,7 +202,7 @@ class DashboardController extends Controller
             $this->buildAttentionCategory(
                 'deadline-soon',
                 'Frister innen 5 dager',
-                'Saker med operative frister som nærmer seg eller er passert.',
+                'Saker med operative frister i dag eller de neste 5 dagene.',
                 $this->buildDeadlineSoonAttentionItems($deadlineItems),
                 'danger',
             ),
@@ -259,13 +259,15 @@ class DashboardController extends Controller
      */
     private function buildDeadlineSoonAttentionItems(array $deadlineItems): array
     {
+        $deadlineStart = now()->startOfDay();
         $deadlineLimit = now()->addDays(5)->endOfDay();
 
         return collect($deadlineItems)
-            ->filter(function (array $item) use ($deadlineLimit): bool {
-                $date = Carbon::parse($item['date']);
+            ->filter(function (array $item) use ($deadlineStart, $deadlineLimit): bool {
+                $date = Carbon::parse($item['date'])->startOfDay();
 
-                return $date->lessThanOrEqualTo($deadlineLimit);
+                return $date->greaterThanOrEqualTo($deadlineStart)
+                    && $date->lessThanOrEqualTo($deadlineLimit);
             })
             ->groupBy('saved_notice_id')
             ->map(function (Collection $group): array {

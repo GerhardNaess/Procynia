@@ -549,6 +549,38 @@ class ManageCustomerBilling extends Page
                 ->icon('heroicon-o-tag')
                 ->button(),
 
+            Action::make('edit_discount')
+                ->label('Endre kunderabatt')
+                ->icon('heroicon-o-receipt-percent')
+                ->button()
+                ->form([
+                    TextInput::make('billing_discount_percent')
+                        ->label('Kunderabatt')
+                        ->numeric()
+                        ->minValue(0)
+                        ->maxValue(100)
+                        ->step(0.01)
+                        ->suffix('%')
+                        ->default((float) ($this->record->billing_discount_percent ?? 0))
+                        ->helperText('Rabatt som gjelder for kundens abonnementer og priser.')
+                        ->required(),
+                ])
+                ->fillForm(['billing_discount_percent' => (float) ($this->record->billing_discount_percent ?? 0)])
+                ->action(function (array $data): void {
+                    $percent = round((float) $data['billing_discount_percent'], 2);
+
+                    $this->record->forceFill([
+                        'billing_discount_percent' => $percent,
+                    ])->save();
+
+                    $this->record = $this->record->fresh();
+
+                    Notification::make()
+                        ->title('Kunderabatt oppdatert')
+                        ->success()
+                        ->send();
+                }),
+
             ActionGroup::make([
                 Action::make('remove_recurring_line')
                     ->label('Fjern intern billing-linje')
@@ -619,6 +651,17 @@ class ManageCustomerBilling extends Page
                 ->icon('heroicon-o-exclamation-triangle')
                 ->button(),
         ];
+    }
+
+    public function discountButtonLabel(): string
+    {
+        $percent = (float) ($this->record->billing_discount_percent ?? 0);
+
+        if ($percent <= 0) {
+            return 'Kunderabatt: Ingen rabatt';
+        }
+
+        return 'Kunderabatt: ' . number_format($percent, 2, ',', ' ') . ' %';
     }
 
     private function planOptions(): array

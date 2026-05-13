@@ -18,6 +18,10 @@ class SavedNoticeInfoItem extends Model
 
     public const TYPE_NOTE = 'note';
 
+    public const TYPE_AI_REQUIREMENT_RESPONSIBILITY = 'ai_requirement_responsibility';
+
+    public const SOURCE_TYPE_SAVED_NOTICE_AI_REQUIREMENT = 'saved_notice_ai_requirement';
+
     public const TYPES = [
         self::TYPE_MESSAGE,
         self::TYPE_CLARIFICATION,
@@ -100,12 +104,15 @@ class SavedNoticeInfoItem extends Model
         'created_by_user_id',
         'closed_at',
         'closure_comment',
+        'source_type',
+        'source_id',
     ];
 
     protected $casts = [
         'requires_response' => 'boolean',
         'response_due_at' => 'datetime',
         'closed_at' => 'datetime',
+        'source_id' => 'integer',
     ];
 
     public function savedNotice(): BelongsTo
@@ -125,6 +132,10 @@ class SavedNoticeInfoItem extends Model
 
     public function getTypeLabelAttribute(): string
     {
+        if ($this->type === self::TYPE_AI_REQUIREMENT_RESPONSIBILITY) {
+            return 'AI requirement responsibility';
+        }
+
         return self::TYPE_LABELS[$this->type] ?? (string) $this->type;
     }
 
