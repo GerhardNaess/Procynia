@@ -62,4 +62,8 @@ return [
         ],
     ],
 
+    'uptime_kuma' => [
+        'url' => env('UPTIME_KUMA_URL', ''),
+    ],
+
 ];

@@ -3,6 +3,7 @@
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\AiController;
+use App\Http\Controllers\Ops\QueueSchedulerHealthController;
 use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
@@ -20,6 +21,11 @@ use App\Http\Controllers\StripeWebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
+
+Route::prefix('ops')->name('ops.')->group(function (): void {
+    Route::get('/health/queue-scheduler', [QueueSchedulerHealthController::class, 'check'])
+        ->name('health.queue-scheduler');
+});
 
 Route::get('/', function () {
     $user = auth()->user();

@@ -7,7 +7,6 @@ use App\Filament\Resources\OperationalRunbookResource\Pages\EditOperationalRunbo
 use App\Filament\Resources\OperationalRunbookResource\Pages\ListOperationalRunbooks;
 use App\Filament\Resources\OperationalRunbookResource\Pages\ViewOperationalRunbook;
 use App\Models\OperationalRunbook;
-use App\Models\OperationalRunbookAttachment;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Actions\EditAction;
@@ -22,9 +21,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
-use Filament\Infolists\Components\RepeatableEntry;
-use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -40,17 +38,37 @@ class OperationalRunbookResource extends Resource
 {
     protected static ?string $model = OperationalRunbook::class;
 
-    protected static ?string $navigationLabel = 'Driftsrutiner';
+    protected static ?string $navigationLabel = null;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Drift';
+    protected static string|UnitEnum|null $navigationGroup = null;
 
     protected static ?int $navigationSort = 2;
 
-    protected static ?string $modelLabel = 'driftsrutine';
+    protected static ?string $modelLabel = null;
 
-    protected static ?string $pluralModelLabel = 'driftsrutiner';
+    protected static ?string $pluralModelLabel = null;
+
+    public static function getNavigationLabel(): string
+    {
+        return __('procynia.operational_runbooks.navigation_label');
+    }
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('procynia.operational_runbooks.navigation_group');
+    }
+
+    public static function getModelLabel(): string
+    {
+        return __('procynia.operational_runbooks.model_label');
+    }
+
+    public static function getPluralModelLabel(): string
+    {
+        return __('procynia.operational_runbooks.plural_model_label');
+    }
 
     protected static ?string $recordTitleAttribute = 'title';
 
@@ -63,38 +81,38 @@ class OperationalRunbookResource extends Resource
     {
         return $schema
             ->components([
-                Section::make('Rutinedetaljer')
+                Section::make(__('procynia.operational_runbooks.sections.details'))
                     ->columns(2)
                     ->schema([
                         TextInput::make('title')
-                            ->label('Tittel')
+                            ->label(__('procynia.operational_runbooks.fields.title'))
                             ->required()
                             ->maxLength(255),
                         Select::make('category')
-                            ->label('Kategori')
+                            ->label(__('procynia.operational_runbooks.fields.category'))
                             ->options(fn (): array => self::categoryOptions())
                             ->default('docker')
                             ->required(),
                         TextInput::make('sort_order')
-                            ->label('Sortering')
+                            ->label(__('procynia.operational_runbooks.fields.sort_order'))
                             ->numeric()
                             ->default(0),
                         Toggle::make('is_active')
-                            ->label('Aktiv')
+                            ->label(__('procynia.operational_runbooks.fields.active'))
                             ->default(true),
                         Textarea::make('summary')
-                            ->label('Sammendrag')
+                            ->label(__('procynia.operational_runbooks.fields.summary'))
                             ->rows(4)
                             ->columnSpanFull(),
                     ]),
-                Section::make('Dokumenter og vedlegg')
+                Section::make(__('procynia.operational_runbooks.sections.documents'))
                     ->columnSpanFull()
                     ->schema([
                         Repeater::make('attachments')
                             ->relationship()
                             ->defaultItems(0)
                             ->hiddenLabel()
-                            ->addActionLabel('Legg til vedlegg')
+                            ->addActionLabel(__('procynia.operational_runbooks.actions.add_attachment'))
                             ->columnSpanFull()
                             ->columns(3)
                             ->itemLabel(function (array $state): string {
@@ -114,28 +132,32 @@ class OperationalRunbookResource extends Resource
                                     }
                                 }
 
-                                return 'Nytt vedlegg';
+                                return __('procynia.operational_runbooks.empty_states.new_attachment');
                             })
                             ->schema([
                                 FileUpload::make('stored_path')
-                                    ->label('Fil')
+                                    ->label(__('procynia.operational_runbooks.fields.file'))
                                     ->required()
                                     ->disk('local')
                                     ->visibility('private')
-                                    ->directory(fn (?OperationalRunbook $record): string => self::attachmentDirectory($record))
-                                    ->getUploadedFileNameForStorageUsing(fn (FileUpload $component, TemporaryUploadedFile $file): string => Str::ulid().'__'.$file->getClientOriginalName())
+                                    ->directory(function ($livewire): string {
+                                        $record = $livewire->getRecord();
+
+                                        return self::attachmentDirectory($record instanceof OperationalRunbook ? $record : null);
+                                    })
+                                    ->getUploadedFileNameForStorageUsing(fn (TemporaryUploadedFile $file): string => Str::ulid().'__'.$file->getClientOriginalName())
                                     ->acceptedFileTypes(self::attachmentAcceptedMimeTypes())
                                     ->maxSize(self::attachmentMaxSizeKb())
                                     ->previewable(false)
                                     ->downloadable(false)
                                     ->openable(false)
                                     ->columnSpanFull(),
-                                TextInput::make('description')
-                                    ->label('Beskrivelse')
-                                    ->maxLength(255)
+                                Textarea::make('description')
+                                    ->label(__('procynia.operational_runbooks.fields.description'))
+                                    ->rows(4)
                                     ->columnSpanFull(),
                                 TextInput::make('sort_order')
-                                    ->label('Sortering')
+                                    ->label(__('procynia.operational_runbooks.fields.sort_order'))
                                     ->numeric()
                                     ->default(0),
                             ])
@@ -148,69 +170,51 @@ class OperationalRunbookResource extends Resource
     public static function infolist(Schema $schema): Schema
     {
         return $schema
+            ->columns(1)
             ->components([
-                Section::make('Rutinedetaljer')
-                    ->columns(2)
+                Section::make(__('procynia.operational_runbooks.sections.summary'))
+                    ->compact()
+                    ->visible(fn (OperationalRunbook $record): bool => filled($record->summary))
+                    ->schema([
+                        TextEntry::make('summary')
+                            ->hiddenLabel()
+                            ->wrap()
+                            ->columnSpanFull(),
+                    ]),
+                Section::make(__('procynia.operational_runbooks.sections.attachments'))
+                    ->description(__('procynia.operational_runbooks.help.attachments'))
+                    ->schema([
+                        ViewEntry::make('attachments')
+                            ->hiddenLabel()
+                            ->view('filament.infolists.attachment-table')
+                            ->columnSpanFull(),
+                    ]),
+                Section::make(__('procynia.operational_runbooks.sections.details'))
+                    ->compact()
+                    ->columns(4)
                     ->schema([
                         TextEntry::make('title')
-                            ->label('Tittel'),
+                            ->label(__('procynia.operational_runbooks.fields.title'))
+                            ->columnSpan(2),
                         TextEntry::make('category')
-                            ->label('Kategori')
+                            ->label(__('procynia.operational_runbooks.fields.category'))
                             ->badge()
                             ->state(fn (OperationalRunbook $record): string => self::categoryLabel($record->category)),
-                        TextEntry::make('sort_order')
-                            ->label('Sortering')
-                            ->numeric(),
                         TextEntry::make('is_active')
-                            ->label('Aktiv')
+                            ->label(__('procynia.operational_runbooks.fields.status'))
                             ->badge()
-                            ->state(fn (OperationalRunbook $record): string => $record->is_active ? 'Aktiv' : 'Inaktiv'),
-                        TextEntry::make('summary')
-                            ->label('Sammendrag')
-                            ->columnSpanFull()
-                            ->wrap()
-                            ->placeholder('Ingen sammendrag'),
+                            ->state(fn (OperationalRunbook $record): string => $record->is_active
+                                ? __('procynia.operational_runbooks.fields.active')
+                                : __('procynia.operational_runbooks.fields.inactive')),
                         TextEntry::make('created_at')
-                            ->label('Opprettet')
+                            ->label(__('procynia.operational_runbooks.fields.created_at'))
                             ->dateTime('d.m.Y H:i'),
                         TextEntry::make('updated_at')
-                            ->label('Sist revidert')
+                            ->label(__('procynia.operational_runbooks.fields.updated_at'))
                             ->dateTime('d.m.Y H:i'),
-                    ]),
-                Section::make('Vedlegg')
-                    ->schema([
-                        RepeatableEntry::make('attachments')
-                            ->label('Vedlegg')
-                            ->placeholder('Mangler dokument')
-                            ->table([
-                                TableColumn::make('Filnavn'),
-                                TableColumn::make('Type'),
-                                TableColumn::make('Størrelse'),
-                                TableColumn::make('Opplastet'),
-                                TableColumn::make('Lenke'),
-                            ])
-                            ->schema([
-                                TextEntry::make('original_name')
-                                    ->label('Filnavn')
-                                    ->weight('medium')
-                                    ->wrap(),
-                                TextEntry::make('file_type_label')
-                                    ->label('Type')
-                                    ->badge(),
-                                TextEntry::make('formatted_size')
-                                    ->label('Størrelse')
-                                    ->placeholder('Ukjent'),
-                                TextEntry::make('created_at')
-                                    ->label('Opplastet')
-                                    ->dateTime('d.m.Y H:i'),
-                                TextEntry::make('download_action')
-                                    ->label('Lenke')
-                                    ->state('Last ned dokument')
-                                    ->color('primary')
-                                    ->icon('heroicon-o-arrow-down-tray')
-                                    ->url(fn (OperationalRunbookAttachment $record): string => route('admin.operational-runbook-attachments.download', ['attachment' => $record])),
-                            ])
-                            ->columnSpanFull(),
+                        TextEntry::make('sort_order')
+                            ->label(__('procynia.operational_runbooks.fields.sort_order'))
+                            ->numeric(),
                     ]),
             ]);
     }
@@ -223,48 +227,52 @@ class OperationalRunbookResource extends Resource
             ->recordUrl(fn (OperationalRunbook $record): string => static::getUrl('view', ['record' => $record]))
             ->columns([
                 TextColumn::make('title')
-                    ->label('Tittel')
+                    ->label(__('procynia.operational_runbooks.fields.title'))
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('category')
-                    ->label('Kategori')
+                    ->label(__('procynia.operational_runbooks.fields.category'))
                     ->badge()
                     ->state(fn (OperationalRunbook $record): string => self::categoryLabel($record->category))
                     ->sortable(),
                 TextColumn::make('attachments_count')
-                    ->label('Antall vedlegg')
+                    ->label(__('procynia.operational_runbooks.fields.attachment_count'))
                     ->badge()
                     ->color(fn (int $state): string => $state > 0 ? 'success' : 'danger')
-                    ->formatStateUsing(fn (int $state): string => $state > 0 ? $state.' vedlegg' : 'Mangler dokument')
+                    ->formatStateUsing(fn (int $state): string => $state > 0
+                        ? (string) __('procynia.operational_runbooks.table.attachment_badge', ['count' => $state])
+                        : (string) __('procynia.operational_runbooks.table.missing_document'))
                     ->sortable(),
                 TextColumn::make('sort_order')
-                    ->label('Sortering')
+                    ->label(__('procynia.operational_runbooks.fields.sort_order'))
                     ->numeric()
                     ->sortable(),
                 TextColumn::make('is_active')
-                    ->label('Aktiv')
+                    ->label(__('procynia.operational_runbooks.fields.status'))
                     ->badge()
-                    ->state(fn (OperationalRunbook $record): string => $record->is_active ? 'Aktiv' : 'Inaktiv')
+                    ->state(fn (OperationalRunbook $record): string => $record->is_active
+                        ? __('procynia.operational_runbooks.fields.active')
+                        : __('procynia.operational_runbooks.fields.inactive'))
                     ->sortable(),
                 TextColumn::make('updated_at')
-                    ->label('Oppdatert')
+                    ->label(__('procynia.operational_runbooks.fields.updated_at'))
                     ->dateTime('d.m.Y H:i')
                     ->sortable(),
             ])
             ->filters([
                 SelectFilter::make('category')
-                    ->label('Kategori')
+                    ->label(__('procynia.operational_runbooks.fields.category'))
                     ->options(fn (): array => self::categoryOptions()),
                 TernaryFilter::make('is_active')
-                    ->label('Aktiv')
-                    ->trueLabel('Aktiv')
-                    ->falseLabel('Inaktiv'),
+                    ->label(__('procynia.operational_runbooks.filters.active_label'))
+                    ->trueLabel(__('procynia.operational_runbooks.filters.active_true'))
+                    ->falseLabel(__('procynia.operational_runbooks.filters.active_false')),
             ])
             ->recordActions([
                 ViewAction::make()
-                    ->label('Vis'),
+                    ->label(__('procynia.operational_runbooks.actions.view')),
                 EditAction::make()
-                    ->label('Rediger'),
+                    ->label(__('procynia.operational_runbooks.actions.edit')),
             ]);
     }
 
@@ -297,32 +305,17 @@ class OperationalRunbookResource extends Resource
      */
     public static function categoryOptions(): array
     {
-        return [
-            'general' => 'Generelt',
-            'docker' => 'Docker',
-            'backup_recovery' => 'Backup og recovery',
-            'deploy' => 'Deploy',
-            'monitoring' => 'Overvåkning',
-            'security' => 'Sikkerhet',
-            'integrations' => 'Integrasjoner',
-            'infrastructure' => 'Infrastruktur',
-            'incidents' => 'Hendelser og beredskap',
-        ];
+        $keys = ['general', 'docker', 'backup_recovery', 'deploy', 'monitoring', 'security', 'integrations', 'infrastructure', 'incidents'];
+
+        return array_combine($keys, array_map(
+            fn (string $key): string => (string) __('procynia.operational_runbooks.categories.'.$key),
+            $keys,
+        ));
     }
 
     public static function categoryLabel(string $category): string
     {
-        return match ($category) {
-            'general' => 'Generelt',
-            'docker' => 'Docker',
-            'backup_recovery' => 'Backup og recovery',
-            'deploy' => 'Deploy',
-            'monitoring' => 'Overvåkning',
-            'security' => 'Sikkerhet',
-            'integrations' => 'Integrasjoner',
-            'infrastructure' => 'Infrastruktur',
-            'incidents' => 'Hendelser og beredskap',
-        };
+        return (string) __('procynia.operational_runbooks.categories.'.$category, [], null) ?: $category;
     }
 
     /**

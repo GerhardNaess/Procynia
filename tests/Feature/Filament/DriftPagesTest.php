@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BackupRecovery;
 use App\Filament\Pages\Incidents;
+use App\Filament\Pages\Monitoring;
 use App\Filament\Pages\QueueScheduler;
 use App\Filament\Pages\SystemStatus;
 use App\Filament\Resources\OperationalRunbookResource;
@@ -21,6 +22,7 @@ use Database\Seeders\OperatingProcedureSeeder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
@@ -52,12 +54,14 @@ class DriftPagesTest extends TestCase
     public function test_drift_pages_expose_expected_navigation_metadata(): void
     {
         $this->assertSame('Drift', SystemStatus::getNavigationGroup());
+        $this->assertSame('Drift', Monitoring::getNavigationGroup());
         $this->assertSame('Drift', QueueScheduler::getNavigationGroup());
         $this->assertSame('Drift', Incidents::getNavigationGroup());
         $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
         $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
 
-        $this->assertSame('System status', SystemStatus::getNavigationLabel());
+        $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
+        $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
         $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());
         $this->assertSame('Incidents', Incidents::getNavigationLabel());
         $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
@@ -73,7 +77,8 @@ class DriftPagesTest extends TestCase
     {
         $admin = $this->internalAdmin();
 
-        $this->actingAs($admin)->get(SystemStatus::getUrl())->assertOk()->assertSee('System status');
+        $this->actingAs($admin)->get(SystemStatus::getUrl())->assertOk()->assertSee('Systemstatus');
+        $this->actingAs($admin)->get(Monitoring::getUrl())->assertOk()->assertSee('Overvåkning');
         $this->actingAs($admin)->get(QueueScheduler::getUrl())->assertOk()->assertSee('Queue and scheduler');
         $this->actingAs($admin)->get(Incidents::getUrl())->assertOk()->assertSee('Incidents');
         $this->actingAs($admin)->get(BackupRecovery::getUrl())->assertOk()->assertSee('Backup and recovery');
@@ -95,10 +100,54 @@ class DriftPagesTest extends TestCase
         $this->actingAs($admin);
 
         $this->assertFalse(SystemStatus::canAccess());
+        $this->assertFalse(Monitoring::canAccess());
         $this->assertFalse(QueueScheduler::canAccess());
         $this->assertFalse(Incidents::canAccess());
         $this->assertFalse(BackupRecovery::canAccess());
         $this->assertFalse(OperationalRunbookResource::canAccess());
+    }
+
+    public function test_monitoring_page_shows_uptime_kuma_with_configured_url(): void
+    {
+        config(['services.uptime_kuma.url' => 'http://127.0.0.1:3001']);
+
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(Monitoring::getUrl())
+            ->assertOk()
+            ->assertSee('Overvåkning')
+            ->assertSee('Uptime Kuma')
+            ->assertSee('http://127.0.0.1:3001')
+            ->assertSee('Åpne Uptime Kuma')
+            ->assertSee('Oppetidsovervåkning og varsling')
+            ->assertSee('Anbefalt bruk');
+    }
+
+    public function test_monitoring_page_shows_missing_url_message_when_not_configured(): void
+    {
+        config(['services.uptime_kuma.url' => '']);
+
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(Monitoring::getUrl())
+            ->assertOk()
+            ->assertSee('Uptime Kuma')
+            ->assertSee('UPTIME_KUMA_URL')
+            ->assertDontSee('Åpne Uptime Kuma');
+    }
+
+    public function test_monitoring_page_does_not_expose_secrets(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $response = $this->actingAs($admin)->get(Monitoring::getUrl())->assertOk();
+
+        $content = $response->getContent();
+        $this->assertStringNotContainsString('api_key', strtolower($content));
+        $this->assertStringNotContainsString('webhook_secret', strtolower($content));
+        $this->assertStringNotContainsString('notification_secret', strtolower($content));
     }
 
     public function test_operational_runbooks_list_page_renders_in_norwegian(): void
@@ -147,9 +196,9 @@ class DriftPagesTest extends TestCase
             ->assertSee('Ny driftsrutine')
             ->assertSee('Kategori')
             ->assertSee('Antall vedlegg')
-            ->assertSee('Aktiv')
+            ->assertSee('Status')
             ->assertSee('Sortering')
-            ->assertSee('Oppdatert')
+            ->assertSee('Sist revidert')
             ->assertSee('Backup verification')
             ->assertSee('Backup og recovery')
             ->assertSee('1 vedlegg')
@@ -255,10 +304,14 @@ class DriftPagesTest extends TestCase
             ->assertOk()
             ->assertSee('Backup verification')
             ->assertSee('Kategori: Backup og recovery')
+            ->assertSee('Status: Aktiv')
+            ->assertSee('Sist revidert:')
             ->assertSee('Vedlegg')
+            ->assertSee('Rutinedetaljer')
             ->assertSee('backup-guide.pdf')
             ->assertSee('Last ned')
-            ->assertSee('Rediger');
+            ->assertSee('Rediger')
+            ->assertSee('Verify nightly backups and restore points.');
 
         $this->actingAs($admin)
             ->get(route('admin.operational-runbook-attachments.download', ['attachment' => $runbook->attachments()->firstOrFail()]))
@@ -278,6 +331,26 @@ class DriftPagesTest extends TestCase
             ->assertSee('Ny driftsrutine');
     }
 
+    public function test_runbook_view_shows_empty_state_when_no_attachments(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $runbook = OperationalRunbook::query()->create([
+            'title' => 'Rutine uten vedlegg',
+            'category' => 'general',
+            'summary' => null,
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(ViewOperationalRunbook::getUrl(['record' => $runbook]))
+            ->assertOk()
+            ->assertSee('Rutine uten vedlegg')
+            ->assertSee('Ingen vedlegg er lagt til ennå.')
+            ->assertDontSee('Sammendrag');
+    }
+
     public function test_operating_procedure_seeder_is_idempotent(): void
     {
         OperationalRunbook::query()->create([
@@ -292,6 +365,7 @@ class DriftPagesTest extends TestCase
         app(OperatingProcedureSeeder::class)->run();
 
         $this->assertSame(1, OperationalRunbook::query()->where('title', 'Docker-oppsett for Procynia')->count());
+        $this->assertSame(1, OperationalRunbook::query()->where('title', 'Uptime Kuma overvåkning')->count());
 
         $this->assertDatabaseHas('operational_runbooks', [
             'title' => 'Docker-oppsett for Procynia',
@@ -300,6 +374,507 @@ class DriftPagesTest extends TestCase
             'is_active' => false,
             'sort_order' => 99,
         ]);
+
+        $this->assertDatabaseHas('operational_runbooks', [
+            'title' => 'Uptime Kuma overvåkning',
+            'category' => 'monitoring',
+            'summary' => 'Beskriver hvordan Uptime Kuma brukes til oppetidsovervåkning av Procynia på tvers av Azure, Google Cloud, AWS og on-premise.',
+            'is_active' => true,
+            'sort_order' => 2,
+        ]);
+    }
+
+    public function test_system_status_page_shows_norwegian_section_labels(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Systemstatus')
+            ->assertSee('Driftstatus')
+            ->assertSee('Infrastruktur')
+            ->assertSee('Teknisk miljø')
+            ->assertSee('Planlagte oppgaver')
+            ->assertSee('Database')
+            ->assertSee('Redis');
+    }
+
+    public function test_system_status_shows_database_and_redis_status_labels(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Databaseforbindelse')
+            ->assertSee('Redis-forbindelse')
+            ->assertSee('Queue/Scheduler')
+            ->assertSee('Failed jobs');
+    }
+
+    public function test_system_status_shows_failed_jobs_as_warning_when_count_is_positive(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\TestJob', 'test' => true]),
+            'exception'  => 'RuntimeException: Something went wrong'."\n".'Stack trace line 1'."\n".'Stack trace line 2',
+            'failed_at'  => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Avvik og oppfølging')
+            ->assertSee('Krever oppfølging')
+            ->assertSee('Feilede jobber')
+            ->assertSee('Vis detaljer');
+    }
+
+    public function test_system_status_shows_reason_text_for_failed_jobs(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\ImportJob']),
+            'exception'  => 'ErrorException: Import failed',
+            'failed_at'  => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Systemstatus er påvirket fordi feilede bakgrunnsjobber kan stoppe import')
+            ->assertSee('Åpne feilede jobber');
+    }
+
+    public function test_system_status_shows_failed_job_detail_table_with_job_info(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'ai-requirements',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\Ai\\GenerateRequirementsJob']),
+            'exception'  => 'TimeoutException: Job exceeded time limit',
+            'failed_at'  => now(),
+        ]);
+
+        $response = $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk();
+
+        // Job type (short class name), queue, connection, and first line of error are in the HTML
+        $response->assertSee('GenerateRequirementsJob');
+        $response->assertSee('ai-requirements');
+        $response->assertSee('TimeoutException: Job exceeded time limit');
+        $response->assertSee(__('procynia.system_status.fields.job_type'));
+        $response->assertSee(__('procynia.system_status.fields.failed_at'));
+        $response->assertSee(__('procynia.system_status.fields.error_reason'));
+        $response->assertSee(__('procynia.system_status.fields.actions'));
+        $response->assertSee(__('procynia.system_status.actions.delete_failed_job'));
+    }
+
+    public function test_system_status_does_not_show_full_stack_trace_in_main_view(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
+            'exception'  => 'RuntimeException: Top-level message'."\n".'#0 /app/vendor/laravel/framework/src/Queue/Worker.php(123): call_user_func()'."\n".'#1 /app/vendor/laravel/framework/src/Queue/Worker.php(456): process()',
+            'failed_at'  => now(),
+        ]);
+
+        $content = $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringNotContainsString('#0 /app/vendor', $content);
+        $this->assertStringNotContainsString('call_user_func', $content);
+        $this->assertStringContainsString('RuntimeException: Top-level message', $content);
+    }
+
+    public function test_system_status_shows_no_issues_found_when_all_ok(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+            $mock->shouldReceive('snapshot')->andReturn([
+                'failed_jobs_count' => 0,
+                'database'  => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
+                'redis'     => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
+                'queue'     => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
+                'scheduler' => ['available' => true, 'status_label' => 'Configured', 'task_count' => 0, 'tasks' => []],
+                'uptime'    => ['available' => false, 'label' => ''],
+                'cache_driver' => 'array', 'session_driver' => 'array',
+                'app_env' => 'testing', 'app_debug' => false,
+                'laravel_version' => '13.0.0', 'php_version' => PHP_VERSION,
+                'app_url' => 'http://localhost',
+            ]);
+            $mock->shouldReceive('recentFailedJobs')->andReturn([]);
+        });
+
+        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+            $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
+        });
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Ingen avvik funnet');
+    }
+
+    public function test_system_status_shows_scheduler_tasks_in_compact_table(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Planlagte oppgaver')
+            ->assertSee(__('procynia.system_status.fields.task'))
+            ->assertSee(__('procynia.system_status.fields.frequency'))
+            ->assertSee(__('procynia.system_status.scheduler.next_run'));
+    }
+
+    public function test_system_status_renders_live_scheduler_progress_metadata(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+            $mock->shouldReceive('snapshot')->andReturn([
+                'failed_jobs_count' => 0,
+                'database' => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
+                'redis' => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
+                'queue' => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
+                'scheduler' => [
+                    'available' => true,
+                    'status_label' => 'Configured',
+                    'task_count' => 2,
+                    'tasks' => [
+                        [
+                            'task_name' => 'Procynia scheduler heartbeat',
+                            'command' => 'php artisan ops:scheduler-heartbeat',
+                            'description' => null,
+                            'expression' => '* * * * *',
+                            'timezone' => 'UTC',
+                            'has_mutex' => false,
+                            'previous_run_at_iso' => '2026-05-13T17:00:00+00:00',
+                            'next_run_at_iso' => '2026-05-13T18:00:00+00:00',
+                            'cycle_duration_seconds' => 3600,
+                            'progress_ratio' => 0.25,
+                            'next_run_at_human' => 'om 45 minutter',
+                            'next_due_date' => '2026-05-13 18:00:00 +00:00',
+                            'next_due_date_human' => 'om 45 minutter',
+                            'repeat_seconds' => 60,
+                            'environments' => [],
+                        ],
+                        [
+                            'task_name' => 'Missing timing data',
+                            'command' => 'php artisan schedule:run',
+                            'description' => null,
+                            'expression' => '* * * * *',
+                            'timezone' => 'UTC',
+                            'has_mutex' => false,
+                            'previous_run_at_iso' => null,
+                            'next_run_at_iso' => null,
+                            'cycle_duration_seconds' => 0,
+                            'progress_ratio' => null,
+                            'next_run_at_human' => __('procynia.system_status.scheduler.unavailable'),
+                            'next_due_date' => '',
+                            'next_due_date_human' => __('procynia.system_status.scheduler.unavailable'),
+                            'repeat_seconds' => 0,
+                            'environments' => [],
+                        ],
+                    ],
+                ],
+                'uptime' => ['available' => false, 'label' => ''],
+                'cache_driver' => 'array',
+                'session_driver' => 'array',
+                'app_env' => 'testing',
+                'app_debug' => false,
+                'laravel_version' => '13.0.0',
+                'php_version' => PHP_VERSION,
+                'app_url' => 'http://localhost',
+            ]);
+            $mock->shouldReceive('recentFailedJobs')->andReturn([]);
+        });
+
+        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+            $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
+        });
+
+        $response = $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk();
+
+        $response->assertSee(__('procynia.system_status.scheduler.progress'));
+        $response->assertSee('om 45 minutter');
+        $response->assertSee(__('procynia.system_status.scheduler.unavailable'));
+        $response->assertSee('data-scheduler-task-row', false);
+        $response->assertSee('data-scheduler-previous-run-at', false);
+        $response->assertSee('data-scheduler-next-run-at', false);
+        $response->assertSee('data-scheduler-cycle-duration-seconds', false);
+        $response->assertSee('data-scheduler-progress-ring', false);
+    }
+
+    public function test_system_status_does_not_translate_dynamic_system_values(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $response = $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk();
+
+        $appEnv = (string) config('app.env', app()->environment());
+        $laravelVersion = app()->version();
+        $phpVersion = PHP_VERSION;
+
+        $response->assertSee($appEnv);
+        $response->assertSee($laravelVersion);
+        $response->assertSee($phpVersion);
+    }
+
+    public function test_system_status_translation_keys_resolve_correctly_in_english(): void
+    {
+        app()->setLocale('en');
+
+        try {
+            $this->assertSame('System status', __('procynia.system_status.title'));
+            $this->assertSame('Operational status', __('procynia.system_status.sections.operational_status'));
+            $this->assertSame('Infrastructure', __('procynia.system_status.sections.infrastructure'));
+            $this->assertSame('Technical environment', __('procynia.system_status.sections.technical_environment'));
+            $this->assertSame('Scheduled tasks', __('procynia.system_status.sections.scheduled_tasks'));
+            $this->assertSame('Database connection', __('procynia.system_status.fields.database_connection'));
+            $this->assertSame('Redis connection', __('procynia.system_status.fields.redis_connection'));
+            $this->assertSame('Progress', __('procynia.system_status.scheduler.progress'));
+            $this->assertSame('Next run', __('procynia.system_status.scheduler.next_run'));
+            $this->assertSame('in', __('procynia.system_status.scheduler.in_prefix'));
+            $this->assertSame('now', __('procynia.system_status.scheduler.now'));
+            $this->assertSame('Not available', __('procynia.system_status.scheduler.unavailable'));
+            $this->assertSame('Connected', __('procynia.system_status.statuses.connected'));
+            $this->assertSame('Requires follow-up', __('procynia.system_status.statuses.requires_follow_up'));
+            $this->assertSame('Show details', __('procynia.system_status.fields.show_details'));
+            $this->assertSame('Failed jobs', __('procynia.system_status.issues.failed_jobs.title'));
+            $this->assertSame('No issues found', __('procynia.system_status.statuses.no_issues'));
+        } finally {
+            app()->setLocale('no');
+        }
+    }
+
+    public function test_clear_failed_jobs_action_is_visible_when_failed_jobs_exist(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\SomeJob']),
+            'exception'  => 'RuntimeException: Something failed',
+            'failed_at'  => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->assertSee('Rydd feilede jobber');
+    }
+
+    public function test_clear_failed_jobs_action_is_hidden_when_no_failed_jobs(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->mock(\App\Services\Operations\RuntimeStatusService::class, function ($mock) {
+            $mock->shouldReceive('snapshot')->andReturn([
+                'failed_jobs_count' => 0,
+                'database'  => ['available' => true, 'connection' => 'pgsql', 'driver' => 'pgsql', 'database' => 'test', 'error_message' => null],
+                'redis'     => ['available' => true, 'connection' => 'default', 'host' => 'localhost', 'database' => '0', 'error_message' => null],
+                'queue'     => ['driver' => 'redis', 'connection' => 'redis', 'queue' => 'default', 'known_queues' => [], 'failed_jobs_count' => 0],
+                'scheduler' => ['available' => true, 'status_label' => 'Configured', 'task_count' => 0, 'tasks' => []],
+                'uptime'    => ['available' => false, 'label' => ''],
+                'cache_driver' => 'array', 'session_driver' => 'array',
+                'app_env' => 'testing', 'app_debug' => false,
+                'laravel_version' => '13.0.0', 'php_version' => PHP_VERSION,
+                'app_url' => 'http://localhost',
+            ]);
+            $mock->shouldReceive('recentFailedJobs')->andReturn([]);
+        });
+
+        $this->mock(\App\Services\Operations\QueueSchedulerHealthService::class, function ($mock) {
+            $mock->shouldReceive('evaluate')->andReturn(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
+        });
+
+        $content = $this->actingAs($admin)
+            ->get(SystemStatus::getUrl())
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringNotContainsString('Rydd feilede jobber', $content);
+    }
+
+    public function test_clear_failed_jobs_action_deletes_all_failed_jobs_rows(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\JobA']),
+            'exception'  => 'Exception: First failure',
+            'failed_at'  => now(),
+        ]);
+
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'ai-requirements',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\JobB']),
+            'exception'  => 'Exception: Second failure',
+            'failed_at'  => now()->subMinutes(5),
+        ]);
+
+        $this->assertSame(2, (int) DB::table($table)->count());
+
+        Livewire::actingAs($admin)
+            ->test(SystemStatus::class)
+            ->call('handleClearFailedJobs')
+            ->assertHasNoErrors();
+
+        $this->assertSame(0, (int) DB::table($table)->count());
+    }
+
+    public function test_clear_failed_jobs_action_refreshes_snapshot_and_failed_jobs_list(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+        DB::table($table)->insert([
+            'uuid'       => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue'      => 'default',
+            'payload'    => json_encode(['displayName' => 'App\\Jobs\\RefreshTestJob']),
+            'exception'  => 'Exception: Will be cleared',
+            'failed_at'  => now(),
+        ]);
+
+        $component = Livewire::actingAs($admin)->test(SystemStatus::class);
+
+        $this->assertSame(1, (int) ($component->get('snapshot')['failed_jobs_count'] ?? 0));
+        $this->assertCount(1, $component->get('failedJobs'));
+
+        $component->call('handleClearFailedJobs')->assertHasNoErrors();
+
+        $this->assertSame(0, (int) ($component->get('snapshot')['failed_jobs_count'] ?? 0));
+        $this->assertCount(0, $component->get('failedJobs'));
+    }
+
+    public function test_clear_failed_jobs_translation_keys_resolve_correctly(): void
+    {
+        $this->assertSame('Rydd feilede jobber', __('procynia.system_status.actions.clear_failed_jobs'));
+        $this->assertSame('Feilede jobber er ryddet.', __('procynia.system_status.messages.failed_jobs_cleared'));
+        $this->assertSame('Slett', __('procynia.system_status.actions.delete_failed_job'));
+        $this->assertSame('Handling', __('procynia.system_status.fields.actions'));
+        $this->assertSame('Fremdrift', __('procynia.system_status.scheduler.progress'));
+        $this->assertSame('Neste kjøring', __('procynia.system_status.scheduler.next_run'));
+        $this->assertSame('om', __('procynia.system_status.scheduler.in_prefix'));
+        $this->assertSame('nå', __('procynia.system_status.scheduler.now'));
+        $this->assertSame('Ikke tilgjengelig', __('procynia.system_status.scheduler.unavailable'));
+        $this->assertSame('Feilet jobb er slettet.', __('procynia.system_status.messages.failed_job_deleted'));
+        $this->assertSame('Feilet jobb finnes ikke lenger.', __('procynia.system_status.messages.failed_job_not_found'));
+        $this->assertStringContainsString('failed_jobs-listen', (string) __('procynia.system_status.messages.clear_failed_jobs_description'));
+
+        app()->setLocale('en');
+
+        try {
+            $this->assertSame('Clear failed jobs', __('procynia.system_status.actions.clear_failed_jobs'));
+            $this->assertSame('Failed jobs have been cleared.', __('procynia.system_status.messages.failed_jobs_cleared'));
+            $this->assertSame('Delete', __('procynia.system_status.actions.delete_failed_job'));
+            $this->assertSame('Actions', __('procynia.system_status.fields.actions'));
+            $this->assertSame('Failed job deleted.', __('procynia.system_status.messages.failed_job_deleted'));
+            $this->assertSame('Failed job no longer exists.', __('procynia.system_status.messages.failed_job_not_found'));
+        } finally {
+            app()->setLocale('no');
+        }
+    }
+
+    public function test_failed_job_rows_show_a_delete_action_that_deletes_only_the_selected_row(): void
+    {
+        $admin = $this->internalAdmin();
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+
+        $firstId = DB::table($table)->insertGetId([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue' => 'default',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\JobA']),
+            'exception' => 'Exception: First failure',
+            'failed_at' => now(),
+        ]);
+
+        $secondId = DB::table($table)->insertGetId([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'connection' => 'redis',
+            'queue' => 'ai-requirements',
+            'payload' => json_encode(['displayName' => 'App\\Jobs\\JobB']),
+            'exception' => 'Exception: Second failure',
+            'failed_at' => now()->subMinutes(5),
+        ]);
+
+        $response = $this->actingAs($admin)->get(SystemStatus::getUrl())->assertOk();
+        $response->assertSee(__('procynia.system_status.fields.actions'));
+        $response->assertSee(__('procynia.system_status.actions.delete_failed_job'));
+
+        Livewire::actingAs($admin)
+            ->test(SystemStatus::class)
+            ->call('promptDeleteFailedJob', $firstId)
+            ->call('callMountedAction')
+            ->assertHasNoErrors();
+
+        Notification::assertNotified(__('procynia.system_status.messages.failed_job_deleted'));
+
+        $this->assertDatabaseMissing($table, ['id' => $firstId]);
+        $this->assertDatabaseHas($table, ['id' => $secondId]);
+        $this->assertSame(1, (int) DB::table($table)->count());
+    }
+
+    public function test_failed_job_delete_action_refreshes_snapshot_and_handles_missing_rows_gracefully(): void
+    {
+        $admin = $this->internalAdmin();
+        $table = (string) config('queue.failed.table', 'failed_jobs');
+
+        $component = Livewire::actingAs($admin)->test(SystemStatus::class);
+
+        $component
+            ->call('promptDeleteFailedJob', 999999999)
+            ->call('callMountedAction')
+            ->assertHasNoErrors();
+
+        Notification::assertNotified(__('procynia.system_status.messages.failed_job_not_found'));
+
+        $this->assertSame(0, (int) ($component->get('snapshot')['failed_jobs_count'] ?? 0));
+        $this->assertCount(0, $component->get('failedJobs'));
+        $this->assertSame(0, (int) DB::table($table)->count());
     }
 
     private function internalAdmin(): User

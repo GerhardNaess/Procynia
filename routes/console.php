@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\OpsQueueHeartbeatJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,3 +16,6 @@ Schedule::command('doffin:import-batch --trigger=scheduler')
 Schedule::command('doffin:watch-inbox-discover')
     ->dailyAt('01:15')
     ->withoutOverlapping();
+
+Schedule::command('ops:scheduler-heartbeat')->everyMinute();
+Schedule::job(new OpsQueueHeartbeatJob)->everyMinute();

@@ -3,8 +3,10 @@
 namespace Tests\Unit\Services\Operations;
 
 use App\Services\Operations\RuntimeStatusService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
@@ -15,6 +17,8 @@ class RuntimeStatusServiceTest extends TestCase
 {
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
+        CarbonImmutable::setTestNow();
         Mockery::close();
 
         parent::tearDown();
@@ -22,6 +26,9 @@ class RuntimeStatusServiceTest extends TestCase
 
     public function test_snapshot_compiles_runtime_data_and_scheduler_tasks(): void
     {
+        Carbon::setTestNow(CarbonImmutable::parse('2026-05-13 17:15:00', 'UTC'));
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-05-13 17:15:00', 'UTC'));
+
         config([
             'queue.default' => 'redis',
             'queue.connections.redis.queue' => 'default',
@@ -79,6 +86,7 @@ class RuntimeStatusServiceTest extends TestCase
                     'next_due_date_human' => '44 minutes from now',
                     'timezone' => 'UTC',
                     'has_mutex' => false,
+                    'repeat_seconds' => null,
                 ],
             ]));
 
@@ -94,6 +102,12 @@ class RuntimeStatusServiceTest extends TestCase
         $this->assertSame('Connected', $snapshot['redis']['status_label']);
         $this->assertSame('Configured', $snapshot['scheduler']['status_label']);
         $this->assertSame(1, $snapshot['scheduler']['task_count']);
+        $this->assertNotEmpty($snapshot['generated_at']);
+        $this->assertSame('2026-05-13T17:00:00+00:00', $snapshot['scheduler']['tasks'][0]['previous_run_at_iso']);
+        $this->assertSame('2026-05-13T18:00:00+00:00', $snapshot['scheduler']['tasks'][0]['next_run_at_iso']);
+        $this->assertEquals(3600, $snapshot['scheduler']['tasks'][0]['cycle_duration_seconds']);
+        $this->assertEqualsWithDelta(0.25, (float) $snapshot['scheduler']['tasks'][0]['progress_ratio'], 0.01);
+        $this->assertSame('om 45 minutter', $snapshot['scheduler']['tasks'][0]['next_run_at_human']);
         $this->assertSame('php artisan doffin:import-batch --trigger=scheduler', $snapshot['scheduler']['tasks'][0]['command']);
     }
 }
