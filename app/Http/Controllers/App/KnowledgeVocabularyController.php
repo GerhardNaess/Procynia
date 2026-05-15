@@ -9,9 +9,11 @@ use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeVocabularyAnalysisBatch;
 use App\Models\User;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularyAnalysisBatchService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularyApprovalService;
+use App\Services\Billing\BillingEntitlementService;
 use App\Support\CustomerContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -31,6 +33,7 @@ class KnowledgeVocabularyController extends Controller
         private readonly KnowledgeMetadataVocabularyService $vocabularyService,
         private readonly KnowledgeVocabularyAnalysisBatchService $analysisBatchService,
         private readonly KnowledgeVocabularyApprovalService $approvalService,
+        private readonly AiUsageGuard $aiUsageGuard,
     ) {
     }
 
@@ -86,6 +89,15 @@ class KnowledgeVocabularyController extends Controller
                 'source_document_ids' => 'Velg minst ett gyldig dokument.',
             ]);
         }
+
+        $customer = Customer::query()->findOrFail($customerId);
+        $this->assertAiAccess($customer);
+        $this->aiUsageGuard->assertCanStartAiOperation(
+            $customer,
+            $user,
+            AiUsageGuard::OPERATION_KNOWLEDGE_VOCABULARY_ANALYSIS_BATCH,
+            count($documentIds),
+        );
 
         $batch = $this->analysisBatchService->createBatch($customerId, $documentIds, (int) $user->id);
         $batch = $this->analysisBatchService->startAnalysis($batch->id);
@@ -319,6 +331,17 @@ class KnowledgeVocabularyController extends Controller
         );
 
         return [$user, $customerId];
+    }
+
+    /**
+     * Purpose: Verify that the current customer may use the AI features in the vocabulary workspace.
+     * Inputs: The customer resolved from the current frontend context.
+     * Returns: None.
+     * Side effects: Aborts with HTTP 403 when the customer lacks AI entitlement.
+     */
+    private function assertAiAccess(Customer $customer): void
+    {
+        abort_unless(app(BillingEntitlementService::class)->canUseAiOffer($customer), 403, __('procynia.ai.ai_access_unavailable_message'));
     }
 
     /**

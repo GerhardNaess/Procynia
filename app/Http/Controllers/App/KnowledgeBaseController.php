@@ -5,9 +5,11 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
+use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\User;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
@@ -15,6 +17,7 @@ use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
 use App\Services\Knowledge\KnowledgeChunkBuilder;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Support\CustomerContext;
@@ -49,6 +52,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
         private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
+        private readonly AiUsageGuard $aiUsageGuard,
     ) {
     }
 
@@ -166,6 +170,17 @@ class KnowledgeBaseController extends Controller
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $chunkRecord = $this->scopedChunk($record->id, $chunk->id);
         $payload = $this->validatedChunkMetadataPayload($request);
+
+        if ($this->requestHasManualChunkContentPayload($request)) {
+            $customer = Customer::query()->findOrFail($customerId);
+            $this->assertAiAccess($customer);
+            $this->aiUsageGuard->assertCanStartAiOperation(
+                $customer,
+                $user,
+                AiUsageGuard::OPERATION_KNOWLEDGE_CHUNK_METADATA_UPDATE,
+            );
+        }
+
         $contentChanged = $this->applyManualChunkContentUpdate($request, $record, $chunkRecord, $payload);
 
         if ($contentChanged) {
@@ -223,6 +238,13 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $payload = $this->validatedStorePayload($request);
+        $customer = Customer::query()->findOrFail($customerId);
+        $this->assertAiAccess($customer);
+        $this->aiUsageGuard->assertCanStartAiOperation(
+            $customer,
+            $user,
+            AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
+        );
         $storedPath = null;
 
         try {
@@ -390,6 +412,17 @@ class KnowledgeBaseController extends Controller
         );
 
         return [$user, $customerId];
+    }
+
+    /**
+     * Purpose: Verify that the current customer may use the AI features in the knowledge base area.
+     * Inputs: The customer resolved from the current frontend context.
+     * Returns: None.
+     * Side effects: Aborts with HTTP 403 when the customer lacks AI entitlement.
+     */
+    private function assertAiAccess(Customer $customer): void
+    {
+        abort_unless(app(BillingEntitlementService::class)->canUseAiOffer($customer), 403, __('procynia.ai.ai_access_unavailable_message'));
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Models\SavedNoticeInfoItem;
 use App\Models\SavedNoticeUserAccess;
 use App\Models\SavedNoticePhaseComment;
 use App\Models\BidSubmission;
+use App\Models\AiUsageEvent;
 use App\Models\Nationality;
 use App\Models\KnowledgeItemChunk;
 use App\Models\SavedNoticeAiDocument;
@@ -30,6 +31,7 @@ use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
 use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\RequirementExtractor;
 use App\Services\KnowledgeChunkCoverageService;
@@ -40,6 +42,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -5716,6 +5719,72 @@ class AiControllerTest extends TestCase
             ->assertNotFound();
 
         $this->assertSame(0, SavedNoticeAiDocument::query()->count());
+    }
+
+    public function test_ai_requirement_answer_draft_is_blocked_by_usage_guard_before_generation(): void
+    {
+        app()->setLocale('no');
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 1,
+            'procynia.ai.usage_guard.customer_per_hour' => 50,
+            'procynia.ai.usage_guard.user_decay_seconds' => 60,
+            'procynia.ai.usage_guard.customer_decay_seconds' => 3600,
+        ]);
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3003-RATE', 'Rate limit target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:05:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'rate-limit.pdf',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/rate-limit.pdf', $savedNotice->id),
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren beskriver leveransen i detalj.', 0);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive leveransen.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+        ]);
+
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+        $userKey = sprintf('ai:user:%d:%s', $context['user']->id, $operationKey);
+        $customerKey = sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey);
+
+        RateLimiter::clear($userKey);
+        RateLimiter::clear($customerKey);
+        RateLimiter::increment($userKey, 60, 1);
+
+        $response = $this->actingAs($context['user'])
+            ->postJson(route('app.ai.requirements.answer-draft.generate', [
+                'savedNotice' => $savedNotice->id,
+                'requirement' => $requirement->id,
+            ]), [
+                'answer_basis_item_ids' => [],
+            ]);
+
+        $response->assertStatus(429)
+            ->assertJsonPath('status', 'fail');
+
+        $message = (string) $response->json('message');
+        $this->assertStringContainsString(__('procynia.ai.usage_guard.user_blocked_base'), $message);
+        $this->assertStringNotContainsString('rate limit', Str::lower($message));
+        $this->assertStringNotContainsString('throttle', Str::lower($message));
+        $this->assertStringNotContainsString('429', $message);
+
+        $this->assertSame(1, AiUsageEvent::query()->count());
+
+        $usageEvent = AiUsageEvent::query()->firstOrFail();
+        $this->assertSame(AiUsageEvent::STATUS_BLOCKED, $usageEvent->status);
+        $this->assertSame(AiUsageEvent::LIMIT_TYPE_USER, $usageEvent->limit_type);
+        $this->assertSame(1, $usageEvent->operation_count);
+        $this->assertSame($context['customer']->id, $usageEvent->customer_id);
+        $this->assertSame($context['user']->id, $usageEvent->user_id);
+        $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT, $usageEvent->operation_key);
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
     }
 
     private function customerAdminContext(string $customerName = 'Procynia AS', bool $withAiAccess = true): array

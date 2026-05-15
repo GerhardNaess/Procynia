@@ -44,6 +44,7 @@ class BillingEntitlementServiceTest extends TestCase
         $service = app(BillingEntitlementService::class);
 
         User::factory()->create([
+            'password' => bcrypt('SecretPass123!'),
             'role' => User::ROLE_CUSTOMER_ADMIN,
             'bid_role' => User::BID_ROLE_SYSTEM_OWNER,
             'customer_id' => $customer->id,

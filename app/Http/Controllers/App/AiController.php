@@ -29,6 +29,7 @@ use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\InfoCenter\RequirementResponsibilityTaskService;
@@ -84,6 +85,7 @@ class AiController extends Controller
         private readonly DocumentPreviewService $documentPreviewService,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly RequirementResponsibilityTaskService $requirementResponsibilityTaskService,
+        private readonly AiUsageGuard $aiUsageGuard,
     ) {
     }
 
@@ -312,6 +314,12 @@ class AiController extends Controller
         ]);
 
         $documents = $request->file('documents', []);
+        $this->aiUsageGuard->assertCanStartAiOperation(
+            $record->customer()->firstOrFail(),
+            $request->user(),
+            AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+            count($documents),
+        );
         $uploadedCount = 0;
         $uploadStartedAt = microtime(true);
         $requestRunId = (string) Str::uuid();
@@ -781,7 +789,19 @@ class AiController extends Controller
             ->whereKey($requirement->id)
             ->firstOrFail();
 
-        $this->assertAiAccess($record);
+        $validated = $request->validate([
+            'answer_basis_item_ids' => ['present', 'array'],
+            'answer_basis_item_ids.*' => ['integer'],
+            'force' => ['sometimes', 'boolean'],
+            'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
+        $this->aiUsageGuard->assertCanStartAiOperation(
+            $record->customer()->firstOrFail(),
+            $request->user(),
+            AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+        );
 
         Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.', [
             'route_name' => $request->route()?->getName(),
@@ -791,15 +811,6 @@ class AiController extends Controller
             'requirement_id' => $ownedRequirement->id,
             'customer_id' => $record->customer_id,
         ]);
-
-        $validated = $request->validate([
-            'answer_basis_item_ids' => ['present', 'array'],
-            'answer_basis_item_ids.*' => ['integer'],
-            'force' => ['sometimes', 'boolean'],
-            'user_answer_prompt' => ['nullable', 'string', 'max:5000'],
-        ]);
-
-        $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
 
         $selectedAnswerBasisItems = $this->syncRequirementAnswerBasisSelectionItems(
             $record,
@@ -1112,10 +1123,19 @@ class AiController extends Controller
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
-        $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
         $userId = $request->user()?->id;
 
         $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
+        if ($confirmedRequirements->isNotEmpty()) {
+            $this->aiUsageGuard->assertCanStartAiOperation(
+                $record->customer()->firstOrFail(),
+                $request->user(),
+                AiUsageGuard::OPERATION_SAVED_NOTICE_EVIDENCE_REFRESH,
+                $confirmedRequirements->count(),
+            );
+        }
+
+        $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
 
         $requirementEmbeddings = $confirmedRequirements->mapWithKeys(function (SavedNoticeAiRequirement $requirement): array {
             return [$requirement->id => $this->requirementEmbeddingFor($requirement)];
@@ -1146,9 +1166,17 @@ class AiController extends Controller
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
         $userId = $request->user()?->id;
-        $requirementAssessmentService = app(RequirementAssessmentService::class);
-
         $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
+        if ($confirmedRequirements->isNotEmpty()) {
+            $this->aiUsageGuard->assertCanStartAiOperation(
+                $record->customer()->firstOrFail(),
+                $request->user(),
+                AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
+                $confirmedRequirements->count(),
+            );
+        }
+
+        $requirementAssessmentService = app(RequirementAssessmentService::class);
 
         $failedCount = 0;
 
