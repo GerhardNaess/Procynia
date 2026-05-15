@@ -1,0 +1,30 @@
+# Produksjonsoverride for Procynia
+#
+# Bruk alltid denne filen sammen med docker-compose.yml i produksjon:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# docker-compose.yml alene er kun for lokal utvikling.
+#
+# Denne filen overstyrer APP_ENV og APP_DEBUG for app, queue og scheduler.
+# Den inneholder ingen secrets, passord, API-nøkler eller andre sensitive verdier.
+# Alle sensitive verdier settes i .env på serveren.
+
+services:
+    app:
+        environment:
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_URL: "${APP_URL}"
+
+    queue:
+        environment:
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_URL: "${APP_URL}"
+
+    scheduler:
+        environment:
+            APP_ENV: production
+            APP_DEBUG: "false"
+            APP_URL: "${APP_URL}"

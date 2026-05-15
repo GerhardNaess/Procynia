@@ -65,6 +65,7 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 - [Doffin supplier harvest](docs/doffin-supplier-harvest.md)
 - [Docker local runtime](docs/docker-local.md)
 - [Queue operations](docs/operations/queues.md)
+- [Production deploy guide](docs/operations/production-deploy.md)
 
 ## Procynia Runtime
 
