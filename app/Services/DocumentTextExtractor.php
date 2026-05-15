@@ -4,6 +4,7 @@ namespace App\Services;
 
 use DOMDocument;
 use DOMXPath;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Throwable;
@@ -564,9 +565,15 @@ class DocumentTextExtractor
      */
     private function extractPdfText(string $path): string
     {
-        $binary = trim((string) config('services.pdftotext.binary', 'pdftotext'));
+        $binary = config('services.pdftotext.binary');
 
-        $result = Process::run([$binary, '-nopgbrk', '-enc', 'UTF-8', $path, '-']);
+        if (empty($binary)) {
+            Log::warning('[Procynia][PDF] pdftotext binary is not configured or is not executable.');
+
+            return '';
+        }
+
+        $result = Process::run([(string) $binary, '-nopgbrk', '-enc', 'UTF-8', $path, '-']);
 
         if (! $result->successful() || trim($result->output()) === '') {
             return '';

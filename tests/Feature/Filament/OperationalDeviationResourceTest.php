@@ -206,6 +206,12 @@ class OperationalDeviationResourceTest extends TestCase
         // Total unique seeded codes is 30
         $this->assertSame(30, OperationalDeviation::query()->pluck('code')->unique()->count());
 
+        $avvik010 = OperationalDeviation::query()->where('code', 'AVVIK-010')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik010->status);
+        $this->assertNotNull($avvik010->verified_at);
+        $this->assertNotNull($avvik010->closed_at);
+        $this->assertStringContainsString('ai_usage_events', (string) $avvik010->verification_notes);
+
         // Pre-created custom row is not overwritten by seeder
         $this->assertDatabaseHas('operational_deviations', [
             'code' => 'AVVIK-001',
@@ -270,6 +276,12 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik009->status);
         $this->assertNotNull($avvik009->closed_at);
         $this->assertNotNull($avvik009->verified_at);
+
+        // AVVIK-015 must be closed (pdftotext-sti miljøstyrt)
+        $avvik015 = OperationalDeviation::query()->where('code', 'AVVIK-015')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik015->status);
+        $this->assertNotNull($avvik015->closed_at);
+        $this->assertNotNull($avvik015->verified_at);
 
         // AVVIK-029 must be closed (HTTPS/TLS-rutine dokumentert)
         $avvik029 = OperationalDeviation::query()->where('code', 'AVVIK-029')->firstOrFail();
@@ -336,10 +348,10 @@ class OperationalDeviationResourceTest extends TestCase
         config([
             'database.default' => 'pgsql',
             'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => '127.0.0.1',
+            'database.connections.pgsql.host' => 'postgres',
             'database.connections.pgsql.port' => '5432',
             'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => '',
+            'database.connections.pgsql.password' => 'Opaque01',
             'database.connections.pgsql.search_path' => 'public',
         ]);
 

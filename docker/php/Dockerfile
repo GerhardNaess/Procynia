@@ -18,6 +18,7 @@ RUN apt-get update \
         libxml2-dev \
         libxslt1-dev \
         libzip-dev \
+        poppler-utils \
         unzip \
         zip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \

@@ -3,8 +3,8 @@
 namespace Tests\Unit;
 
 use App\Services\DocumentTextExtractor;
-use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Tests\TestCase;
 use ZipArchive;
 
 class DocumentTextExtractorTest extends TestCase
@@ -154,30 +154,23 @@ XML;
 
     public function test_it_preserves_pdf_block_boundaries(): void
     {
+        // Respect configured binary; fall back to PATH for local dev; skip if unavailable.
+        $binary = config('services.pdftotext.binary');
+
+        if (empty($binary)) {
+            $binary = trim((string) shell_exec('which pdftotext 2>/dev/null'));
+        }
+
+        if (empty($binary) || ! is_executable($binary)) {
+            $this->markTestSkipped('pdftotext is not available; set PDFTOTEXT_BINARY to run this test.');
+        }
+
+        config(['services.pdftotext.binary' => $binary]);
+
         $path = $this->tempDocumentPath('pdf');
 
         try {
-            $pdf = <<<'PDF'
-%PDF-1.4
-1 0 obj
-<< /Length 161 >>
-stream
-BT
-(Overskrift) Tj
-ET
-BT
-(Første avsnitt med tekst.) Tj
-ET
-BT
-(Andre avsnitt med mer tekst.) Tj
-ET
-endstream
-endobj
-trailer
-%%EOF
-PDF;
-
-            file_put_contents($path, $pdf);
+            $this->writeValidTestPdf($path);
 
             $extractor = new DocumentTextExtractor();
 
@@ -188,6 +181,39 @@ PDF;
         } finally {
             @unlink($path);
         }
+    }
+
+    private function writeValidTestPdf(string $path): void
+    {
+        // A minimal but structurally complete PDF that pdftotext can parse.
+        // WinAnsiEncoding maps 0xF8 → ø, giving us "Første" with correct UTF-8 output.
+        $header = "%PDF-1.4\n";
+        $obj1   = "1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n";
+        $obj2   = "2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n";
+        $obj3   = "3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
+            . " /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica"
+            . " /Encoding /WinAnsiEncoding>>>>>>\n>>\nendobj\n";
+        // \370 is octal 0xF8 = ø in WinAnsiEncoding
+        $stream = "BT /F1 14 Tf 72 720 Td (Overskrift) Tj"
+            . " 0 -100 Td (F\370rste avsnitt med tekst.) Tj"
+            . " 0 -100 Td (Andre avsnitt med mer tekst.) Tj ET\n";
+        $obj4 = "4 0 obj\n<</Length " . strlen($stream) . ">>\nstream\n{$stream}endstream\nendobj\n";
+
+        $o1 = strlen($header);
+        $o2 = $o1 + strlen($obj1);
+        $o3 = $o2 + strlen($obj2);
+        $o4 = $o3 + strlen($obj3);
+        $xrefOffset = $o4 + strlen($obj4);
+
+        $xref = "xref\n0 5\n"
+            . "0000000000 65535 f \n"
+            . str_pad((string) $o1, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
+            . str_pad((string) $o2, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
+            . str_pad((string) $o3, 10, '0', STR_PAD_LEFT) . " 00000 n \n"
+            . str_pad((string) $o4, 10, '0', STR_PAD_LEFT) . " 00000 n \n";
+        $trailer = "trailer\n<</Size 5 /Root 1 0 R>>\nstartxref\n{$xrefOffset}\n%%EOF\n";
+
+        file_put_contents($path, $header . $obj1 . $obj2 . $obj3 . $obj4 . $xref . $trailer);
     }
 
     private function tempDocumentPath(string $extension): string

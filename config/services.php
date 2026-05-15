@@ -23,7 +23,7 @@ return [
     ],
 
     'pdftotext' => [
-        'binary' => env('PDFTOTEXT_BINARY', '/usr/local/bin/pdftotext'),
+        'binary' => env('PDFTOTEXT_BINARY'),
     ],
 
     'openai' => [

@@ -253,7 +253,7 @@ class OperationalDeviationSeeder extends Seeder
             'ready_for_verification_at' => '2026-05-15 22:30:00',
             'verified_at' => '2026-05-15 22:45:00',
             'closed_at' => '2026-05-15 22:45:00',
-            'verification_notes' => 'Server-side AI rate limiting is implemented. AI operations are limited per user and per customer. Uncontrolled AI volume is stopped before AI call or AI job dispatch starts. Users receive a controlled and understandable message. Non-sensitive usage logging is added as a basis for later limit tuning. The existing entitlement check remains in place. AVVIK-010 is not closed.',
+            'verification_notes' => 'Server-side AI rate limiting is implemented. AI operations are limited per user and per customer. Uncontrolled AI volume is stopped before AI call or AI job dispatch starts. Users receive a controlled and understandable message. Non-sensitive usage logging is added as a basis for later limit tuning. The existing entitlement check remains in place.',
         ]);
 
         $this->seed([
@@ -319,13 +319,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Ingen måling av AI-bruk mot inkluderte credits',
             'category' => OperationalDeviation::CATEGORY_BILLING,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => "Kundens inkluderte AI-bruk/credits måles ikke tydelig mot faktisk forbruk.",
             'impact' => 'Billing og kostnadskontroll blir upresis.',
             'recommended_action' => 'Implementer AI usage metering per kunde og vis forbruk i Billing.',
             'acceptance_criteria' => 'AI-bruk telles per kunde og sammenlignes med inkluderte credits.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-15 23:00:00',
+            'ready_for_verification_at' => '2026-05-15 23:30:00',
+            'verified_at' => '2026-05-15 23:45:00',
+            'closed_at' => '2026-05-15 23:45:00',
+            'verification_notes' => 'AI usage is now measured from ai_usage_events. Admin can review AI usage per customer and per user. Allowed and blocked AI operations are visible, including user-limit and customer-limit blocks. The view gives internal evidence for later tuning of included AI capacity. No sensitive prompt, document, or answer text is stored or shown. This is not billing or Stripe usage billing.',
         ]);
 
         $this->seed([
@@ -363,13 +368,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'pdftotext-sti er hardkodet',
             'category' => OperationalDeviation::CATEGORY_DOCUMENT_HANDLING,
             'severity' => OperationalDeviation::SEVERITY_MEDIUM,
-            'status' => OperationalDeviation::STATUS_NEW,
-            'description' => 'pdftotext-stien er hardkodet i konfigurasjon.',
-            'impact' => 'PDF-ekstraksjon kan feile i Docker eller andre miljøer.',
+            'status' => OperationalDeviation::STATUS_CLOSED,
+            'description' => 'pdftotext-stien var hardkodet i konfigurasjon.',
+            'impact' => 'PDF-ekstraksjon kunne feile i Docker eller andre miljøer.',
             'recommended_action' => 'Gjør binærsti miljøstyrt og dokumenter Docker-avhengighet.',
             'acceptance_criteria' => "pdftotext fungerer i Docker og sti styres via config/env.",
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-15 21:30:00',
+            'ready_for_verification_at' => '2026-05-15 22:00:00',
+            'verified_at' => '2026-05-15 22:00:00',
+            'closed_at' => '2026-05-15 22:00:00',
+            'verification_notes' => 'config/services.php: hardkodet Mac-sti /usr/local/bin/pdftotext fjernet, env(\'PDFTOTEXT_BINARY\') brukes uten fallback. DocumentTextExtractor.php: null-sjekk og Log::warning lagt til for ukonfigurert binær. docker/php/Dockerfile: poppler-utils lagt til i apt-get install. .env.example: PDFTOTEXT_BINARY=/usr/bin/pdftotext dokumentert med kommentar for Docker/produksjon og lokal Mac. Lokal utvikling angir egen sti i .env. Tester verifiserer config-basert sti og lukket avviksstatus.',
         ]);
 
         // --- Produktavvik ---

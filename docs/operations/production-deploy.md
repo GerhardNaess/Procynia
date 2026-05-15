@@ -63,6 +63,16 @@ Følgende skal være på plass før produksjonsdeploy starter:
 - Stripe-nøkler og priser konfigurert dersom billing skal aktiveres
 - Doffin API-nøkkel dersom anbudshøsting skal brukes
 
+### Dokumenthåndtering
+
+`poppler-utils` (inkluderer `pdftotext`) er installert i Procynias PHP-container via Dockerfile. Binærstien styres av:
+
+```dotenv
+PDFTOTEXT_BINARY=/usr/bin/pdftotext
+```
+
+Dersom PDF-ekstraksjon ikke brukes aktivt, kan variabelen utelates — men PDF-opplastinger vil gi tom tekst uten advarsel i loggen.
+
 ### Backup
 
 - Backup-lokasjon valgt og tilgjengelig (f.eks. offsite S3, Azure Blob, lokal disk med replikering)
