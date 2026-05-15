@@ -517,13 +517,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Ingen admin-guide for drift, billing og avvik',
             'category' => OperationalDeviation::CATEGORY_DOCUMENTATION,
             'severity' => OperationalDeviation::SEVERITY_MEDIUM,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Det mangler samlet adminrettet dokumentasjon for drift, billing og avvik.',
             'impact' => 'Intern drift blir personavhengig.',
             'recommended_action' => 'Lag admin-guide for sentrale Filament-moduler.',
             'acceptance_criteria' => 'Intern admin kan bruke og vedlikeholde drift, billing og avvik uten chat-historikk.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 09:00:00',
+            'ready_for_verification_at' => '2026-05-16 10:00:00',
+            'verified_at' => '2026-05-16 10:15:00',
+            'closed_at' => '2026-05-16 10:15:00',
+            'verification_notes' => 'Intern admin-guide er etablert i docs/operations/admin-guide.md. Guiden dekker drift, avviksregister, backup/recovery, billing/fakturering, AI-bruk og kapasitet. Den beskriver tilgang og roller, daglige/ukentlige/månedlige rutiner, produksjonskontroll etter deploy og håndtering av feil. Guiden reduserer personavhengighet i intern drift. Ingen secrets, passord, tokens eller reelle kundedata er inkludert i dokumentasjonen.',
         ]);
     }
 
