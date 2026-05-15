@@ -1881,9 +1881,11 @@ return [
             'view' => 'Vis',
             'download' => 'Last ned',
             'add_attachment' => 'Legg til vedlegg',
+            'add_category' => 'Ny kategori',
         ],
         'help' => [
             'attachments' => 'Dokumenter, bilder og filer som hører til denne driftsrutinen.',
+            'category' => 'Velg en eksisterende kategori eller opprett en ny direkte i nedtrekksfeltet.',
         ],
         'empty_states' => [
             'attachments' => 'Ingen vedlegg er lagt til ennå.',
@@ -1906,6 +1908,10 @@ return [
             'integrations' => 'Integrasjoner',
             'infrastructure' => 'Infrastruktur',
             'incidents' => 'Hendelser og beredskap',
+        ],
+        'messages' => [
+            'category_exists' => 'En kategori med dette navnet eller slugen finnes allerede.',
+            'category_name_required' => 'Kategorinavnet må fylles ut.',
         ],
         'table' => [
             'missing_document' => 'Mangler dokument',

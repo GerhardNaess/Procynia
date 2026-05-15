@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\OperationalRunbookCategory;
 use App\Models\OperationalRunbook;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
@@ -13,6 +14,8 @@ class OperatingProcedureSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->seedCategories();
+
         $this->seedRunbook(
             title: 'Docker-oppsett for Procynia',
             category: 'docker',
@@ -28,6 +31,41 @@ class OperatingProcedureSeeder extends Seeder
             content: 'Uptime Kuma kjøres som leverandørnøytral Docker Compose-tjeneste med persistent Docker volume og reverse proxy/HTTPS foran. Faktisk domene, varsling og monitorer settes per miljø.',
             sortOrder: 2,
         );
+    }
+
+    /**
+     * Seed the canonical runbook categories without overwriting existing edits.
+     */
+    private function seedCategories(): void
+    {
+        if (! Schema::hasTable('operational_runbook_categories')) {
+            return;
+        }
+
+        $now = now();
+
+        foreach ([
+            ['name' => 'Generelt', 'slug' => 'general', 'sort_order' => 0],
+            ['name' => 'Docker', 'slug' => 'docker', 'sort_order' => 10],
+            ['name' => 'Backup og recovery', 'slug' => 'backup_recovery', 'sort_order' => 20],
+            ['name' => 'Deploy', 'slug' => 'deploy', 'sort_order' => 30],
+            ['name' => 'Overvåkning', 'slug' => 'monitoring', 'sort_order' => 40],
+            ['name' => 'Sikkerhet', 'slug' => 'security', 'sort_order' => 50],
+            ['name' => 'Integrasjoner', 'slug' => 'integrations', 'sort_order' => 60],
+            ['name' => 'Infrastruktur', 'slug' => 'infrastructure', 'sort_order' => 70],
+            ['name' => 'Hendelser og beredskap', 'slug' => 'incidents', 'sort_order' => 80],
+        ] as $category) {
+            OperationalRunbookCategory::query()->firstOrCreate(
+                ['slug' => $category['slug']],
+                [
+                    'name' => $category['name'],
+                    'sort_order' => $category['sort_order'],
+                    'is_active' => true,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ],
+            );
+        }
     }
 
     /**

@@ -1881,9 +1881,11 @@ return [
             'view' => 'View',
             'download' => 'Download',
             'add_attachment' => 'Add attachment',
+            'add_category' => 'New category',
         ],
         'help' => [
             'attachments' => 'Documents, images and files belonging to this operational runbook.',
+            'category' => 'Choose an existing category or create a new one directly from the dropdown.',
         ],
         'empty_states' => [
             'attachments' => 'No attachments have been added yet.',
@@ -1906,6 +1908,10 @@ return [
             'integrations' => 'Integrations',
             'infrastructure' => 'Infrastructure',
             'incidents' => 'Incidents and emergency response',
+        ],
+        'messages' => [
+            'category_exists' => 'A category with this name or slug already exists.',
+            'category_name_required' => 'The category name is required.',
         ],
         'table' => [
             'missing_document' => 'Missing document',

@@ -15,6 +15,7 @@ use App\Filament\Resources\OperationalRunbookResource\Pages\ViewOperationalRunbo
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\OperationalRunbookCategory;
 use App\Models\OperationalRunbookAttachment;
 use App\Models\OperationalRunbook;
 use App\Models\User;
@@ -24,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -208,10 +210,12 @@ class DriftPagesTest extends TestCase
     public function test_operational_runbook_create_page_creates_new_runbook_with_docker_category(): void
     {
         $admin = $this->internalAdmin();
+        $category = OperationalRunbookCategory::query()->where('slug', 'docker')->firstOrFail();
+
         Livewire::actingAs($admin)
             ->test(CreateOperationalRunbook::class)
             ->set('data.title', 'Docker-oppsett for test')
-            ->set('data.category', 'docker')
+            ->set('data.operational_runbook_category_id', $category->id)
             ->set('data.sort_order', 1)
             ->set('data.is_active', true)
             ->set('data.summary', 'Kort sammendrag av Docker-oppsett.')
@@ -221,6 +225,7 @@ class DriftPagesTest extends TestCase
         $this->assertDatabaseHas('operational_runbooks', [
             'title' => 'Docker-oppsett for test',
             'category' => 'docker',
+            'operational_runbook_category_id' => $category->id,
             'sort_order' => 1,
             'is_active' => true,
             'summary' => 'Kort sammendrag av Docker-oppsett.',
@@ -228,6 +233,92 @@ class DriftPagesTest extends TestCase
 
         $runbook = OperationalRunbook::query()->where('title', 'Docker-oppsett for test')->firstOrFail();
         $this->assertSame(0, $runbook->attachments()->count());
+    }
+
+    public function test_operational_runbook_categories_are_loaded_from_the_database(): void
+    {
+        $options = OperationalRunbookResource::categoryOptions();
+
+        $this->assertArrayHasKey('general', $options);
+        $this->assertArrayHasKey('docker', $options);
+        $this->assertArrayHasKey('backup_recovery', $options);
+        $this->assertArrayHasKey('monitoring', $options);
+        $this->assertSame('Docker', $options['docker']);
+        $this->assertSame('Backup og recovery', $options['backup_recovery']);
+    }
+
+    public function test_new_operational_runbook_category_can_be_created_and_selected(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $category = OperationalRunbookCategory::query()->create([
+            'name' => 'Incident response',
+            'sort_order' => 95,
+            'is_active' => true,
+        ]);
+
+        $this->assertDatabaseHas('operational_runbook_categories', [
+            'name' => 'Incident response',
+            'slug' => 'incident-response',
+            'sort_order' => 95,
+            'is_active' => true,
+        ]);
+
+        $this->assertArrayHasKey('incident-response', OperationalRunbookResource::categoryOptions());
+        $this->assertSame('Incident response', OperationalRunbookResource::categoryOptions()['incident-response']);
+
+        Livewire::actingAs($admin)
+            ->test(CreateOperationalRunbook::class)
+            ->set('data.title', 'Incident response runbook')
+            ->set('data.operational_runbook_category_id', $category->id)
+            ->set('data.sort_order', 4)
+            ->set('data.is_active', true)
+            ->set('data.summary', 'Kort beskrivelse av incident response.')
+            ->call('create')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('operational_runbooks', [
+            'title' => 'Incident response runbook',
+            'category' => 'incident-response',
+            'operational_runbook_category_id' => $category->id,
+            'sort_order' => 4,
+            'is_active' => true,
+            'summary' => 'Kort beskrivelse av incident response.',
+        ]);
+    }
+
+    public function test_duplicate_operational_runbook_category_cannot_be_created(): void
+    {
+        OperationalRunbookCategory::query()->create([
+            'name' => 'Change management',
+            'sort_order' => 100,
+            'is_active' => true,
+        ]);
+
+        $this->expectException(ValidationException::class);
+
+        OperationalRunbookCategory::query()->create([
+            'name' => 'Change management',
+            'sort_order' => 101,
+            'is_active' => false,
+        ]);
+    }
+
+    public function test_existing_operational_runbooks_keep_their_category_value(): void
+    {
+        $runbook = OperationalRunbook::query()->create([
+            'title' => 'Legacy category runbook',
+            'category' => 'backup_recovery',
+            'summary' => 'Legacy category should stay intact.',
+            'is_active' => true,
+            'sort_order' => 11,
+        ]);
+
+        $runbook->refresh();
+
+        $this->assertSame('backup_recovery', $runbook->category);
+        $this->assertNotNull($runbook->operational_runbook_category_id);
+        $this->assertSame('Backup og recovery', $runbook->categoryDefinition?->name);
     }
 
     public function test_operational_runbook_attachments_can_be_saved_and_downloaded(): void

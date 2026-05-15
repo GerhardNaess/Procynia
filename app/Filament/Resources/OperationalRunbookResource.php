@@ -7,8 +7,10 @@ use App\Filament\Resources\OperationalRunbookResource\Pages\EditOperationalRunbo
 use App\Filament\Resources\OperationalRunbookResource\Pages\ListOperationalRunbooks;
 use App\Filament\Resources\OperationalRunbookResource\Pages\ViewOperationalRunbook;
 use App\Models\OperationalRunbook;
+use App\Models\OperationalRunbookCategory;
 use App\Support\CustomerContext;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\FileUpload;
@@ -30,6 +32,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Schema as SchemaFacade;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use UnitEnum;
@@ -88,11 +91,32 @@ class OperationalRunbookResource extends Resource
                             ->label(__('procynia.operational_runbooks.fields.title'))
                             ->required()
                             ->maxLength(255),
-                        Select::make('category')
+                        Select::make('operational_runbook_category_id')
                             ->label(__('procynia.operational_runbooks.fields.category'))
-                            ->options(fn (): array => self::categoryOptions())
-                            ->default('docker')
-                            ->required(),
+                            ->relationship('categoryDefinition', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->helperText(__('procynia.operational_runbooks.help.category'))
+                            ->default(fn (): ?int => self::defaultCategoryId('docker'))
+                            ->required()
+                            ->createOptionAction(fn (Action $action): Action => $action
+                                ->label(__('procynia.operational_runbooks.actions.add_category'))
+                                ->modalHeading(__('procynia.operational_runbooks.actions.add_category'))
+                                ->modalSubmitActionLabel(__('procynia.common.save'))
+                                ->modalWidth('lg'))
+                            ->createOptionForm([
+                                TextInput::make('name')
+                                    ->label(__('procynia.common.name'))
+                                    ->required()
+                                    ->maxLength(255),
+                                TextInput::make('sort_order')
+                                    ->label(__('procynia.operational_runbooks.fields.sort_order'))
+                                    ->numeric()
+                                    ->default(0),
+                                Toggle::make('is_active')
+                                    ->label(__('procynia.common.active'))
+                                    ->default(true),
+                            ]),
                         TextInput::make('sort_order')
                             ->label(__('procynia.operational_runbooks.fields.sort_order'))
                             ->numeric()
@@ -199,7 +223,7 @@ class OperationalRunbookResource extends Resource
                         TextEntry::make('category')
                             ->label(__('procynia.operational_runbooks.fields.category'))
                             ->badge()
-                            ->state(fn (OperationalRunbook $record): string => self::categoryLabel($record->category)),
+                            ->state(fn (OperationalRunbook $record): string => $record->categoryDefinition?->name ?? self::categoryLabel($record->category)),
                         TextEntry::make('is_active')
                             ->label(__('procynia.operational_runbooks.fields.status'))
                             ->badge()
@@ -222,7 +246,7 @@ class OperationalRunbookResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withCount('attachments'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withCount('attachments')->with('categoryDefinition'))
             ->defaultSort('sort_order')
             ->recordUrl(fn (OperationalRunbook $record): string => static::getUrl('view', ['record' => $record]))
             ->columns([
@@ -233,7 +257,7 @@ class OperationalRunbookResource extends Resource
                 TextColumn::make('category')
                     ->label(__('procynia.operational_runbooks.fields.category'))
                     ->badge()
-                    ->state(fn (OperationalRunbook $record): string => self::categoryLabel($record->category))
+                    ->state(fn (OperationalRunbook $record): string => $record->categoryDefinition?->name ?? self::categoryLabel($record->category))
                     ->sortable(),
                 TextColumn::make('attachments_count')
                     ->label(__('procynia.operational_runbooks.fields.attachment_count'))
@@ -284,6 +308,7 @@ class OperationalRunbookResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
+            ->with('categoryDefinition')
             ->orderByDesc('is_active')
             ->orderBy('category')
             ->orderBy('sort_order')
@@ -305,17 +330,68 @@ class OperationalRunbookResource extends Resource
      */
     public static function categoryOptions(): array
     {
-        $keys = ['general', 'docker', 'backup_recovery', 'deploy', 'monitoring', 'security', 'integrations', 'infrastructure', 'incidents'];
+        $options = [];
 
-        return array_combine($keys, array_map(
-            fn (string $key): string => (string) __('procynia.operational_runbooks.categories.'.$key),
-            $keys,
-        ));
+        if (SchemaFacade::hasTable('operational_runbook_categories')) {
+            $options = OperationalRunbookCategory::query()
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(['slug', 'name'])
+                ->mapWithKeys(fn (OperationalRunbookCategory $category): array => [
+                    $category->slug => $category->name,
+                ])
+                ->all();
+        }
+
+        if (! SchemaFacade::hasTable('operational_runbooks')) {
+            return $options;
+        }
+
+        $legacyCategories = OperationalRunbook::query()
+            ->distinct()
+            ->pluck('category')
+            ->filter()
+            ->values()
+            ->all();
+
+        foreach ($legacyCategories as $legacyCategory) {
+            if (! array_key_exists($legacyCategory, $options)) {
+                $options[$legacyCategory] = self::legacyCategoryLabel($legacyCategory);
+            }
+        }
+
+        return $options;
     }
 
     public static function categoryLabel(string $category): string
     {
-        return (string) __('procynia.operational_runbooks.categories.'.$category, [], null) ?: $category;
+        if (SchemaFacade::hasTable('operational_runbook_categories')) {
+            $categoryName = OperationalRunbookCategory::query()
+                ->where('slug', $category)
+                ->value('name');
+
+            if (filled($categoryName)) {
+                return (string) $categoryName;
+            }
+        }
+
+        return self::legacyCategoryLabel($category);
+    }
+
+    public static function defaultCategoryId(string $slug): ?int
+    {
+        if (! SchemaFacade::hasTable('operational_runbook_categories')) {
+            return null;
+        }
+
+        return OperationalRunbookCategory::query()
+            ->where('slug', $slug)
+            ->value('id');
+    }
+
+    public static function legacyCategoryLabel(string $category): string
+    {
+        return (string) Str::headline(str_replace('_', ' ', $category));
     }
 
     /**
