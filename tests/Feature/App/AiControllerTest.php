@@ -852,6 +852,79 @@ class AiControllerTest extends TestCase
         $this->assertNotNull($requirement->answer_draft_generated_at);
     }
 
+    public function test_ai_requirement_answer_draft_generation_forwards_user_answer_prompt_to_draft_service(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-USERPROMPT', 'User prompt target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-05-15 10:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-05-15 10:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $judge = Mockery::mock(RequirementGroundingJudgeService::class);
+        $judge->shouldReceive('judge')->once()->andReturn([
+            'status' => 'supported',
+            'can_generate_answer' => true,
+            'directly_supported_points' => [],
+            'related_but_insufficient_points' => [],
+            'unsupported_points' => [],
+            'missing_knowledge_summary' => null,
+            'recommended_document_title' => null,
+            'suggested_filename' => null,
+            'reasoning_summary' => 'Tilstrekkelig grunnlag.',
+        ]);
+        $this->app->instance(RequirementGroundingJudgeService::class, $judge);
+
+        $capturedUserPrompt = null;
+        $draftService = Mockery::mock(RequirementAnswerDraftService::class);
+        $draftService->shouldReceive('ensureAnswerDraft')
+            ->once()
+            ->withArgs(function (...$args) use (&$capturedUserPrompt): bool {
+                // $args[4] is $requirementUserPrompt
+                $capturedUserPrompt = $args[4] ?? 'NOT_SET';
+
+                return true;
+            })
+            ->andReturnUsing(function (SavedNoticeAiRequirement $req, ...$ignored): SavedNoticeAiRequirement {
+                $req->forceFill([
+                    'answer_draft_text' => 'Svarutkast med brukerprompt.',
+                    'answer_draft_generated_at' => '2026-05-15 10:05:00',
+                ])->save();
+
+                return $req->refresh();
+            });
+        $this->app->instance(RequirementAnswerDraftService::class, $draftService);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+            'user_answer_prompt' => 'Vektlegg miljøsertifiseringen vår.',
+        ]);
+
+        $response->assertOk();
+        $this->assertSame('Vektlegg miljøsertifiseringen vår.', $capturedUserPrompt);
+    }
+
     public function test_ai_requirement_answer_draft_update_endpoint_persists_user_edits(): void
     {
         $context = $this->customerAdminContext();

@@ -303,13 +303,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Manglende brukerprompt per krav',
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Brukeren kan ikke gi egen instruks eller kontekst per krav før svar genereres.',
             'impact' => 'Svarene blir mindre treffsikre og mindre tilpasset brukerens kompetanse.',
             'recommended_action' => "Legg til prompt-felt per krav som kombineres med Procynias standardprompt.",
             'acceptance_criteria' => 'Bruker kan angi prompt per krav, og prompten brukes ved generering.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-15 10:00:00',
+            'ready_for_verification_at' => '2026-05-15 10:30:00',
+            'verified_at' => '2026-05-15 10:45:00',
+            'closed_at' => '2026-05-15 10:45:00',
+            'verification_notes' => 'Per-requirement user prompt is fully implemented. AiController::generateRequirementAnswerDraft() accepts user_answer_prompt (nullable string, max 5000), normalises it, and forwards it to RequirementAnswerDraftService::ensureAnswerDraft() as $requirementUserPrompt. The service inserts it into the AI payload as requirement_user_instructions with scope and priority metadata. The frontend (Show.jsx) maintains a per-requirement prompt state map keyed by requirement ID, renders a textarea per requirement, and sends user_answer_prompt in the POST body.',
         ]);
 
         // --- Billing-avvik ---
