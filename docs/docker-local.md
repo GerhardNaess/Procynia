@@ -59,7 +59,7 @@ docker logs procynia-queue
 Inside the container, the worker command is:
 
 ```bash
-php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=1 --timeout=0
+php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=3 --backoff=60 --timeout=120 --sleep=3
 ```
 
 To restart it:

@@ -9,10 +9,13 @@ use Tests\TestCase;
 
 class QueueSchedulerHealthTest extends TestCase
 {
+    private const TEST_TOKEN = 'test-health-token';
+
     protected function setUp(): void
     {
         parent::setUp();
         config(['cache.default' => 'array']);
+        config(['procynia.health_token' => self::TEST_TOKEN]);
     }
 
     public function test_returns_200_when_both_heartbeats_are_fresh(): void
@@ -20,7 +23,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::put('ops.scheduler.heartbeat', now()->timestamp);
         Cache::put('ops.queue.heartbeat', now()->timestamp);
 
-        $this->getJson('/ops/health/queue-scheduler')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(200)
             ->assertExactJson(['ok' => true, 'scheduler' => 'ok', 'queue' => 'ok']);
     }
@@ -30,7 +34,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::forget('ops.scheduler.heartbeat');
         Cache::put('ops.queue.heartbeat', now()->timestamp);
 
-        $this->getJson('/ops/health/queue-scheduler')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(503)
             ->assertExactJson(['ok' => false, 'scheduler' => 'stale', 'queue' => 'ok']);
     }
@@ -40,7 +45,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::put('ops.scheduler.heartbeat', now()->timestamp);
         Cache::forget('ops.queue.heartbeat');
 
-        $this->getJson('/ops/health/queue-scheduler')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(503)
             ->assertExactJson(['ok' => false, 'scheduler' => 'ok', 'queue' => 'stale']);
     }
@@ -50,7 +56,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::forget('ops.scheduler.heartbeat');
         Cache::forget('ops.queue.heartbeat');
 
-        $this->getJson('/ops/health/queue-scheduler')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(503)
             ->assertExactJson(['ok' => false, 'scheduler' => 'stale', 'queue' => 'stale']);
     }
@@ -60,7 +67,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::put('ops.scheduler.heartbeat', now()->subMinutes(10)->timestamp);
         Cache::put('ops.queue.heartbeat', now()->timestamp);
 
-        $this->getJson('/ops/health/queue-scheduler')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(503)
             ->assertExactJson(['ok' => false, 'scheduler' => 'stale', 'queue' => 'ok']);
     }
@@ -70,7 +78,8 @@ class QueueSchedulerHealthTest extends TestCase
         Cache::put('ops.scheduler.heartbeat', now()->timestamp);
         Cache::put('ops.queue.heartbeat', now()->timestamp);
 
-        $body = $this->getJson('/ops/health/queue-scheduler')
+        $body = $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queue-scheduler')
             ->assertStatus(200)
             ->json();
 
@@ -117,11 +126,33 @@ class QueueSchedulerHealthTest extends TestCase
         $this->assertCount(4, $heartbeatJobs);
     }
 
-    public function test_endpoint_is_accessible_without_authentication(): void
+    public function test_endpoint_requires_token_and_returns_403_without_it(): void
     {
-        Cache::put('ops.scheduler.heartbeat', now()->timestamp);
-        Cache::put('ops.queue.heartbeat', now()->timestamp);
+        $this->getJson('/ops/health/queue-scheduler')
+            ->assertStatus(403)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Forbidden']);
+    }
 
-        $this->getJson('/ops/health/queue-scheduler')->assertStatus(200);
+    public function test_endpoint_returns_403_with_wrong_token(): void
+    {
+        $this->withHeaders(['X-Procynia-Health-Token' => 'wrong-token'])
+            ->getJson('/ops/health/queue-scheduler')
+            ->assertStatus(403)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Forbidden']);
+    }
+
+    public function test_endpoint_returns_503_when_token_is_not_configured(): void
+    {
+        config(['procynia.health_token' => '']);
+
+        $this->withHeaders(['X-Procynia-Health-Token' => self::TEST_TOKEN])
+            ->getJson('/ops/health/queue-scheduler')
+            ->assertStatus(503)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Health token is not configured']);
+    }
+
+    private function withHealthToken(string $token): static
+    {
+        return $this->withHeaders(['X-Procynia-Health-Token' => $token]);
     }
 }

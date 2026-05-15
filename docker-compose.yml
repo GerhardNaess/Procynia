@@ -131,8 +131,8 @@ services:
             - /bin/sh
             - -lc
             - |
-                printf '%s\n' '[Procynia][Queue] Starting queue worker connection=redis queues=supplier-harvests,supplier-lookups,ai-requirements,default'
-                exec php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=1 --timeout=0
+                printf '%s\n' '[Procynia][Queue] Starting queue worker connection=redis queues=supplier-harvests,supplier-lookups,ai-requirements,default tries=3 backoff=60 timeout=120'
+                exec php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=3 --backoff=60 --timeout=120 --sleep=3
         restart: unless-stopped
 
     scheduler:

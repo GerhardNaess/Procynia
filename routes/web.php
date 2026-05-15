@@ -39,7 +39,7 @@ Route::prefix('health')
             ->name('documents.parsing');
     });
 
-Route::prefix('ops')->name('ops.')->group(function (): void {
+Route::prefix('ops')->middleware('health.token')->name('ops.')->group(function (): void {
     Route::get('/health/queues/{queue}', [QueueHeartbeatHealthController::class, 'check'])
         ->name('health.queues.check');
     Route::get('/health/queue-scheduler', [QueueSchedulerHealthController::class, 'check'])

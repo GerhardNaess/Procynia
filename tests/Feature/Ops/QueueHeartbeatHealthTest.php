@@ -9,11 +9,14 @@ use Tests\TestCase;
 
 class QueueHeartbeatHealthTest extends TestCase
 {
+    private const TEST_TOKEN = 'test-health-token';
+
     protected function setUp(): void
     {
         parent::setUp();
 
         config(['cache.default' => 'array']);
+        config(['procynia.health_token' => self::TEST_TOKEN]);
         Cache::flush();
     }
 
@@ -30,7 +33,8 @@ class QueueHeartbeatHealthTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-05-15 12:00:00', 'UTC'));
         Cache::put($this->heartbeatKey($queue), now()->timestamp);
 
-        $this->getJson("/ops/health/queues/{$queue}")
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson("/ops/health/queues/{$queue}")
             ->assertStatus(200)
             ->assertJsonPath('status', 'ok')
             ->assertJsonPath('queue', $queue)
@@ -42,7 +46,8 @@ class QueueHeartbeatHealthTest extends TestCase
     {
         $queue = 'supplier-harvests';
 
-        $this->getJson("/ops/health/queues/{$queue}")
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson("/ops/health/queues/{$queue}")
             ->assertStatus(503)
             ->assertJsonPath('status', 'fail')
             ->assertJsonPath('queue', $queue)
@@ -56,7 +61,8 @@ class QueueHeartbeatHealthTest extends TestCase
         $queue = 'supplier-lookups';
         Cache::put($this->heartbeatKey($queue), now()->subSeconds(301)->timestamp);
 
-        $this->getJson("/ops/health/queues/{$queue}")
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson("/ops/health/queues/{$queue}")
             ->assertStatus(503)
             ->assertJsonPath('status', 'fail')
             ->assertJsonPath('queue', $queue)
@@ -66,7 +72,8 @@ class QueueHeartbeatHealthTest extends TestCase
 
     public function test_unknown_queue_returns_404(): void
     {
-        $this->getJson('/ops/health/queues/unknown-queue')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queues/unknown-queue')
             ->assertStatus(404)
             ->assertJsonPath('status', 'fail');
     }
@@ -76,10 +83,36 @@ class QueueHeartbeatHealthTest extends TestCase
         Carbon::setTestNow(Carbon::parse('2026-05-15 12:00:00', 'UTC'));
         Cache::put($this->heartbeatKey('supplier-harvests'), now()->timestamp);
 
-        $this->getJson('/ops/health/queues/supplier-lookups')
+        $this->withHealthToken(self::TEST_TOKEN)
+            ->getJson('/ops/health/queues/supplier-lookups')
             ->assertStatus(503)
             ->assertJsonPath('status', 'fail')
             ->assertJsonPath('queue', 'supplier-lookups');
+    }
+
+    public function test_endpoint_requires_token_and_returns_403_without_it(): void
+    {
+        $this->getJson('/ops/health/queues/default')
+            ->assertStatus(403)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Forbidden']);
+    }
+
+    public function test_endpoint_returns_403_with_wrong_token(): void
+    {
+        $this->withHeaders(['X-Procynia-Health-Token' => 'wrong-token'])
+            ->getJson('/ops/health/queues/default')
+            ->assertStatus(403)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Forbidden']);
+    }
+
+    public function test_endpoint_returns_503_when_token_is_not_configured(): void
+    {
+        config(['procynia.health_token' => '']);
+
+        $this->withHeaders(['X-Procynia-Health-Token' => self::TEST_TOKEN])
+            ->getJson('/ops/health/queues/default')
+            ->assertStatus(503)
+            ->assertExactJson(['status' => 'fail', 'message' => 'Health token is not configured']);
     }
 
     public static function supportedQueuesProvider(): array
@@ -95,5 +128,10 @@ class QueueHeartbeatHealthTest extends TestCase
     private function heartbeatKey(string $queue): string
     {
         return 'ops.queue.heartbeat.'.$queue;
+    }
+
+    private function withHealthToken(string $token): static
+    {
+        return $this->withHeaders(['X-Procynia-Health-Token' => $token]);
     }
 }

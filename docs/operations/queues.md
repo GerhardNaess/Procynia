@@ -29,8 +29,13 @@ The application currently uses these queue names:
 Use the Redis-backed worker service defined in `docker-compose.yml`. Inside the `procynia-queue` container, the worker command is:
 
 ```bash
-php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=1 --timeout=0
+php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=3 --backoff=60 --timeout=120 --sleep=3
 ```
+
+- `--tries=3` — jobber forsøkes opptil 3 ganger før de havner i `failed_jobs`
+- `--backoff=60` — 60 sekunder ventetid mellom forsøk
+- `--timeout=120` — jobber som kjører lenger enn 120 sekunder avbrytes
+- `--sleep=3` — worker venter 3 sekunder mellom runder når køen er tom
 
 ### Legacy host worker
 
@@ -66,7 +71,7 @@ docker logs procynia-redis
 The queue log should show:
 
 ```text
-[Procynia][Queue] Starting queue worker connection=redis queues=supplier-harvests,supplier-lookups,ai-requirements,default
+[Procynia][Queue] Starting queue worker connection=redis queues=supplier-harvests,supplier-lookups,ai-requirements,default tries=3 backoff=60 timeout=120
 ```
 
 The scheduler log should show:
