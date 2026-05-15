@@ -212,6 +212,13 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik010->closed_at);
         $this->assertStringContainsString('ai_usage_events', (string) $avvik010->verification_notes);
 
+        $avvik016 = OperationalDeviation::query()->where('code', 'AVVIK-016')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik016->status);
+        $this->assertNotNull($avvik016->started_at);
+        $this->assertNotNull($avvik016->verified_at);
+        $this->assertNotNull($avvik016->closed_at);
+        $this->assertStringContainsString('retrieval_sources', (string) $avvik016->verification_notes);
+
         // Pre-created custom row is not overwritten by seeder
         $this->assertDatabaseHas('operational_deviations', [
             'code' => 'AVVIK-001',
@@ -282,6 +289,15 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik015->status);
         $this->assertNotNull($avvik015->closed_at);
         $this->assertNotNull($avvik015->verified_at);
+
+        // AVVIK-016 must be closed (kildevisning per AI-svar verifisert)
+        $avvik016 = OperationalDeviation::query()->where('code', 'AVVIK-016')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik016->status);
+        $this->assertNotNull($avvik016->started_at);
+        $this->assertNotNull($avvik016->ready_for_verification_at);
+        $this->assertNotNull($avvik016->verified_at);
+        $this->assertNotNull($avvik016->closed_at);
+        $this->assertStringContainsString('retrieval_sources', (string) $avvik016->verification_notes);
 
         // AVVIK-029 must be closed (HTTPS/TLS-rutine dokumentert)
         $avvik029 = OperationalDeviation::query()->where('code', 'AVVIK-029')->firstOrFail();

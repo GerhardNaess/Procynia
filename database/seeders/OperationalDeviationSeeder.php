@@ -294,13 +294,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Manglende kildevisning per AI-svar',
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Brukeren ser ikke tydelig nok hvilke kilder som ligger bak hvert AI-svar.',
             'impact' => 'Tillit, etterprøvbarhet og kvalitetssikring svekkes.',
             'recommended_action' => 'Vis dokument, seksjon, chunk og eventuelt sidegrunnlag per svar.',
             'acceptance_criteria' => 'Brukeren kan se konkret kildegrunnlag for hvert svarutkast.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 09:15:00',
+            'ready_for_verification_at' => '2026-05-16 09:45:00',
+            'verified_at' => '2026-05-16 10:00:00',
+            'closed_at' => '2026-05-16 10:00:00',
+            'verification_notes' => 'AI-svar viser nå kildegrunnlag per krav/svar. document_title, tabellgrunnlag, bildegrunnlag og retrieval_sources returneres og vises der dette finnes. Lagret kildegrunnlag overlever refresh, og brukeren kan skille dokumentert grunnlag fra mangler og antagelser. Ingen ny parallell kilde-modell er innført.',
         ]);
 
         $this->seed([

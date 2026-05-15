@@ -1426,6 +1426,10 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive løsningen med utgangspunkt i dokumentasjonen.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+        $this->assertIsArray($requirement->answer_draft_retrieval_sources);
+        $this->assertNotEmpty($requirement->answer_draft_retrieval_sources);
+        $this->assertSame($retrievalKnowledge->original_filename, data_get($requirement->answer_draft_retrieval_sources, '0.document_title'));
+        $this->assertSame('semantic', data_get($requirement->answer_draft_retrieval_sources, '0.chunk_type'));
     }
 
     public function test_ai_requirement_answer_draft_generation_uses_table_chunk_summary_and_text_as_grounding_evidence(): void
@@ -1971,6 +1975,7 @@ class AiControllerTest extends TestCase
         $refreshTableSource = collect(data_get($refreshRequirementRow, 'answer_draft.retrieval_sources', []))
             ->firstWhere('id', $tableChunk->id);
         $this->assertNotNull($refreshTableSource);
+        $this->assertSame($tableKnowledge->original_filename, data_get($refreshTableSource, 'document_title'));
         $this->assertSame('table', data_get($refreshTableSource, 'chunk_type'));
         $this->assertSame(
             '<table><tr><th colspan="2">Sikkerhetsparametere for SOC tjenesten</th></tr><tr><th>Parameter</th><th>Verdi</th></tr><tr><td>Overvåkning</td><td>24/7</td></tr></table>',
@@ -2221,6 +2226,7 @@ class AiControllerTest extends TestCase
         $refreshRequirementRow = $refreshRequirements->firstWhere('id', $requirement->id);
 
         $this->assertNotNull($refreshRequirementRow);
+        $this->assertSame($knowledgeItem->original_filename, data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.document_title'));
         $this->assertSame($imageChunk->id, data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.id'));
         $this->assertSame('image', data_get($refreshRequirementRow, 'answer_draft.retrieval_sources.0.chunk_type'));
         $this->assertSame(
