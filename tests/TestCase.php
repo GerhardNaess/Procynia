@@ -46,18 +46,14 @@ abstract class TestCase extends BaseTestCase
             'APP_ROUTES_CACHE' => 'bootstrap/cache/testing-routes.php',
             'APP_EVENTS_CACHE' => 'bootstrap/cache/testing-events.php',
             'DB_CONNECTION' => 'pgsql',
-            'DB_HOST' => '127.0.0.1',
+            'DB_HOST' => 'postgres',
             'DB_PORT' => '5432',
             'DB_DATABASE' => 'procynia_test',
             'DB_USERNAME' => 'gehard',
-            'DB_PASSWORD' => '',
+            'DB_PASSWORD' => 'Opaque01',
         ];
 
         foreach ($defaults as $key => $value) {
-            if (getenv($key) !== false || array_key_exists($key, $_ENV) || array_key_exists($key, $_SERVER)) {
-                continue;
-            }
-
             putenv("{$key}={$value}");
             $_ENV[$key] = $value;
             $_SERVER[$key] = $value;

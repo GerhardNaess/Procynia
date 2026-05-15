@@ -217,11 +217,11 @@ class AiUsageGuardTest extends TestCase
         config([
             "database.connections.{$connectionName}" => [
                 'driver' => 'pgsql',
-                'host' => $this->projectEnv('DB_HOST', '127.0.0.1'),
-                'port' => $this->projectEnv('DB_PORT', '5432'),
-                'database' => $this->projectEnv('DB_DATABASE', 'procynia'),
-                'username' => $this->projectEnv('DB_USERNAME', 'gehard'),
-                'password' => $this->projectEnv('DB_PASSWORD', ''),
+                'host' => 'postgres',
+                'port' => '5432',
+                'database' => 'procynia_test',
+                'username' => 'gehard',
+                'password' => 'Opaque01',
                 'charset' => 'utf8',
                 'prefix' => '',
                 'prefix_indexes' => true,
@@ -242,25 +242,4 @@ class AiUsageGuardTest extends TestCase
      * Returns: The configured value or the fallback when the key is missing.
      * Side effects: Caches the parsed .env file for the current test process.
      */
-    private function projectEnv(string $key, string $default): string
-    {
-        static $values = null;
-
-        if (! is_array($values)) {
-            $values = [];
-
-            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $trimmed = trim($line);
-
-                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
-                    continue;
-                }
-
-                [$envKey, $envValue] = explode('=', $trimmed, 2);
-                $values[trim($envKey)] = trim($envValue, " \t\n\r\0\x0B\"'");
-            }
-        }
-
-        return (string) ($values[$key] ?? $default);
-    }
 }
