@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'base_url' => env('DOFFIN_BASE_URL', 'https://betaapi.doffin.no'),
+    'base_url' => env('DOFFIN_BASE_URL'),
     'search_endpoint' => env('DOFFIN_SEARCH_ENDPOINT', '/public/v2/search'),
     'download_endpoint' => env('DOFFIN_DOWNLOAD_ENDPOINT', '/public/v2/download'),
     'live_search_base_url' => env('DOFFIN_LIVE_SEARCH_BASE_URL', 'https://api.doffin.no/webclient/api/v2/search-api'),

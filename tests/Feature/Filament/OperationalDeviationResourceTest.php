@@ -223,7 +223,7 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertSame(30, OperationalDeviation::query()->count());
         $this->assertSame(30, OperationalDeviation::query()->pluck('code')->unique()->count());
 
-        // AVVIK-001 and AVVIK-002 must be closed with a closed_at timestamp
+        // AVVIK-001, AVVIK-002, AVVIK-003, AVVIK-004, AVVIK-005 and AVVIK-006 must be closed with a closed_at timestamp
         $avvik001 = OperationalDeviation::query()->where('code', 'AVVIK-001')->firstOrFail();
         $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik001->status);
         $this->assertNotNull($avvik001->closed_at);
@@ -234,10 +234,36 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik002->closed_at);
         $this->assertNotNull($avvik002->verified_at);
 
-        // AVVIK-003 must be new (open)
         $avvik003 = OperationalDeviation::query()->where('code', 'AVVIK-003')->firstOrFail();
-        $this->assertSame(OperationalDeviation::STATUS_NEW, $avvik003->status);
-        $this->assertNull($avvik003->closed_at);
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik003->status);
+        $this->assertNotNull($avvik003->closed_at);
+        $this->assertNotNull($avvik003->verified_at);
+
+        $avvik004 = OperationalDeviation::query()->where('code', 'AVVIK-004')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik004->status);
+        $this->assertNotNull($avvik004->closed_at);
+        $this->assertNotNull($avvik004->verified_at);
+
+        $avvik005 = OperationalDeviation::query()->where('code', 'AVVIK-005')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik005->status);
+        $this->assertNotNull($avvik005->closed_at);
+        $this->assertNotNull($avvik005->verified_at);
+
+        $avvik006 = OperationalDeviation::query()->where('code', 'AVVIK-006')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik006->status);
+        $this->assertNotNull($avvik006->closed_at);
+        $this->assertNotNull($avvik006->verified_at);
+
+        $avvik007 = OperationalDeviation::query()->where('code', 'AVVIK-007')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik007->status);
+        $this->assertNotNull($avvik007->closed_at);
+        $this->assertNotNull($avvik007->verified_at);
+
+        // AVVIK-008 must be closed (Doffin beta-default fjernet)
+        $avvik008 = OperationalDeviation::query()->where('code', 'AVVIK-008')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik008->status);
+        $this->assertNotNull($avvik008->closed_at);
+        $this->assertNotNull($avvik008->verified_at);
 
         // Last seeded avvik exists
         $this->assertDatabaseHas('operational_deviations', ['code' => 'AVVIK-030']);
