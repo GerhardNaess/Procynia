@@ -64,3 +64,44 @@ The Laravel framework is open-sourced software licensed under the [MIT license](
 - [Customer frontend](docs/customer-frontend.md)
 - [Doffin supplier harvest](docs/doffin-supplier-harvest.md)
 - [Docker local runtime](docs/docker-local.md)
+- [Queue operations](docs/operations/queues.md)
+
+## Procynia Runtime
+
+Docker Compose is the canonical runtime for Procynia.
+
+Start:
+
+```bash
+docker compose up -d
+```
+
+Stop:
+
+```bash
+docker compose down
+```
+
+Status:
+
+```bash
+docker compose ps
+```
+
+Open the application at:
+
+```text
+http://localhost:8080
+```
+
+Inspect logs with:
+
+```bash
+docker logs procynia-app
+docker logs procynia-queue
+docker logs procynia-scheduler
+docker logs procynia-redis
+docker logs procynia-postgres
+```
+
+Do not use `php artisan serve`, host queue workers, or host scheduler processes as the normal runtime path.

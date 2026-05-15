@@ -1,6 +1,7 @@
-# Procynia Docker Local Runtime
+# Procynia Docker Runtime
 
-This project uses a single local Docker Compose stack for the Laravel runtime.
+This project uses a single Docker Compose stack for the canonical Procynia runtime.
+Do not use host `php artisan serve`, host queue workers, or host scheduler processes as the normal path.
 
 ## Services
 
@@ -20,7 +21,7 @@ This project uses a single local Docker Compose stack for the Laravel runtime.
 ## Start
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
 Then open:
@@ -52,13 +53,13 @@ docker compose exec app php artisan migrate
 The queue worker runs as a dedicated service:
 
 ```bash
-docker compose logs -f queue
+docker logs procynia-queue
 ```
 
-The worker command is:
+Inside the container, the worker command is:
 
 ```bash
-php artisan queue:work redis --queue=supplier-harvests,ai-requirements,default --tries=1 --timeout=0
+php artisan queue:work redis --queue=supplier-harvests,supplier-lookups,ai-requirements,default --tries=1 --timeout=0
 ```
 
 To restart it:
@@ -67,15 +68,23 @@ To restart it:
 docker compose restart queue
 ```
 
+Production deploys should also restart queue workers with:
+
+```bash
+docker compose exec app php artisan queue:restart
+```
+
+See `docs/operations/queues.md` for the canonical queue operations note.
+
 ## Scheduler
 
 The scheduler runs as a dedicated service:
 
 ```bash
-docker compose logs -f scheduler
+docker logs procynia-scheduler
 ```
 
-The scheduler command is:
+Inside the container, the scheduler command is:
 
 ```bash
 php artisan schedule:work
@@ -96,14 +105,19 @@ docker compose exec app php artisan test
 ## Logs
 
 ```bash
-docker compose logs -f app web postgres redis queue scheduler
+docker logs procynia-app
+docker logs procynia-web
+docker logs procynia-postgres
+docker logs procynia-redis
+docker logs procynia-queue
+docker logs procynia-scheduler
 ```
 
 Laravel file logs are still written under `storage/logs` inside the shared project volume.
 
 ## Frontend build
 
-The Docker phase here does not add a Node container. Keep using the existing host command:
+The Docker phase here does not add a Node container. Keep using the existing host build command:
 
 ```bash
 npm run build
@@ -115,6 +129,7 @@ npm run build
 - On a fresh clone, create `.env` from `.env.example` and run `php artisan key:generate` once before the first boot.
 - Database and Redis service names are pinned in `docker-compose.yml`.
 - `public/storage` is served directly by Nginx through an explicit alias, so no storage-link bootstrap step is required.
+- Host runtime commands such as `php artisan serve`, `php artisan queue:work database`, and `php artisan schedule:work` are legacy troubleshooting tools, not the normal runtime path.
 
 ## Secrets and Env
 
