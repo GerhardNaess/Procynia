@@ -133,21 +133,42 @@ npm run build
 
 ## Secrets and Env
 
-Keep these values in your local `.env` file and out of the repository:
+`docker-compose.yml` never contains real credentials. All secrets are read from
+your local `.env` file via Docker Compose variable interpolation (`${VAR}`).
+
+**`.env` must define the following for the stack to start:**
+
+```dotenv
+# PostgreSQL service and app connection (values must match)
+POSTGRES_DB=procynia
+POSTGRES_USER=<your local db user>
+POSTGRES_PASSWORD=<your local db password>
+```
+
+Laravel reads the database connection as `DB_USERNAME` / `DB_PASSWORD` / `DB_DATABASE`,
+which the compose file maps from the same `POSTGRES_*` variables.
+
+**Never commit `.env`.** It is listed in `.gitignore`.
+
+**`.env.example`** contains safe placeholder values (`change_me`). Copy it to `.env`
+and fill in your actual credentials before the first `docker compose up`.
+
+Additional secrets to keep in `.env` and out of the repository:
 
 - `APP_KEY`
 - `OPENAI_API_KEY`
-- `STRIPE_KEY`
-- `STRIPE_SECRET`
-- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_KEY`, `STRIPE_SECRET`, `STRIPE_WEBHOOK_SECRET`
 - `DOFFIN_API_KEY`
 - mail credentials
 - AWS credentials
+- `PROCYNIA_HEALTH_TOKEN`
 
-Docker pins the local runtime services explicitly:
+Docker pins the local runtime service names explicitly in `docker-compose.yml`:
 
-- PostgreSQL host: `postgres`
-- Redis host: `redis`
+- PostgreSQL host (inside Docker): `postgres` — port 5432
+- PostgreSQL host (from host / pgAdmin): `127.0.0.1` — port 5433
+- Redis host (inside Docker): `redis` — port 6379
+- Redis host (from host): `127.0.0.1` — port 6380
 - App URL: `http://localhost:8080`
 
 ## Persistent Storage

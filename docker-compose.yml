@@ -14,9 +14,9 @@ services:
             DB_CONNECTION: pgsql
             DB_HOST: postgres
             DB_PORT: 5432
-            DB_DATABASE: procynia
-            DB_USERNAME: gehard
-            DB_PASSWORD: Opaque01
+            DB_DATABASE: ${POSTGRES_DB}
+            DB_USERNAME: ${POSTGRES_USER}
+            DB_PASSWORD: ${POSTGRES_PASSWORD}
             REDIS_CLIENT: phpredis
             REDIS_HOST: redis
             REDIS_PORT: 6379
@@ -58,15 +58,15 @@ services:
         image: postgres:16-alpine
         container_name: procynia-postgres
         environment:
-            POSTGRES_DB: procynia
-            POSTGRES_USER: gehard
-            POSTGRES_PASSWORD: Opaque01
+            POSTGRES_DB: ${POSTGRES_DB}
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
         ports:
             - "127.0.0.1:5433:5432"
         volumes:
             - procynia_postgres_data:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U gehard -d procynia"]
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
             interval: 10s
             timeout: 5s
             retries: 5
@@ -104,9 +104,9 @@ services:
             DB_CONNECTION: pgsql
             DB_HOST: postgres
             DB_PORT: 5432
-            DB_DATABASE: procynia
-            DB_USERNAME: gehard
-            DB_PASSWORD: Opaque01
+            DB_DATABASE: ${POSTGRES_DB}
+            DB_USERNAME: ${POSTGRES_USER}
+            DB_PASSWORD: ${POSTGRES_PASSWORD}
             REDIS_CLIENT: phpredis
             REDIS_HOST: redis
             REDIS_PORT: 6379
@@ -150,9 +150,9 @@ services:
             DB_CONNECTION: pgsql
             DB_HOST: postgres
             DB_PORT: 5432
-            DB_DATABASE: procynia
-            DB_USERNAME: gehard
-            DB_PASSWORD: Opaque01
+            DB_DATABASE: ${POSTGRES_DB}
+            DB_USERNAME: ${POSTGRES_USER}
+            DB_PASSWORD: ${POSTGRES_PASSWORD}
             REDIS_CLIENT: phpredis
             REDIS_HOST: redis
             REDIS_PORT: 6379
