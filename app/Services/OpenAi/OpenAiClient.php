@@ -11,6 +11,23 @@ use RuntimeException;
 
 class OpenAiClient
 {
+    /**
+     * Purpose: Send a GET request to the configured OpenAI API.
+     * Inputs: The endpoint path and timeout in seconds.
+     * Returns: The raw HTTP response.
+     * Side effects: Issues one network request and logs failed responses.
+     */
+    public function get(string $endpoint, int $timeoutSeconds = 180): Response
+    {
+        $response = $this->pendingRequest($timeoutSeconds)->get(ltrim($endpoint, '/'));
+
+        if ($response->failed()) {
+            $this->logFailure($endpoint, $response->status(), $this->requestIdFrom($response), $response->body());
+        }
+
+        return $response;
+    }
+
     public function createResponse(array $payload, int $timeoutSeconds = 120): array
     {
         return $this->send('responses', $payload, $timeoutSeconds);
@@ -107,7 +124,7 @@ class OpenAiClient
             ->timeout($timeoutSeconds)
             ->withOptions([
                 'curl' => [
-                    CURLOPT_CONNECTTIMEOUT => 15,
+                    CURLOPT_CONNECTTIMEOUT => max(1, min($timeoutSeconds, 10)),
                 ],
             ]);
     }
