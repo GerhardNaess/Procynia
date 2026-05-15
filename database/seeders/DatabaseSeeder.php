@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             WatchProfileSeeder::class,
             UserNotificationSeeder::class,
             OperatingProcedureSeeder::class,
+            OperationalDeviationSeeder::class,
         ]);
     }
 }
