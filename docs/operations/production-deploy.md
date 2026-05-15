@@ -2,9 +2,10 @@
 
 ## Revisjonslogg
 
-| Dato       | Ansvarlig      | Merknad                             |
-|------------|----------------|-------------------------------------|
+| Dato       | Ansvarlig      | Merknad                              |
+|------------|----------------|--------------------------------------|
 | 2026-05-15 | Gerhard Næss   | Første versjon opprettet (AVVIK-005) |
+| 2026-05-15 | Gerhard Næss   | AVVIK-029 lukket: HTTPS/TLS-rutine utvidet med TrustProxies, certbot, konkrete verifikasjonskommandoer og sjekk av interne porter |
 
 **Neste revisjon:** Før første produksjonsdeploy  
 **Eier:** Teknisk ansvarlig for Procynia
@@ -474,10 +475,11 @@ Queue workeren prosesserer følgende køer i prioritert rekkefølge:
 
 ### Krav
 
-Produksjon skal alltid kjøres bak HTTPS. HTTP-tilkoblinger skal redirectes til HTTPS.
+Produksjon skal alltid eksponeres via HTTPS. HTTP på port 80 skal redirectes til HTTPS.
 
-- `APP_URL` i `.env` skal bruke `https://`.
+- `APP_URL` i `.env` skal bruke `https://` — f.eks. `APP_URL=https://app.procynia.no`.
 - Gyldig TLS-sertifikat skal være installert og fornyet automatisk.
+- TLS termineres i reverse proxy. Procynias webcontainer (`port 8080`) skal ikke eksponeres direkte mot internett.
 - Interne porter (`8080`, `5433`, `6380`) skal ikke eksponeres mot internett.
 
 ### Reverse proxy
@@ -514,11 +516,62 @@ server {
 }
 ```
 
+### Laravel og forwarded headers
+
+Procynia er konfigurert til å stole på forwarded headers fra reverse proxy (`bootstrap/app.php` → `trustProxies(at: '*')`). Applikasjonen gjenkjenner korrekt HTTPS-forespørsler og genererer `https://`-URLer når proxyen sender `X-Forwarded-Proto: https`.
+
+### Sertifikatfornyelse
+
+Ved bruk av Let's Encrypt/Certbot aktiveres automatisk fornyelse med:
+
+```bash
+certbot renew --dry-run   # Testgjennomgang uten faktisk fornyelse
+certbot renew             # Faktisk fornyelse
+```
+
+Certbot legger vanligvis til en cron-jobb eller systemd-timer automatisk. Verifiser at fornyelse er aktivt:
+
+```bash
+systemctl list-timers | grep certbot
+```
+
 ### Kontroller etter TLS-oppsett
 
-- Åpne `https://app.procynia.no` og kontroller at sertifikatet er gyldig
-- Kontroller at `http://app.procynia.no` redirectes til HTTPS
-- Kontroller at `APP_URL` i `.env` samsvarer med faktisk URL
+Kjør følgende kommandoer etter at TLS er satt opp eller endret:
+
+**HTTPS-respons:**
+
+```bash
+curl -I https://app.procynia.no
+```
+
+Forventet: `HTTP/2 200` eller `302` redirect til innloggingssiden. Sertifikatet skal være gyldig (ingen `curl`-advarsel).
+
+**HTTP → HTTPS redirect:**
+
+```bash
+curl -I http://app.procynia.no
+```
+
+Forventet: `301 Moved Permanently` med `Location: https://app.procynia.no/...`
+
+**APP_URL samsvarer med faktisk domene:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec app php artisan config:show app.url
+```
+
+Forventet: `https://app.procynia.no`
+
+**Interne porter er ikke eksponert mot internett:**
+
+```bash
+ss -tlnp | grep -E '5433|6380|8080'
+```
+
+Disse portene skal kun ha `127.0.0.1` som bind-adresse — ikke `0.0.0.0`.
+
+Dersom domenet eller sertifikatet endres, skal hele TLS-sjekklisten ovenfor kjøres på nytt.
 
 ---
 
@@ -730,6 +783,6 @@ Følgende avvik er registrert og har direkte innvirkning på produksjonssettinge
 | AVVIK-006  | Queue worker bruker tries=1 og timeout=0       | Lukket  | Høy       |
 | AVVIK-007  | Manglende produksjonsbackup og restore-rutine  | Lukket  | Kritisk   |
 | AVVIK-008  | Doffin peker mot beta-API som standard         | Lukket  | Høy       |
-| AVVIK-029  | Ingen tydelig produksjons-HTTPS/TLS-rutine     | Åpen    | Kritisk   |
+| AVVIK-029  | Ingen tydelig produksjons-HTTPS/TLS-rutine     | Lukket  | Kritisk   |
 
-AVVIK-003 er lukket ved opprettelse av `docker-compose.prod.yml`. AVVIK-007 er lukket ved opprettelse av backup/restore-skript og `docs/operations/backup-restore.md`. AVVIK-008 er lukket ved fjerning av beta-default i `config/doffin.php` og oppdatering av `.env.example`. Øvrige åpne avvik behandles som egne oppgaver i avviksregisteret.
+AVVIK-003 er lukket ved opprettelse av `docker-compose.prod.yml`. AVVIK-007 er lukket ved opprettelse av backup/restore-skript og `docs/operations/backup-restore.md`. AVVIK-008 er lukket ved fjerning av beta-default i `config/doffin.php` og oppdatering av `.env.example`. AVVIK-029 er lukket ved utvidelse av seksjon 8 med TrustProxies, certbot-fornyelse, konkrete verifikasjonskommandoer og sjekk av interne porter. Øvrige åpne avvik behandles som egne oppgaver i avviksregisteret.

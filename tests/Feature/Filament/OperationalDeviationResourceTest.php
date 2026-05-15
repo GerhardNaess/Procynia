@@ -265,6 +265,12 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik008->closed_at);
         $this->assertNotNull($avvik008->verified_at);
 
+        // AVVIK-029 must be closed (HTTPS/TLS-rutine dokumentert)
+        $avvik029 = OperationalDeviation::query()->where('code', 'AVVIK-029')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik029->status);
+        $this->assertNotNull($avvik029->closed_at);
+        $this->assertNotNull($avvik029->verified_at);
+
         // Last seeded avvik exists
         $this->assertDatabaseHas('operational_deviations', ['code' => 'AVVIK-030']);
 

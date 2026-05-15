@@ -186,13 +186,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Ingen tydelig produksjons-HTTPS/TLS-rutine',
             'category' => OperationalDeviation::CATEGORY_OPERATION,
             'severity' => OperationalDeviation::SEVERITY_CRITICAL,
-            'status' => OperationalDeviation::STATUS_NEW,
-            'description' => 'Det mangler tydelig rutine for HTTPS/TLS i produksjon.',
-            'impact' => 'Produksjon kan ende med usikret HTTP.',
+            'status' => OperationalDeviation::STATUS_CLOSED,
+            'description' => 'Det manglet tydelig rutine for HTTPS/TLS i produksjon.',
+            'impact' => 'Produksjon kunne ende med usikret HTTP.',
             'recommended_action' => 'Dokumenter og implementer TLS via reverse proxy, load balancer eller tilsvarende.',
             'acceptance_criteria' => "Produksjonsdeploy krever HTTPS og har dokumentert sertifikathåndtering.",
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-15 21:00:00',
+            'ready_for_verification_at' => '2026-05-15 21:30:00',
+            'verified_at' => '2026-05-15 21:30:00',
+            'closed_at' => '2026-05-15 21:30:00',
+            'verification_notes' => 'docs/operations/production-deploy.md seksjon 8 er utvidet med: eksplisitt krav om HTTPS og HTTP→HTTPS redirect, nginx reverse proxy-eksempel med X-Forwarded-Proto og øvrige forwarded headers, Laravel TrustProxies-konfigurasjon (bootstrap/app.php), certbot/Let\'s Encrypt fornyelsesrutine, konkrete verifikasjonskommandoer (curl -I https og curl -I http med forventet respons), sjekk av at interne porter ikke er eksponert, og note om at TLS-sjekklisten kjøres på nytt ved domene-/sertifikatendring. .env.example er oppdatert med produksjonskommentar for APP_URL.',
         ]);
 
         $this->seed([
