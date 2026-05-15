@@ -463,13 +463,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Ingen ende-til-ende-tester',
             'category' => OperationalDeviation::CATEGORY_TESTING,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Det finnes ikke Playwright, Cypress, Dusk eller tilsvarende E2E-tester.',
             'impact' => 'Kritiske brukerflyter kan feile uten at testene oppdager det.',
             'recommended_action' => 'Legg til E2E-tester for login, kunngjøring, lagring, AI-krav, billing og admin.',
             'acceptance_criteria' => 'Minst de mest kritiske brukerflytene er dekket av E2E-test.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-15 22:00:00',
+            'ready_for_verification_at' => '2026-05-15 23:00:00',
+            'verified_at' => '2026-05-15 23:30:00',
+            'closed_at' => '2026-05-15 23:30:00',
+            'verification_notes' => 'Playwright E2E-oppsett innført (tests/e2e/). Chromium-baserte E2E-tester dekker: login-side, innlogging som kundebruker og super admin, ugyldig innlogging, admin-tilgang for super admin (kan se operasjonelle avvik), admin-blokkering for kundebrukere (CATEGORY_TESTING canAccess() = false), appnavigasjon (kunngjøringer, dashboard, AI), billing-tilgang for system owner og blokkering for vanlig bruker. Testdata opprettes via idempotent E2ETestSeeder. Ingen eksterne API-kall (OpenAI, Stripe, Doffin) gjøres i E2E-testene. Dokumentert i docs/testing/e2e.md.',
         ]);
 
         $this->seed([
