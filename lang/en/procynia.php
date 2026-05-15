@@ -1969,8 +1969,8 @@ return [
             'no_runs' => 'No backup runs recorded yet.',
             'no_files' => 'No backup files found in the backup directory.',
             'directory_missing' => 'Backup directory does not exist or is not accessible.',
-            'restore_note' => 'Restore is performed manually from the server. See docs/operations/backup-restore.md for the full procedure.',
-            'temp_notice' => 'Temporary solution for pilot and early production. A professional backup/restore system should be used for mature production.',
+            'restore_note' => 'Restore is a controlled operational procedure. There is no restore button on this page. See docs/operations/backup-restore.md for the full procedure and docs/operations/production-deploy.md for deploy context.',
+            'temp_notice' => 'This page is used to monitor backups, start or stop scheduled backups, and run manual backups. Restore is not a normal UI action here. .env, secrets, and private keys are not included in ordinary backup files. Backup files must be treated as production data.',
         ],
         'statuses' => [
             'running' => 'Running',

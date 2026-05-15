@@ -1969,8 +1969,8 @@ return [
             'no_runs' => 'Ingen backup-kjøringer registrert ennå.',
             'no_files' => 'Ingen backupfiler funnet i backup-katalogen.',
             'directory_missing' => 'Backup-katalogen finnes ikke eller er ikke tilgjengelig.',
-            'restore_note' => 'Restore kjøres manuelt fra server. Se docs/operations/backup-restore.md for fullstendig prosedyre.',
-            'temp_notice' => 'Midlertidig løsning for pilot og tidlig drift. Ved moden produksjon skal profesjonelt backup-/restore-system brukes.',
+            'restore_note' => 'Restore er en kontrollert driftsprosedyre. Det finnes ingen restore-knapp i denne siden. Se docs/operations/backup-restore.md for full prosedyre og docs/operations/production-deploy.md for deploy-kontekst.',
+            'temp_notice' => 'Denne siden brukes til å overvåke backup, starte eller stoppe planlagt backup og kjøre manuell backup. Restore er ikke en vanlig UI-handling her. .env, secrets og private nøkler inngår ikke i ordinære backupfiler. Backupfiler må behandles som produksjonsdata.',
         ],
         'statuses' => [
             'running' => 'Kjører',

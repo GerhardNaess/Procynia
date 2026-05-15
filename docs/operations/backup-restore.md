@@ -427,6 +427,9 @@ For at planlagt backup faktisk skal kjøre, må Laravel scheduler fortsatt være
 - Siste backup-kjøringer (type, status, varighet, filnavn, feilmelding)
 - Backupfiler i backup-katalogen (filnavn, størrelse, sist endret)
 - Restore-instruksjon med lenke til denne dokumentasjonen
+- Siden har ingen restore-knapp. Restore utføres som en kontrollert driftsprosedyre fra server eller annet egnet driftsmiljø.
+- `.env`, secrets og private nøkler inngår ikke i ordinære backupfiler.
+- Backupfiler må behandles som produksjonsdata.
 
 ### Manuell backup fra Admin
 

@@ -307,8 +307,14 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik026->closed_at);
         $this->assertNotNull($avvik026->verified_at);
 
-        // Last seeded avvik exists
-        $this->assertDatabaseHas('operational_deviations', ['code' => 'AVVIK-030']);
+        // AVVIK-030 must be closed (BackupRecovery verified and clearly limited to controlled restore procedure)
+        $avvik030 = OperationalDeviation::query()->where('code', 'AVVIK-030')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik030->status);
+        $this->assertNotNull($avvik030->started_at);
+        $this->assertNotNull($avvik030->ready_for_verification_at);
+        $this->assertNotNull($avvik030->verified_at);
+        $this->assertNotNull($avvik030->closed_at);
+        $this->assertStringContainsString('restore', Str::lower((string) $avvik030->verification_notes));
 
         // Running seeder a second time does not create duplicates
         app(OperationalDeviationSeeder::class)->run();

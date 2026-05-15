@@ -49,6 +49,18 @@ class BackupRecoveryPageTest extends TestCase
             ->assertSee('Backup and recovery');
     }
 
+    public function test_backup_recovery_page_clarifies_that_restore_is_controlled(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $this->actingAs($admin)
+            ->get(BackupRecovery::getUrl())
+            ->assertOk()
+            ->assertSee(__('procynia.backup_recovery.messages.temp_notice'))
+            ->assertSee(__('procynia.backup_recovery.messages.restore_note'))
+            ->assertDontSee('wire:click="restore"');
+    }
+
     public function test_backup_recovery_page_is_not_accessible_to_customer_admin(): void
     {
         $user = User::query()->create([

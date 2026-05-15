@@ -262,8 +262,10 @@
             <div class="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
                 {{ $t('sections.restore') }}
             </div>
-            <p class="text-sm text-gray-700">{{ $t('messages.restore_note') }}</p>
-            <p class="mt-2 font-mono text-xs text-gray-500">docs/operations/backup-restore.md</p>
+            <div class="rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
+                <p class="font-semibold">{{ $t('messages.restore_note') }}</p>
+                <p class="mt-2 font-mono text-xs text-warning-700">docs/operations/backup-restore.md</p>
+            </div>
         </section>
 
     </div>

@@ -204,7 +204,7 @@ Hvis Backup og recovery-siden viser feil eller manglende heartbeat:
 
 ### `.env` og secrets
 
-`.env`-filen og secrets inngår **ikke** i ordinære backupfiler. De må bevares separat etter egen rutine. Se `docs/operations/backup-restore.md` seksjon 6 for retningslinjer om secrets.
+`.env`-filen og secrets inngår **ikke** i ordinære backupfiler. De må bevares separat etter egen rutine. Backup- og restore-siden har ingen restore-knapp; restore er en kontrollert driftsprosedyre som utføres fra server eller annet egnet driftsmiljø. Se `docs/operations/backup-restore.md` seksjon 6 for retningslinjer om secrets.
 
 ### Merk
 

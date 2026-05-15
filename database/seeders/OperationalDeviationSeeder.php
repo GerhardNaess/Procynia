@@ -205,13 +205,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Uklart om BackupRecovery-siden dekker reell restore',
             'category' => OperationalDeviation::CATEGORY_OPERATION,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'BackupRecovery-siden finnes, men det er uklart om den dekker faktisk backup og restore for produksjon.',
             'impact' => 'Det kan finnes en UI-side som gir falsk trygghet uten reell restore-prosess.',
             'recommended_action' => 'Gjennomgå BackupRecovery-funksjonen og dokumenter faktisk virkemåte.',
             'acceptance_criteria' => "BackupRecovery-siden er verifisert, dokumentert og koblet til reell backup/restore-rutine, eller tydelig merket som ikke-produksjonsklar.",
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 09:00:00',
+            'ready_for_verification_at' => '2026-05-16 10:00:00',
+            'verified_at' => '2026-05-16 10:30:00',
+            'closed_at' => '2026-05-16 10:30:00',
+            'verification_notes' => 'BackupRecovery-siden er verifisert. Siden viser faktisk backupstatus og backupstyring. Restore er tydelig dokumentert som kontrollert driftsprosedyre. Siden gir ikke falsk inntrykk av automatisk produksjonsrestore. Dokumentasjon og tester er oppdatert. AVVIK-007-rutinen er lagt til grunn.',
         ]);
 
         // --- Integrasjoner ---
