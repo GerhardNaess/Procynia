@@ -95,6 +95,55 @@ Response semantics:
 - `200` means both heartbeats are fresh
 - `503` means queue or scheduler should be investigated
 
+## Per-queue health
+
+Each Laravel queue now has its own heartbeat monitor endpoint. These check whether the corresponding queue has actually processed a heartbeat job recently, not merely whether the container is running.
+
+Endpoints:
+
+```text
+GET /ops/health/queues/supplier-harvests
+GET /ops/health/queues/supplier-lookups
+GET /ops/health/queues/ai-requirements
+GET /ops/health/queues/default
+```
+
+These endpoints all return JSON with the queue-specific heartbeat status. The health check is fresh when the last processed heartbeat is not older than `300` seconds. A missing or stale heartbeat returns `503`.
+
+### Uptime Kuma monitors
+
+Create one JSON Query monitor per queue:
+
+#### Procynia - supplier-harvests
+
+- URL: `http://localhost:8080/ops/health/queues/supplier-harvests`
+- JSON query: `$.status`
+- Condition: `==`
+- Expected value: `ok`
+
+#### Procynia - supplier-lookups
+
+- URL: `http://localhost:8080/ops/health/queues/supplier-lookups`
+- JSON query: `$.status`
+- Condition: `==`
+- Expected value: `ok`
+
+#### Procynia - ai-requirements
+
+- URL: `http://localhost:8080/ops/health/queues/ai-requirements`
+- JSON query: `$.status`
+- Condition: `==`
+- Expected value: `ok`
+
+#### Procynia - default
+
+- URL: `http://localhost:8080/ops/health/queues/default`
+- JSON query: `$.status`
+- Condition: `==`
+- Expected value: `ok`
+
+The existing `/ops/health/queue-scheduler` endpoint remains the combined queue/scheduler control. Use it for the overall heartbeat status, and use the per-queue endpoints to verify each queue independently.
+
 ## Knowledge metadata jobs
 
 These jobs currently use the default queue because they do not set an explicit queue name:

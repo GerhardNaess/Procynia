@@ -15,6 +15,9 @@ use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\Health\DocumentHealthController;
+use App\Http\Controllers\Health\IntegrationHealthController;
+use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\StripeWebhookController;
@@ -22,7 +25,23 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
 
+Route::prefix('health')
+    ->middleware('health.token')
+    ->name('health.')
+    ->group(function (): void {
+        Route::get('/integrations/doffin/import-freshness', [IntegrationHealthController::class, 'doffinImportFreshness'])
+            ->name('integrations.doffin.import-freshness');
+        Route::get('/integrations/openai', [IntegrationHealthController::class, 'openAiConnectivity'])
+            ->name('integrations.openai');
+        Route::get('/integrations/stripe/webhooks', [IntegrationHealthController::class, 'stripeWebhooks'])
+            ->name('integrations.stripe.webhooks');
+        Route::get('/documents/parsing', [DocumentHealthController::class, 'documentParsing'])
+            ->name('documents.parsing');
+    });
+
 Route::prefix('ops')->name('ops.')->group(function (): void {
+    Route::get('/health/queues/{queue}', [QueueHeartbeatHealthController::class, 'check'])
+        ->name('health.queues.check');
     Route::get('/health/queue-scheduler', [QueueSchedulerHealthController::class, 'check'])
         ->name('health.queue-scheduler');
 });

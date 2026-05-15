@@ -4,6 +4,7 @@ namespace Tests\Feature\Ops;
 
 use App\Jobs\OpsQueueHeartbeatJob;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Artisan;
 use Tests\TestCase;
 
 class QueueSchedulerHealthTest extends TestCase
@@ -92,6 +93,28 @@ class QueueSchedulerHealthTest extends TestCase
         (new OpsQueueHeartbeatJob)->handle();
 
         $this->assertNotNull(Cache::get('ops.queue.heartbeat'));
+        $this->assertNotNull(Cache::get('ops.queue.heartbeat.default'));
+    }
+
+    public function test_non_default_queue_heartbeat_does_not_touch_aggregate_cache_key(): void
+    {
+        Cache::forget('ops.queue.heartbeat');
+        Cache::forget('ops.queue.heartbeat.supplier-harvests');
+
+        (new OpsQueueHeartbeatJob('supplier-harvests'))->handle();
+
+        $this->assertNull(Cache::get('ops.queue.heartbeat'));
+        $this->assertNotNull(Cache::get('ops.queue.heartbeat.supplier-harvests'));
+    }
+
+    public function test_scheduler_registers_four_queue_heartbeat_jobs(): void
+    {
+        Artisan::call('schedule:list', ['--json' => true, '--next' => true]);
+        $tasks = json_decode(Artisan::output(), true);
+
+        $heartbeatJobs = array_values(array_filter($tasks, static fn ($task): bool => ($task['command'] ?? null) === 'App\\Jobs\\OpsQueueHeartbeatJob'));
+
+        $this->assertCount(4, $heartbeatJobs);
     }
 
     public function test_endpoint_is_accessible_without_authentication(): void
