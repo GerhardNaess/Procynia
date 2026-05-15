@@ -28,9 +28,13 @@
         $queueHb      = ($health['queue'] ?? 'stale') === 'ok';
         $qsOk         = (bool) ($health['ok'] ?? false);
 
-        // Three severity levels: error = critical infra issue, warning = failed jobs only, ok = all clear
+        $backupStatus   = $snapshot['backup'] ?? [];
+        $backupWarnings = (array) ($backupStatus['warnings'] ?? []);
+        $backupOk       = (bool) ($backupStatus['ok'] ?? true);
+
+        // Three severity levels: error = critical infra issue, warning = failed jobs / backup only, ok = all clear
         $criticalIssues = ! $dbOk || ! $redisOk || ! $qsOk;
-        $overallStatus  = $criticalIssues ? 'error' : ($failedCount > 0 ? 'warning' : 'ok');
+        $overallStatus  = $criticalIssues ? 'error' : ($failedCount > 0 || ! $backupOk ? 'warning' : 'ok');
         $hasIssues      = $overallStatus !== 'ok';
 
         $okBadge   = 'bg-success-50 text-success-700 ring-1 ring-inset ring-success-200';
@@ -260,6 +264,26 @@
                             </div>
                         </div>
                     @endif
+
+                    {{-- Backup warnings --}}
+                    @foreach ($backupWarnings as $backupWarnKey)
+                        @php
+                            $isCriticalBackup = in_array($backupWarnKey, ['directory_missing', 'backup_overdue', 'no_scheduler_heartbeat'], true);
+                        @endphp
+                        <div class="rounded-xl border {{ $isCriticalBackup ? 'border-danger-200 bg-danger-50' : 'border-warning-200 bg-warning-50' }} p-3">
+                            <div class="flex items-start gap-2.5">
+                                <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {{ $isCriticalBackup ? 'bg-danger-500' : 'bg-warning-500' }}"></span>
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-sm font-semibold {{ $isCriticalBackup ? 'text-danger-900' : 'text-warning-900' }}">
+                                        {{ __('procynia.backup_recovery.warnings.'.$backupWarnKey) }}
+                                    </p>
+                                    <p class="mt-1.5 text-xs {{ $isCriticalBackup ? 'text-danger-600' : 'text-warning-600' }}">
+                                        → {{ __('procynia.backup_recovery.warnings.'.$backupWarnKey.'_step') }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    @endforeach
 
                 </div>
             @endif

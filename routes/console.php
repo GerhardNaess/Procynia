@@ -18,6 +18,7 @@ Schedule::command('doffin:watch-inbox-discover')
     ->withoutOverlapping();
 
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
+Schedule::command('procynia:backup')->hourly()->withoutOverlapping();
 Schedule::job(new OpsQueueHeartbeatJob('supplier-harvests'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('supplier-lookups'))->everyMinute();
 Schedule::job(new OpsQueueHeartbeatJob('ai-requirements'))->everyMinute();

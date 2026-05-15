@@ -2,6 +2,7 @@
 
 namespace App\Services\Operations;
 
+use App\Services\Operations\BackupService;
 use Illuminate\Support\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
@@ -38,6 +39,7 @@ class RuntimeStatusService
             'uptime' => $this->uptimeStatus(),
             'failed_jobs_count' => $failedJobsCount,
             'scheduler' => $this->schedulerStatus(),
+            'backup' => $this->backupStatus(),
         ];
     }
 
@@ -193,6 +195,20 @@ class RuntimeStatusService
             return (int) DB::table($table)->count();
         } catch (Throwable) {
             return 0;
+        }
+    }
+
+    /**
+     * Return a compact backup status summary for the system status cockpit.
+     *
+     * @return array<string, mixed>
+     */
+    private function backupStatus(): array
+    {
+        try {
+            return app(BackupService::class)->evaluateStatus();
+        } catch (Throwable) {
+            return ['ok' => true, 'enabled' => false, 'warnings' => []];
         }
     }
 
