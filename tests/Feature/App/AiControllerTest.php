@@ -6198,6 +6198,163 @@ class AiControllerTest extends TestCase
         $this->assertSame('kunnskapsgrunnlag.docx', data_get($requirementRow, 'answer_draft.retrieval_sources.0.document_title'));
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // AVVIK-018B — Word export tests
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * W1 – Authenticated user receives a valid .docx binary for a notice with saved drafts.
+     * Proves that the export endpoint returns 200 with the correct content-type
+     * and a non-empty response body that starts with a PK (ZIP/DOCX) magic header.
+     */
+    public function test_export_requirements_docx_returns_word_document_with_saved_drafts(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'DOCX-W1', 'Anbudsbesvarelse W1', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'krav.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/krav.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal ha ISO 27001-sertifisering.');
+        $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal ha ISO 27001-sertifisering.',
+            'answer_draft_text' => 'Leverandøren er ISO 27001-sertifisert og kan dokumentere dette.',
+            'answer_draft_generated_at' => now()->toDateTimeString(),
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        $this->assertStringStartsWith('PK', (string) $response->getContent());
+    }
+
+    /**
+     * W2 – Export only includes requirements that have a saved answer_draft_text.
+     * Proves that requirements without a draft are silently excluded from the
+     * exported document — the endpoint still returns 200.
+     */
+    public function test_export_requirements_docx_excludes_requirements_without_drafts(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'DOCX-W2', 'Anbudsbesvarelse W2', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'krav.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/krav.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Krav med utkast.');
+        $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '2.1',
+            'requirement_text' => 'Krav med utkast.',
+            'answer_draft_text' => 'Dette kravet har et svarutkast.',
+            'answer_draft_generated_at' => now()->toDateTimeString(),
+        ]);
+
+        $chunkB = $this->createAiDocumentChunk($document, 'Krav uten utkast.', 1);
+        $this->createAiRequirement($savedNotice, $document, $chunkB, [
+            'requirement_identifier' => '2.2',
+            'requirement_text' => 'Krav uten utkast.',
+            'answer_draft_text' => null,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $response->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    }
+
+    /**
+     * W3 – Export returns 422 when no requirements have a saved draft.
+     * Proves the endpoint does not return an empty or broken document when there
+     * is nothing to export — a 422 lets the frontend show an appropriate message.
+     */
+    public function test_export_requirements_docx_returns_422_when_no_drafts_exist(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'DOCX-W3', 'Anbudsbesvarelse W3', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'krav.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/krav.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Krav uten noe utkast ennå.');
+        $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Krav uten noe utkast ennå.',
+            'answer_draft_text' => null,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertStatus(422);
+    }
+
+    /**
+     * W4 – Export endpoint requires authentication.
+     * Proves that unauthenticated requests are redirected to the login page.
+     */
+    public function test_export_requirements_docx_requires_authentication(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'DOCX-W4', 'Anbudsbesvarelse W4', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $response = $this->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertRedirect();
+    }
+
+    /**
+     * W5 – Export endpoint is scoped to the authenticated customer's tenant.
+     * Proves that a user from another customer receives a 404 when trying to
+     * export requirements belonging to a different customer's saved notice.
+     */
+    public function test_export_requirements_docx_is_scoped_to_customer_tenant(): void
+    {
+        $ownerContext = $this->customerAdminContext('Owner Co');
+        $attackerContext = $this->customerAdminContext('Attacker Co');
+
+        $savedNotice = $this->createSavedNotice($ownerContext['customer']->id, 'DOCX-W5-OWNER', 'Owner notice W5', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'krav.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/krav.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Sensitiv kravtekst.');
+        $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Sensitiv kravtekst.',
+            'answer_draft_text' => 'Sensitiv besvarelse.',
+            'answer_draft_generated_at' => now()->toDateTimeString(),
+        ]);
+
+        $response = $this->actingAs($attackerContext['user'])
+            ->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertNotFound();
+    }
+
     private function customerAdminContext(string $customerName = 'Procynia AS', bool $withAiAccess = true): array
     {
         $customer = $this->createCustomer($customerName);

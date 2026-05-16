@@ -114,6 +114,7 @@ Route::prefix('app')
         Route::get('/ai/{savedNotice}/documents/{document}/preview', [AiController::class, 'previewDocument'])->name('ai.documents.preview');
         Route::get('/ai/{savedNotice}/documents/{document}/preview-file', [AiController::class, 'previewPdfDocument'])->name('ai.documents.preview-file');
         Route::get('/ai/{savedNotice}/documents/{document}/download', [AiController::class, 'downloadDocument'])->name('ai.documents.download');
+        Route::get('/ai/{savedNotice}/export/requirements.docx', [AiController::class, 'exportRequirementsToDocx'])->name('ai.requirements.export.docx');
         Route::delete('/ai/{savedNotice}/documents/{document}', [AiController::class, 'destroyDocument'])->name('ai.documents.destroy');
         Route::post('/ai/{savedNotice}/answer-basis/documents', [AiController::class, 'storeAnswerBasisDocuments'])
             ->name('ai.answer-basis.documents.store');

@@ -28,6 +28,7 @@ use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
 use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
 use App\Services\Ai\Requirements\RequirementEditorService;
+use App\Services\Ai\Requirements\RequirementWordExportService;
 use App\Services\Ai\Requirements\RequirementLoader;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Billing\BillingEntitlementService;
@@ -86,6 +87,7 @@ class AiController extends Controller
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly RequirementResponsibilityTaskService $requirementResponsibilityTaskService,
         private readonly AiUsageGuard $aiUsageGuard,
+        private readonly RequirementWordExportService $requirementWordExportService,
     ) {
     }
 
@@ -162,6 +164,7 @@ class AiController extends Controller
             'answer_basis_items' => $this->aiAnswerBasisItemsPayload($record->answerBasisItems),
             'answer_basis_documents_upload_url' => route('app.ai.answer-basis.documents.store', ['savedNotice' => $record->id]),
             'answer_basis_text_store_url' => route('app.ai.answer-basis.texts.store', ['savedNotice' => $record->id]),
+            'export_docx_url' => route('app.ai.requirements.export.docx', ['savedNotice' => $record->id]),
             'can_use_ai_offer' => $canUseAiOffer,
         ]);
     }
@@ -555,6 +558,41 @@ class AiController extends Controller
         $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $downloadName);
 
         return $response;
+    }
+
+    /**
+     * Purpose: Export all requirements with saved answer drafts as a Word (.docx) document.
+     * Inputs: The current request and the route-bound saved notice.
+     * Returns: A streamed .docx download response, or 422 if no drafts exist.
+     * Side effects: None.
+     */
+    public function exportRequirementsToDocx(
+        Request $request,
+        SavedNotice $savedNotice,
+    ): \Symfony\Component\HttpFoundation\StreamedResponse|\Illuminate\Http\Response {
+        $record = $this->visibleAiSavedNotice($request, $savedNotice);
+        $this->assertAiAccess($record);
+
+        $requirements = $record->aiRequirements()
+            ->whereNotNull('answer_draft_text')
+            ->where('answer_draft_text', '!=', '')
+            ->orderBy('requirement_identifier')
+            ->get();
+
+        if ($requirements->isEmpty()) {
+            return response('', 422);
+        }
+
+        $docxContents = $this->requirementWordExportService->build($record, $requirements);
+        $filename = 'tilbudsbesvarelse-' . $record->id . '.docx';
+
+        return response()->streamDownload(
+            function () use ($docxContents): void {
+                echo $docxContents;
+            },
+            $filename,
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        );
     }
 
     /**

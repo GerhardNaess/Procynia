@@ -1533,6 +1533,7 @@ export default function AiShow({
     documents = [],
     documents_upload_url: documentsUploadUrl = '',
     answer_basis_items: answerBasisItemsProp = [],
+    export_docx_url: exportDocxUrl = '',
 }) {
     const currentCaseId = caseData?.id ?? null;
     const {
@@ -2998,6 +2999,16 @@ export default function AiShow({
                                     >
                                         {deletingAllRequirements ? tai.deleting : tai.delete_all_requirements}
                                     </button>
+                                ) : null}
+
+                                {exportDocxUrl ? (
+                                    <a
+                                        href={exportDocxUrl}
+                                        title={tai.export_word_title ?? 'Last ned alle svarutkast som Word-dokument'}
+                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    >
+                                        {tai.export_word ?? 'Last ned Word'}
+                                    </a>
                                 ) : null}
                             </div>
                         </div>
