@@ -6,7 +6,7 @@ function readWorkspaceState() {
     }
 
     try {
-        const rawState = window.sessionStorage.getItem(STORAGE_KEY);
+        const rawState = window.localStorage.getItem(STORAGE_KEY);
 
         if (!rawState) {
             return {};
@@ -28,7 +28,7 @@ function writeWorkspaceState(nextState) {
     }
 
     try {
-        window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
     } catch {
         // Ignore storage failures and keep the current page state in memory only.
     }

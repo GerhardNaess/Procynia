@@ -77,9 +77,12 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const noticeMode = searchParams.get('mode') ?? 'live';
     const noticeTab = searchParams.get('tab') ?? (noticeMode === 'live' ? 'live' : null);
     const currentAiCaseId = page.props.case?.id ?? null;
+    const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
+        ? String(page.props.analysisCases[0].id)
+        : null;
     const rememberedAiCaseId = currentAiCaseId !== null && currentAiCaseId !== undefined
         ? String(currentAiCaseId)
-        : readLastAiCaseId();
+        : (readLastAiCaseId() ?? firstAvailableAiCaseId);
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.is_system_owner ? '/app/billing' : null;
@@ -517,8 +520,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                             return (
                                                 <span
                                                     key={item.key}
-                                                    className={classes}
+                                                    className={classNames('rounded-xl px-3 py-2 text-sm font-medium cursor-default text-slate-400 select-none')}
                                                     aria-current={isActive ? 'page' : undefined}
+                                                    aria-disabled="true"
                                                 >
                                                     {item.label}
                                                 </span>
