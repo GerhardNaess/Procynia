@@ -1,6 +1,7 @@
 import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import InfoHint from '../../../Components/App/InfoHint';
 import {
     readRememberedAiRequirementId,
     writeRememberedAiRequirementId,
@@ -2839,6 +2840,7 @@ export default function AiShow({
                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
                                 {aiStatusMeta.label}
                             </span>
+                            <InfoHint size="sm" label="Vis forklaring for AI-status" text={tai.hint_ai_status} />
                         </div>
                         <div className="flex flex-wrap gap-2 text-sm text-slate-500">
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
@@ -3070,8 +3072,9 @@ export default function AiShow({
                                 </label>
 
                                 <label className="block space-y-1">
-                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                         {tai.requirement_type_label}
+                                        <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
                                     </span>
                                     <select
                                         value={manualRequirementForm.data.requirement_type}
@@ -3554,8 +3557,9 @@ export default function AiShow({
                                                             </label>
 
                                                             <label className="block space-y-1">
-                                                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                                     {tai.requirement_type_label}
+                                                                    <InfoHint size="sm" label="Vis forklaring for Kravtype" text={tai.hint_requirement_type} />
                                                                 </span>
                                                                 <select
                                                                     value={requirementEditForm.data.requirement_type}
@@ -4251,7 +4255,8 @@ export default function AiShow({
                                             ) : null}
 
                                             {activeRequirementKnowledgeGrounding ? (
-                                                <div className="mt-4 flex justify-end">
+                                                <div className="mt-4 flex items-center justify-end gap-2">
+                                                    <InfoHint size="sm" align="left" label="Vis forklaring for Kunnskapsgrunnlag" text={tai.hint_knowledge_grounding} />
                                                     <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.className ?? KNOWLEDGE_GROUNDING_META.red.className}`}>
                                                         {tai[`knowledge_grounding_${activeRequirementKnowledgeGrounding.level}`] ?? KNOWLEDGE_GROUNDING_META[activeRequirementKnowledgeGrounding.level]?.label ?? KNOWLEDGE_GROUNDING_META.red.label}
                                                     </span>
