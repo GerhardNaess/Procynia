@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import InfoHint from './InfoHint';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -152,51 +153,17 @@ function buildMonthOptions(locale = 'nb-NO') {
     });
 }
 
-function InfoButton({ infoKey, title, infoText, openInfoKey, setOpenInfoKey, texts = {} }) {
-    const isOpen = openInfoKey === infoKey;
+// Adapter that preserves the internal API used by InfoTile and Card while delegating
+// rendering to the shared InfoHint component. The openInfoKey/setOpenInfoKey props
+// are no longer needed but are accepted so existing call sites do not need to change.
+function InfoButton({ infoKey, title, infoText, texts = {} }) {
     const resolvedInfoText = infoText ?? texts.info_texts?.[infoKey];
-
-    if (!resolvedInfoText) {
-        return null;
-    }
-
+    if (!resolvedInfoText) return null;
     return (
-        <span
-            className="relative inline-flex shrink-0"
-            onMouseEnter={() => setOpenInfoKey(infoKey)}
-            onMouseLeave={() => setOpenInfoKey((current) => (current === infoKey ? null : current))}
-        >
-            <button
-                type="button"
-                aria-label={`${texts.info_prefix} ${title}`}
-                aria-expanded={isOpen}
-                aria-describedby={isOpen ? `${infoKey}-tooltip` : undefined}
-                onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setOpenInfoKey((current) => (current === infoKey ? null : infoKey));
-                }}
-                onFocus={() => setOpenInfoKey(infoKey)}
-                onBlur={() => setOpenInfoKey((current) => (current === infoKey ? null : current))}
-                className={classNames(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-semibold leading-none text-slate-500 transition',
-                    'hover:border-violet-300 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300',
-                    isOpen ? 'border-violet-300 text-violet-700 shadow-sm' : '',
-                )}
-            >
-                i
-            </button>
-
-            {isOpen ? (
-                <div
-                    id={`${infoKey}-tooltip`}
-                    role="tooltip"
-                    className="absolute right-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-600 shadow-[0_20px_40px_rgba(15,23,42,0.12)]"
-                >
-                    {resolvedInfoText}
-                </div>
-            ) : null}
-        </span>
+        <InfoHint
+            label={`${texts.info_prefix ?? 'Vis forklaring for'} ${title}`}
+            text={resolvedInfoText}
+        />
     );
 }
 

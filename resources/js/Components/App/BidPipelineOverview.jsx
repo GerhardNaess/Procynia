@@ -1,3 +1,5 @@
+import InfoHint from './InfoHint';
+
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
@@ -61,32 +63,6 @@ function stageHelpText(stageKey) {
     }
 }
 
-function InfoIcon({ text, align = 'center' }) {
-    const tooltipClassName = align === 'right'
-        ? 'right-0'
-        : 'left-1/2 -translate-x-1/2';
-
-    return (
-        <span className="group relative inline-flex items-center align-middle">
-            <button
-                type="button"
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-semibold leading-none text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
-                aria-label={text}
-            >
-                i
-            </button>
-            <span
-                role="tooltip"
-                className={classNames(
-                    'pointer-events-none absolute top-full z-20 mt-2 hidden w-64 rounded-xl border border-slate-200 bg-slate-950 px-3 py-2 text-left text-xs font-medium leading-5 text-white shadow-lg group-hover:block group-focus-within:block',
-                    tooltipClassName,
-                )}
-            >
-                {text}
-            </span>
-        </span>
-    );
-}
 
 export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
     const stages = pipeline?.stages ?? [];
@@ -98,7 +74,11 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                 <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
                     <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                         Totalt
-                        <InfoIcon
+                        <InfoHint
+                            variant="dark"
+                            size="sm"
+                            align="center"
+                            label="Vis forklaring for Totalt"
                             text="Totalt antall bid-saker i porteføljen, uavhengig av hvilken status sakene har akkurat nå."
                         />
                     </div>
@@ -113,7 +93,11 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                 <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
                     <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                         Aktive
-                        <InfoIcon
+                        <InfoHint
+                            variant="dark"
+                            size="sm"
+                            align="center"
+                            label="Vis forklaring for Aktive"
                             text="Totalt antall aktive saker i porteføljen, altså saker som fortsatt er i arbeid, vurdering eller beslutning."
                         />
                     </div>
@@ -128,7 +112,11 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                 <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 shadow-[0_8px_20px_rgba(15,23,42,0.04)]">
                     <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                         Utfall
-                        <InfoIcon
+                        <InfoHint
+                            variant="dark"
+                            size="sm"
+                            align="center"
+                            label="Vis forklaring for Utfall"
                             text="Totalt antall avsluttede saker i porteføljen, altså saker med endelig utfall eller saker som er flyttet ut av aktiv portefølje."
                         />
                     </div>
@@ -146,7 +134,7 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                     <div>
                         <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                             Aktivt løp
-                            <InfoIcon text="Den aktive delen av pipeline viser saker som fortsatt er i arbeid, vurdering eller beslutning." />
+                            <InfoHint variant="dark" size="sm" align="center" label="Vis forklaring for Aktivt løp" text="Den aktive delen av pipeline viser saker som fortsatt er i arbeid, vurdering eller beslutning." />
                         </div>
                         <div className="mt-1 text-sm text-slate-500">
                             Saker som fortsatt er i arbeid eller nær beslutning.
@@ -165,7 +153,7 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                         >
                             <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                 {stage.label}
-                                <InfoIcon text={stageHelpText(stage.key)} />
+                                <InfoHint variant="dark" size="sm" align="center" label={`Vis forklaring for ${stage.label}`} text={stageHelpText(stage.key)} />
                             </div>
                             <div className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
                                 {formatCount(stage.count, locale)}
@@ -180,7 +168,7 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                     <div>
                         <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                             Utfall
-                            <InfoIcon text="Utfall viser saker som er avsluttet med et endelig resultat eller er flyttet ut av aktiv portefølje." />
+                            <InfoHint variant="dark" size="sm" align="center" label="Vis forklaring for Utfall" text="Utfall viser saker som er avsluttet med et endelig resultat eller er flyttet ut av aktiv portefølje." />
                         </div>
                         <div className="mt-1 text-sm text-slate-500">
                             Avsluttede saker og resultater i porteføljen.
@@ -199,7 +187,7 @@ export default function BidPipelineOverview({ pipeline, locale = 'nb-NO' }) {
                         >
                             <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                 {stage.label}
-                                <InfoIcon text={stageHelpText(stage.key)} />
+                                <InfoHint variant="dark" size="sm" align="center" label={`Vis forklaring for ${stage.label}`} text={stageHelpText(stage.key)} />
                             </div>
                             <div className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
                                 {formatCount(stage.count, locale)}
