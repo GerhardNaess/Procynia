@@ -1,6 +1,7 @@
 import { Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 
 function formatDate(value, locale) {
     if (!value) {
@@ -53,10 +54,10 @@ export default function DepartmentsIndex({ departments }) {
                 </section>
 
                 {departments.length === 0 ? (
-                    <section className="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-lg font-semibold text-slate-900">Ingen avdelinger ennå</div>
-                        <p className="mt-2 text-sm text-slate-500">Legg til den første avdelingen for å strukturere kunden bedre.</p>
-                    </section>
+                    <EmptyStateBox
+                        title="Ingen avdelinger ennå"
+                        description="Legg til den første avdelingen for å strukturere kunden bedre."
+                    />
                 ) : (
                     <>
                         <section className="grid gap-3 md:hidden">

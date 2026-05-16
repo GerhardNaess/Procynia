@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
@@ -86,10 +87,10 @@ export default function UsersIndex({ users }) {
                 </section>
 
                 {users.length === 0 ? (
-                    <section className="rounded-[24px] border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-lg font-semibold text-slate-900">Ingen brukere ennå</div>
-                        <p className="mt-2 text-sm text-slate-500">Legg til den første brukeren for å gi flere tilgang til kundeområdet.</p>
-                    </section>
+                    <EmptyStateBox
+                        title="Ingen brukere ennå"
+                        description="Legg til den første brukeren for å gi flere tilgang til kundeområdet."
+                    />
                 ) : (
                     <>
                         <section className="grid gap-3 md:hidden">

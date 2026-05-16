@@ -1,6 +1,7 @@
 import { Link, usePage } from '@inertiajs/react';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 
 const AI_STATUS_TONE = {
@@ -206,14 +207,10 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                 </div>
                             </div>
                         ) : (
-                            <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-6 py-12">
-                                <div className="text-lg font-semibold text-slate-900">
-                                    {tai.no_cases_title ?? 'Ingen saker er klare for oversikt ennå'}
-                                </div>
-                                <p className="mt-2 text-sm text-slate-500">
-                                    {tai.no_cases_subtitle ?? 'Lagrede saker vil dukke opp her når de har nok struktur til videre arbeid.'}
-                                </p>
-                            </div>
+                            <EmptyStateBox
+                                title={tai.no_cases_title ?? 'Ingen saker er klare for oversikt ennå'}
+                                description={tai.no_cases_subtitle ?? 'Lagrede saker vil dukke opp her når de har nok struktur til videre arbeid.'}
+                            />
                         )}
                     </div>
                 </section>
