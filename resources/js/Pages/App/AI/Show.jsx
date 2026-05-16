@@ -3648,19 +3648,25 @@ export default function AiShow({
                                                                                 {assessment.assessment_status_label ?? ASSESSMENT_STATUS_META.completed.label}
                                                                             </span>
                                                                             {assessment.coverage_status ? (
-                                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-                                                                                    COVERAGE_STATUS_META[assessment.coverage_status]?.className
-                                                                                        ?? COVERAGE_STATUS_META.missing.className
-                                                                                }`}>
-                                                                                    {assessment.coverage_status_label ?? COVERAGE_STATUS_META.missing.label}
+                                                                                <span className="inline-flex items-center gap-1">
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                        COVERAGE_STATUS_META[assessment.coverage_status]?.className
+                                                                                            ?? COVERAGE_STATUS_META.missing.className
+                                                                                    }`}>
+                                                                                        {assessment.coverage_status_label ?? COVERAGE_STATUS_META.missing.label}
+                                                                                    </span>
+                                                                                    <InfoHint size="sm" label="Vis forklaring for Dekningsstatus" text={tai.hint_coverage_status} />
                                                                                 </span>
                                                                             ) : null}
                                                                             {assessment.risk_level ? (
-                                                                                <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
-                                                                                    RISK_LEVEL_META[assessment.risk_level]?.className
-                                                                                        ?? RISK_LEVEL_META.high.className
-                                                                                }`}>
-                                                                                    {assessment.risk_level_label ?? RISK_LEVEL_META.high.label}
+                                                                                <span className="inline-flex items-center gap-1">
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                        RISK_LEVEL_META[assessment.risk_level]?.className
+                                                                                            ?? RISK_LEVEL_META.high.className
+                                                                                    }`}>
+                                                                                        {assessment.risk_level_label ?? RISK_LEVEL_META.high.label}
+                                                                                    </span>
+                                                                                    <InfoHint size="sm" label="Vis forklaring for Risikonivå" text={tai.hint_risk_level} />
                                                                                 </span>
                                                                             ) : null}
                                                                         </div>
