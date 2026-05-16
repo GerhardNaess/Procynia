@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import BidStatusPipeline from '../../../Components/App/BidStatusPipeline';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale, options = {}) {
     if (!value) {
@@ -899,7 +900,7 @@ export default function SavedNoticeShow({ notice }) {
                             </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-3">
+                        <div className="flex flex-wrap items-start gap-3">
                             {notice.external_url ? (
                                 <a
                                     href={notice.external_url}
@@ -910,6 +911,30 @@ export default function SavedNoticeShow({ notice }) {
                                     {externalLinkLabel}
                                 </a>
                             ) : null}
+                            <PageHelpButton
+                                buttonLabel={tsn.page_help_button ?? 'Hjelp'}
+                                title={tsn.page_help_title ?? 'Om denne saken'}
+                                intro={tsn.page_help_intro ?? 'Dette er arbeidsrommet for én lagret kunngjøring.'}
+                                sections={[
+                                    {
+                                        title: tsn.page_help_section_overview ?? 'Hva siden brukes til',
+                                        items: [
+                                            {
+                                                title: tsn.page_help_item_status_title ?? 'Status og ansvar',
+                                                text: tsn.page_help_item_status_text ?? 'Sett bid-status, tilordne bid-manager og kommersiell eier, og registrer sentrale datoer.',
+                                            },
+                                            {
+                                                title: tsn.page_help_item_documents_title ?? 'Dokumenter og AI',
+                                                text: tsn.page_help_item_documents_text ?? 'Last opp anbudsdokumenter og start AI-analyse for å ekstrahere krav og generere svarutkast.',
+                                            },
+                                            {
+                                                title: tsn.page_help_item_review_title ?? 'Business Review',
+                                                text: tsn.page_help_item_review_text ?? 'Opprett Business Review for formell go/no-go-beslutning.',
+                                            },
+                                        ],
+                                    },
+                                ]}
+                            />
                         </div>
                     </div>
                 </section>

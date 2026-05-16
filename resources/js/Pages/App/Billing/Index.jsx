@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -337,9 +338,35 @@ export default function BillingIndex() {
                 )}
 
                 <header className="space-y-3">
-                    <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-                        {tb.title ?? 'Fakturering og abonnement'}
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+                            {tb.title ?? 'Fakturering og abonnement'}
+                        </h1>
+                        <PageHelpButton
+                            buttonLabel={tb.page_help_button ?? 'Hjelp'}
+                            title={tb.page_help_title ?? 'Om Fakturering'}
+                            intro={tb.page_help_intro ?? 'Faktureringssiden gir deg oversikt over abonnement, tjenester, brukernivåer og betalingsstatus.'}
+                            sections={[
+                                {
+                                    title: tb.page_help_section_overview ?? 'Hva du finner her',
+                                    items: [
+                                        {
+                                            title: tb.page_help_item_subscription_title ?? 'Abonnement',
+                                            text: tb.page_help_item_subscription_text ?? 'Viser gjeldende abonnement, neste fakturering og betalingsstatus.',
+                                        },
+                                        {
+                                            title: tb.page_help_item_services_title ?? 'Tjenester og brukernivåer',
+                                            text: tb.page_help_item_services_text ?? 'Viser hvilke tjenester som er aktive og antall brukere per nivå.',
+                                        },
+                                        {
+                                            title: tb.page_help_item_invoices_title ?? 'Fakturaer',
+                                            text: tb.page_help_item_invoices_text ?? 'Historikk over fakturaer med beløp, dato og status.',
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-4xl text-sm leading-6 text-slate-600">
                         {tb.subtitle ?? 'Oversikt over abonnement, tjenester, brukernivåer og fakturaer fra Stripe.'}
                     </p>

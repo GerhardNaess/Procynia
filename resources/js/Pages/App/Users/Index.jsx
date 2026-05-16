@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale) {
     if (!value) {
@@ -15,7 +16,8 @@ function formatDate(value, locale) {
 }
 
 export default function UsersIndex({ users }) {
-    const { locale } = usePage().props;
+    const { locale, translations = {} } = usePage().props;
+    const tu = translations?.user ?? {};
     const [togglingUserId, setTogglingUserId] = useState(null);
 
     const toggleActive = (user) => {
@@ -39,7 +41,33 @@ export default function UsersIndex({ users }) {
         <CustomerAppLayout title="Brukere" showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Brukere</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Brukere</h1>
+                        <PageHelpButton
+                            buttonLabel={tu.page_help_button ?? 'Hjelp'}
+                            title={tu.page_help_title ?? 'Om Brukere'}
+                            intro={tu.page_help_intro ?? 'Brukersiden brukes til å administrere hvem som har tilgang til kundemiljøet, hvilken rolle de har og hvilken avdeling de tilhører.'}
+                            sections={[
+                                {
+                                    title: tu.page_help_section_roles ?? 'Roller og tilgang',
+                                    items: [
+                                        {
+                                            title: tu.page_help_item_system_owner_title ?? 'System Owner',
+                                            text: tu.page_help_item_system_owner_text ?? 'Har full tilgang: kan administrere brukere, avdelinger, bevakningsprofiler og abonnement.',
+                                        },
+                                        {
+                                            title: tu.page_help_item_bid_manager_title ?? 'Bid-manager',
+                                            text: tu.page_help_item_bid_manager_text ?? 'Administrerer saker i tildelte avdelinger og kan ha utvidet innsyn i porteføljen.',
+                                        },
+                                        {
+                                            title: tu.page_help_item_contributor_title ?? 'Bidragsyter',
+                                            text: tu.page_help_item_contributor_text ?? 'Kan jobbe med saker de er tilknyttet. Tilgangen styres av bid-manager og System Owner.',
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         Administrer brukere og roller for din egen kunde. Nye brukere opprettes som aktive med passordet du setter.
                     </p>

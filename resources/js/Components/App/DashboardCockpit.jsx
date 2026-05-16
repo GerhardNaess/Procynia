@@ -1,6 +1,7 @@
 import { Link } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import InfoHint from './InfoHint';
+import PageHelpButton from './PageHelpButton';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -595,9 +596,35 @@ export default function DashboardCockpit({ cockpit, locale = 'nb-NO', texts = {}
     return (
         <div className="space-y-5">
             <section className="space-y-1.5">
-                <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                    {pageTitle}
-                </h1>
+                <div className="flex items-center gap-3">
+                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                        {pageTitle}
+                    </h1>
+                    <PageHelpButton
+                        buttonLabel={texts.page_help_button ?? 'Hjelp'}
+                        title={texts.page_help_title ?? 'Om dashboardet'}
+                        intro={texts.page_help_intro ?? 'Dashboardet gir deg et daglig cockpit-blikk over portefølje, frister, ansvar og bid-fremdrift.'}
+                        sections={[
+                            {
+                                title: texts.page_help_section_widgets ?? 'Hva du ser her',
+                                items: [
+                                    {
+                                        title: texts.page_help_item_pipeline_title ?? 'Pipeline-stadier',
+                                        text: texts.page_help_item_pipeline_text ?? 'Viser antall saker i hvert trinn av bid-prosessen.',
+                                    },
+                                    {
+                                        title: texts.page_help_item_attention_title ?? 'Oppmerksomhet nå',
+                                        text: texts.page_help_item_attention_text ?? 'Saker som krever rask handling: nær frist, mangler ansvarlig eller ikke startet.',
+                                    },
+                                    {
+                                        title: texts.page_help_item_calendar_title ?? 'Bidkalender',
+                                        text: texts.page_help_item_calendar_text ?? 'Planlagte frister og Business Reviews sortert per måned.',
+                                    },
+                                ],
+                            },
+                        ]}
+                    />
+                </div>
                 <p className="max-w-4xl text-[15px] leading-7 text-slate-500">
                     {pageSubtitle}
                 </p>

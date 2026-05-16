@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 
 const noticeSummaryPreviewLimit = 280;
@@ -1394,7 +1395,33 @@ export default function NoticeIndex({
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{pageHeading}</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">{pageHeading}</h1>
+                        <PageHelpButton
+                            buttonLabel={nt.page_help_button ?? 'Hjelp'}
+                            title={nt.page_help_title ?? 'Om Kunngjøringer'}
+                            intro={nt.page_help_intro ?? 'Kunngjøringer er inngangen til nye anbudsmuligheter.'}
+                            sections={[
+                                {
+                                    title: nt.page_help_section_usage ?? 'Slik bruker du siden',
+                                    items: [
+                                        {
+                                            title: nt.page_help_item_live_title ?? 'Live-søk',
+                                            text: nt.page_help_item_live_text ?? 'Søk direkte mot Doffin med filtre på frist, CPV, nøkkelord og relevans.',
+                                        },
+                                        {
+                                            title: nt.page_help_item_saved_title ?? 'Arbeidsliste',
+                                            text: nt.page_help_item_saved_text ?? 'Viser kunngjøringer du allerede har lagret og jobber aktivt med.',
+                                        },
+                                        {
+                                            title: nt.page_help_item_save_title ?? 'Lagre en kunngjøring',
+                                            text: nt.page_help_item_save_text ?? 'Lagrede kunngjøringer flyttes til arbeidslisten og følges opp som saker.',
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="text-[15px] text-slate-500">{pageSubtitle}</p>
                 </section>
 
