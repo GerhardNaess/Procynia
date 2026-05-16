@@ -3,28 +3,29 @@ import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import StatusBadge from '../../../Components/App/StatusBadge';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
 }
 
-const STATUS_BADGE_CLASSES = {
-    active: 'bg-green-100 text-green-800',
-    trialing: 'bg-blue-100 text-blue-800',
-    past_due: 'bg-amber-100 text-amber-800',
-    unpaid: 'bg-amber-100 text-amber-800',
-    open: 'bg-amber-100 text-amber-800',
-    pending: 'bg-amber-100 text-amber-800',
-    draft: 'bg-slate-100 text-slate-600',
-    paid: 'bg-green-100 text-green-800',
-    cancelled: 'bg-slate-100 text-slate-600',
-    canceled: 'bg-slate-100 text-slate-600',
-    void: 'bg-slate-100 text-slate-600',
-    incomplete: 'bg-amber-100 text-amber-800',
-    incomplete_expired: 'bg-slate-100 text-slate-600',
-    uncollectible: 'bg-slate-100 text-slate-600',
-    inactive: 'bg-slate-100 text-slate-600',
-    default: 'bg-slate-100 text-slate-600',
+const STATUS_BADGE_TONES = {
+    active: 'green',
+    trialing: 'blue',
+    past_due: 'amber',
+    unpaid: 'amber',
+    open: 'amber',
+    pending: 'amber',
+    draft: 'slate',
+    paid: 'green',
+    cancelled: 'slate',
+    canceled: 'slate',
+    void: 'slate',
+    incomplete: 'amber',
+    incomplete_expired: 'slate',
+    uncollectible: 'slate',
+    inactive: 'slate',
+    default: 'slate',
 };
 
 const ACTIVE_STRIPE_STATUSES = new Set(['active', 'trialing', 'past_due', 'unpaid']);
@@ -42,16 +43,6 @@ function resolveLabel(value, labels, fallback) {
     return labels?.[key] ?? fallback;
 }
 
-function StatusBadge({ status, label }) {
-    const statusKey = normalizeKey(status);
-    const classes = STATUS_BADGE_CLASSES[statusKey] ?? STATUS_BADGE_CLASSES.default;
-
-    return (
-        <span className={classNames('inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium', classes)}>
-            {label}
-        </span>
-    );
-}
 
 function SummaryCard({ label, value }) {
     return (
@@ -412,7 +403,7 @@ export default function BillingIndex() {
                     {hasActiveStripeSubscription ? (
                         <div className="mt-4 space-y-4">
                             <div className="flex flex-wrap items-center gap-3">
-                                <StatusBadge status={subscription.status} label={resolveStatusLabel(subscription.status)} />
+                                <StatusBadge tone={STATUS_BADGE_TONES[normalizeKey(subscription.status)] ?? 'slate'}>{resolveStatusLabel(subscription.status)}</StatusBadge>
                                 {subscription.cancel_at_period_end && (
                                     <span className="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800">
                                         {subscriptionText.cancels_at_period_end ?? 'Avsluttes ved periodeslutt'}
@@ -555,7 +546,7 @@ export default function BillingIndex() {
                                                 </span>
                                             </td>
                                             <td className="py-3 pr-4">
-                                                <StatusBadge status={line.status} label={resolveStatusLabel(line.status)} />
+                                                <StatusBadge tone={STATUS_BADGE_TONES[normalizeKey(line.status)] ?? 'slate'}>{resolveStatusLabel(line.status)}</StatusBadge>
                                             </td>
                                             <td className="py-3">
                                                 <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
@@ -610,7 +601,7 @@ export default function BillingIndex() {
                                                 {resolveServiceLevelLabel(level.level_key)}
                                             </td>
                                             <td className="py-3 pr-4">
-                                                <StatusBadge status={level.status} label={resolveStatusLabel(level.status)} />
+                                                <StatusBadge tone={STATUS_BADGE_TONES[normalizeKey(level.status)] ?? 'slate'}>{resolveStatusLabel(level.status)}</StatusBadge>
                                             </td>
                                             <td className="py-3 text-slate-700">
                                                 {level.assigned_by ?? '—'}
@@ -658,7 +649,7 @@ export default function BillingIndex() {
                                                 {invoice.amount_due} {invoice.currency}
                                             </td>
                                             <td className="py-3 pr-4">
-                                                <StatusBadge status={invoice.status} label={resolveStatusLabel(invoice.status)} />
+                                                <StatusBadge tone={STATUS_BADGE_TONES[normalizeKey(invoice.status)] ?? 'slate'}>{resolveStatusLabel(invoice.status)}</StatusBadge>
                                             </td>
                                             <td className="py-3">
                                                 {invoice.invoice_pdf || invoice.hosted_invoice_url ? (

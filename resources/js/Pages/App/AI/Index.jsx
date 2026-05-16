@@ -1,11 +1,12 @@
 import { Link, usePage } from '@inertiajs/react';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import StatusBadge from '../../../Components/App/StatusBadge';
 
-const AI_STATUS_CLASS = {
-    not_started: 'bg-slate-100 text-slate-700 ring-slate-200',
-    ready: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
-    in_review: 'bg-violet-100 text-violet-700 ring-violet-200',
+const AI_STATUS_TONE = {
+    not_started: 'slate',
+    ready: 'emerald',
+    in_review: 'violet',
 };
 
 function formatDate(value, locale) {
@@ -155,7 +156,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                         </thead>
                                         <tbody className="divide-y divide-slate-200 bg-white">
                                             {rows.map((analysisCase) => {
-                                                const aiStatusClass = AI_STATUS_CLASS[analysisCase.ai_status] ?? AI_STATUS_CLASS.not_started;
+                                                const aiStatusTone = AI_STATUS_TONE[analysisCase.ai_status] ?? 'slate';
                                                 const aiStatusLabel = AI_STATUS_LABEL[analysisCase.ai_status] ?? AI_STATUS_LABEL.not_started;
                                                 const updatedAtLabel = analysisCase.updated_at
                                                     ? formatDate(analysisCase.updated_at, locale)
@@ -182,9 +183,9 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                                             {analysisCase.stage_label}
                                                         </td>
                                                         <td className="px-5 py-4">
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusClass}`}>
+                                                            <StatusBadge tone={aiStatusTone}>
                                                                 {aiStatusLabel}
-                                                            </span>
+                                                            </StatusBadge>
                                                         </td>
                                                         <td className="px-5 py-4 text-sm text-slate-600">
                                                             {updatedAtLabel}

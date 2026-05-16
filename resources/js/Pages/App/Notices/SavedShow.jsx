@@ -2,7 +2,9 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import BidStatusPipeline from '../../../Components/App/BidStatusPipeline';
+import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
+import StatusBadge from '../../../Components/App/StatusBadge';
 
 function formatDate(value, locale, options = {}) {
     if (!value) {
@@ -65,16 +67,11 @@ function actionButtonClassName(tone, status = null) {
     return 'border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-300 hover:bg-violet-100';
 }
 
-function infoItemStatusBadgeClassName(status) {
+function infoItemStatusBadgeTone(status) {
     switch (status) {
-        case 'open':
-            return 'bg-emerald-100 text-emerald-700 ring-emerald-200';
-        case 'waiting':
-            return 'bg-amber-100 text-amber-800 ring-amber-200';
-        case 'closed':
-            return 'bg-slate-100 text-slate-700 ring-slate-200';
-        default:
-            return 'bg-slate-100 text-slate-700 ring-slate-200';
+        case 'open':    return 'emerald';
+        case 'waiting': return 'amber';
+        default:        return 'slate';
     }
 }
 
@@ -963,7 +960,10 @@ export default function SavedNoticeShow({ notice }) {
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.responsible}</div>
                                         <div className="mt-3 space-y-3">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.bid_manager_label}</div>
+                                                <div className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                    {tsn.bid_manager_label}
+                                                    <InfoHint size="sm" label="Vis forklaring for Bid-manager" text={tsn.hint_bid_manager} />
+                                                </div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || tsn.not_set}</div>
                                                 {notice.bid_manager?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
@@ -973,7 +973,10 @@ export default function SavedNoticeShow({ notice }) {
                                             </div>
 
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.opportunity_owner_label}</div>
+                                                <div className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                    {tsn.opportunity_owner_label}
+                                                    <InfoHint size="sm" label="Vis forklaring for Kommersiell eier" text={tsn.hint_opportunity_owner} />
+                                                </div>
                                                 <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || tsn.not_set}</div>
                                                 {notice.opportunity_owner?.bid_role ? (
                                                     <div className="mt-1 text-xs text-slate-500">
@@ -1736,23 +1739,12 @@ export default function SavedNoticeShow({ notice }) {
                                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                                     <div className="min-w-0 space-y-3">
                                                         <div className="flex flex-wrap items-center gap-2">
-                                                            <span
-                                                                className={classNames(
-                                                                    'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset',
-                                                                    infoItemStatusBadgeClassName(item.status),
-                                                                )}
-                                                            >
+                                                            <StatusBadge tone={infoItemStatusBadgeTone(item.status)}>
                                                                 {item.status_label}
-                                                            </span>
-                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                {item.type_label}
-                                                            </span>
-                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                {item.direction_label}
-                                                            </span>
-                                                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
-                                                                {item.channel_label}
-                                                            </span>
+                                                            </StatusBadge>
+                                                            <StatusBadge tone="slate">{item.type_label}</StatusBadge>
+                                                            <StatusBadge tone="slate">{item.direction_label}</StatusBadge>
+                                                            <StatusBadge tone="slate">{item.channel_label}</StatusBadge>
                                                         </div>
 
                                                         <div className="text-sm font-semibold text-slate-950">
