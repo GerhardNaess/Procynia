@@ -5866,6 +5866,338 @@ class AiControllerTest extends TestCase
         $this->assertNull($requirement->answer_draft_text);
     }
 
+    // -------------------------------------------------------------------------
+    // AVVIK-024A — AI-output kvalitetstester (T1–T5)
+    // Tester Procynias håndtering av AI-output, ikke språkmodellkvalitet.
+    // Ingen av disse testene kaller ekte OpenAI.
+    // -------------------------------------------------------------------------
+
+    /**
+     * T4 – Payload-struktur for lagret utkast.
+     * Proves that the Show page returns generation_state = 'generated' and
+     * the persisted retrieval_sources when a requirement already has a saved draft.
+     * No AI calls needed — data is read directly from the database.
+     */
+    public function test_answer_draft_payload_returns_generation_state_generated_and_retrieval_sources_for_saved_draft(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-QT4-PAYLOAD', 'Payload T4 target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => 'Leverandøren beskriver løsningen grundig i dette dokumentet.',
+            'answer_draft_generated_at' => '2026-04-06 11:15:00',
+            'answer_draft_retrieval_sources' => [
+                [
+                    'chunk_id' => 42,
+                    'document_title' => 'relevant-knowledge.docx',
+                    'chunk_type' => 'semantic',
+                ],
+            ],
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+        $requirementRow = $requirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($requirementRow);
+        $this->assertSame('Leverandøren beskriver løsningen grundig i dette dokumentet.', data_get($requirementRow, 'answer_draft.text'));
+        $this->assertSame('generated', data_get($requirementRow, 'answer_draft.generation_state'));
+        $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.generated_at'));
+        $this->assertIsArray(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+        $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+        $this->assertSame('relevant-knowledge.docx', data_get($requirementRow, 'answer_draft.retrieval_sources.0.document_title'));
+        $this->assertSame('semantic', data_get($requirementRow, 'answer_draft.retrieval_sources.0.chunk_type'));
+    }
+
+    /**
+     * T5 – Payload-struktur for krav uten utkast.
+     * Proves that the Show page returns a controlled empty payload with
+     * generation_state = null when no draft has been generated yet.
+     * No AI calls needed.
+     */
+    public function test_answer_draft_payload_returns_null_generation_state_for_requirement_without_draft(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-QT5-EMPTY', 'Empty draft T5 target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive sikkerhetsarkitekturen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive sikkerhetsarkitekturen.',
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+        $requirementRow = $requirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($requirementRow);
+        $this->assertNull(data_get($requirementRow, 'answer_draft.generation_state'));
+        $this->assertSame('', data_get($requirementRow, 'answer_draft.text'));
+        $this->assertIsArray(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+        $this->assertEmpty(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+    }
+
+    /**
+     * T1 – Blokkert generering ved rød grounding.
+     * Proves that the generate endpoint returns a blocked payload and does not
+     * persist any draft when the knowledge grounding level is red.
+     * No OpenAI calls should be made.
+     */
+    public function test_answer_draft_generation_is_blocked_and_nothing_persisted_when_knowledge_grounding_is_red(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'red',
+                'max_score' => 0.08,
+                'sources_count' => 0,
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-QT1-RED', 'Red grounding T1 target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+        ]);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.text', '');
+        $response->assertJsonPath('knowledge_grounding.level', 'red');
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    /**
+     * T2 – Blokkert generering når judge sier can_generate_answer = false.
+     * Proves that when the grounding judge returns can_generate_answer = false,
+     * no draft is generated or persisted, and the blocked payload is returned.
+     * The judge service is mocked; no OpenAI HTTP calls should be made.
+     */
+    public function test_answer_draft_generation_is_blocked_and_nothing_persisted_when_judge_says_cannot_generate(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'amber',
+                'max_score' => 0.55,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'unsupported',
+                'can_generate_answer' => false,
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => ['Leverandøren mangler dokumentasjon på sikkerhetssertifisering.'],
+                'missing_knowledge_summary' => 'Kunnskapsgrunnlaget inneholder ikke nødvendig sikkerhetsdokumentasjon.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grunnlaget er utilstrekkelig for å generere et svar.',
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-QT2-JUDGE', 'Judge blocked T2 target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+        ]);
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'blocked_missing_knowledge');
+        $response->assertJsonPath('answer_draft.text', '');
+        $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'unsupported');
+        $response->assertJsonPath('answer_draft.missing_knowledge.can_generate_answer', false);
+
+        $requirement->refresh();
+        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNull($requirement->answer_draft_generated_at);
+
+        Http::assertNothingSent();
+    }
+
+    /**
+     * T3 – Persistens av retrieval_sources etter vellykket generering.
+     * Proves that after a successful generate call, answer_draft_retrieval_sources
+     * is stored in the database and is returned correctly from the Show page payload.
+     * OpenAI is replaced by Http::fake() with a fixed draft response.
+     */
+    public function test_retrieval_sources_are_persisted_after_successful_generation_and_survive_payload_readback(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'green',
+                'max_score' => 0.92,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => null,
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grunnlaget er tilstrekkelig dokumentert.',
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-QT3-PERSIST', 'Persist sources T3 target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+        ]);
+
+        [$retrievalKnowledge] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren skal beskrive løsningen.',
+            'kunnskapsgrunnlag.docx',
+        );
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-request-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(function (Request $request) {
+            return Http::response(
+                $this->openAiStructuredResponse(
+                    ['answer_draft_text' => 'Leverandøren dokumenterer løsningen i tråd med kunnskapsgrunnlaget.'],
+                    50,
+                    20,
+                ),
+                200,
+                ['x-request-id' => 'req_answer_draft_persist_t3'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $this->assertIsArray($response->json('retrieval_sources'));
+        $this->assertNotEmpty($response->json('retrieval_sources'));
+
+        $requirement->refresh();
+        $this->assertNotNull($requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+        $this->assertIsArray($requirement->answer_draft_retrieval_sources);
+        $this->assertNotEmpty($requirement->answer_draft_retrieval_sources);
+        $this->assertSame('kunnskapsgrunnlag.docx', data_get($requirement->answer_draft_retrieval_sources, '0.document_title'));
+
+        $pageResponse = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $pageResponse->assertOk();
+        $page = $this->inertiaPageFromResponse($pageResponse);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+        $requirementRow = $requirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($requirementRow);
+        $this->assertSame('generated', data_get($requirementRow, 'answer_draft.generation_state'));
+        $this->assertIsArray(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+        $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.retrieval_sources'));
+        $this->assertSame('kunnskapsgrunnlag.docx', data_get($requirementRow, 'answer_draft.retrieval_sources.0.document_title'));
+    }
+
     private function customerAdminContext(string $customerName = 'Procynia AS', bool $withAiAccess = true): array
     {
         $customer = $this->createCustomer($customerName);
