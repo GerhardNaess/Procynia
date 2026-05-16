@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AlertBox from '../../../Components/App/AlertBox';
 import DiscoveryNoticeCard from '../../../Components/App/DiscoveryNoticeCard';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
@@ -1528,6 +1529,7 @@ export default function NoticeIndex({
                                         selectedItems={selectedCpvItems}
                                         onSelectedItemsChange={setSelectedCpvItems}
                                         popularItems={cpvSelector?.popular ?? []}
+                                        labelHint={nt.hint_cpv}
                                     />
                                     <label className="space-y-2">
                                         <span className="text-sm font-medium text-slate-700">{tf.keyword}</span>
@@ -1866,15 +1868,15 @@ export default function NoticeIndex({
                             </div>
 
                             {isCappedLiveSearch ? (
-                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                <AlertBox>
                                     {noticesText.liveCappedWarning?.replace(':total', formatInteger(totalHits, locale)).replace(':accessible', formatInteger(accessibleHits, locale))}
-                                </div>
+                                </AlertBox>
                             ) : null}
 
                             {showLiveSearchFallbackBanner ? (
-                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                <AlertBox>
                                     {noticesText.liveFallbackBanner}
-                                </div>
+                                </AlertBox>
                             ) : null}
 
                             {notices.data.length === 0 ? (
@@ -2463,9 +2465,9 @@ export default function NoticeIndex({
                                                                             </div>
                                                                         ) : null}
                                                                         {needsHistorySelection ? (
-                                                                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:col-span-2">
+                                                                            <AlertBox className="sm:col-span-2">
                                                                                 {noticesText.historyNeedsSelection}
-                                                                            </div>
+                                                                            </AlertBox>
                                                                         ) : null}
                                                                         {isHistoryMode && notice.next_process_date_at ? (
                                                                             <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 sm:col-span-2">

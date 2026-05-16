@@ -1,6 +1,7 @@
 import { Link, usePage } from '@inertiajs/react';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AlertBox from '../../../Components/App/AlertBox';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 import StatusBadge from '../../../Components/App/StatusBadge';
 
@@ -97,10 +98,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                 </section>
 
                 {!canUseAiOffer ? (
-                    <section className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900">
-                        <div className="font-semibold">
-                            {tai.ai_access_unavailable_title ?? 'AI er ikke tilgjengelig'}
-                        </div>
+                    <AlertBox title={tai.ai_access_unavailable_title ?? 'AI er ikke tilgjengelig'}>
                         <p className="mt-1">
                             {tai.ai_access_unavailable_message ?? 'AI er ikke tilgjengelig for abonnementet ditt. System Owner kan aktivere eller endre abonnement under Fakturering.'}
                         </p>
@@ -112,7 +110,7 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                                 {tai.ai_access_billing_cta ?? 'Gå til Fakturering'}
                             </a>
                         ) : null}
-                    </section>
+                    </AlertBox>
                 ) : null}
 
                 <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">

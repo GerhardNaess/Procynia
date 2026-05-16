@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -387,9 +388,9 @@ export default function BillingIndex() {
                 </section>
 
                 {showProcyniaStripeWarning && (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+                    <AlertBox>
                         {alertText.services_without_subscription ?? 'Kontoen har aktive tjenester eller brukernivåer i Procynia, men ingen aktiv Stripe-subscription. Fakturaer, betaling og utestående håndteres via Stripe når abonnement eller faktura er opprettet.'}
-                    </div>
+                    </AlertBox>
                 )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -791,14 +792,14 @@ export default function BillingIndex() {
                             </>
                         ) : (
                             <>
-                                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                                <AlertBox className="mt-4">
                                     <p className="font-medium">
                                         {planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.'}
                                     </p>
                                     <p className="mt-2">
                                         {planChangeText.confirm_note ?? 'Endringen behandles via Stripe og kan påvirke videre fakturering.'}
                                     </p>
-                                </div>
+                                </AlertBox>
 
                                 {selectedPlanSummary && (
                                     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">

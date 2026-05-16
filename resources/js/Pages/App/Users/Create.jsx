@@ -1,5 +1,6 @@
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 
 function classNames(...values) {
@@ -250,9 +251,9 @@ export default function UsersCreate({
                         </div>
 
                         {canAddUser ? null : (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                            <AlertBox>
                                 {usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Fakturering.'}
-                            </div>
+                            </AlertBox>
                         )}
                     </section>
 
@@ -331,12 +332,11 @@ export default function UsersCreate({
                             )}
 
                             {form.data.bid_role === 'system_owner' ? (
-                                <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:col-span-2">
-                                    <div className="font-semibold">System Owner</div>
+                                <AlertBox title="System Owner" className="space-y-2 md:col-span-2">
                                     <p className="text-xs leading-5 text-amber-800">
                                         System Owner har full kontroll over brukere, roller, avdelingsstruktur og bid-managernes administrative ansvarsområde.
                                     </p>
-                                </div>
+                                </AlertBox>
                             ) : null}
 
                             {isBidManager && canEditBidManagerScope ? (

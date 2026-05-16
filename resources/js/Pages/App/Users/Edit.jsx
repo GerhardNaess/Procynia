@@ -1,6 +1,7 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import AlertBox from '../../../Components/App/AlertBox';
 import InfoHint from '../../../Components/App/InfoHint';
 
 function classNames(...values) {
@@ -251,12 +252,11 @@ export default function UsersEdit({
                             )}
 
                             {form.data.bid_role === 'system_owner' ? (
-                                <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:col-span-2">
-                                    <div className="font-semibold">System Owner</div>
+                                <AlertBox title="System Owner" className="space-y-2 md:col-span-2">
                                     <p className="text-xs leading-5 text-amber-800">
                                         System Owner har full kontroll over brukere, roller, avdelingsstruktur og bid-managernes administrative ansvarsområde.
                                     </p>
-                                </div>
+                                </AlertBox>
                             ) : null}
 
                             {isBidManager && canEditBidManagerScope ? (
