@@ -1,5 +1,6 @@
 import { Link, useForm, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import InfoHint from '../../../Components/App/InfoHint';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -212,8 +213,9 @@ export default function UsersCreate({
                             </div>
 
                             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                                     {usersFormText.user_license_label ?? 'Brukerlisens'}
+                                    <InfoHint size="sm" label="Vis forklaring for Brukerlisens" text={usersFormText.hint_user_license} />
                                 </div>
                                 {canChooseUserLicense ? (
                                     <div className="mt-3 space-y-2">
@@ -295,7 +297,10 @@ export default function UsersCreate({
 
                             {canEditRole ? (
                                 <label className="space-y-2 md:col-span-2">
-                                    <span className="text-sm font-medium text-slate-700">Rolle</span>
+                                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                                        {usersFormText.field_role ?? 'Rolle'}
+                                        <InfoHint size="sm" label="Vis forklaring for Rolle" text={usersFormText.hint_role} />
+                                    </span>
                                     <select
                                         name="bid_role"
                                         value={form.data.bid_role}
@@ -336,7 +341,10 @@ export default function UsersCreate({
 
                             {isBidManager && canEditBidManagerScope ? (
                                 <label className="space-y-2 md:col-span-2">
-                                    <span className="text-sm font-medium text-slate-700">Administrativt ansvarsområde</span>
+                                    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                                        {usersFormText.admin_scope_label ?? 'Administrativt ansvarsområde'}
+                                        <InfoHint size="sm" label="Vis forklaring for Administrativt ansvarsområde" text={usersFormText.hint_admin_scope} />
+                                    </span>
                                     <select
                                         name="bid_manager_scope"
                                         value={form.data.bid_manager_scope}

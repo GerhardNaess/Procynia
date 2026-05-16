@@ -745,6 +745,7 @@ return [
         'page_help_item_bid_manager_text' => 'Administrerer saker i tildelte avdelinger og kan ha utvidet innsyn i porteføljen.',
         'page_help_item_contributor_title' => 'Bidragsyter',
         'page_help_item_contributor_text' => 'Kan jobbe med saker de er tilknyttet. Tilgangen styres av bid-manager og System Owner.',
+        'hint_role_column' => 'Rollen viser ansvarsnivå i Procynia: System Owner administrerer miljøet, bid-manager leder tilbudsarbeid, og contributor bidrar i saker.',
     ],
     'ai' => [
         'no_files_selected' => 'Ingen filer valgt ennå.',
@@ -1522,6 +1523,9 @@ return [
         'save_button' => 'Lagre endringer',
         'cannot_deactivate_self' => 'Du kan ikke deaktivere din egen bruker.',
         'contributor_locked_role' => 'Contributor',
+        'hint_role' => 'Rollen styrer ansvar og operativ tilgang i Procynia. System Owner administrerer miljøet, bid-manager leder tilbudsarbeidet, og contributor bidrar i saker.',
+        'hint_user_license' => 'Brukerlisens bestemmer tilgangsnivå innenfor kundens abonnement. Rollen er separat og styrer ansvar i arbeidsflyt.',
+        'hint_admin_scope' => 'Styrer hvilke avdelinger bid-manager kan administrere operativt. Dette er separat fra brukerens egne avdelingstilhørigheter.',
     ],
     'customer_env' => [
         'title' => 'Kundemiljø',
@@ -1813,6 +1817,10 @@ return [
         'status_open' => 'Åpen',
         'no_subscription' => 'Ingen aktiv Stripe-subscription. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.',
         'no_invoices' => 'Ingen Stripe-fakturaer funnet. Fakturaer og PDF-er vises her når de er opprettet i Stripe.',
+        'hint_subscription' => 'Viser abonnementstilstand og neste fornyelsesdato. Betaling og fakturagrunnlag håndteres av ekstern betalingstjeneste.',
+        'hint_procynia_services' => 'Tjenester beskriver hvilken funksjonalitet som er aktivert for kunden. Dette er Procynias interne oversikt, ikke det samme som fakturagrunnlaget.',
+        'hint_procynia_levels' => 'Brukernivå beskriver tjenestenivå for den enkelte brukeren. Det er ikke det samme som arbeidsrollen i tilbudsarbeidet.',
+        'hint_ai_credits' => 'Viser kundens bruk av AI-funksjoner og eventuelle midlertidige stopp. Brukes til kapasitetsstyring, ikke som direkte fakturagrunnlag.',
     ],
 
     'suppliers' => [

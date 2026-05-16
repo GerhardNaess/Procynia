@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale) {
@@ -166,7 +167,12 @@ export default function UsersIndex({ users }) {
                                             <th className="px-6 py-4">Navn</th>
                                             <th className="px-6 py-4">E-post</th>
                                             <th className="px-6 py-4">Avdeling</th>
-                                            <th className="px-6 py-4">Rolle</th>
+                                            <th className="px-6 py-4">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    Rolle
+                                                    <InfoHint size="sm" align="left" label="Vis forklaring for Rolle" text={tu.hint_role_column} />
+                                                </span>
+                                            </th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4">Opprettet</th>
                                             <th className="px-6 py-4">Handlinger</th>

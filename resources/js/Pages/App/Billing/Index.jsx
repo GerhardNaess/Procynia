@@ -1,6 +1,7 @@
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function classNames(...values) {
@@ -401,9 +402,12 @@ export default function BillingIndex() {
                 )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
-                        {subscriptionText.heading ?? 'Abonnement fra Stripe'}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-slate-900">
+                            {subscriptionText.heading ?? 'Abonnement fra Stripe'}
+                        </h2>
+                        <InfoHint size="sm" label="Vis forklaring for Abonnement" text={tb.hint_subscription} />
+                    </div>
 
                     {hasActiveStripeSubscription ? (
                         <div className="mt-4 space-y-4">
@@ -452,7 +456,10 @@ export default function BillingIndex() {
                                 )}
                                 {subscription.included_ai_credits !== undefined && subscription.included_ai_credits !== null && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}</dt>
+                                        <dt className="flex items-center gap-1.5 text-slate-500">
+                                            {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
+                                            <InfoHint size="sm" label="Vis forklaring for KI-tilbud" text={tb.hint_ai_credits} />
+                                        </dt>
                                         <dd className="font-medium text-slate-900">{subscription.included_ai_credits}</dd>
                                     </>
                                 )}
@@ -503,9 +510,12 @@ export default function BillingIndex() {
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
-                        {servicesText.heading ?? 'Tjenester i Procynia'}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-slate-900">
+                            {servicesText.heading ?? 'Tjenester i Procynia'}
+                        </h2>
+                        <InfoHint size="sm" label="Vis forklaring for Tjenester" text={tb.hint_procynia_services} />
+                    </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
                         {servicesText.help ?? 'Dette viser aktive tjenester og faktureringsgrunnlag i Procynia. Fakturaer og betalingsstatus håndteres via Stripe.'}
                     </p>
@@ -565,9 +575,12 @@ export default function BillingIndex() {
                 </section>
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <h2 className="text-base font-semibold text-slate-900">
-                        {levelsText.heading ?? 'Brukernivåer i Procynia'}
-                    </h2>
+                    <div className="flex items-center gap-2">
+                        <h2 className="text-base font-semibold text-slate-900">
+                            {levelsText.heading ?? 'Brukernivåer i Procynia'}
+                        </h2>
+                        <InfoHint size="sm" label="Vis forklaring for Brukernivåer" text={tb.hint_procynia_levels} />
+                    </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
                         {levelsText.help ?? 'Dette viser hvilke brukere som har aktive produkt- eller KI-nivåer i Procynia.'}
                     </p>

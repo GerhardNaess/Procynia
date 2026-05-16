@@ -99,6 +99,7 @@ class HandleInertiaRequests extends Middleware
                 'knowledge' => __('procynia.knowledge'),
                 'saved_notice' => __('procynia.saved_notice'),
                 'billing' => __('procynia.billing'),
+                'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
                 'common' => [
                     'back' => __('procynia.frontend.back'),
@@ -256,6 +257,9 @@ class HandleInertiaRequests extends Middleware
                     'save_button' => __('procynia.users_form.save_button'),
                     'cannot_deactivate_self' => __('procynia.users_form.cannot_deactivate_self'),
                     'contributor_locked_role' => __('procynia.users_form.contributor_locked_role'),
+                    'hint_role' => __('procynia.users_form.hint_role'),
+                    'hint_user_license' => __('procynia.users_form.hint_user_license'),
+                    'hint_admin_scope' => __('procynia.users_form.hint_admin_scope'),
                 ],
                 'customer_env' => [
                     'title' => __('procynia.customer_env.title'),

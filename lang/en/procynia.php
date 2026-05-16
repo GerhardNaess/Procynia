@@ -745,6 +745,7 @@ return [
         'page_help_item_bid_manager_text' => 'Manages cases in assigned departments and may have extended visibility into the portfolio.',
         'page_help_item_contributor_title' => 'Contributor',
         'page_help_item_contributor_text' => 'Can work on cases they are assigned to. Access is managed by bid manager and System Owner.',
+        'hint_role_column' => 'The role shows responsibility level in Procynia: System Owner manages the environment, bid manager leads bid work, and contributor contributes to cases.',
     ],
     'ai' => [
         'no_files_selected' => 'No files selected yet.',
@@ -1522,6 +1523,9 @@ return [
         'save_button' => 'Save changes',
         'cannot_deactivate_self' => 'You cannot deactivate your own user.',
         'contributor_locked_role' => 'Contributor',
+        'hint_role' => 'The role controls responsibility and operational access in Procynia. System Owner manages the environment, bid manager leads bid work, and contributor contributes to cases.',
+        'hint_user_license' => 'The user license determines the access level within the customer subscription. The role is separate and controls responsibility in the workflow.',
+        'hint_admin_scope' => 'Controls which departments the bid manager can administer operationally. This is separate from the user\'s own department memberships.',
     ],
     'customer_env' => [
         'title' => 'Customer environment',
@@ -1813,6 +1817,10 @@ return [
         'status_open' => 'Open',
         'no_subscription' => 'No active Stripe subscription. Contact Procynia if the subscription should be activated or changed.',
         'no_invoices' => 'No Stripe invoices found. Invoices and PDFs will appear here when they have been created in Stripe.',
+        'hint_subscription' => 'Shows subscription status and next renewal date. Payment and billing are handled by the external payment provider.',
+        'hint_procynia_services' => 'Services describe which functionality is activated for the customer. This is Procynia\'s internal overview, not the same as the invoice basis.',
+        'hint_procynia_levels' => 'User level describes the service level for each individual user. It is not the same as the work role in the bidding process.',
+        'hint_ai_credits' => 'Shows the customer\'s use of AI features and any temporary stops. Used for capacity management, not as a direct invoice basis.',
     ],
 
     'suppliers' => [
