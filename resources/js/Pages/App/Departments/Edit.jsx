@@ -1,6 +1,7 @@
 import { Link, router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import FormButtonRow from '../../../Components/App/FormButtonRow';
 
 export default function DepartmentsEdit({ department }) {
     const [toggling, setToggling] = useState(false);
@@ -90,7 +91,7 @@ export default function DepartmentsEdit({ department }) {
                         </div>
                     </div>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                    <FormButtonRow>
                         <Link
                             href="/app/departments"
                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
@@ -104,7 +105,7 @@ export default function DepartmentsEdit({ department }) {
                         >
                             {form.processing ? 'Lagrer...' : 'Lagre endringer'}
                         </button>
-                    </div>
+                    </FormButtonRow>
                 </form>
                 </div>
             </div>

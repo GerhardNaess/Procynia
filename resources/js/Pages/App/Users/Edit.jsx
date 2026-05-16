@@ -3,6 +3,7 @@ import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
 import DepartmentCheckboxGroup from '../../../Components/App/DepartmentCheckboxGroup';
+import FormButtonRow from '../../../Components/App/FormButtonRow';
 import InfoHint from '../../../Components/App/InfoHint';
 
 function classNames(...values) {
@@ -399,7 +400,7 @@ export default function UsersEdit({
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                        <FormButtonRow>
                             <Link
                                 href={redirectTo}
                                 className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
@@ -413,7 +414,7 @@ export default function UsersEdit({
                             >
                                 {form.processing ? 'Lagrer...' : 'Lagre endringer'}
                             </button>
-                        </div>
+                        </FormButtonRow>
                     </form>
                 </div>
             </div>

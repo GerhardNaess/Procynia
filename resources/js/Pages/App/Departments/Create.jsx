@@ -1,5 +1,6 @@
 import { Link, useForm } from '@inertiajs/react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import FormButtonRow from '../../../Components/App/FormButtonRow';
 
 export default function DepartmentsCreate() {
     const form = useForm({
@@ -58,7 +59,7 @@ export default function DepartmentsCreate() {
                         </div>
                     </div>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                    <FormButtonRow>
                         <Link
                             href="/app/departments"
                             className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
@@ -72,7 +73,7 @@ export default function DepartmentsCreate() {
                         >
                             {form.processing ? 'Lagrer...' : 'Opprett avdeling'}
                         </button>
-                    </div>
+                    </FormButtonRow>
                 </form>
                 </div>
             </div>
