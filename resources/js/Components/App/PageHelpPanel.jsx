@@ -1,8 +1,4 @@
-import { useEffect } from 'react';
-
-function classNames(...values) {
-    return values.filter(Boolean).join(' ');
-}
+import { useEffect, useState } from 'react';
 
 /**
  * Slide-in help panel. Not a focus-trapping modal — the page remains interactive.
@@ -16,15 +12,28 @@ function classNames(...values) {
  * @param {function}          onClose
  */
 export default function PageHelpPanel({ id, title, intro, sections = [], isOpen, onClose }) {
+    const [topOffset, setTopOffset] = useState(0);
+
     useEffect(() => {
         if (!isOpen) return undefined;
+
+        function measureHeader() {
+            const header = document.querySelector('header');
+            setTopOffset(header ? Math.round(header.getBoundingClientRect().bottom) : 0);
+        }
 
         function onKeyDown(event) {
             if (event.key === 'Escape') onClose();
         }
 
+        measureHeader();
+        window.addEventListener('resize', measureHeader);
         document.addEventListener('keydown', onKeyDown);
-        return () => document.removeEventListener('keydown', onKeyDown);
+
+        return () => {
+            window.removeEventListener('resize', measureHeader);
+            document.removeEventListener('keydown', onKeyDown);
+        };
     }, [isOpen, onClose]);
 
     if (!isOpen) return null;
@@ -41,7 +50,8 @@ export default function PageHelpPanel({ id, title, intro, sections = [], isOpen,
                 id={id}
                 role="dialog"
                 aria-label={title}
-                className="fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col overflow-y-auto bg-white shadow-[0_0_40px_rgba(15,23,42,0.15)] sm:max-w-md"
+                style={{ top: topOffset }}
+                className="fixed right-0 bottom-0 z-50 flex w-full max-w-sm flex-col overflow-y-auto bg-white shadow-[0_0_40px_rgba(15,23,42,0.15)] sm:max-w-md"
             >
                 <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                     <div>
