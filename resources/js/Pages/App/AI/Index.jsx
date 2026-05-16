@@ -1,4 +1,5 @@
 import { Link, usePage } from '@inertiajs/react';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
 const AI_STATUS_CLASS = {
@@ -50,9 +51,44 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                         {tai.overview ?? 'Oversikt'}
                     </div>
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        {tai.overview ?? 'Oversikt'}
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                            {tai.overview ?? 'Oversikt'}
+                        </h1>
+                        <PageHelpButton
+                            buttonLabel={tai.help_button ?? 'Hjelp'}
+                            title={tai.help_panel_title ?? 'Om AI-oversikten'}
+                            intro={tai.help_panel_intro ?? 'AI-arbeidsflaten samler sakene som er klare for AI-assistert anbudsarbeid, og gir deg tilgang til krav, kunnskapsgrunnlag og svarutkast.'}
+                            sections={[
+                                {
+                                    title: tai.help_section_cases ?? 'Saker',
+                                    items: [
+                                        {
+                                            title: tai.help_item_cases_ready_title ?? 'Klare saker',
+                                            text: tai.help_item_cases_ready_text ?? 'Saker vises her når de er lagret og har nok struktur for AI-assistert arbeid.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.help_section_status ?? 'AI-status',
+                                    items: [
+                                        {
+                                            title: tai.ai_status_not_started ?? 'Ikke startet',
+                                            text: tai.help_item_status_not_started ?? 'Ingen AI-kjøringer er startet for saken ennå.',
+                                        },
+                                        {
+                                            title: tai.ai_status_ready ?? 'Påbegynt',
+                                            text: tai.help_item_status_ready ?? 'AI-arbeid er i gang, men ikke ferdig gjennomgått av teamet.',
+                                        },
+                                        {
+                                            title: tai.ai_status_in_review ?? 'Under vurdering',
+                                            text: tai.help_item_status_in_review ?? 'Saken er under aktiv gjennomgang og kvalitetssikring av teamet.',
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         {tai.index_subtitle ?? 'Her jobber du med konkrete anbudssaker, krav og kunnskapsgrunnlag.'}
                     </p>
