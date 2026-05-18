@@ -676,6 +676,106 @@ XML;
         $this->assertStringContainsString('Agenda | • Status på fremdrift', $tableBlock['table_text']);
     }
 
+    // Regression: 4-column tables where the second column starts beyond firstCellLeft+45 (e.g. left=120)
+    // were broken into single-row fragments because continuation lines at that x-position were rejected.
+    public function test_it_detects_table_run_through_continuation_in_second_column(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // 4-column layout: col1=50, col2=120, col3=300, col4=540.
+        // firstCellLeft=50 → old isLeftColumnContinuation zone is [30,95].
+        // A continuation at left=120 exceeds 95, so the old code breaks the run here.
+        $lineGroups = [
+            // Row 1 — 4-column candidate line.
+            $this->popplerLineGroup('R1 Levere dokumentasjon H K', 100, 50, 620, 114, [
+                ['text' => 'R1', 'left' => 50, 'width' => 30],
+                ['text' => 'Levere dokumentasjon', 'left' => 120, 'width' => 140],
+                ['text' => 'H', 'left' => 300, 'width' => 30],
+                ['text' => 'K', 'left' => 540, 'width' => 30],
+            ]),
+            // Row 1 continuation — single item at col-2 position (left=120). Old code rejects this.
+            $this->popplerLineGroup('og sørge for sporbarhet', 116, 120, 260, 130, [
+                ['text' => 'og sørge for sporbarhet', 'left' => 120, 'width' => 140],
+            ]),
+            // Row 2 — 4-column candidate line.
+            $this->popplerLineGroup('R2 Godkjenne og signere I I', 132, 50, 620, 146, [
+                ['text' => 'R2', 'left' => 50, 'width' => 30],
+                ['text' => 'Godkjenne og signere', 'left' => 120, 'width' => 140],
+                ['text' => 'I', 'left' => 300, 'width' => 30],
+                ['text' => 'I', 'left' => 540, 'width' => 30],
+            ]),
+            // Row 2 continuation — same col-2 position.
+            $this->popplerLineGroup('avtale og protokoll', 148, 120, 260, 162, [
+                ['text' => 'avtale og protokoll', 'left' => 120, 'width' => 140],
+            ]),
+            // Row 3 — 4-column candidate line, no continuation.
+            $this->popplerLineGroup('R3 Rapportere status U U', 164, 50, 620, 178, [
+                ['text' => 'R3', 'left' => 50, 'width' => 30],
+                ['text' => 'Rapportere status', 'left' => 120, 'width' => 140],
+                ['text' => 'U', 'left' => 300, 'width' => 30],
+                ['text' => 'U', 'left' => 540, 'width' => 30],
+            ]),
+            // Body text after the table — starts at left=72 but spans most of the page;
+            // width guard must keep it out of the table even after the fix.
+            $this->popplerLineGroup('Dette er fritekst som ikke tilhører tabellen over.', 194, 72, 770, 208, [
+                ['text' => 'Dette er fritekst som ikke tilhører tabellen over.', 'left' => 72, 'width' => 698],
+            ]),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        // Currently FAILS: old code breaks the run at each col-2 continuation, yielding no complete runs.
+        $this->assertCount(1, $runs, 'There must be exactly one table run spanning all three rows and their continuations.');
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(4, $runs[0]['end_index'], 'Run must end at the last data row (index 4), not absorb the body text (index 5).');
+    }
+
+    public function test_it_appends_second_column_continuation_text_to_correct_cell(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // Same geometry: col2 starts at left=120, beyond the old left-zone boundary of firstCellLeft+45=95.
+        $tableLines = [
+            // Row 1 — 4-column candidate line.
+            $this->popplerLineGroup('R1 Levere løsning H K', 100, 50, 620, 114, [
+                ['text' => 'R1', 'left' => 50, 'width' => 30],
+                ['text' => 'Levere løsning', 'left' => 120, 'width' => 140],
+                ['text' => 'H', 'left' => 300, 'width' => 30],
+                ['text' => 'K', 'left' => 540, 'width' => 30],
+            ]),
+            // Row 1 continuation at col-2 position.
+            $this->popplerLineGroup('innen avtalt frist', 116, 120, 260, 130, [
+                ['text' => 'innen avtalt frist', 'left' => 120, 'width' => 140],
+            ]),
+            // Row 2 — no continuation.
+            $this->popplerLineGroup('R2 Godkjenne dokumentasjon I I', 132, 50, 620, 146, [
+                ['text' => 'R2', 'left' => 50, 'width' => 30],
+                ['text' => 'Godkjenne dokumentasjon', 'left' => 120, 'width' => 140],
+                ['text' => 'I', 'left' => 300, 'width' => 30],
+                ['text' => 'I', 'left' => 540, 'width' => 30],
+            ]),
+        ];
+
+        $rows = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableLogicalRows', [$tableLines, 842]);
+
+        $this->assertCount(2, $rows, 'Two data rows must produce two logical rows.');
+
+        $row1Cells = array_values((array) ($rows[0]['cells'] ?? []));
+
+        $this->assertSame('R1', (string) ($row1Cells[0]['text'] ?? ''));
+        $this->assertStringContainsString('Levere løsning', (string) ($row1Cells[1]['text'] ?? ''));
+
+        // Currently FAILS: old code silently drops the continuation line instead of merging it.
+        $this->assertStringContainsString('innen avtalt frist', (string) ($row1Cells[1]['text'] ?? ''), 'Continuation text must be merged into the second cell of the first row.');
+
+        $this->assertSame('H', (string) ($row1Cells[2]['text'] ?? ''), 'Third cell must be unchanged.');
+        $this->assertSame('K', (string) ($row1Cells[3]['text'] ?? ''), 'Fourth cell must be unchanged.');
+
+        $row2Cells = array_values((array) ($rows[1]['cells'] ?? []));
+        $this->assertSame('R2', (string) ($row2Cells[0]['text'] ?? ''));
+        $this->assertSame('Godkjenne dokumentasjon', (string) ($row2Cells[1]['text'] ?? ''), 'Row 2 must be unaffected.');
+    }
+
     public function test_it_merges_adjacent_poppler_table_blocks_across_a_page_break(): void
     {
         $extractor = new DocumentTextExtractor();

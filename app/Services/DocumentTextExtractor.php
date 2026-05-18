@@ -1411,27 +1411,35 @@ class DocumentTextExtractor
         }
 
         $lineLeft = (int) ($line['left'] ?? 0);
-        $templateCells = array_values((array) ($template['cells'] ?? []));
-        $firstCellLeft = $templateCells !== []
-            ? (int) ($templateCells[0]['left'] ?? 0)
-            : 0;
-        $anchorLeft = $templateCells !== []
-            ? (int) ($templateCells[array_key_last($templateCells)]['left'] ?? $firstCellLeft)
-            : 0;
-
         $lineWidth = max(0, (int) ($line['right'] ?? 0) - $lineLeft);
-        $isRightColumnContinuation = $lineLeft >= max(250, $anchorLeft - 20);
-        $isLeftColumnContinuation = $lineLeft >= max(0, $firstCellLeft - 20) && $lineLeft <= $firstCellLeft + 45;
+        $templateCells = array_values((array) ($template['cells'] ?? []));
 
-        if (! $isRightColumnContinuation && ! $isLeftColumnContinuation) {
+        if (count($templateCells) < 2) {
             return false;
         }
 
-        if ($isLeftColumnContinuation && $pageWidth > 0 && $lineWidth > (int) round($pageWidth * 0.5)) {
+        $matchedCellIndex = null;
+        $matchedDistance = null;
+
+        foreach ($templateCells as $cellIndex => $cell) {
+            $cellLeft = (int) ($cell['left'] ?? 0);
+            $distance = abs($lineLeft - $cellLeft);
+
+            if ($distance <= 45 && ($matchedDistance === null || $distance < $matchedDistance)) {
+                $matchedCellIndex = $cellIndex;
+                $matchedDistance = $distance;
+            }
+        }
+
+        if ($matchedCellIndex === null) {
             return false;
         }
 
         if ($pageWidth > 0 && $lineWidth > (int) round($pageWidth * 0.95)) {
+            return false;
+        }
+
+        if ($matchedCellIndex === 0 && $pageWidth > 0 && $lineWidth > (int) round($pageWidth * 0.5)) {
             return false;
         }
 
