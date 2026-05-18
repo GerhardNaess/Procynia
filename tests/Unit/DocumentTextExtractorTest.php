@@ -183,6 +183,966 @@ XML;
         }
     }
 
+    public function test_it_detects_extended_pdf_heading_patterns(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $this->assertSame(1, $this->invokePdfHeadingLevel($extractor, '1 Innledning'));
+        $this->assertSame(2, $this->invokePdfHeadingLevel($extractor, '1.1 Bakgrunn'));
+        $this->assertSame(2, $this->invokePdfHeadingLevel($extractor, '1.1.1 Krav til leveranse'));
+        $this->assertSame(1, $this->invokePdfHeadingLevel($extractor, 'Kapittel 3'));
+        $this->assertSame(1, $this->invokePdfHeadingLevel($extractor, 'Del 1'));
+        $this->assertSame(1, $this->invokePdfHeadingLevel($extractor, 'A. Vedlegg'));
+    }
+
+    public function test_it_does_not_classify_bullet_lists_as_poppler_table_runs(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                '• Prosjektleder hos Leverandøren med operativt koordineringsansvar',
+                100,
+                72,
+                440,
+                112,
+                [
+                    ['text' => '•', 'left' => 72, 'width' => 12],
+                    ['text' => 'Prosjektleder hos Leverandøren med operativt koordineringsansvar', 'left' => 96, 'width' => 320],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '- Prosjekteier / styringsgruppe med representasjon fra Kunden',
+                122,
+                72,
+                440,
+                134,
+                [
+                    ['text' => '-', 'left' => 72, 'width' => 10],
+                    ['text' => 'Prosjekteier / styringsgruppe med representasjon fra Kunden', 'left' => 96, 'width' => 300],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1. Tekniske og funksjonelle delansvarlige',
+                144,
+                72,
+                440,
+                156,
+                [
+                    ['text' => '1.', 'left' => 72, 'width' => 18],
+                    ['text' => 'Tekniske og funksjonelle delansvarlige', 'left' => 96, 'width' => 260],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'a) Navngitte kontaktpunkter hos Kundens øvrige leverandører',
+                166,
+                72,
+                440,
+                178,
+                [
+                    ['text' => 'a)', 'left' => 72, 'width' => 16],
+                    ['text' => 'Navngitte kontaktpunkter hos Kundens øvrige leverandører', 'left' => 96, 'width' => 340],
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertSame([], $runs);
+    }
+
+    public function test_it_keeps_poppler_list_lines_as_list_blocks(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                '• Prosjektleder hos Leverandøren med operativt koordineringsansvar',
+                100,
+                72,
+                440,
+                112,
+                [
+                    ['text' => '•', 'left' => 72, 'width' => 12],
+                    ['text' => 'Prosjektleder hos Leverandøren med operativt koordineringsansvar', 'left' => 96, 'width' => 320],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '- Prosjekteier / styringsgruppe med representasjon fra Kunden',
+                122,
+                72,
+                440,
+                134,
+                [
+                    ['text' => '-', 'left' => 72, 'width' => 10],
+                    ['text' => 'Prosjekteier / styringsgruppe med representasjon fra Kunden', 'left' => 96, 'width' => 300],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1. Tekniske og funksjonelle delansvarlige',
+                144,
+                72,
+                440,
+                156,
+                [
+                    ['text' => '1.', 'left' => 72, 'width' => 18],
+                    ['text' => 'Tekniske og funksjonelle delansvarlige', 'left' => 96, 'width' => 260],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'a) Navngitte kontaktpunkter hos Kundens øvrige leverandører',
+                166,
+                72,
+                440,
+                178,
+                [
+                    ['text' => 'a)', 'left' => 72, 'width' => 16],
+                    ['text' => 'Navngitte kontaktpunkter hos Kundens øvrige leverandører', 'left' => 96, 'width' => 340],
+                ],
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(4, $blocks);
+        $this->assertSame(['list', 'list', 'list', 'list'], array_values(array_map(
+            static fn (array $block): string => (string) ($block['type'] ?? ''),
+            $blocks,
+        )));
+        $this->assertSame('• Prosjektleder hos Leverandøren med operativt koordineringsansvar', $blocks[0]['text']);
+        $this->assertSame('- Prosjekteier / styringsgruppe med representasjon fra Kunden', $blocks[1]['text']);
+        $this->assertSame('1. Tekniske og funksjonelle delansvarlige', $blocks[2]['text']);
+        $this->assertSame('a) Navngitte kontaktpunkter hos Kundens øvrige leverandører', $blocks[3]['text']);
+    }
+
+    public function test_it_does_not_treat_sentence_like_two_fragment_blocks_as_tables(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'I praksis pleier migreringsstrategier ved overtakelse av IT-drift å kategoriseres etter hvordan',
+                100,
+                72,
+                720,
+                122,
+                [
+                    ['text' => 'I praksis pleier migreringsstrategier ved overtakelse av IT-drift å kategoriseres etter hvordan', 'left' => 72, 'width' => 520],
+                    ['text' => 'En vanlig og faglig ryddig', 'left' => 610, 'width' => 92],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'overgangen fra eksisterende miljø til nytt driftsregime skjer i tid og risiko kategorisering kan se slik ut:',
+                124,
+                72,
+                720,
+                146,
+                [
+                    ['text' => 'overgangen fra eksisterende miljø til nytt driftsregime skjer i tid og risiko', 'left' => 72, 'width' => 550],
+                    ['text' => 'kategorisering kan se slik ut:', 'left' => 610, 'width' => 102],
+                ],
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 6]);
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            ['start_index' => 0, 'end_index' => 1],
+            6,
+            1,
+            842,
+            1200,
+        ]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('paragraph', $blocks[0]['type']);
+        $this->assertStringContainsString('I praksis pleier migreringsstrategier ved overtakelse av IT-drift å kategoriseres etter hvordan', $blocks[0]['text']);
+        $this->assertStringContainsString('overgangen fra eksisterende miljø til nytt driftsregime skjer i tid og risiko kategorisering kan se slik ut:', $blocks[0]['text']);
+        $this->assertNull($tableBlock);
+    }
+
+    public function test_it_still_detects_real_poppler_table_runs_for_multicolumn_rows(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Krav-ID Krav Dokumentasjon',
+                100,
+                72,
+                480,
+                112,
+                [
+                    ['text' => 'Krav-ID', 'left' => 72, 'width' => 70],
+                    ['text' => 'Krav', 'left' => 200, 'width' => 80],
+                    ['text' => 'Dokumentasjon', 'left' => 360, 'width' => 110],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'K-01 Leverandøren skal Beskrivelse vedlegges',
+                122,
+                72,
+                480,
+                134,
+                [
+                    ['text' => 'K-01', 'left' => 72, 'width' => 48],
+                    ['text' => 'Leverandøren skal', 'left' => 200, 'width' => 118],
+                    ['text' => 'Beskrivelse vedlegges', 'left' => 360, 'width' => 140],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'K-02 Leverandøren skal Sertifikat vedlegges',
+                144,
+                72,
+                480,
+                156,
+                [
+                    ['text' => 'K-02', 'left' => 72, 'width' => 48],
+                    ['text' => 'Leverandøren skal', 'left' => 200, 'width' => 118],
+                    ['text' => 'Sertifikat vedlegges', 'left' => 360, 'width' => 140],
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertCount(1, $runs);
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(2, $runs[0]['end_index']);
+
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            $runs[0],
+            1,
+            1,
+            842,
+            800,
+        ]);
+
+        $this->assertSame('table', $tableBlock['type']);
+        $this->assertSame('Tabell 1 – side 1', $tableBlock['title']);
+        $this->assertStringContainsString('Krav-ID | Krav | Dokumentasjon', $tableBlock['text']);
+        $this->assertStringContainsString('K-01 | Leverandøren skal | Beskrivelse vedlegges', $tableBlock['text']);
+    }
+
+    public function test_it_detects_poppler_tables_when_bullet_markers_share_the_description_cell(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Nivå Kategori Beskrivelse',
+                163,
+                107,
+                371,
+                183,
+                [
+                    ['text' => 'Nivå', 'left' => 107, 'width' => 34],
+                    ['text' => 'Kategori', 'left' => 157, 'width' => 60],
+                    ['text' => 'Beskrivelse', 'left' => 292, 'width' => 79],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'A Kritisk feil • Feil som medfører at utstyret eller programvaren stopper',
+                187,
+                107,
+                680,
+                208,
+                [
+                    ['text' => 'A', 'left' => 107, 'width' => 17],
+                    ['text' => 'Kritisk feil', 'left' => 157, 'width' => 70],
+                    ['text' => '•', 'left' => 319, 'width' => 8],
+                    ['text' => 'Feil som medfører at utstyret eller programvaren stopper', 'left' => 346, 'width' => 334],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'B Alvorlig feil • Feil som fører til at funksjoner som, ut fra en objektiv vurdering',
+                352,
+                107,
+                707,
+                373,
+                [
+                    ['text' => 'B', 'left' => 107, 'width' => 16],
+                    ['text' => 'Alvorlig feil', 'left' => 157, 'width' => 79],
+                    ['text' => '•', 'left' => 319, 'width' => 8],
+                    ['text' => 'Feil som fører til at funksjoner som, ut fra en objektiv vurdering', 'left' => 346, 'width' => 361],
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 792]);
+
+        $this->assertCount(1, $runs);
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(2, $runs[0]['end_index']);
+
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            $runs[0],
+            4,
+            1,
+            792,
+            1024,
+        ]);
+
+        $this->assertSame('table', $tableBlock['type']);
+        $this->assertSame('Tabell 1 – side 4', $tableBlock['title']);
+        $this->assertStringContainsString('Nivå | Kategori | Beskrivelse', $tableBlock['table_markdown']);
+        $this->assertStringContainsString('A | Kritisk feil | • Feil som medfører at utstyret eller programvaren stopper', $tableBlock['table_text']);
+        $this->assertStringContainsString('B | Alvorlig feil | • Feil som fører til at funksjoner som, ut fra en objektiv vurdering', $tableBlock['table_text']);
+    }
+
+    public function test_it_detects_flattened_poppler_table_rows_when_columns_are_separated_by_whitespace(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Krav-ID    Krav    Dokumentasjon',
+                100,
+                72,
+                512,
+                112,
+            ),
+            $this->popplerLineGroup(
+                'K-01    Leverandøren skal    Beskrivelse vedlegges',
+                122,
+                72,
+                512,
+                134,
+            ),
+            $this->popplerLineGroup(
+                'K-02    Leverandøren skal    Sertifikat vedlegges',
+                144,
+                72,
+                512,
+                156,
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertCount(1, $runs);
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(2, $runs[0]['end_index']);
+
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            $runs[0],
+            1,
+            1,
+            842,
+            800,
+        ]);
+
+        $this->assertSame('table', $tableBlock['type']);
+        $this->assertSame('Tabell 1 – side 1', $tableBlock['title']);
+        $this->assertSame("Krav-ID | Krav | Dokumentasjon\nK-01 | Leverandøren skal | Beskrivelse vedlegges\nK-02 | Leverandøren skal | Sertifikat vedlegges", $tableBlock['table_text']);
+        $this->assertStringContainsString('| Krav-ID | Krav | Dokumentasjon |', $tableBlock['table_markdown']);
+        $this->assertStringContainsString('| K-02 | Leverandøren skal | Sertifikat vedlegges |', $tableBlock['table_markdown']);
+    }
+
+    public function test_it_keeps_wrapped_first_column_rows_inside_poppler_tables(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Ansvarlig Leverandøren',
+                215,
+                115,
+                339,
+                235,
+                [
+                    ['text' => 'Ansvarlig', 'left' => 115, 'width' => 67],
+                    ['text' => 'Leverandøren', 'left' => 242, 'width' => 97],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Agenda • Status på fremdrift',
+                250,
+                115,
+                440,
+                270,
+                [
+                    ['text' => 'Agenda', 'left' => 115, 'width' => 56],
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Status på fremdrift', 'left' => 310, 'width' => 130],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Problemstillinger',
+                270,
+                283,
+                428,
+                290,
+                [
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Problemstillinger', 'left' => 310, 'width' => 118],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Prosjektplan',
+                291,
+                283,
+                397,
+                311,
+                [
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Prosjektplan', 'left' => 310, 'width' => 87],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Kvalitet i leveransene',
+                311,
+                283,
+                457,
+                331,
+                [
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Kvalitet i leveransene', 'left' => 310, 'width' => 147],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Deltagere fra TBD',
+                448,
+                115,
+                273,
+                468,
+                [
+                    ['text' => 'Deltagere fra', 'left' => 115, 'width' => 94],
+                    ['text' => 'TBD', 'left' => 242, 'width' => 31],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Kunden',
+                468,
+                115,
+                171,
+                488,
+                [
+                    ['text' => 'Kunden', 'left' => 115, 'width' => 56],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Deltagere fra • Prosjektleder',
+                504,
+                115,
+                403,
+                524,
+                [
+                    ['text' => 'Deltagere fra', 'left' => 115, 'width' => 94],
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Prosjektleder', 'left' => 310, 'width' => 93],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Leverandøren • Technical Manager',
+                524,
+                115,
+                441,
+                544,
+                [
+                    ['text' => 'Leverandøren', 'left' => 115, 'width' => 99],
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Technical Manager', 'left' => 310, 'width' => 131],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Fagressurser ved behov',
+                548,
+                283,
+                472,
+                568,
+                [
+                    ['text' => '•', 'left' => 283, 'width' => 10],
+                    ['text' => 'Fagressurser ved behov', 'left' => 310, 'width' => 162],
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertCount(1, $runs);
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(9, $runs[0]['end_index']);
+
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            $runs[0],
+            14,
+            2,
+            842,
+            1200,
+        ]);
+
+        $this->assertSame('table', $tableBlock['type']);
+        $this->assertSame('Tabell 2 – side 14', $tableBlock['title']);
+        $this->assertStringContainsString('Ansvarlig | Leverandøren', $tableBlock['table_text']);
+        $this->assertStringContainsString("Deltagere fra\nKunden | TBD", $tableBlock['table_text']);
+        $this->assertStringContainsString('Agenda | • Status på fremdrift', $tableBlock['table_text']);
+    }
+
+    public function test_it_merges_adjacent_poppler_table_blocks_across_a_page_break(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $previousTableBlock = [
+            'type' => 'table',
+            'page_number' => 13,
+            'page_height' => 1200,
+            'top' => 190,
+            'left' => 115,
+            'width' => 620,
+            'height' => 1005,
+            'title' => 'Tabell 8 – side 13',
+            'text' => "Ansvarlig | Leverandøren\nAgenda | • Status på fremdrift\nLokasjon | Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.",
+            'table_text' => "Ansvarlig | Leverandøren\nAgenda | • Status på fremdrift\nLokasjon | Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.",
+            'table_markdown' => "| Ansvarlig | Leverandøren |\n| Agenda | • Status på fremdrift |\n| Lokasjon | Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler. |",
+            'table_complexity' => 'simple',
+            'table_warnings' => [],
+            'table_json' => [
+                'source_type' => 'pdf_table',
+                'complexity' => 'simple',
+                'warnings' => [],
+                'row_count' => 3,
+                'column_count' => 2,
+                'title_row_index' => null,
+                'header_row_indices' => [],
+                'rows' => [
+                    [
+                        'row_index' => 0,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 0, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Ansvarlig', 'is_empty' => false],
+                            ['row_index' => 0, 'cell_index' => 1, 'column_index' => 1, 'text' => 'Leverandøren', 'is_empty' => false],
+                        ],
+                    ],
+                    [
+                        'row_index' => 1,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 1, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Agenda', 'is_empty' => false],
+                            ['row_index' => 1, 'cell_index' => 1, 'column_index' => 1, 'text' => '• Status på fremdrift', 'is_empty' => false],
+                        ],
+                    ],
+                    [
+                        'row_index' => 2,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 2, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Lokasjon', 'is_empty' => false],
+                            ['row_index' => 2, 'cell_index' => 1, 'column_index' => 1, 'text' => 'Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.', 'is_empty' => false],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $continuationTableBlock = [
+            'type' => 'table',
+            'page_number' => 14,
+            'page_height' => 1200,
+            'top' => 72,
+            'left' => 115,
+            'width' => 620,
+            'height' => 180,
+            'title' => 'Tabell 9 – side 14',
+            'text' => "Deltagere fra\nKunden | TBD\nResultat | Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet\nFrekvens | Hver 4 uke, oftere ved behov",
+            'table_text' => "Deltagere fra\nKunden | TBD\nResultat | Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet\nFrekvens | Hver 4 uke, oftere ved behov",
+            'table_markdown' => "| Deltagere fra | TBD |\n| Resultat | Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet |\n| Frekvens | Hver 4 uke, oftere ved behov |",
+            'table_complexity' => 'simple',
+            'table_warnings' => [],
+            'table_json' => [
+                'source_type' => 'pdf_table',
+                'complexity' => 'simple',
+                'warnings' => [],
+                'row_count' => 3,
+                'column_count' => 2,
+                'title_row_index' => null,
+                'header_row_indices' => [],
+                'rows' => [
+                    [
+                        'row_index' => 0,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 0, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Deltagere fra', 'is_empty' => false],
+                            ['row_index' => 0, 'cell_index' => 1, 'column_index' => 1, 'text' => "Kunden\nTBD", 'is_empty' => false],
+                        ],
+                    ],
+                    [
+                        'row_index' => 1,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 1, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Resultat', 'is_empty' => false],
+                            ['row_index' => 1, 'cell_index' => 1, 'column_index' => 1, 'text' => 'Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet', 'is_empty' => false],
+                        ],
+                    ],
+                    [
+                        'row_index' => 2,
+                        'row_type' => 'data',
+                        'is_title' => false,
+                        'is_header' => false,
+                        'is_empty' => false,
+                        'explicit_header' => false,
+                        'cells' => [
+                            ['row_index' => 2, 'cell_index' => 0, 'column_index' => 0, 'text' => 'Frekvens', 'is_empty' => false],
+                            ['row_index' => 2, 'cell_index' => 1, 'column_index' => 1, 'text' => 'Hver 4 uke, oftere ved behov', 'is_empty' => false],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$previousTableBlock, $continuationTableBlock],
+        ]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('table', $blocks[0]['type']);
+        $this->assertSame(14, $blocks[0]['page_end']);
+        $this->assertSame("Ansvarlig | Leverandøren\nAgenda | • Status på fremdrift\nLokasjon | Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.\nDeltagere fra\nKunden | TBD\nResultat | Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet\nFrekvens | Hver 4 uke, oftere ved behov", $blocks[0]['table_text']);
+        $this->assertSame(6, data_get($blocks[0], 'table_json.row_count'));
+        $this->assertStringContainsString('Lokasjon | Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.', $blocks[0]['table_text']);
+        $this->assertStringContainsString('Frekvens | Hver 4 uke, oftere ved behov', $blocks[0]['table_text']);
+    }
+
+    public function test_it_merges_table_across_page_break_with_intervening_footer_and_separator_blocks(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
+            ['Ansvarlig', 'Leverandøren'],
+            ['Agenda', 'Status på fremdrift'],
+            ['Lokasjon', 'Møtet avholdes som Teams-møte'],
+        ]);
+
+        // Footer on page 13, appears after the table.
+        $page13Footer = [
+            'type' => 'paragraph',
+            'page_number' => 13,
+            'page_height' => 1000,
+            'page_width' => 842,
+            'top' => 970,
+            'left' => 50,
+            'width' => 750,
+            'height' => 20,
+            'text' => '© Advania Norge AS   29.09.2025   Side 13 av 31',
+            'source_metadata' => ['source_type' => 'pdf_text', 'page_number' => 13],
+        ];
+
+        // ALL-CAPS section label at the top of page 14 (e.g. "BILAG 1-11").
+        $page14BilagHeading = [
+            'type' => 'heading',
+            'page_number' => 14,
+            'page_height' => 1000,
+            'page_width' => 842,
+            'top' => 40,
+            'left' => 50,
+            'width' => 200,
+            'height' => 20,
+            'text' => 'BILAG 1-11',
+            'level' => 1,
+            'source_metadata' => ['source_type' => 'pdf_text', 'page_number' => 14],
+        ];
+
+        // Company logo image at the top of page 14.
+        $page14Logo = [
+            'type' => 'image',
+            'page_number' => 14,
+            'page_height' => 1000,
+            'page_width' => 842,
+            'top' => 40,
+            'left' => 600,
+            'width' => 150,
+            'height' => 40,
+            'text' => '',
+            'image_bytes' => null,
+            'source_metadata' => ['source_type' => 'pdf_graphic', 'page_number' => 14],
+        ];
+
+        $page14TableCont = $this->makeSimpleTableBlock(14, 1000, 842, 90, 120, 'Tabell 9 – side 14', [
+            ['Resultat', 'Fatte beslutninger som sikrer fremdriften'],
+            ['Frekvens', 'Hver 4 uke, oftere ved behov'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page13Table, $page13Footer, $page14BilagHeading, $page14Logo, $page14TableCont],
+        ]);
+
+        $this->assertCount(4, $blocks, 'Separator blocks are preserved; only the two table blocks merge.');
+        $merged = $blocks[0];
+        $this->assertSame('table', $merged['type']);
+        $this->assertSame(13, $merged['page_number']);
+        $this->assertSame(14, $merged['page_end']);
+        $this->assertSame(5, data_get($merged, 'table_json.row_count'));
+        $this->assertStringContainsString('Lokasjon | Møtet avholdes som Teams-møte', $merged['table_text']);
+        $this->assertStringContainsString('Frekvens | Hver 4 uke, oftere ved behov', $merged['table_text']);
+        $this->assertSame('Tabell 8 – side 13–14', $merged['title']);
+    }
+
+    public function test_it_does_not_merge_tables_separated_by_a_content_heading(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
+            ['Ansvarlig', 'Leverandøren'],
+            ['Agenda', 'Status på fremdrift'],
+            ['Lokasjon', 'Møtet avholdes som Teams-møte'],
+        ]);
+
+        // Real content heading on page 14 – this must prevent the merge.
+        $page14Heading = [
+            'type' => 'heading',
+            'page_number' => 14,
+            'page_height' => 1000,
+            'page_width' => 842,
+            'top' => 40,
+            'left' => 50,
+            'width' => 400,
+            'height' => 20,
+            'text' => '3 Ny seksjon med eget innhold',
+            'level' => 1,
+            'source_metadata' => ['source_type' => 'pdf_text', 'page_number' => 14],
+        ];
+
+        $page14Table = $this->makeSimpleTableBlock(14, 1000, 842, 90, 180, 'Tabell 9 – side 14', [
+            ['Felt A', 'Verdi A'],
+            ['Felt B', 'Verdi B'],
+            ['Felt C', 'Verdi C'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page13Table, $page14Heading, $page14Table],
+        ]);
+
+        $this->assertCount(3, $blocks, 'A content heading between tables must prevent the merge.');
+        $this->assertNull($blocks[0]['page_end'] ?? null, 'First table should not have page_end when not merged.');
+        $this->assertSame(13, $blocks[0]['page_number']);
+        $this->assertSame(14, $blocks[2]['page_number']);
+    }
+
+    public function test_it_does_not_merge_tables_separated_by_body_text(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 8 – side 13', [
+            ['Ansvarlig', 'Leverandøren'],
+            ['Lokasjon', 'Teams-møte'],
+            ['Frekvens', 'Hver 4 uke'],
+        ]);
+
+        $page14Body = [
+            'type' => 'paragraph',
+            'page_number' => 14,
+            'page_height' => 1000,
+            'page_width' => 842,
+            'top' => 40,
+            'left' => 50,
+            'width' => 600,
+            'height' => 40,
+            'text' => 'Dette er brødtekst som innleder en ny separat tabell på neste side.',
+            'source_metadata' => ['source_type' => 'pdf_text', 'page_number' => 14],
+        ];
+
+        $page14Table = $this->makeSimpleTableBlock(14, 1000, 842, 120, 180, 'Tabell 9 – side 14', [
+            ['Felt A', 'Verdi A'],
+            ['Felt B', 'Verdi B'],
+            ['Felt C', 'Verdi C'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page13Table, $page14Body, $page14Table],
+        ]);
+
+        $this->assertCount(3, $blocks, 'Body text between tables must prevent the merge.');
+        $this->assertSame(13, $blocks[0]['page_number']);
+        $this->assertSame(14, $blocks[2]['page_number']);
+    }
+
+    public function test_it_merges_table_across_three_pages_using_page_end(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page13Table = $this->makeSimpleTableBlock(13, 1000, 842, 200, 750, 'Tabell 5 – side 13', [
+            ['Rad 1A', 'Rad 1B'],
+            ['Rad 2A', 'Rad 2B'],
+            ['Rad 3A', 'Rad 3B'],
+        ]);
+        $page14Table = $this->makeSimpleTableBlock(14, 1000, 842, 50, 200, 'Tabell 6 – side 14', [
+            ['Rad 4A', 'Rad 4B'],
+            ['Rad 5A', 'Rad 5B'],
+            ['Rad 6A', 'Rad 6B'],
+        ]);
+        $page15Table = $this->makeSimpleTableBlock(15, 1000, 842, 50, 180, 'Tabell 7 – side 15', [
+            ['Rad 7A', 'Rad 7B'],
+            ['Rad 8A', 'Rad 8B'],
+            ['Rad 9A', 'Rad 9B'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page13Table, $page14Table, $page15Table],
+        ]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('table', $blocks[0]['type']);
+        $this->assertSame(13, $blocks[0]['page_number']);
+        $this->assertSame(15, $blocks[0]['page_end']);
+        $this->assertSame(9, data_get($blocks[0], 'table_json.row_count'));
+        $this->assertSame('Tabell 5 – side 13–15', $blocks[0]['title']);
+    }
+
+    public function test_it_updates_merged_table_title_with_page_range(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page5Table = $this->makeSimpleTableBlock(5, 1000, 842, 200, 750, 'Tabell 3 – side 5', [
+            ['Kolonne A', 'Kolonne B'],
+            ['Verdi 1', 'Verdi 2'],
+            ['Verdi 3', 'Verdi 4'],
+        ]);
+        $page6Table = $this->makeSimpleTableBlock(6, 1000, 842, 50, 180, 'Tabell 4 – side 6', [
+            ['Verdi 5', 'Verdi 6'],
+            ['Verdi 7', 'Verdi 8'],
+            ['Verdi 9', 'Verdi 10'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page5Table, $page6Table],
+        ]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('Tabell 3 – side 5–6', $blocks[0]['title']);
+    }
+
+    public function test_it_does_not_merge_separate_tables_on_non_consecutive_pages(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page5Table = $this->makeSimpleTableBlock(5, 1000, 842, 200, 400, 'Tabell 1 – side 5', [
+            ['A', 'B'],
+            ['C', 'D'],
+            ['E', 'F'],
+        ]);
+        $page7Table = $this->makeSimpleTableBlock(7, 1000, 842, 50, 200, 'Tabell 2 – side 7', [
+            ['X', 'Y'],
+            ['Z', 'W'],
+            ['Q', 'R'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page5Table, $page7Table],
+        ]);
+
+        $this->assertCount(2, $blocks, 'Tables on non-consecutive pages must not be merged.');
+    }
+
+    public function test_it_does_not_merge_table_whose_previous_part_ends_too_high_on_the_page(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // Table ending at 60% of the page — below the 0.70 threshold.
+        $page1Table = $this->makeSimpleTableBlock(1, 1000, 842, 100, 500, 'Tabell 1 – side 1', [
+            ['A', 'B'],
+            ['C', 'D'],
+            ['E', 'F'],
+        ]);
+        $page2Table = $this->makeSimpleTableBlock(2, 1000, 842, 50, 200, 'Tabell 2 – side 2', [
+            ['X', 'Y'],
+            ['Z', 'W'],
+            ['Q', 'R'],
+        ]);
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page1Table, $page2Table],
+        ]);
+
+        $this->assertCount(2, $blocks, 'Table not reaching page bottom must not trigger a merge.');
+    }
+
+    /**
+     * Build a minimal table block compatible with mergePopplerPdfTableBlocks requirements.
+     *
+     * @param array<int, array{0: string, 1: string}> $rows  Two-column row data.
+     * @return array<string, mixed>
+     */
+    private function makeSimpleTableBlock(
+        int $pageNumber,
+        int $pageHeight,
+        int $pageWidth,
+        int $top,
+        int $height,
+        string $title,
+        array $rows,
+    ): array {
+        $jsonRows = [];
+        $textLines = [];
+
+        foreach ($rows as $index => [$cellA, $cellB]) {
+            $textLines[] = "{$cellA} | {$cellB}";
+            $jsonRows[] = [
+                'row_index' => $index,
+                'row_type' => 'data',
+                'is_title' => false,
+                'is_header' => false,
+                'is_empty' => false,
+                'explicit_header' => false,
+                'cells' => [
+                    ['row_index' => $index, 'cell_index' => 0, 'column_index' => 0, 'text' => $cellA, 'is_empty' => false, 'source_metadata' => []],
+                    ['row_index' => $index, 'cell_index' => 1, 'column_index' => 1, 'text' => $cellB, 'is_empty' => false, 'source_metadata' => []],
+                ],
+                'source_metadata' => ['source_type' => 'pdf_table', 'page_number' => $pageNumber],
+            ];
+        }
+
+        $tableText = implode("\n", $textLines);
+
+        return [
+            'type' => 'table',
+            'page_number' => $pageNumber,
+            'page_height' => $pageHeight,
+            'page_width' => $pageWidth,
+            'top' => $top,
+            'left' => 100,
+            'width' => 650,
+            'height' => $height,
+            'title' => $title,
+            'text' => $tableText,
+            'table_text' => $tableText,
+            'table_markdown' => implode("\n", array_map(
+                static fn (array $r): string => "| {$r[0]} | {$r[1]} |",
+                $rows,
+            )),
+            'table_complexity' => 'simple',
+            'table_warnings' => [],
+            'table_json' => [
+                'source_type' => 'pdf_table',
+                'complexity' => 'simple',
+                'warnings' => [],
+                'row_count' => count($rows),
+                'column_count' => 2,
+                'title_row_index' => null,
+                'header_row_indices' => [],
+                'rows' => $jsonRows,
+                'source_metadata' => ['source_type' => 'pdf_table', 'page_number' => $pageNumber],
+                'table_text' => $tableText,
+                'table_markdown' => '',
+            ],
+            'source_metadata' => ['source_type' => 'pdf_table', 'page_number' => $pageNumber],
+        ];
+    }
+
     private function writeValidTestPdf(string $path): void
     {
         // A minimal but structurally complete PDF that pdftotext can parse.
@@ -233,5 +1193,57 @@ XML;
         }
 
         return $targetPath;
+    }
+
+    private function invokePdfHeadingLevel(DocumentTextExtractor $extractor, string $line): ?int
+    {
+        $method = new \ReflectionMethod($extractor, 'detectPdfHeadingLevel');
+        $method->setAccessible(true);
+
+        return $method->invoke($extractor, $line);
+    }
+
+    /**
+     * Purpose: Invoke a private method on the DocumentTextExtractor for focused unit tests.
+     * Inputs: The extractor instance, a private method name, and ordered arguments.
+     * Returns: The invoked method result.
+     * Side effects: None.
+     *
+     * @param array<int, mixed> $arguments
+     */
+    private function invokeDocumentTextExtractorMethod(DocumentTextExtractor $extractor, string $methodName, array $arguments = []): mixed
+    {
+        $method = new \ReflectionMethod($extractor, $methodName);
+        $method->setAccessible(true);
+
+        return $method->invokeArgs($extractor, $arguments);
+    }
+
+    /**
+     * Purpose: Build one synthetic Poppler-like line group for private extractor tests.
+     * Inputs: The visible line text, geometry, and optional already split items.
+     * Returns: A line-group array compatible with the Poppler table/list detector.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<string, mixed>
+     */
+    private function popplerLineGroup(string $text, int $top, int $left, int $right, int $bottom, array $items = []): array
+    {
+        return [
+            'text' => $text,
+            'items' => $items !== [] ? $items : [
+                [
+                    'text' => $text,
+                    'left' => $left,
+                    'width' => max(1, $right - $left),
+                ],
+            ],
+            'top' => $top,
+            'left' => $left,
+            'right' => $right,
+            'bottom' => $bottom,
+            'page_number' => 1,
+        ];
     }
 }

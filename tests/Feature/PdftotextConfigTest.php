@@ -45,6 +45,23 @@ class PdftotextConfigTest extends TestCase
         );
     }
 
+    public function test_env_example_documents_the_other_poppler_binaries(): void
+    {
+        $content = file_get_contents(base_path('.env.example'));
+
+        foreach ([
+            'PDFTOHTML_BINARY=',
+            'PDFIMAGES_BINARY=',
+            'PDFINFO_BINARY=',
+        ] as $variable) {
+            $this->assertStringContainsString(
+                $variable,
+                $content,
+                sprintf('.env.example must document the %s variable', $variable),
+            );
+        }
+    }
+
     public function test_env_example_does_not_set_hardcoded_mac_path_as_active_value(): void
     {
         $lines = explode("\n", file_get_contents(base_path('.env.example')));
@@ -94,6 +111,48 @@ class PdftotextConfigTest extends TestCase
             $source,
             'DocumentTextExtractor.php must read pdftotext binary path from config',
         );
+    }
+
+    public function test_services_config_reads_the_other_poppler_binaries_from_env(): void
+    {
+        $source = file_get_contents(config_path('services.php'));
+
+        foreach ([
+            'PDFTOHTML_BINARY',
+            'PDFIMAGES_BINARY',
+            'PDFINFO_BINARY',
+        ] as $variable) {
+            $this->assertStringContainsString(
+                $variable,
+                $source,
+                sprintf('config/services.php must read %s env var', $variable),
+            );
+        }
+    }
+
+    public function test_runtime_poppler_binaries_are_configured_for_the_docker_containers(): void
+    {
+        $expectedBinaries = [
+            'services.pdftotext.binary' => '/usr/bin/pdftotext',
+            'services.pdftohtml.binary' => '/usr/bin/pdftohtml',
+            'services.pdfimages.binary' => '/usr/bin/pdfimages',
+            'services.pdfinfo.binary' => '/usr/bin/pdfinfo',
+        ];
+
+        foreach ($expectedBinaries as $configKey => $expectedBinary) {
+            $binary = config($configKey);
+
+            $this->assertSame(
+                $expectedBinary,
+                $binary,
+                sprintf('%s must point to %s in the Docker runtime', $configKey, $expectedBinary),
+            );
+
+            $this->assertTrue(
+                is_string($binary) && is_executable($binary),
+                sprintf('%s must be executable in the Docker runtime', $expectedBinary),
+            );
+        }
     }
 
     public function test_document_text_extractor_logs_warning_when_binary_not_configured(): void

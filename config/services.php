@@ -26,6 +26,18 @@ return [
         'binary' => env('PDFTOTEXT_BINARY'),
     ],
 
+    'pdftohtml' => [
+        'binary' => env('PDFTOHTML_BINARY'),
+    ],
+
+    'pdfimages' => [
+        'binary' => env('PDFIMAGES_BINARY'),
+    ],
+
+    'pdfinfo' => [
+        'binary' => env('PDFINFO_BINARY'),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
