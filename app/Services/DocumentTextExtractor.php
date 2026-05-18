@@ -1404,9 +1404,13 @@ class DocumentTextExtractor
 
         $lineTop = (int) ($line['top'] ?? 0);
         $previousBottom = (int) ($previousLine['bottom'] ?? $lineTop);
+        $previousTop = (int) ($previousLine['top'] ?? $lineTop);
         $verticalGap = $lineTop - $previousBottom;
 
-        if ($verticalGap < -2 || $verticalGap > 30) {
+        $previousHeight = max(1, $previousBottom - $previousTop);
+        $allowedNegativeOverlap = min(10, max(2, (int) round($previousHeight * 0.35)));
+
+        if ($verticalGap < -$allowedNegativeOverlap || $verticalGap > 30) {
             return false;
         }
 

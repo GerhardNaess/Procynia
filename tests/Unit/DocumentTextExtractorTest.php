@@ -776,6 +776,67 @@ XML;
         $this->assertSame('Godkjenne dokumentasjon', (string) ($row2Cells[1]['text'] ?? ''), 'Row 2 must be unaffected.');
     }
 
+    // Regression: when one item in a line group is taller than the others (e.g. bold H/U with height=28
+    // while surrounding text uses height=20), the group's bottom is extended by the taller item.
+    // A continuation line whose top falls inside that extended span gets a negative verticalGap
+    // (e.g. 319 - 324 = -5) and is rejected by the < -2 guard, breaking the table run prematurely.
+    // Coordinates are taken directly from the real ANSVARSMATRISE table on PDF page 29.
+    public function test_it_detects_table_run_when_continuation_top_falls_within_tall_item_span(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $lineGroups = [
+            // Header (index 0): 4 columns matching the real ANSVARSMATRISE header layout.
+            $this->popplerLineGroup('I Aktivitet/Leveranse Leverandør Kunde', 224, 107, 761, 244, [
+                ['text' => 'I', 'left' => 107, 'width' => 8],
+                ['text' => 'Aktivitet/Leveranse', 'left' => 158, 'width' => 139],
+                ['text' => 'Leverandør', 'left' => 615, 'width' => 82],
+                ['text' => 'Kunde', 'left' => 713, 'width' => 48],
+            ]),
+            // R1 main row (index 1): all items at normal height, bottom = top+20 = 269.
+            $this->popplerLineGroup('R1 Etablere Leverandørens roller H/U I', 249, 107, 756, 269, [
+                ['text' => 'R1', 'left' => 107, 'width' => 21],
+                ['text' => 'Etablere Leverandørens roller', 'left' => 158, 'width' => 403],
+                ['text' => 'H/U', 'left' => 650, 'width' => 31],
+                ['text' => 'I', 'left' => 744, 'width' => 12],
+            ]),
+            // R1 continuation at col 2 (index 2): gap = 272-269 = +3, well within tolerance.
+            $this->popplerLineGroup('spesifisert i kontrakten.', 272, 158, 327, 292, [
+                ['text' => 'spesifisert i kontrakten.', 'left' => 158, 'width' => 169],
+            ]),
+            // R2 main row (index 3): the H/U cell renders with height=28 in the real PDF.
+            // This extends the line group bottom to 296+28=324 instead of the expected 316.
+            $this->popplerLineGroup('R2 Etablere kundens roller I H/U', 296, 107, 788, 324, [
+                ['text' => 'R2', 'left' => 107, 'width' => 21],
+                ['text' => 'Etablere kundens roller', 'left' => 158, 'width' => 439],
+                ['text' => 'I', 'left' => 660, 'width' => 12],
+                ['text' => 'H/U', 'left' => 733, 'width' => 55],
+            ]),
+            // R2 continuation at col 2 (index 4): top=319 is inside the R2 group span (296-324).
+            // verticalGap = 319 - 324 = -5. Currently rejected by verticalGap < -2.
+            $this->popplerLineGroup('kontrakten.', 319, 158, 247, 339, [
+                ['text' => 'kontrakten.', 'left' => 158, 'width' => 89],
+            ]),
+            // R3 main row (index 5): would start a fresh run if the R2 continuation breaks the current one.
+            $this->popplerLineGroup('R3 Gjøre tilgjengelig dokumentasjon I H/U', 344, 107, 765, 364, [
+                ['text' => 'R3', 'left' => 107, 'width' => 21],
+                ['text' => 'Gjøre tilgjengelig dokumentasjon', 'left' => 158, 'width' => 428],
+                ['text' => 'I', 'left' => 660, 'width' => 12],
+                ['text' => 'H/U', 'left' => 734, 'width' => 31],
+            ]),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 892]);
+
+        $this->assertCount(1, $runs, 'One continuous table run must be detected across all three data rows.');
+        $this->assertSame(0, $runs[0]['start_index']);
+
+        // Currently FAILS: run ends at index 3 (R2 main row) because the R2 continuation at
+        // top=319 gets verticalGap = 319-324 = -5, which fails the verticalGap < -2 guard.
+        // After the fix, the run must extend through R3 at index 5.
+        $this->assertSame(5, $runs[0]['end_index'], 'Run must extend through R3 (index 5), not stop at R2 main row (index 3).');
+    }
+
     public function test_it_merges_adjacent_poppler_table_blocks_across_a_page_break(): void
     {
         $extractor = new DocumentTextExtractor();
