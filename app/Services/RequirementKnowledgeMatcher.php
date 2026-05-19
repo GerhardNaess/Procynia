@@ -87,9 +87,7 @@ class RequirementKnowledgeMatcher
         $rankedCandidates = $knowledgeChunks
             ->map(function ($chunk) use ($requirementTokens, $heuristicBoosts, &$tableCandidateDiagnostics): ?array {
                 $chunkType = (string) data_get($chunk, 'chunk_type', '');
-                $chunkContent = $chunkType === 'table'
-                    ? (string) data_get($chunk, 'table_text', '')
-                    : (string) data_get($chunk, 'content', '');
+                $chunkContent = $this->searchableChunkText($chunk);
                 $normalizedChunkContent = $this->normalizeText($chunkContent);
 
                 if ($normalizedChunkContent === '') {
@@ -258,6 +256,119 @@ class RequirementKnowledgeMatcher
         });
 
         return $finalRankedCandidates;
+    }
+
+    /**
+     * Purpose: Build the searchable text for one knowledge chunk from its content and structured evidence fields.
+     * Inputs: A knowledge chunk payload returned from the retrieval pool.
+     * Returns: A normalized text string assembled from the chunk's semantic and structured evidence fields.
+     * Side effects: None.
+     */
+    private function searchableChunkText(array $chunk): string
+    {
+        $segments = [];
+
+        $appendText = static function (mixed $value) use (&$segments): void {
+            if ($value === null) {
+                return;
+            }
+
+            if (is_bool($value)) {
+                $value = $value ? 'true' : 'false';
+            } elseif (is_array($value)) {
+                return;
+            } elseif (is_object($value) && method_exists($value, '__toString')) {
+                $value = (string) $value;
+            } elseif (! is_scalar($value)) {
+                return;
+            }
+
+            $text = trim((string) $value);
+
+            if ($text === '') {
+                return;
+            }
+
+            $segments[] = $text;
+        };
+
+        $appendStructuredValue = static function (mixed $value) use (&$segments, &$appendStructuredValue, $appendText): void {
+            if ($value === null) {
+                return;
+            }
+
+            if (is_string($value)) {
+                $trimmed = trim($value);
+
+                if ($trimmed === '') {
+                    return;
+                }
+
+                if (str_starts_with($trimmed, '{') || str_starts_with($trimmed, '[')) {
+                    $decoded = json_decode($trimmed, true);
+
+                    if (json_last_error() === JSON_ERROR_NONE) {
+                        $appendStructuredValue($decoded);
+
+                        return;
+                    }
+                }
+
+                $appendText(html_entity_decode(strip_tags($trimmed), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+                return;
+            }
+
+            if (is_bool($value) || is_int($value) || is_float($value)) {
+                $appendText($value);
+
+                return;
+            }
+
+            if (! is_array($value)) {
+                $appendText($value);
+
+                return;
+            }
+
+            foreach ($value as $key => $item) {
+                if (is_string($key) && trim($key) !== '') {
+                    $appendText($key);
+                }
+
+                $appendStructuredValue($item);
+            }
+        };
+
+        $appendText(data_get($chunk, 'content'));
+        $appendText(data_get($chunk, 'title'));
+        $appendText(data_get($chunk, 'heading_path'));
+        $appendText(data_get($chunk, 'section_path'));
+        $appendText(data_get($chunk, 'section_title'));
+
+        if ((string) data_get($chunk, 'chunk_type', '') === 'table') {
+            $appendText(data_get($chunk, 'table_text'));
+            $appendStructuredValue(data_get($chunk, 'table_json'));
+            $appendStructuredValue(data_get($chunk, 'table_metadata'));
+            $appendStructuredValue(data_get($chunk, 'source_metadata'));
+
+            $tableHtml = trim((string) data_get($chunk, 'table_html', ''));
+
+            if ($tableHtml !== '') {
+                $appendText(html_entity_decode(strip_tags($tableHtml), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            }
+        }
+
+        if ((string) data_get($chunk, 'chunk_type', '') === 'image') {
+            $appendText(data_get($chunk, 'image_caption'));
+            $appendText(data_get($chunk, 'image_description'));
+            $appendText(data_get($chunk, 'image_alt_text'));
+            $appendText(data_get($chunk, 'ocr_text'));
+            $appendStructuredValue(data_get($chunk, 'image_metadata'));
+            $appendStructuredValue(data_get($chunk, 'source_metadata'));
+        }
+
+        return implode(' ', $segments);
     }
 
     /**

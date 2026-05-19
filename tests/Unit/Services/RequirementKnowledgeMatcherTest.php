@@ -86,6 +86,85 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertGreaterThan(0, $matches->first()['score']);
     }
 
+    public function test_it_should_rank_table_and_image_chunks_when_the_relevant_text_is_only_present_in_structured_table_and_image_fields(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'Beskriv sikkerhetsparametere og vis Business Cybersecurity Services i dokumentasjonen.',
+            collect([
+                $this->chunkPayload(
+                    1,
+                    'Generisk prosjekttekst',
+                    'sikkerhetsparametere',
+                    '2026-04-06 10:00:00',
+                    null,
+                    [
+                        'section_title' => 'Prosjekt',
+                        'section_path' => 'Prosjekt > Generelt',
+                    ],
+                ),
+                $this->chunkPayload(
+                    2,
+                    'Sikkerhetsparametere',
+                    '',
+                    '2026-04-06 10:01:00',
+                    null,
+                    [
+                        'chunk_type' => 'table',
+                        'content' => '',
+                        'table_text' => '',
+                        'table_html' => '<table><tr><th>Sikkerhetsparameter</th><th>Kontroll</th></tr><tr><td>Loggovervåking</td><td>Kontinuerlig</td></tr></table>',
+                        'table_json' => [
+                            'title' => 'Sikkerhetsparametere',
+                            'table_text' => 'Sikkerhetsparameter | Kontroll',
+                            'rows' => [
+                                [
+                                    [
+                                        'text' => 'Sikkerhetsparameter',
+                                    ],
+                                    [
+                                        'text' => 'Kontroll',
+                                    ],
+                                ],
+                                [
+                                    [
+                                        'text' => 'Loggovervåking',
+                                    ],
+                                    [
+                                        'text' => 'Kontinuerlig',
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'section_title' => 'SOC-tjenesten',
+                        'section_path' => 'Sikkerhet > SOC-tjenesten',
+                    ],
+                ),
+                $this->chunkPayload(
+                    3,
+                    'Tjenestebilde',
+                    '',
+                    '2026-04-06 10:02:00',
+                    null,
+                    [
+                        'chunk_type' => 'image',
+                        'content' => '',
+                        'image_caption' => 'Business Cybersecurity Services',
+                        'image_description' => 'Illustrasjon av Business Cybersecurity Services',
+                        'ocr_text' => 'Business Cybersecurity Services',
+                        'section_title' => 'Tjenestebilde',
+                        'section_path' => 'Prosjekt > Illustrasjoner',
+                    ],
+                ),
+            ]),
+        );
+
+        $this->assertContains(2, $matches->pluck('chunk_id')->all());
+        $this->assertContains(3, $matches->pluck('chunk_id')->all());
+        $this->assertSame([3, 2, 1], $matches->pluck('chunk_id')->all());
+    }
+
     public function test_it_does_not_give_a_strong_boost_from_generic_metadata_words_alone(): void
     {
         $matcher = app(RequirementKnowledgeMatcher::class);
