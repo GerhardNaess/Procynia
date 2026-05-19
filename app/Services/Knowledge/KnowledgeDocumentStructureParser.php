@@ -978,6 +978,7 @@ class KnowledgeDocumentStructureParser
         $currentHeadings = [];
 
         foreach ($blocks as $block) {
+            $type = trim((string) ($block['type'] ?? ''));
             $text = trim((string) ($block['text'] ?? ''));
 
             if ($text === '') {
@@ -985,6 +986,86 @@ class KnowledgeDocumentStructureParser
             }
 
             $level = isset($block['level']) && is_int($block['level']) ? $block['level'] : null;
+            $headingPath = $this->currentHeadingPath($currentHeadings);
+
+            if ($type === 'table') {
+                $elements[] = [
+                    'type' => 'table',
+                    'heading_path' => $headingPath,
+                    'text' => $text,
+                    'heading_level' => null,
+                    'relation_hint' => null,
+                    'title' => $block['title'] ?? null,
+                    'caption' => $block['caption'] ?? null,
+                    'page_number' => $block['page_number'] ?? null,
+                    'page_start' => $block['page_start'] ?? null,
+                    'page_end' => $block['page_end'] ?? null,
+                    'page_width' => $block['page_width'] ?? null,
+                    'page_height' => $block['page_height'] ?? null,
+                    'top' => $block['top'] ?? null,
+                    'left' => $block['left'] ?? null,
+                    'width' => $block['width'] ?? null,
+                    'height' => $block['height'] ?? null,
+                    'rows' => $block['rows'] ?? data_get($block, 'table_json.rows'),
+                    'cells' => $block['cells'] ?? null,
+                    'table_text' => $block['table_text'] ?? null,
+                    'table_html' => $block['table_html'] ?? null,
+                    'table_json' => $block['table_json'] ?? null,
+                    'table_markdown' => $block['table_markdown'] ?? null,
+                    'table_complexity' => $block['table_complexity'] ?? null,
+                    'table_warnings' => $block['table_warnings'] ?? null,
+                    'table_index_in_document' => $block['table_index_in_document'] ?? null,
+                    'metadata' => $block['metadata'] ?? $block['source_metadata'] ?? null,
+                    'source_lines' => $block['source_lines'] ?? null,
+                    'source_metadata' => $block['source_metadata'] ?? null,
+                ];
+
+                continue;
+            }
+
+            if ($type === 'image' || $type === 'graphic') {
+                $elements[] = [
+                    'type' => 'image',
+                    'heading_path' => $headingPath,
+                    'text' => $text,
+                    'heading_level' => null,
+                    'relation_hint' => null,
+                    'title' => $block['title'] ?? null,
+                    'caption' => $block['caption'] ?? ($block['image_caption'] ?? null),
+                    'page_number' => $block['page_number'] ?? null,
+                    'page_start' => $block['page_start'] ?? null,
+                    'page_end' => $block['page_end'] ?? null,
+                    'page_width' => $block['page_width'] ?? null,
+                    'page_height' => $block['page_height'] ?? null,
+                    'top' => $block['top'] ?? null,
+                    'left' => $block['left'] ?? null,
+                    'width' => $block['width'] ?? ($block['image_width'] ?? null),
+                    'height' => $block['height'] ?? ($block['image_height'] ?? null),
+                    'path' => $block['path'] ?? null,
+                    'storage_path' => $block['storage_path'] ?? null,
+                    'image_path' => $block['image_path'] ?? null,
+                    'image_disk' => $block['image_disk'] ?? null,
+                    'image_mime_type' => $block['image_mime_type'] ?? null,
+                    'image_original_filename' => $block['image_original_filename'] ?? null,
+                    'image_width' => $block['image_width'] ?? null,
+                    'image_height' => $block['image_height'] ?? null,
+                    'image_hash' => $block['image_hash'] ?? null,
+                    'image_metadata' => $block['image_metadata'] ?? null,
+                    'alt' => $block['alt'] ?? ($block['image_alt_text'] ?? null),
+                    'description' => $block['description'] ?? ($block['image_description'] ?? null),
+                    'image_alt_text' => $block['image_alt_text'] ?? null,
+                    'image_caption' => $block['image_caption'] ?? null,
+                    'ocr_text' => $block['ocr_text'] ?? null,
+                    'image_description' => $block['image_description'] ?? null,
+                    'image_bytes' => $block['image_bytes'] ?? null,
+                    'image_index_in_document' => $block['image_index_in_document'] ?? null,
+                    'metadata' => $block['metadata'] ?? ($block['image_metadata'] ?? $block['source_metadata'] ?? null),
+                    'source_lines' => $block['source_lines'] ?? null,
+                    'source_metadata' => $block['source_metadata'] ?? null,
+                ];
+
+                continue;
+            }
 
             if ($level !== null) {
                 $currentHeadings = $this->trimHeadingStack($currentHeadings, $level);
@@ -2591,6 +2672,17 @@ class KnowledgeDocumentStructureParser
                 'text' => trim((string) ($element['text'] ?? '')),
                 'heading_level' => $element['heading_level'] ?? null,
                 'relation_hint' => $element['relation_hint'] ?? null,
+                'title' => $element['title'] ?? null,
+                'caption' => $element['caption'] ?? null,
+                'page_number' => $element['page_number'] ?? null,
+                'page_start' => $element['page_start'] ?? null,
+                'page_end' => $element['page_end'] ?? null,
+                'page_width' => $element['page_width'] ?? null,
+                'page_height' => $element['page_height'] ?? null,
+                'top' => $element['top'] ?? null,
+                'left' => $element['left'] ?? null,
+                'width' => $element['width'] ?? null,
+                'height' => $element['height'] ?? null,
                 'table_json' => $element['table_json'] ?? null,
                 'table_html' => $element['table_html'] ?? null,
                 'table_complexity' => $element['table_complexity'] ?? null,
@@ -2598,6 +2690,7 @@ class KnowledgeDocumentStructureParser
                 'table_markdown' => $element['table_markdown'] ?? null,
                 'table_text' => $element['table_text'] ?? null,
                 'rows' => $element['rows'] ?? null,
+                'cells' => $element['cells'] ?? null,
                 'row_count' => $element['row_count'] ?? null,
                 'column_count' => $element['column_count'] ?? null,
                 'table_index_in_document' => $element['table_index_in_document'] ?? null,
@@ -2614,6 +2707,12 @@ class KnowledgeDocumentStructureParser
                 'image_caption' => $element['image_caption'] ?? null,
                 'ocr_text' => $element['ocr_text'] ?? null,
                 'image_description' => $element['image_description'] ?? null,
+                'path' => $element['path'] ?? null,
+                'storage_path' => $element['storage_path'] ?? null,
+                'alt' => $element['alt'] ?? null,
+                'description' => $element['description'] ?? null,
+                'metadata' => $element['metadata'] ?? null,
+                'source_lines' => $element['source_lines'] ?? null,
                 'source_metadata' => $element['source_metadata'] ?? null,
                 'image_index_in_document' => $element['image_index_in_document'] ?? null,
             ];
@@ -2651,6 +2750,17 @@ class KnowledgeDocumentStructureParser
                 'order_index' => count($finalElements),
                 'heading_level' => isset($element['heading_level']) ? (int) $element['heading_level'] : null,
                 'relation_hint' => $this->normalizeNullableString($element['relation_hint'] ?? null),
+                'title' => $this->normalizeNullableString($element['title'] ?? null),
+                'caption' => $this->normalizeNullableString($element['caption'] ?? null),
+                'page_number' => isset($element['page_number']) ? (int) $element['page_number'] : null,
+                'page_start' => isset($element['page_start']) ? (int) $element['page_start'] : null,
+                'page_end' => isset($element['page_end']) ? (int) $element['page_end'] : null,
+                'page_width' => isset($element['page_width']) ? (int) $element['page_width'] : null,
+                'page_height' => isset($element['page_height']) ? (int) $element['page_height'] : null,
+                'top' => isset($element['top']) ? (int) $element['top'] : null,
+                'left' => isset($element['left']) ? (int) $element['left'] : null,
+                'width' => isset($element['width']) ? (int) $element['width'] : null,
+                'height' => isset($element['height']) ? (int) $element['height'] : null,
                 'table_json' => is_array($element['table_json'] ?? null) ? $element['table_json'] : null,
                 'table_html' => $this->normalizeNullableString($element['table_html'] ?? null),
                 'table_complexity' => $this->normalizeNullableString($element['table_complexity'] ?? null),
@@ -2661,6 +2771,7 @@ class KnowledgeDocumentStructureParser
                 'table_markdown' => $this->normalizeNullableString($element['table_markdown'] ?? null),
                 'table_text' => $this->normalizeNullableString($element['table_text'] ?? null),
                 'rows' => isset($element['rows']) && is_array($element['rows']) ? $element['rows'] : null,
+                'cells' => isset($element['cells']) && is_array($element['cells']) ? $element['cells'] : null,
                 'row_count' => isset($element['row_count']) ? (int) $element['row_count'] : null,
                 'column_count' => isset($element['column_count']) ? (int) $element['column_count'] : null,
                 'table_index_in_document' => isset($element['table_index_in_document']) ? (int) $element['table_index_in_document'] : null,
@@ -2677,6 +2788,12 @@ class KnowledgeDocumentStructureParser
                 'image_caption' => $this->normalizeNullableString($element['image_caption'] ?? null),
                 'ocr_text' => $this->normalizeNullableString($element['ocr_text'] ?? null),
                 'image_description' => $this->normalizeNullableString($element['image_description'] ?? null),
+                'path' => $this->normalizeNullableString($element['path'] ?? null),
+                'storage_path' => $this->normalizeNullableString($element['storage_path'] ?? null),
+                'alt' => $this->normalizeNullableString($element['alt'] ?? null),
+                'description' => $this->normalizeNullableString($element['description'] ?? null),
+                'metadata' => isset($element['metadata']) && is_array($element['metadata']) ? $element['metadata'] : null,
+                'source_lines' => isset($element['source_lines']) && is_array($element['source_lines']) ? $element['source_lines'] : null,
                 'source_metadata' => isset($element['source_metadata']) && is_array($element['source_metadata']) ? $element['source_metadata'] : null,
                 'image_index_in_document' => isset($element['image_index_in_document']) ? (int) $element['image_index_in_document'] : null,
             ];
