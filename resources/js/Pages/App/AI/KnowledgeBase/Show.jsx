@@ -1304,30 +1304,24 @@ export default function KnowledgeBaseShow({
                                                         )}
                                                     >
                                                         <div className="flex items-start justify-between gap-3">
-                                                            <div className="space-y-2">
-                                                                <div className="flex flex-wrap items-center gap-2">
-                                                                    <div className="text-sm font-medium text-slate-950">
-                                                                        {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0, knowledgeShowLabels), q)}
-                                                                    </div>
-                                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                                                                        {getChunkTypeLabel(chunk, knowledgeShowLabels)}
+                                                            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                                                                {isSelected ? (
+                                                                    <span className="inline-flex shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                                                                        {tks.selected_badge}
                                                                     </span>
-                                                                    {isChunkMetadataPending(chunk) ? (
-                                                                        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                                                                            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-                                                                            {tks.metadata_generating}
-                                                                        </span>
-                                                                    ) : null}
-                                                                    {isSelected ? (
-                                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
-                                                                            {tks.selected_badge}
-                                                                        </span>
-                                                                    ) : null}
-                                                                </div>
-
-                                                                <p className="max-h-24 overflow-hidden text-sm leading-6 text-slate-600">
-                                                                    {highlightText(previewText, q)}
-                                                                </p>
+                                                                ) : null}
+                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                                                    {formatTemplate(knowledgeShowLabels.chunkNumberLabel, { number: originalIndex + 1 })}
+                                                                </span>
+                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                                                    {getChunkTypeLabel(chunk, knowledgeShowLabels)}
+                                                                </span>
+                                                                {isChunkMetadataPending(chunk) ? (
+                                                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                                                        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                                                                        {tks.metadata_generating}
+                                                                    </span>
+                                                                ) : null}
                                                             </div>
 
                                                             <span className={classNames(
@@ -1337,6 +1331,14 @@ export default function KnowledgeBaseShow({
                                                                 {reviewStatusMeta.label}
                                                             </span>
                                                         </div>
+
+                                                        <div className="mt-3 text-sm font-medium text-slate-950">
+                                                            {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0, knowledgeShowLabels), q)}
+                                                        </div>
+
+                                                        <p className="mt-2 max-h-24 overflow-hidden text-sm leading-6 text-slate-600">
+                                                            {highlightText(previewText, q)}
+                                                        </p>
 
                                                         <div className="mt-3 flex flex-wrap items-center gap-2">
                                                             <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
