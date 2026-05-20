@@ -2489,11 +2489,14 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedPreH2TableStructureFixture(): array
     {
+        $preH2Text = 'Tekst før tabell. ' . $this->repeatedWords('forklaring', 40);
+        $h2Text = "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2. " . $this->repeatedWords('dokumentasjon', 35);
+
         return $this->buildRuleBasedStructureFixture([
             [
                 'type' => 'paragraph',
                 'heading_path' => '1 Overskrift test',
-                'text' => 'Tekst før tabell.',
+                'text' => $preH2Text,
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2661,7 +2664,7 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => '1 Overskrift test > 1.1 Dokumentasjonskrav for drift',
-                'text' => "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2.",
+                'text' => $h2Text,
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
