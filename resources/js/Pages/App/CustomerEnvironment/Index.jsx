@@ -609,7 +609,7 @@ export default function CustomerEnvironmentIndex({
                             )}
                         </section>
                     </section>
-                ) : (
+                ) : currentTab === 'users' ? (
                     <section className="space-y-5">
                         <div className="flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -834,7 +834,7 @@ export default function CustomerEnvironmentIndex({
                             )}
                         </section>
                     </section>
-                )}
+                ) : null}
 
                 {currentTab === 'document-templates' ? (
                     <section className="space-y-5">
