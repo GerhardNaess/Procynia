@@ -2445,7 +2445,7 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function realKnowledgePdfUpload(): UploadedFile
     {
-        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS315WF8PAV46EYZK9CQD9DD.pdf');
+        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS3257C5FZRST2VVHVSAGR0Z.pdf');
 
         if (! is_file($path)) {
             throw new RuntimeException('Unable to locate the real PDF fixture used for regression testing.');

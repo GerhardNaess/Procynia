@@ -348,17 +348,7 @@ class PdfFigurePreviewRenderer
             return null;
         }
 
-        $seedTop = (int) ($seedBlock['top'] ?? 0);
-        $thresholdTop = max(0, $seedTop - self::DEFAULT_PADDING);
-
-        $selectedBlocks = array_values(array_filter(
-            $bestBlocks,
-            static function (array $match) use ($thresholdTop): bool {
-                $block = is_array($match['block'] ?? null) ? $match['block'] : [];
-
-                return (int) ($block['top'] ?? 0) >= $thresholdTop;
-            },
-        ));
+        $selectedBlocks = $this->clusterFigureMatches($bestBlocks, $seedBlock, $bestPageHeight);
 
         if ($selectedBlocks === []) {
             $selectedBlocks = [[
@@ -374,6 +364,124 @@ class PdfFigurePreviewRenderer
             'page_height' => $bestPageHeight,
             'blocks' => $selectedBlocks,
         ];
+    }
+
+    /**
+     * Purpose: Keep only the contiguous figure-like block cluster around the chosen seed block.
+     * Inputs: The matched blocks on the best page, the seed block, and the page height.
+     * Returns: A compact ordered subset of blocks that belong to the same figure region.
+     *
+     * @param array<int, array{block: array<string, mixed>, score: int, caption_match: bool}> $matches
+     * @param array<string, mixed> $seedBlock
+     * @return array<int, array{block: array<string, mixed>, score: int, caption_match: bool}>
+     */
+    private function clusterFigureMatches(array $matches, array $seedBlock, int $pageHeight): array
+    {
+        if ($matches === []) {
+            return [];
+        }
+
+        usort(
+            $matches,
+            static function (array $left, array $right): int {
+                $topComparison = ((int) data_get($left, 'block.top', 0)) <=> ((int) data_get($right, 'block.top', 0));
+
+                if ($topComparison !== 0) {
+                    return $topComparison;
+                }
+
+                return ((int) data_get($left, 'block.left', 0)) <=> ((int) data_get($right, 'block.left', 0));
+            },
+        );
+
+        $seedIndex = null;
+        $seedTop = (int) ($seedBlock['top'] ?? 0);
+        $seedLeft = (int) ($seedBlock['left'] ?? 0);
+        $seedWidth = max(1, (int) ($seedBlock['width'] ?? 0));
+
+        foreach ($matches as $index => $match) {
+            $block = is_array($match['block'] ?? null) ? $match['block'] : [];
+
+            if ((int) ($block['top'] ?? 0) === $seedTop && (int) ($block['left'] ?? 0) === $seedLeft && max(1, (int) ($block['width'] ?? 0)) === $seedWidth) {
+                $seedIndex = $index;
+
+                break;
+            }
+        }
+
+        if ($seedIndex === null) {
+            $seedIndex = 0;
+        }
+
+        $gapThreshold = $this->figureClusterGapThreshold($pageHeight);
+        $horizontalPadding = 24;
+        $cluster = [];
+        $clusterLeft = null;
+        $clusterRight = null;
+        $clusterBottom = null;
+
+        for ($index = $seedIndex; $index < count($matches); $index++) {
+            $match = $matches[$index];
+            $block = is_array($match['block'] ?? null) ? $match['block'] : [];
+
+            if ($block === []) {
+                continue;
+            }
+
+            if ($cluster === []) {
+                $cluster[] = $match;
+                $clusterLeft = (int) ($block['left'] ?? 0);
+                $clusterRight = $clusterLeft + max(1, (int) ($block['width'] ?? 0));
+                $clusterBottom = (int) ($block['top'] ?? 0) + max(1, (int) ($block['height'] ?? 0));
+
+                continue;
+            }
+
+            $blockTop = (int) ($block['top'] ?? 0);
+            $blockLeft = (int) ($block['left'] ?? 0);
+            $blockRight = $blockLeft + max(1, (int) ($block['width'] ?? 0));
+            $verticalGap = max(0, $blockTop - (int) $clusterBottom);
+            $overlapsCluster = $this->blockOverlapsHorizontalCluster($blockLeft, $blockRight, (int) $clusterLeft, (int) $clusterRight, $horizontalPadding);
+
+            if ($verticalGap > $gapThreshold && ! $overlapsCluster) {
+                break;
+            }
+
+            if ($verticalGap > (int) ceil($gapThreshold * 1.5) && ! $overlapsCluster) {
+                break;
+            }
+
+            $cluster[] = $match;
+            $clusterLeft = min((int) $clusterLeft, $blockLeft);
+            $clusterRight = max((int) $clusterRight, $blockRight);
+            $clusterBottom = max((int) $clusterBottom, $blockTop + max(1, (int) ($block['height'] ?? 0)));
+        }
+
+        return $cluster;
+    }
+
+    /**
+     * Purpose: Determine the maximum vertical gap allowed between blocks in one figure cluster.
+     * Inputs: The PDF page height.
+     * Returns: A conservative gap threshold in page coordinates.
+     */
+    private function figureClusterGapThreshold(int $pageHeight): int
+    {
+        if ($pageHeight <= 0) {
+            return 80;
+        }
+
+        return max(48, min(72, (int) round($pageHeight * 0.05)));
+    }
+
+    /**
+     * Purpose: Determine whether one block horizontally overlaps the current figure cluster.
+     * Inputs: The candidate block bounds and the current cluster bounds.
+     * Returns: True when the candidate is horizontally close enough to stay in the figure cluster.
+     */
+    private function blockOverlapsHorizontalCluster(int $blockLeft, int $blockRight, int $clusterLeft, int $clusterRight, int $padding): bool
+    {
+        return $blockRight >= ($clusterLeft - $padding) && $blockLeft <= ($clusterRight + $padding);
     }
 
     /**
