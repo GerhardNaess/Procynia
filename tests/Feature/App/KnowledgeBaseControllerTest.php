@@ -784,11 +784,11 @@ class KnowledgeBaseControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('table-pipeline.docx', [
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Innledning før tabell.', 'style' => 'Normal'],
+                ['text' => 'Innledning før tabell. Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
-                ['text' => 'Tekst før tabell.', 'style' => 'Normal'],
+                ['text' => 'Tekst før tabell. Kravene til dokumentasjon for drift av systemet skal dekke alle aspekter ved vedlikehold og løpende operasjon. Dette inkluderer detaljerte prosedyrer for oppstart, avvikling, sikkerhetskopiering og gjenoppretting av data og systemtilstand. Alle prosedyrer skal testes regelmessig og resultatene dokumenteres.', 'style' => 'Normal'],
                 ['text' => '', 'style' => 'Table'],
-                ['text' => 'Tekst etter tabell.', 'style' => 'Normal'],
+                ['text' => 'Tekst etter tabell. Resultater fra testing av systemet skal dokumenteres og oppbevares i henhold til gjeldende retningslinjer for intern kvalitetssikring. Avvik fra forventede resultater skal rapporteres og håndteres i henhold til avviksprosedyren. Ansvaret for oppdatering og videre oppfølging tilhører den ansvarlige driftslederen.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
