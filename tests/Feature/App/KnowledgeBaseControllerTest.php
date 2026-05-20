@@ -17,6 +17,7 @@ use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
+use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
@@ -626,6 +627,11 @@ class KnowledgeBaseControllerTest extends TestCase
         $structure = $this->ruleBasedFigureGapStructureFixture();
         $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
 
+        $prefixPayload = collect($payloads)->first(static function (array $payload): bool {
+            return data_get($payload, 'chunk_type') === 'semantic'
+                && str_contains((string) ($payload['content'] ?? ''), 'Det skal holdes egne møter for risikostyring jevnlig');
+        });
+
         $chunkTypes = array_values(array_map(
             static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
             $payloads,
@@ -642,6 +648,8 @@ class KnowledgeBaseControllerTest extends TestCase
         $previousPayload = $payloads[$imageIndex - 1] ?? null;
         $nextPayload = $payloads[$imageIndex + 1] ?? null;
 
+        $this->assertNotNull($prefixPayload, 'Expected the narrative text before the figure to remain a semantic chunk.');
+        $this->assertStringContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) ($prefixPayload['content'] ?? ''));
         $this->assertSame('image', $imagePayload['chunk_type']);
         $this->assertStringContainsString('1.12', (string) ($imagePayload['heading_path'] ?? ''));
         $this->assertStringContainsString('1.12', (string) ($imagePayload['section_path'] ?? ''));
@@ -653,6 +661,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertStringContainsString('1.13', (string) ($nextPayload['heading_path'] ?? ''));
         $this->assertStringContainsString('Advania Risk Management', (string) ($imagePayload['content'] ?? ''));
         $this->assertStringContainsString('Kontroll', (string) ($imagePayload['content'] ?? ''));
+        $this->assertStringNotContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) ($imagePayload['content'] ?? ''));
         $this->assertSame('pdf_figure_gap', data_get($imagePayload, 'image_metadata.source'));
         $this->assertTrue((bool) data_get($imagePayload, 'image_metadata.derived_from_text'));
         $this->assertSame('Advania Risk Management', $imagePayload['image_caption'] ?? null);
@@ -669,6 +678,47 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertNotEmpty($imagePayload['image_caption'] ?? null);
         $this->assertNotEmpty($imagePayload['ocr_text'] ?? null);
         $this->assertNotEmpty($imagePayload['image_description'] ?? null);
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_does_not_create_pdf_figure_gap_for_body_text_without_strong_figure_evidence(): void
+    {
+        $structure = $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'B ILAG 1-11 > 1.10 L EVERANDØRENS STANDARD ORGANISERING AV PROSJEKTER',
+                'text' => 'Innledning før sjekklister. Leverandøren beskriver her hvordan kick-off for prosjektet skal gjennomføres.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11 > 1.10 L EVERANDØRENS STANDARD ORGANISERING AV PROSJEKTER',
+                'text' => "Sjekklister for prosjekt kick-off\nLeverandøren benytter etablerte sjekklister for gjennomføring av prosjektets kick-off. Disse sjekklistene sikrer at alle sentrale temaer behandles ved prosjektoppstart. Dette omfatter blant annet gjennomgang av prosjektmål, leveranseomfang, organisering, rollefordeling, fremdriftsplan, samhandlingsmodell, rapporteringsstruktur og beslutningsprosesser.\nSjekklistene bidrar til å etablere en felles forståelse av prosjektet mellom partene før prosjektets operative aktiviteter starter.\nSjekklister for milepæler og beslutningspunkter\nVed sentrale milepæler i prosjektet benyttes strukturerte sjekklister som dokumenterer at nødvendige aktiviteter er gjennomført før prosjektet går videre til neste fase. Sjekklistene benyttes som grunnlag for beslutningsunderlag i prosjektledelsen og i styringsgruppen.\nBeslutningsunderlaget kan blant annet omfatte:",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => '4. Oppfølging > 1.11 L EVERANDØRENS OPPBYGGING AV PROSJEKTPLANEN (WBS STRUKTUR MM .)',
+                'text' => "1.11 L EVERANDØRENS OPPBYGGING AV PROSJEKTPLANEN (WBS STRUKTUR MM .)\n\nOppbygging av WBS-struktur i prosjektplanen. Leverandøren benytter en strukturert Work Breakdown Structure (WBS) som grunnlag for planlegging, styring og oppfølging av prosjektet.",
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+        $imagePayloads = array_values(array_filter(
+            $payloads,
+            static fn (array $payload): bool => ($payload['chunk_type'] ?? null) === 'image',
+        ));
+        $semanticPayload = collect($payloads)->first(static function (array $payload): bool {
+            return ($payload['chunk_type'] ?? null) === 'semantic'
+                && str_contains((string) ($payload['content'] ?? ''), 'Sjekklister for prosjekt kick-off');
+        });
+
+        $this->assertCount(0, $imagePayloads, 'Long body text without figure evidence should remain semantic text.');
+        $this->assertNotNull($semanticPayload, 'The checklist text should remain a semantic chunk.');
+        $this->assertStringContainsString('Leverandøren benytter etablerte sjekklister', (string) ($semanticPayload['content'] ?? ''));
     }
 
     public function test_real_pdf_import_keeps_existing_pdf_graphics_and_drops_competing_pdf_figure_gaps(): void
@@ -715,6 +765,15 @@ class KnowledgeBaseControllerTest extends TestCase
                 && str_contains((string) $chunk->heading_path, '1.12');
         });
 
+        $pageTwentyThreeNarrative = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'semantic'
+                && str_contains((string) $chunk->content, 'Det skal holdes egne møter for risikostyring jevnlig');
+        });
+
+        $sjekklisterChunk = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return str_contains((string) $chunk->content, 'Sjekklister for prosjekt kick-off');
+        });
+
         $competingFigureGapInSectionOneFour = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
             return data_get($chunk, 'chunk_type') === 'image'
                 && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
@@ -724,6 +783,9 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertNotNull($pageNineGraphic);
         $this->assertNotNull($pageEighteenGraphic);
         $this->assertNotNull($pageTwentyThreeFigure);
+        $this->assertNotNull($pageTwentyThreeNarrative, 'The paragraph before the figure should remain a semantic chunk.');
+        $this->assertNotNull($sjekklisterChunk, 'Checklist text should still be present in the imported chunks.');
+        $this->assertSame('semantic', data_get($sjekklisterChunk, 'chunk_type'));
         $this->assertNull($competingFigureGapInSectionOneFour, 'Existing 1.4 graphic must not be replaced by a derived pdf_figure_gap chunk.');
 
         $this->assertSame('pdf_graphic', data_get($pageNineGraphic, 'image_metadata.source_type'));
@@ -739,11 +801,19 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.derived_from_text'));
         $this->assertSame('Advania Risk Management', $pageTwentyThreeFigure->image_caption);
         $this->assertNotEmpty($pageTwentyThreeFigure->image_description ?? null);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_path);
+        $this->assertSame('image/png', $pageTwentyThreeFigure->image_mime_type);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_hash);
+        $this->assertTrue(Storage::disk('local')->exists($pageTwentyThreeFigure->image_path));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.preview_generated'));
+        $this->assertSame(24, data_get($pageTwentyThreeFigure, 'image_metadata.preview_page_number'));
+        $this->assertStringNotContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) $pageTwentyThreeFigure->content);
+        $this->assertStringNotContainsString('Sjekklister for prosjekt kick-off', (string) $pageTwentyThreeFigure->content);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
-        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $showResponse->assertViewHas('page', function (array $page) use ($document, $pageTwentyThreeNarrative): bool {
             $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
 
             $pageNineGraphic = $chunks->first(static function (array $chunk): bool {
@@ -763,7 +833,9 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.knowledgeItem.id') === $document->id
                 && $pageNineGraphic !== null
                 && ! empty($pageNineGraphic['image_url'])
+                && $pageTwentyThreeNarrative !== null
                 && $pageTwentyThreeFigure !== null
+                && ! empty($pageTwentyThreeFigure['image_url'])
                 && data_get($pageTwentyThreeFigure, 'image_caption') === 'Advania Risk Management';
         });
 
@@ -773,6 +845,50 @@ class KnowledgeBaseControllerTest extends TestCase
                 'chunk' => $pageNineGraphic->id,
             ]))
             ->assertOk();
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $pageTwentyThreeFigure->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_real_pdf_import_keeps_the_figure_chunk_when_preview_rendering_fails(): void
+    {
+        Storage::fake('local');
+
+        $this->app->instance(PdfFigurePreviewRenderer::class, Mockery::mock(PdfFigurePreviewRenderer::class, function ($mock): void {
+            $mock->shouldReceive('renderPreview')->andReturnNull();
+        }));
+
+        $context = $this->customerContext('Customer Real Pdf Preview Fallback AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->realKnowledgePdfUpload(),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->firstOrFail();
+
+        $pageTwentyThreeFigure = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'image')
+            ->where('image_caption', 'Advania Risk Management')
+            ->firstOrFail();
+
+        $this->assertSame('pdf_figure_gap', data_get($pageTwentyThreeFigure, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.derived_from_text'));
+        $this->assertNull($pageTwentyThreeFigure->image_path);
+        $this->assertNull($pageTwentyThreeFigure->image_url ?? null);
+        $this->assertStringContainsString('Advania Risk Management', (string) $pageTwentyThreeFigure->content);
     }
 
     public function test_knowledge_document_upload_persists_table_chunks_separately_from_text_chunks(): void
@@ -2329,7 +2445,7 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function realKnowledgePdfUpload(): UploadedFile
     {
-        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS21B3M5YKSPAYKQWTZ1HC33.pdf');
+        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS315WF8PAV46EYZK9CQD9DD.pdf');
 
         if (! is_file($path)) {
             throw new RuntimeException('Unable to locate the real PDF fixture used for regression testing.');
@@ -2911,7 +3027,21 @@ class KnowledgeBaseControllerTest extends TestCase
             ],
             [
                 'type' => 'paragraph',
-                'heading_path' => 'B ILAG 1-11',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => 'Det skal holdes egne møter for risikostyring jevnlig for å overvåke eksisterende risiko, identifisere nye risikoer og for å avtale risikostrategi og tiltak for å kunne styre risiko gjennom prosjektet. Hyppigheten av disse møtene avtales mellom Kunden og Leverandøren i planleggingsfasen når alle innledende risikoer er identifisert og analysert. Risikorapportering vil være en naturlig del av styringsgruppe- og prosjektrapportering. Leverandøren har etablert maler for å identifisere, håndtere og presentere identifiserte risikoer i prosjektprosessen. Risikostyring og identifisering er også et kontinuerlig arbeid for prosjektlederen i prosjektperioden og er tydelig definert i prosjektprosessen til selskapet som er revidert av DNV-GL og sertifisert til standarden 9001:2015. Leverandøren vil først og fremst gjennomføre risiko opp mot: Kvalitet, Kost og Fremdrift (tid).',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => "• Kvalitet\n• Kost\n• Fremdrift (tid)",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
                 'text' => 'Advania Risk Management',
                 'heading_level' => null,
                 'relation_hint' => null,

@@ -16,6 +16,7 @@ use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
 use App\Services\Knowledge\KnowledgeChunkBuilder;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
+use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
@@ -52,6 +53,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
         private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
+        private readonly PdfFigurePreviewRenderer $pdfFigurePreviewRenderer,
         private readonly AiUsageGuard $aiUsageGuard,
     ) {
     }
@@ -275,6 +277,7 @@ class KnowledgeBaseController extends Controller
                 $payload,
                 $request,
                 $storedPath,
+                $absolutePath,
                 $extractedText,
                 $chunkPayloads,
                 $extractionFailed,
@@ -304,7 +307,7 @@ class KnowledgeBaseController extends Controller
 
                 return [
                     'knowledge_document' => $knowledgeDocument,
-                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads),
+                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads, $absolutePath),
                 ];
             });
 
@@ -2256,9 +2259,36 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
+            $lineInfos = [];
+            $lineCursor = 0;
+
+            foreach (preg_split('/\n+/u', $gapText) ?: [] as $rawLine) {
+                $rawLine = trim((string) $rawLine);
+
+                if ($rawLine === '') {
+                    continue;
+                }
+
+                $relativeStart = mb_strpos($gapText, $rawLine, $lineCursor, 'UTF-8');
+
+                if ($relativeStart === false) {
+                    $relativeStart = $lineCursor;
+                }
+
+                $relativeEnd = $relativeStart + mb_strlen($rawLine, 'UTF-8');
+                $lineCursor = $relativeEnd;
+
+                $lineInfos[] = [
+                    'raw' => $rawLine,
+                    'normalized' => $normalizeLine($rawLine),
+                    'relative_start' => $relativeStart,
+                    'relative_end' => $relativeEnd,
+                ];
+            }
+
             $lines = array_values(array_filter(array_map(
-                $normalizeLine,
-                preg_split('/\n+/u', $gapText) ?: [],
+                static fn (array $lineInfo): string => (string) ($lineInfo['normalized'] ?? ''),
+                $lineInfos,
             ), static fn (string $line): bool => $line !== ''));
 
             if ($lines === []) {
@@ -2287,20 +2317,27 @@ class KnowledgeBaseController extends Controller
 
             $shortSuffixLineCount = 0;
             $listLikeSuffixLineCount = 0;
+            $longSuffixLineCount = 0;
 
             foreach ($suffixLines as $suffixLine) {
-                if ($wordCount($suffixLine) <= 6) {
+                $suffixWordCount = $wordCount($suffixLine);
+
+                if ($suffixWordCount <= 6) {
                     $shortSuffixLineCount++;
                 }
 
                 if ($isListLikeLine($suffixLine)) {
                     $listLikeSuffixLineCount++;
                 }
+
+                if ($suffixWordCount > 12 || mb_strlen($suffixLine, 'UTF-8') > 90 || preg_match('/[.!?]\s*$/u', $suffixLine) === 1) {
+                    $longSuffixLineCount++;
+                }
             }
 
-            if ($shortSuffixLineCount < 3 && $listLikeSuffixLineCount < 2) {
-                continue;
-            }
+            $isFigureLikeGap = $shortSuffixLineCount >= 3
+                && $listLikeSuffixLineCount >= 2
+                && $longSuffixLineCount === 0;
 
             $figureHeadingPath = $this->cleanNullableString($leftRange['section_path'] ?? $leftRange['heading_path'] ?? null, 255)
                 ?? $this->cleanNullableString($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null, 255);
@@ -2322,21 +2359,49 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
+            if (! $isFigureLikeGap) {
+                if ($longSuffixLineCount > 0 || $wordCount($gapText) >= self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
+                    $figureChunkRanges[] = [
+                        'heading_path' => $figureHeadingPath,
+                        'section_path' => $figureHeadingPath,
+                        'start_offset' => $gapStart,
+                        'end_offset' => $gapEnd,
+                        'chunk_kind' => 'semantic',
+                    ];
+                }
+
+                continue;
+            }
+
             $figureCaption = $normalizeLine($lines[$titleLineIndex] ?? '');
+            $figureStartRelative = (int) ($lineInfos[$titleLineIndex]['relative_start'] ?? 0);
+            $figureText = trim((string) mb_substr($gapText, $figureStartRelative, $gapEnd - $gapStart - $figureStartRelative, 'UTF-8'));
+            $prefixText = trim((string) mb_substr($gapText, 0, $figureStartRelative, 'UTF-8'));
+
+            if ($prefixText !== '' && $wordCount($prefixText) >= self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
+                $figureChunkRanges[] = [
+                    'heading_path' => $figureHeadingPath,
+                    'section_path' => $figureHeadingPath,
+                    'start_offset' => $gapStart,
+                    'end_offset' => $gapStart + $figureStartRelative,
+                    'chunk_kind' => 'semantic',
+                ];
+            }
+
             $figureElement = [
                 'heading_path' => $figureHeadingPath,
-                'start_offset' => $gapStart,
+                'start_offset' => $gapStart + $figureStartRelative,
                 'end_offset' => $gapEnd,
                 'image_caption' => $figureCaption !== '' ? $figureCaption : null,
-                'image_alt_text' => $gapText,
-                'image_description' => $gapText,
-                'ocr_text' => $gapText,
+                'image_alt_text' => $figureText,
+                'image_description' => $figureText,
+                'ocr_text' => $figureText,
                 'image_metadata' => [
                     'source' => 'pdf_figure_gap',
                     'derived_from_text' => true,
-                    'gap_character_count' => mb_strlen($gapText, 'UTF-8'),
-                    'gap_word_count' => $wordCount($gapText),
-                    'gap_line_count' => count($lines),
+                    'gap_character_count' => mb_strlen($figureText, 'UTF-8'),
+                    'gap_word_count' => $wordCount($figureText),
+                    'gap_line_count' => count(array_slice($lineInfos, $titleLineIndex)),
                 ],
             ];
 
@@ -2784,7 +2849,7 @@ class KnowledgeBaseController extends Controller
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads): Collection
+    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads, ?string $sourceDocumentPath = null): Collection
     {
         $knowledgeDocument->chunks()->delete();
 
@@ -2793,7 +2858,7 @@ class KnowledgeBaseController extends Controller
         }
 
         $chunkAttributes = array_map(
-            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument): array {
+            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument, $sourceDocumentPath): array {
                 $chunkType = (string) ($chunkPayload['chunk_type'] ?? '');
                 $attributes = [
                     'chunk_index' => $chunkIndex,
@@ -2836,6 +2901,34 @@ class KnowledgeBaseController extends Controller
                     $imageMimeType = $this->cleanNullableString($attributes['image_mime_type'] ?? null, 191);
                     $imageOriginalFilename = $this->cleanNullableString($attributes['image_original_filename'] ?? null, 255) ?? 'image';
                     $imageHash = $this->cleanNullableString($attributes['image_hash'] ?? null, 128);
+                    $imageMetadata = is_array($attributes['image_metadata'] ?? null) ? $attributes['image_metadata'] : [];
+
+                    if ((! is_string($imageBytes) || trim($imageBytes) === '')
+                        && is_string($sourceDocumentPath)
+                        && $sourceDocumentPath !== ''
+                        && (string) data_get($imageMetadata, 'source') === 'pdf_figure_gap'
+                        && (bool) data_get($imageMetadata, 'derived_from_text')) {
+                        $preview = $this->pdfFigurePreviewRenderer->renderPreview($sourceDocumentPath, $chunkPayload);
+
+                        if (is_array($preview)) {
+                            $previewBytes = $preview['image_bytes'] ?? null;
+
+                            if (is_string($previewBytes) && trim($previewBytes) !== '') {
+                                $imageBytes = $previewBytes;
+                                $imageMimeType = $this->cleanNullableString($preview['image_mime_type'] ?? null, 191) ?? 'image/png';
+                                $imageOriginalFilename = $this->cleanNullableString($preview['image_original_filename'] ?? null, 255) ?? $imageOriginalFilename;
+                                $attributes['image_width'] = $preview['image_width'] ?? $attributes['image_width'];
+                                $attributes['image_height'] = $preview['image_height'] ?? $attributes['image_height'];
+                                $imageMetadata = array_merge(
+                                    $imageMetadata,
+                                    is_array($preview['image_metadata'] ?? null) ? $preview['image_metadata'] : [],
+                                );
+                                $attributes['image_mime_type'] = $imageMimeType;
+                                $attributes['image_original_filename'] = $imageOriginalFilename;
+                                $attributes['image_metadata'] = $imageMetadata;
+                            }
+                        }
+                    }
 
                     if (is_string($imageBytes) && trim($imageBytes) !== '') {
                         $imageHash = $imageHash ?? hash('sha256', $imageBytes);
