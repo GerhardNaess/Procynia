@@ -61,6 +61,30 @@ class RequirementWordExportServiceTest extends TestCase
         $this->assertStringNotContainsString('[[PROCYNIA_CONTENT]]', $documentXml);
     }
 
+    public function test_it_renders_markdown_headings_in_answer_drafts_as_word_headings_when_template_is_available(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->createCustomer('Headingkunde AS');
+        $savedNotice = $this->createSavedNotice($context->id, 'TEMPLATE-HEADINGS', 'Template heading target');
+        $this->createWordExportTemplate($context, 'heading-template.docx', 'Heading header', 'Heading footer');
+
+        $service = app(RequirementWordExportService::class);
+        $docxBinary = $service->build($savedNotice, new Collection([
+            $this->createRequirement('1.1', 'Kravtekst for heading-test.', "### Innledning og samlet forståelse\n\nBrødtekst.\n\n## Formål og omfang\n\nMer brødtekst."),
+        ]));
+
+        $documentXml = $this->readDocumentXml($docxBinary);
+
+        $this->assertStringContainsString('Heading header', $documentXml);
+        $this->assertStringContainsString('Innledning og samlet forståelse', $documentXml);
+        $this->assertStringContainsString('Formål og omfang', $documentXml);
+        $this->assertStringNotContainsString('### Innledning og samlet forståelse', $documentXml);
+        $this->assertStringNotContainsString('## Formål og omfang', $documentXml);
+        $this->assertGreaterThanOrEqual(1, substr_count($documentXml, 'Heading3'));
+        $this->assertGreaterThanOrEqual(1, substr_count($documentXml, 'Heading4'));
+    }
+
     public function test_it_does_not_use_another_customers_template(): void
     {
         Storage::fake('local');
@@ -104,12 +128,12 @@ class RequirementWordExportServiceTest extends TestCase
         $this->assertStringNotContainsString('Fallback header', $documentXml);
     }
 
-    private function createRequirement(string $identifier, string $text): SavedNoticeAiRequirement
+    private function createRequirement(string $identifier, string $text, string $answerDraftText = 'Svarutkast'): SavedNoticeAiRequirement
     {
         return (new SavedNoticeAiRequirement())->forceFill([
             'requirement_identifier' => $identifier,
             'requirement_text' => $text,
-            'answer_draft_text' => 'Svarutkast',
+            'answer_draft_text' => $answerDraftText,
             'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_MANDATORY,
             'answer_draft_retrieval_sources' => [],
         ]);

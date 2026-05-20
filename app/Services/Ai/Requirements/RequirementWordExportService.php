@@ -50,8 +50,16 @@ class RequirementWordExportService
         $phpWord->setDefaultFontName('Calibri');
         $phpWord->setDefaultFontSize(11);
 
-        Style::addTitleStyle(1, ['bold' => true, 'size' => 18, 'name' => 'Calibri']);
-        Style::addTitleStyle(2, ['bold' => true, 'size' => 13, 'name' => 'Calibri']);
+        foreach ([
+            1 => 18,
+            2 => 13,
+            3 => 12,
+            4 => 11,
+            5 => 10,
+            6 => 9,
+        ] as $level => $size) {
+            Style::addTitleStyle($level, ['bold' => true, 'size' => $size, 'name' => 'Calibri']);
+        }
 
         $section = $phpWord->addSection();
 
@@ -86,7 +94,7 @@ class RequirementWordExportService
 
             $section->addTextBreak(1);
             $section->addText('Svarutkast:', ['bold' => true]);
-            $this->addMultilineText($section, (string) ($requirement->answer_draft_text ?? ''));
+            $this->addMarkdownMultilineText($section, (string) ($requirement->answer_draft_text ?? ''));
 
             $sources = is_array($requirement->answer_draft_retrieval_sources)
                 ? $requirement->answer_draft_retrieval_sources
@@ -305,10 +313,81 @@ class RequirementWordExportService
 
     private function addMultilineText(mixed $section, string $text): void
     {
-        $lines = explode("\n", str_replace("\r\n", "\n", $text));
+        $lines = $this->splitLines($text);
         foreach ($lines as $index => $line) {
             $section->addText($line !== '' ? $line : ' ');
         }
+    }
+
+    private function addMarkdownMultilineText(mixed $section, string $text): void
+    {
+        foreach ($this->splitLines($text) as $line) {
+            $heading = $this->parseMarkdownHeadingLine($line);
+
+            if (is_array($heading)) {
+                $section->addTitle($heading['text'], $heading['level']);
+
+                continue;
+            }
+
+            $section->addText($line !== '' ? $line : ' ');
+        }
+    }
+
+    /**
+     * Purpose: Split text into lines while handling CRLF and lone CR endings safely.
+     * Inputs: Raw multi-line text.
+     * Returns: A line list preserving empty lines.
+     * Side effects: None.
+     *
+     * @return array<int, string>
+     */
+    private function splitLines(string $text): array
+    {
+        return explode("\n", str_replace(["\r\n", "\r"], "\n", $text));
+    }
+
+    /**
+     * Purpose: Detect a Markdown heading line and map it to a Word heading level.
+     * Inputs: One line of exported answer-draft text.
+     * Returns: Heading metadata when the line is a Markdown heading, otherwise null.
+     * Side effects: None.
+     *
+     * @return array{text: string, level: int}|null
+     */
+    private function parseMarkdownHeadingLine(string $line): ?array
+    {
+        if (trim($line) === '') {
+            return null;
+        }
+
+        if (preg_match('/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/u', $line, $matches) !== 1) {
+            return null;
+        }
+
+        $headingText = trim((string) $matches[2]);
+
+        if ($headingText === '') {
+            return null;
+        }
+
+        $markdownLevel = strlen((string) $matches[1]);
+
+        return [
+            'text' => $headingText,
+            'level' => $this->markdownHeadingLevelToWordTitleLevel($markdownLevel),
+        ];
+    }
+
+    /**
+     * Purpose: Offset Markdown heading depth to a document heading style depth.
+     * Inputs: The Markdown heading level from the AI answer draft.
+     * Returns: A Word title level that stays below the document title and requirement heading.
+     * Side effects: None.
+     */
+    private function markdownHeadingLevelToWordTitleLevel(int $markdownLevel): int
+    {
+        return min(6, max(2, $markdownLevel + 1));
     }
 
     private function sourceLabel(array $source): string
