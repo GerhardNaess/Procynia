@@ -2186,6 +2186,7 @@ class KnowledgeBaseController extends Controller
 
         $normalizeLine = static fn (string $line): string => trim(preg_replace('/\s+/u', ' ', $line) ?? '');
         $wordCount = static fn (string $text): int => count(preg_split('/\s+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        $normalizePath = static fn (mixed $value): string => trim(preg_replace('/\s+/u', ' ', (string) ($value ?? '')) ?? '');
         $isTitleLikeLine = static function (string $line) use ($wordCount): bool {
             $line = trim(preg_replace('/\s+/u', ' ', $line) ?? '');
 
@@ -2210,6 +2211,25 @@ class KnowledgeBaseController extends Controller
             return preg_match('/^[\p{Lu}\d]/u', $line) === 1;
         };
         $isListLikeLine = static fn (string $line): bool => preg_match('/^(?:\d+\.|\d+\)|[•\-–])\s*/u', trim($line)) === 1;
+        $existingImagePaths = [];
+
+        foreach ($chunkRanges as $chunkRange) {
+            if ((string) ($chunkRange['chunk_kind'] ?? '') !== 'image') {
+                continue;
+            }
+
+            $existingHeadingPath = $normalizePath($chunkRange['heading_path'] ?? null);
+            $existingSectionPath = $normalizePath($chunkRange['section_path'] ?? null);
+
+            if ($existingHeadingPath !== '') {
+                $existingImagePaths['heading:'.$existingHeadingPath] = true;
+            }
+
+            if ($existingSectionPath !== '') {
+                $existingImagePaths['section:'.$existingSectionPath] = true;
+            }
+        }
+
         $figureChunkRanges = [];
         $rangeCount = count($chunkRanges);
 
@@ -2286,6 +2306,19 @@ class KnowledgeBaseController extends Controller
                 ?? $this->cleanNullableString($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null, 255);
 
             if ($figureHeadingPath === null || $figureHeadingPath === '') {
+                continue;
+            }
+
+            $figureHeadingKey = $normalizePath($figureHeadingPath);
+            $figureSectionKey = $normalizePath($leftRange['section_path'] ?? $leftRange['heading_path'] ?? null);
+
+            if ($figureSectionKey === '') {
+                $figureSectionKey = $normalizePath($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null);
+            }
+
+            // Existing real image chunks win over synthetic figure gaps in the same section or heading.
+            if (($figureHeadingKey !== '' && isset($existingImagePaths['heading:'.$figureHeadingKey]))
+                || ($figureSectionKey !== '' && isset($existingImagePaths['section:'.$figureSectionKey]))) {
                 continue;
             }
 

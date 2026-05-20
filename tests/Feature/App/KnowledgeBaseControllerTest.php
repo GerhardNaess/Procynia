@@ -11,6 +11,7 @@ use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
@@ -36,6 +37,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
         $this->bindKnowledgeChunkBoundaryService();
+        $this->bindSuccessfulBillingEntitlementService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService();
         $this->bindSuccessfulEmbeddingService();
@@ -642,9 +644,126 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertStringContainsString('1.13', (string) ($nextPayload['heading_path'] ?? ''));
         $this->assertStringContainsString('Advania Risk Management', (string) ($imagePayload['content'] ?? ''));
         $this->assertStringContainsString('Kontroll', (string) ($imagePayload['content'] ?? ''));
+        $this->assertSame('pdf_figure_gap', data_get($imagePayload, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($imagePayload, 'image_metadata.derived_from_text'));
+        $this->assertSame('Advania Risk Management', $imagePayload['image_caption'] ?? null);
+        foreach ([
+            'Identifisere',
+            'Beskrivelse',
+            'Analyse',
+            'Planlegge',
+            'Oppfølging',
+            'Kontroll',
+        ] as $term) {
+            $this->assertStringContainsString($term, (string) ($imagePayload['image_description'] ?? ''));
+        }
         $this->assertNotEmpty($imagePayload['image_caption'] ?? null);
         $this->assertNotEmpty($imagePayload['ocr_text'] ?? null);
         $this->assertNotEmpty($imagePayload['image_description'] ?? null);
+    }
+
+    public function test_real_pdf_import_keeps_existing_pdf_graphics_and_drops_competing_pdf_figure_gaps(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Real Pdf AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->realKnowledgePdfUpload(),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $pageNineGraphic = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.page_number') === 9
+                && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+        });
+
+        $pageEighteenGraphic = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.page_number') === 18
+                && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+        });
+
+        $pageTwentyThreeFigure = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                && data_get($chunk, 'image_metadata.derived_from_text') === true
+                && data_get($chunk, 'image_caption') === 'Advania Risk Management'
+                && str_contains((string) $chunk->heading_path, '1.12');
+        });
+
+        $competingFigureGapInSectionOneFour = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                && str_contains((string) $chunk->heading_path, '1.4');
+        });
+
+        $this->assertNotNull($pageNineGraphic);
+        $this->assertNotNull($pageEighteenGraphic);
+        $this->assertNotNull($pageTwentyThreeFigure);
+        $this->assertNull($competingFigureGapInSectionOneFour, 'Existing 1.4 graphic must not be replaced by a derived pdf_figure_gap chunk.');
+
+        $this->assertSame('pdf_graphic', data_get($pageNineGraphic, 'image_metadata.source_type'));
+        $this->assertSame(9, data_get($pageNineGraphic, 'image_metadata.page_number'));
+        $this->assertNotEmpty($pageNineGraphic->image_path);
+        $this->assertNotEmpty($pageNineGraphic->image_metadata['source_image_path'] ?? null);
+
+        $this->assertSame('pdf_graphic', data_get($pageEighteenGraphic, 'image_metadata.source_type'));
+        $this->assertSame(18, data_get($pageEighteenGraphic, 'image_metadata.page_number'));
+        $this->assertNotEmpty($pageEighteenGraphic->image_path);
+
+        $this->assertSame('pdf_figure_gap', data_get($pageTwentyThreeFigure, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.derived_from_text'));
+        $this->assertSame('Advania Risk Management', $pageTwentyThreeFigure->image_caption);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_description ?? null);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+
+            $pageNineGraphic = $chunks->first(static function (array $chunk): bool {
+                return data_get($chunk, 'chunk_type') === 'image'
+                    && data_get($chunk, 'image_metadata.page_number') === 9
+                    && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+            });
+
+            $pageTwentyThreeFigure = $chunks->first(static function (array $chunk): bool {
+                return data_get($chunk, 'chunk_type') === 'image'
+                    && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                    && data_get($chunk, 'image_metadata.derived_from_text') === true
+                    && data_get($chunk, 'image_caption') === 'Advania Risk Management';
+            });
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && $pageNineGraphic !== null
+                && ! empty($pageNineGraphic['image_url'])
+                && $pageTwentyThreeFigure !== null
+                && data_get($pageTwentyThreeFigure, 'image_caption') === 'Advania Risk Management';
+        });
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $pageNineGraphic->id,
+            ]))
+            ->assertOk();
     }
 
     public function test_knowledge_document_upload_persists_table_chunks_separately_from_text_chunks(): void
@@ -2180,6 +2299,29 @@ class KnowledgeBaseControllerTest extends TestCase
     }
 
     /**
+     * Purpose: Reuse the real PDF fixture that previously exposed the figure-gap regression.
+     * Inputs: None.
+     * Returns: A test uploaded file backed by the actual PDF used during manual diagnosis.
+     * Side effects: None.
+     */
+    private function realKnowledgePdfUpload(): UploadedFile
+    {
+        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS21B3M5YKSPAYKQWTZ1HC33.pdf');
+
+        if (! is_file($path)) {
+            throw new RuntimeException('Unable to locate the real PDF fixture used for regression testing.');
+        }
+
+        return new UploadedFile(
+            $path,
+            'Masterdata Prosjekt_pdf.pdf',
+            'application/pdf',
+            null,
+            true,
+        );
+    }
+
+    /**
      * Purpose: Build a synthetic structure fixture for the rule-based H1/H2 chunk payload builder.
      * Inputs: None.
      * Returns: A parsed-structure shaped array with one H1-only section, one H1 with H2 subsections, and another H1-only section.
@@ -3037,6 +3179,21 @@ XML;
             });
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic billing entitlement service for knowledge base tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulBillingEntitlementService(): void
+    {
+        $service = Mockery::mock(BillingEntitlementService::class);
+        $service->shouldReceive('canUseAiOffer')
+            ->andReturnTrue();
+
+        $this->app->instance(BillingEntitlementService::class, $service);
     }
 
     /**
