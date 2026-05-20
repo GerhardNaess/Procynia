@@ -334,6 +334,7 @@ class KnowledgeBaseControllerTest extends TestCase
                     'media_bytes' => $this->docxSampleImageBytes(),
                 ],
                 ['text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['text' => 'Tekst etter H2.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
@@ -362,7 +363,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
         $this->assertSame('1 Overskrift test', $imageChunk->section_path);
-        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $imageChunk->content);
         $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $imageChunk->content);
 
         $this->assertSame('1 Overskrift test', $tableChunk->heading_path);
@@ -371,7 +372,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame('1.1 Dokumentasjonskrav for drift', $postH2Chunk->heading_path);
         $this->assertStringContainsString('Tekst etter H2.', (string) $postH2Chunk->content);
-        $this->assertStringNotContainsString('Bilde i seksjon: 1 Overskrift test', (string) $postH2Chunk->content);
+        $this->assertStringNotContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $postH2Chunk->content);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
@@ -383,7 +384,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
             return $imageChunk !== null
                 && data_get($imageChunk, 'section_path') === '1 Overskrift test'
-                && str_contains((string) data_get($imageChunk, 'content', ''), 'Bilde i seksjon: 1 Overskrift test')
+                && str_contains((string) data_get($imageChunk, 'content', ''), 'Grafikk i seksjon: 1 Overskrift test')
                 && ! str_contains((string) data_get($imageChunk, 'content', ''), '1.1 Dokumentasjonskrav for drift')
                 && $postH2Chunk !== null
                 && data_get($postH2Chunk, 'heading_path') === '1.1 Dokumentasjonskrav for drift'
