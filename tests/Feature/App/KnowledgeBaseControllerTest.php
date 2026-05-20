@@ -237,6 +237,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 ],
                 ['type' => 'paragraph', 'text' => 'Figur 1: Overordnet arkitektur', 'style' => 'Caption'],
                 ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['type' => 'paragraph', 'text' => 'Tekst etter H2.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
@@ -266,7 +267,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('png', $imageChunk->image_metadata['extension'] ?? null);
         $this->assertSame('unknown', $imageChunk->image_metadata['image_kind'] ?? null);
         $this->assertNotEmpty($imageChunk->content);
-        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $imageChunk->content);
         $this->assertStringContainsString('Arkitekturdiagram med integrasjoner', (string) $imageChunk->content);
         $this->assertStringContainsString('Figur 1: Overordnet arkitektur', (string) $imageChunk->content);
         $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
@@ -293,6 +294,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
                     'knowledgeItem' => $document->id,
                     'chunk' => $imageChunk['id'],
+                    'v' => $imageChunk['image_hash'],
                 ])
                 && ! empty($imageChunk['image_metadata'])
                 && data_get($imageChunk, 'image_metadata.extension') === 'png'
