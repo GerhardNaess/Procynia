@@ -513,6 +513,194 @@ XML;
         $this->assertStringContainsString('Dette er reell innholdstekst etter TOC.', $semanticText);
     }
 
+    public function test_it_keeps_real_page_six_failure_level_rows_in_one_table_run(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Nivå Kategori Beskrivelse',
+                163,
+                107,
+                371,
+                183,
+                [
+                    ['text' => 'Nivå', 'left' => 107, 'width' => 34],
+                    ['text' => 'Kategori', 'left' => 157, 'width' => 60],
+                    ['text' => 'Beskrivelse', 'left' => 292, 'width' => 79],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'A Kritisk feil • Feil som medfører at utstyret eller programvaren',
+                187,
+                107,
+                680,
+                208,
+                [
+                    ['text' => 'A', 'left' => 107, 'width' => 16],
+                    ['text' => 'Kritisk feil', 'left' => 157, 'width' => 70],
+                    ['text' => '•', 'left' => 319, 'width' => 8],
+                    ['text' => 'Feil som medfører at utstyret eller programvaren', 'left' => 346, 'width' => 334],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'stopper, at data går tapt, eller at andre funksjoner som',
+                211,
+                346,
+                719,
+                231,
+                [
+                    ['text' => 'stopper, at data går tapt, eller at andre funksjoner som', 'left' => 346, 'width' => 373],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'etter en objektiv vurdering er kritiske for Kunden, ikke',
+                234,
+                346,
+                713,
+                254,
+                [
+                    ['text' => 'etter en objektiv vurdering er kritiske for Kunden, ikke', 'left' => 346, 'width' => 367],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'er levert eller ikke virker som avtalt.',
+                257,
+                346,
+                595,
+                277,
+                [
+                    ['text' => 'er levert eller ikke virker som avtalt.', 'left' => 346, 'width' => 249],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Dokumentasjonen er så ufullstendig eller misvisende at',
+                281,
+                319,
+                721,
+                302,
+                [
+                    ['text' => '•', 'left' => 319, 'width' => 10],
+                    ['text' => 'Dokumentasjonen er så ufullstendig eller misvisende at', 'left' => 346, 'width' => 375],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Kunden ikke kan bruke utstyret eller programvaren',
+                305,
+                346,
+                692,
+                325,
+                [
+                    ['text' => 'Kunden ikke kan bruke utstyret eller programvaren', 'left' => 346, 'width' => 346],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'eller vesentlige deler av det.',
+                328,
+                346,
+                543,
+                348,
+                [
+                    ['text' => 'eller vesentlige deler av det.', 'left' => 346, 'width' => 197],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'B Alvorlig feil • Feil som fører til at funksjoner som, ut fra en objektiv',
+                352,
+                107,
+                707,
+                373,
+                [
+                    ['text' => 'B', 'left' => 107, 'width' => 16],
+                    ['text' => 'Alvorlig feil', 'left' => 157, 'width' => 79],
+                    ['text' => '•', 'left' => 319, 'width' => 8],
+                    ['text' => 'Feil som fører til at funksjoner som, ut fra en objektiv', 'left' => 346, 'width' => 361],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'vurdering, er viktige for Kunden, ikke virker som',
+                376,
+                346,
+                672,
+                396,
+                [
+                    ['text' => 'vurdering, er viktige for Kunden, ikke virker som', 'left' => 346, 'width' => 326],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'beskrevet i avtalen, og som det er tids- og',
+                399,
+                346,
+                630,
+                419,
+                [
+                    ['text' => 'beskrevet i avtalen, og som det er tids- og', 'left' => 346, 'width' => 284],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'ressurskrevende å omgå.',
+                422,
+                346,
+                525,
+                442,
+                [
+                    ['text' => 'ressurskrevende å omgå.', 'left' => 346, 'width' => 179],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '• Dokumentasjonen er så ufullstendig eller misvisende at',
+                446,
+                319,
+                721,
+                467,
+                [
+                    ['text' => '•', 'left' => 319, 'width' => 10],
+                    ['text' => 'Dokumentasjonen er så ufullstendig eller misvisende at', 'left' => 346, 'width' => 375],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Kunden ikke kan benytte funksjoner som etter en',
+                470,
+                346,
+                681,
+                490,
+                [
+                    ['text' => 'Kunden ikke kan benytte funksjoner som etter en', 'left' => 346, 'width' => 335],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'objektiv vurdering er viktige for Kunden.',
+                493,
+                346,
+                624,
+                513,
+                [
+                    ['text' => 'objektiv vurdering er viktige for Kunden.', 'left' => 346, 'width' => 278],
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertCount(1, $runs, 'The wrapped page 6 failure-level table must stay one continuous table run.');
+        $this->assertSame(0, $runs[0]['start_index']);
+        $this->assertSame(14, $runs[0]['end_index'], 'The run must continue through the B row instead of splitting after A.');
+
+        $tableBlock = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTableBlock', [
+            $lineGroups,
+            $runs[0],
+            6,
+            1,
+            842,
+            1200,
+        ]);
+
+        $this->assertSame('table', $tableBlock['type']);
+        $this->assertSame('Tabell 1 – side 6', $tableBlock['title']);
+        $this->assertStringContainsString('A | Kritisk feil | • Feil som medfører at utstyret eller programvaren', $tableBlock['table_text']);
+        $this->assertStringContainsString('stopper, at data går tapt, eller at andre funksjoner som', $tableBlock['table_text']);
+        $this->assertStringContainsString("B | Alvorlig feil | • Feil som fører til at funksjoner som, ut fra en objektiv\nvurdering, er viktige for Kunden, ikke virker som\nbeskrevet i avtalen, og som det er tids- og\nressurskrevende å omgå.", $tableBlock['table_text']);
+    }
+
     public function test_it_still_detects_real_poppler_table_runs_for_multicolumn_rows(): void
     {
         $extractor = new DocumentTextExtractor();

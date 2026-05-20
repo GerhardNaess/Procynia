@@ -739,6 +739,11 @@ class DocumentTextExtractor
 
                 $endIndex = $candidateIndex;
                 $previousLine = $candidateLine;
+                $updatedTemplate = $this->popplerPdfTableColumnTemplate($candidateLine);
+
+                if ($updatedTemplate !== null) {
+                    $template = $updatedTemplate;
+                }
             }
 
             if ($endIndex > $index) {
