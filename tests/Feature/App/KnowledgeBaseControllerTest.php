@@ -16,6 +16,7 @@ use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
+use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
 use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\OpenAi\EmbeddingService;
@@ -39,6 +40,7 @@ class KnowledgeBaseControllerTest extends TestCase
         DB::beginTransaction();
         $this->bindKnowledgeChunkBoundaryService();
         $this->bindSuccessfulBillingEntitlementService();
+        $this->bindSuccessfulKnowledgeDocumentSummaryGenerationService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService();
         $this->bindSuccessfulEmbeddingService();
@@ -147,6 +149,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $document->extraction_status);
         $this->assertSame('', (string) $document->extraction_error);
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $document->summary);
         $this->assertGreaterThan(0, $chunks->count());
         $this->assertSame(range(0, $chunks->count() - 1), $chunks->pluck('chunk_index')->all());
         $this->assertSame(
@@ -2131,6 +2134,224 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_document_show_generates_an_ai_summary_from_the_full_document_context(): void
+    {
+        $context = $this->customerContext('Customer Summary AI AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'ai-summary.pdf',
+            'content' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'original_filename' => 'ai-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/ai-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Første del av dokumentet beskriver koordinering, roller og samhandling.',
+            'start_offset' => 0,
+            'end_offset' => 72,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'start_offset' => 73,
+            'end_offset' => 131,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $summary = (string) data_get($page, 'props.knowledgeItem.summary', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && str_starts_with($summary, 'AI-oppsummering:')
+                && str_contains($summary, 'Første del av dokumentet beskriver koordinering')
+                && str_contains($summary, 'Andre del beskriver risiko, oppfølging og kostnadsstyring')
+                && $summary !== (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+        });
+
+        $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $updatedDocument->summary);
+        $this->assertStringContainsString('Første del av dokumentet beskriver koordinering', (string) $updatedDocument->summary);
+        $this->assertStringContainsString('Andre del beskriver risiko, oppfølging og kostnadsstyring', (string) $updatedDocument->summary);
+    }
+
+    public function test_knowledge_document_summary_prefers_semantic_chunks_over_toc_text(): void
+    {
+        $context = $this->customerContext('Customer Summary Semantic AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'toc-summary.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
+            'original_filename' => 'toc-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Dette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.',
+            'start_offset' => 0,
+            'end_offset' => 110,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Mer faktisk innhold som skal kunne bidra til en kort dokumentoppsummering.',
+            'start_offset' => 111,
+            'end_offset' => 188,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $contentExcerpt = (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && str_contains($contentExcerpt, 'Dette er faktisk innhold fra dokumentets semantiske del')
+                && str_contains($contentExcerpt, 'Mer faktisk innhold som skal kunne bidra')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'Innholdsfortegnelse');
+        });
+    }
+
+    public function test_knowledge_document_summary_falls_back_to_cleaned_raw_text_without_toc_noise(): void
+    {
+        $context = $this->customerContext('Customer Summary Fallback AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'toc-fallback.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2 Reell innholdstekst etter TOC.',
+            'original_filename' => 'toc-fallback.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-fallback.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nReell innholdstekst etter TOC. Denne teksten skal brukes i oppsummeringen.",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $contentExcerpt = (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && str_contains($contentExcerpt, 'Reell innholdstekst etter TOC.')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'BILAG 1-11');
+        });
+    }
+
+    public function test_knowledge_document_index_uses_semantic_excerpt_instead_of_toc_text(): void
+    {
+        $context = $this->customerContext('Customer Summary Index AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'index-toc-summary.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
+            'original_filename' => 'index-toc-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/index-toc-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nDette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Dette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.',
+            'start_offset' => 0,
+            'end_offset' => 110,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Mer faktisk innhold som skal kunne bidra til en kort dokumentoppsummering.',
+            'start_offset' => 111,
+            'end_offset' => 188,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+            $item = $items->firstWhere('id', $document->id);
+            $contentExcerpt = (string) data_get($item, 'content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $item !== null
+                && str_contains($contentExcerpt, 'Dette er faktisk innhold fra dokumentets semantiske del')
+                && str_contains($contentExcerpt, 'Mer faktisk innhold som skal kunne bidra')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'BILAG 1-11');
+        });
+    }
+
     public function test_knowledge_document_update_allows_metadata_only_changes_and_keeps_chunks_intact(): void
     {
         Storage::fake('local');
@@ -2445,7 +2666,7 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function realKnowledgePdfUpload(): UploadedFile
     {
-        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS3257C5FZRST2VVHVSAGR0Z.pdf');
+        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS34FX95FEPJDW15HEYE1W7H.pdf');
 
         if (! is_file($path)) {
             throw new RuntimeException('Unable to locate the real PDF fixture used for regression testing.');
@@ -3339,6 +3560,41 @@ XML;
             });
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic document summary generation service for knowledge base tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulKnowledgeDocumentSummaryGenerationService(): void
+    {
+        $service = Mockery::mock(KnowledgeDocumentSummaryGenerationService::class);
+        $service->shouldReceive('generateForDocument')
+            ->andReturnUsing(function (KnowledgeItem $document): ?string {
+                $chunks = $document->relationLoaded('chunks')
+                    ? $document->chunks
+                    : $document->chunks()->orderBy('chunk_index')->get();
+
+                $chunkText = $chunks
+                    ->map(static fn (KnowledgeItemChunk $chunk): string => trim((string) $chunk->content))
+                    ->filter(static fn (string $content): bool => $content !== '')
+                    ->take(4)
+                    ->implode(' ');
+
+                if ($chunkText === '') {
+                    $chunkText = trim((string) ($document->extracted_text ?: $document->content));
+                }
+
+                if ($chunkText === '') {
+                    return null;
+                }
+
+                return Str::limit('AI-oppsummering: '.Str::squish($chunkText), 240, '');
+            });
+
+        $this->app->instance(KnowledgeDocumentSummaryGenerationService::class, $service);
     }
 
     /**

@@ -11,6 +11,7 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
 use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
@@ -52,6 +53,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkBuilder $knowledgeChunkBuilder,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
+        private readonly KnowledgeDocumentSummaryGenerationService $knowledgeDocumentSummaryGenerationService,
         private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
         private readonly PdfFigurePreviewRenderer $pdfFigurePreviewRenderer,
         private readonly AiUsageGuard $aiUsageGuard,
@@ -69,7 +71,12 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
 
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
-            ->with(['uploadedBy'])
+            ->with([
+                'uploadedBy',
+                'chunks' => static fn ($query) => $query
+                    ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
+                    ->orderBy('chunk_index'),
+            ])
             ->withCount('chunks')
             ->orderByDesc('updated_at')
             ->orderByDesc('id')
@@ -102,6 +109,9 @@ class KnowledgeBaseController extends Controller
             ->withCount('chunks')
             ->whereKey($knowledgeItem->id)
             ->firstOrFail();
+
+        $this->ensureDocumentSummary($record);
+
         return Inertia::render('App/AI/KnowledgeBase/Show', [
             'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
             'knowledgeItem' => $this->documentDetailPayload($record),
@@ -312,6 +322,7 @@ class KnowledgeBaseController extends Controller
             });
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
+            $this->ensureDocumentSummary($result['knowledge_document']);
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
@@ -336,6 +347,12 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $record->loadMissing([
+            'uploadedBy',
+            'chunks' => static fn ($query) => $query
+                ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
+                ->orderBy('chunk_index'),
+        ]);
 
         return Inertia::render('App/AI/KnowledgeBase/Edit', [
             'pageTitle' => 'Kunnskapsdokumenter · Rediger',
@@ -426,6 +443,45 @@ class KnowledgeBaseController extends Controller
     private function assertAiAccess(Customer $customer): void
     {
         abort_unless(app(BillingEntitlementService::class)->canUseAiOffer($customer), 403, __('procynia.ai.ai_access_unavailable_message'));
+    }
+
+    /**
+     * Purpose: Ensure the document has a persisted AI summary when the customer may use AI features.
+     * Inputs: The knowledge document loaded for the current customer.
+     * Returns: The persisted summary string when one is available, otherwise null.
+     * Side effects: May call OpenAI and updates the document summary column.
+     */
+    private function ensureDocumentSummary(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $existingSummary = trim((string) $knowledgeDocument->summary);
+
+        if ($existingSummary !== '') {
+            return $existingSummary;
+        }
+
+        if ($knowledgeDocument->extraction_status !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
+            return null;
+        }
+
+        $customer = Customer::query()->find($knowledgeDocument->customer_id);
+
+        if (! $customer instanceof Customer || ! app(BillingEntitlementService::class)->canUseAiOffer($customer)) {
+            return null;
+        }
+
+        $summary = $this->knowledgeDocumentSummaryGenerationService->generateForDocument($knowledgeDocument);
+        $summary = $this->cleanNullableString($summary, 20000);
+
+        if ($summary === null) {
+            return null;
+        }
+
+        $knowledgeDocument->forceFill([
+            'summary' => $summary,
+        ])->save();
+        $knowledgeDocument->summary = $summary;
+
+        return $summary;
     }
 
     /**
@@ -3224,17 +3280,150 @@ class KnowledgeBaseController extends Controller
      */
     private function contentExcerpt(KnowledgeItem $knowledgeDocument): string
     {
-        $text = trim(preg_replace('/\s+/u', ' ', (string) $knowledgeDocument->extracted_text) ?? '');
+        $summaryText = $this->documentSummaryText($knowledgeDocument);
 
-        if ($text !== '') {
-            return Str::limit($text, 360, '...');
+        if ($summaryText !== '') {
+            return Str::limit($summaryText, 360, '...');
         }
 
         if ($knowledgeDocument->extraction_status === KnowledgeItem::EXTRACTION_STATUS_FAILED) {
             return 'Tekstuttrekk feilet.';
         }
 
-        return 'Ingen ekstrahert tekst.';
+        return trim((string) $knowledgeDocument->extracted_text) !== '' ? '' : 'Ingen ekstrahert tekst.';
+    }
+
+    /**
+     * Purpose: Resolve the best summary source text for a knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: Clean semantic chunk text when available, otherwise filtered extracted text.
+     * Side effects: None.
+     */
+    private function documentSummaryText(KnowledgeItem $knowledgeDocument): string
+    {
+        $semanticText = $this->semanticChunkSummaryText($knowledgeDocument);
+
+        if ($semanticText !== '') {
+            $cleanSemanticText = $this->cleanDocumentSummaryText($semanticText);
+
+            if ($cleanSemanticText !== '') {
+                return $cleanSemanticText;
+            }
+        }
+
+        return $this->cleanDocumentSummaryText((string) $knowledgeDocument->extracted_text);
+    }
+
+    /**
+     * Purpose: Collect summary candidate text from loaded semantic/document chunks.
+     * Inputs: A customer-scoped knowledge document with optional chunk relation loading.
+     * Returns: Chunk text in reading order or an empty string when chunks are unavailable.
+     * Side effects: None.
+     */
+    private function semanticChunkSummaryText(KnowledgeItem $knowledgeDocument): string
+    {
+        if (! $knowledgeDocument->relationLoaded('chunks')) {
+            return '';
+        }
+
+        $chunks = $knowledgeDocument->chunks
+            ->filter(static function (KnowledgeItemChunk $chunk): bool {
+                return in_array($chunk->chunk_type, ['semantic', 'document'], true);
+            })
+            ->sortBy('chunk_index')
+            ->map(static fn (KnowledgeItemChunk $chunk): string => trim((string) $chunk->content))
+            ->filter(static fn (string $content): bool => $content !== '')
+            ->values()
+            ->all();
+
+        return implode("\n\n", $chunks);
+    }
+
+    /**
+     * Purpose: Remove TOC/dotted-leader noise from a summary candidate.
+     * Inputs: Raw semantic or extracted text.
+     * Returns: A compact body-text excerpt without TOC lines.
+     * Side effects: None.
+     */
+    private function cleanDocumentSummaryText(string $text): string
+    {
+        $text = trim(str_replace(["\r\n", "\r"], "\n", $text));
+
+        if ($text === '') {
+            return '';
+        }
+
+        $paragraphs = preg_split('/\n{2,}/u', $text) ?: [];
+        $cleanParagraphs = [];
+
+        foreach ($paragraphs as $paragraph) {
+            $lines = preg_split('/\n/u', trim($paragraph)) ?: [];
+            $cleanLines = [];
+
+            foreach ($lines as $line) {
+                $normalizedLine = $this->normalizeSummaryTextLine($line);
+
+                if ($normalizedLine === '' || $this->isTocSummaryLine($normalizedLine)) {
+                    continue;
+                }
+
+                $cleanLines[] = $normalizedLine;
+            }
+
+            $cleanParagraph = trim(implode(' ', $cleanLines));
+
+            if ($cleanParagraph === '') {
+                continue;
+            }
+
+            $cleanParagraphs[] = $cleanParagraph;
+        }
+
+        return trim(preg_replace('/\s+/u', ' ', implode("\n\n", $cleanParagraphs)) ?? '');
+    }
+
+    /**
+     * Purpose: Normalize one summary candidate line before TOC filtering.
+     * Inputs: A raw extracted line.
+     * Returns: A collapsed single-line string.
+     * Side effects: None.
+     */
+    private function normalizeSummaryTextLine(string $line): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+    }
+
+    /**
+     * Purpose: Determine whether a line looks like TOC noise rather than document body text.
+     * Inputs: One normalized summary line.
+     * Returns: True when the line resembles a table of contents entry or heading.
+     * Side effects: None.
+     */
+    private function isTocSummaryLine(string $line): bool
+    {
+        if ($line === '') {
+            return false;
+        }
+
+        $normalized = Str::ascii(mb_strtolower(trim($line), 'UTF-8'));
+
+        if (preg_match('/\b(?:innholdsfortegnelse|table of contents|contents)\b/u', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\s*(?:bilag|vedlegg)\b/iu', $normalized) === 1 && mb_strlen($normalized, 'UTF-8') <= 80 && ! preg_match('/[.!?]/u', $normalized)) {
+            return true;
+        }
+
+        if (mb_strlen($normalized, 'UTF-8') > 180) {
+            return false;
+        }
+
+        if (preg_match('/^\s*(?:\d+(?:\.\d+)*|bilag\s+\d+(?:-\d+)?|vedlegg\s+[a-z0-9]+)\b/iu', $normalized) !== 1) {
+            return false;
+        }
+
+        return preg_match('/(?:\.{4,}|\s{6,})\s*(?:\d{1,3}|[ivxlcdm]{1,5})\s*$/iu', $normalized) === 1;
     }
 
     private function cleanNullableString(mixed $value, int $maxLength): ?string

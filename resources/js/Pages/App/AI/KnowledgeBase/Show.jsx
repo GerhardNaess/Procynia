@@ -715,9 +715,7 @@ export default function KnowledgeBaseShow({
         : 0;
     const summaryInitialText = normalizeSearchText(knowledgeItem?.summary).length > 0
         ? String(knowledgeItem.summary)
-        : (normalizeSearchText(knowledgeItem?.content_excerpt).length > 0
-            ? String(knowledgeItem.content_excerpt)
-            : '');
+        : '';
     const summaryForm = useForm({
         summary: summaryInitialText,
     });
