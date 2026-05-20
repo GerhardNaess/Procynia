@@ -1462,29 +1462,29 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $context = $this->customerContext('Customer Four D AS');
 
-        $embeddingService = Mockery::mock(EmbeddingService::class);
-        $embeddingService->shouldReceive('tryEmbedText')
+        $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $metadataService->shouldReceive('generateForChunks')
             ->once()
-            ->with(Mockery::on(function (string $text): bool {
-                return str_contains($text, 'Summary: Kort oppsummering for gjenfinning.')
-                    && str_contains($text, 'Service/product tag: Produkt A')
-                    && str_contains($text, 'Theme tag: Tema A')
-                    && str_contains($text, 'Topic: Emne A')
-                    && str_contains($text, 'Sub-topic: Underemne A')
-                    && str_contains($text, 'Content: Metadata generation test content');
-            }))
-            ->andReturn([
-                'ok' => true,
-                'embedding' => [0.11, 0.22, 0.33],
-                'model' => 'text-embedding-3-small',
-                'usage' => [],
-                'error_type' => null,
-                'error_message' => null,
-                'upstream_status' => 200,
-                'request_id' => 'test-request-id',
-                'response_body_excerpt' => null,
-            ]);
-        $this->app->instance(EmbeddingService::class, $embeddingService);
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne A',
+                        'sub_topic' => 'Underemne A',
+                        'keywords' => ['stikkord a', 'stikkord b'],
+                        'matched_terms' => ['term a'],
+                        'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+
+                return $result;
+            });
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('metadata-generation.docx', 'Metadata generation test content that should be chunked and embedded.'),
