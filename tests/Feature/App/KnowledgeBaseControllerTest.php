@@ -1147,36 +1147,28 @@ class KnowledgeBaseControllerTest extends TestCase
         $context = $this->customerContext('Customer Four Structured Metadata Calls AS');
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->twice()
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                $chunkNumber = $chunk->chunk_index + 1;
-                $summary = 'Kort oppsummering '.$chunkNumber;
-                $keywords = ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'];
-
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Emne '.$chunkNumber,
-                    'sub_topic' => 'Underemne '.$chunkNumber,
-                    'keywords' => $keywords,
-                    'matched_terms' => ['term '.$chunkNumber],
-                    'summary_for_retrieval' => $summary,
-                    'confidence_score' => 0.91,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Emne '.$chunkNumber,
-                        'Sub-topic: Underemne '.$chunkNumber,
-                        'Keywords: '.implode(', ', $keywords),
-                        'Matched terms: term '.$chunkNumber,
-                        'Summary: '.$summary,
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+        $metadataService->shouldReceive('generateForChunks')
+            ->once()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $summary = 'Kort oppsummering '.$chunkNumber;
+                    $keywords = ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'];
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => $keywords,
+                        'matched_terms' => ['term '.$chunkNumber],
+                        'summary_for_retrieval' => $summary,
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
@@ -1184,11 +1176,11 @@ class KnowledgeBaseControllerTest extends TestCase
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-calls.docx', [
                 ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Første avsnitt under hovedseksjonen. Leveransen inkluderer alle nødvendige tjenester og prosesser som er avtalt mellom partene. Systemet skal dokumenteres grundig og godkjennes av alle involverte parter. Konfigurasjon og vedlikehold av systemet inngår i leveransen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
                 ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => 'Avsluttende avsnitt om systemet og leveransen. Alle krav er ivaretatt i henhold til den avtalte kontrakten og tilhørende spesifikasjoner. Systemet er nå ferdig og klart til produksjon og videre drift. Dokumentasjonen er godkjent av alle parter og er i tråd med kravene.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1212,7 +1204,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(['stikkord-1-a', 'stikkord-1-b'], $chunks[0]->keywords);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunks[0]->metadata_status);
         $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Strategisk samhandling', (string) $chunks[0]->content);
         $this->assertSame('Emne 2', $chunks[1]->topic);
         $this->assertSame('Underemne 2', $chunks[1]->sub_topic);
         $this->assertSame(['stikkord-2-a', 'stikkord-2-b'], $chunks[1]->keywords);
@@ -3474,7 +3466,10 @@ XML;
     {
         config([
             'database.default' => 'pgsql',
+            'database.connections.pgsql.host' => '127.0.0.1',
+            'database.connections.pgsql.port' => 5432,
             'database.connections.pgsql.database' => 'procynia_test',
+            'database.connections.pgsql.url' => null,
         ]);
 
         DB::purge('pgsql');
