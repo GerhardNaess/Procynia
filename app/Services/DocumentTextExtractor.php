@@ -1686,14 +1686,21 @@ class DocumentTextExtractor
         $previousWidth = max(0, (int) ($previousBlock['width'] ?? 0));
         $currentWidth = max(0, (int) ($currentBlock['width'] ?? 0));
         $allowedLeftDelta = max(45, (int) round(min((int) ($previousBlock['page_width'] ?? 0), (int) ($currentBlock['page_width'] ?? 0)) * 0.06));
-        $allowedWidthDelta = max(120, (int) round(min((int) ($previousBlock['page_width'] ?? 0), (int) ($currentBlock['page_width'] ?? 0)) * 0.18));
 
         if (abs($previousLeft - $currentLeft) > $allowedLeftDelta) {
             return false;
         }
 
-        if (abs($previousWidth - $currentWidth) > $allowedWidthDelta) {
-            return false;
+        if ($previousWidth > 0 && $currentWidth > 0) {
+            $smallerWidth = min($previousWidth, $currentWidth);
+            $largerWidth = max($previousWidth, $currentWidth);
+
+            // Poppler can report a much wider continuation block on the next page when
+            // wrapped cells are laid out differently, so use a conservative width ratio
+            // instead of a brittle absolute delta.
+            if ($largerWidth > max(120, (int) round($smallerWidth * 2.5))) {
+                return false;
+            }
         }
 
         return true;

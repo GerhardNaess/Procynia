@@ -1396,6 +1396,39 @@ XML;
         $this->assertSame('Tabell 8 – side 13–14', $merged['title']);
     }
 
+    public function test_it_merges_a_continuing_table_across_a_page_break_even_when_the_second_page_block_is_wider(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $page14Table = $this->makeSimpleTableBlock(14, 1262, 892, 750, 393, 'Tabell 3 – side 14', [
+            ['Ansvarlig', 'Leverandøren'],
+            ['Agenda', 'Status på fremdrift'],
+            ['Kvalitet', 'Kvalitet i leveransene'],
+            ['Lokasjon', 'Møtet avholdes som Teams-møte, eventuelt i Kundens lokaler.'],
+            ['Deltagere fra Kunden', 'TBD – 3 representanter'],
+            ['Deltagere fra Leverandøren', 'Prosjekteier, Ressurseier, Prosjektleder, Andre ved behov'],
+        ]);
+        $page14Table['width'] = 360;
+
+        $page15Table = $this->makeSimpleTableBlock(15, 1262, 892, 107, 56, 'Tabell 4 – side 15', [
+            ['Resultat', 'Fatte beslutninger som sikrer fremdriften og kvaliteten i prosjektet'],
+            ['Frekvens', 'Hver 4 uke, oftere ved behov'],
+        ]);
+        $page15Table['width'] = 714;
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'mergePopplerPdfTableBlocksAcrossPages', [
+            [$page14Table, $page15Table],
+        ]);
+
+        $this->assertCount(1, $blocks, 'A table that clearly continues on the next page must remain one merged table block.');
+        $this->assertSame('table', $blocks[0]['type']);
+        $this->assertSame(14, $blocks[0]['page_number']);
+        $this->assertSame(15, $blocks[0]['page_end']);
+        $this->assertSame(8, data_get($blocks[0], 'table_json.row_count'));
+        $this->assertStringContainsString('Deltagere fra Leverandøren', $blocks[0]['table_text']);
+        $this->assertStringContainsString('Frekvens | Hver 4 uke, oftere ved behov', $blocks[0]['table_text']);
+    }
+
     public function test_it_does_not_merge_tables_separated_by_a_content_heading(): void
     {
         $extractor = new DocumentTextExtractor();
