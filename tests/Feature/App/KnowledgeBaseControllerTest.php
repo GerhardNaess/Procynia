@@ -2681,18 +2681,22 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedTableChunkStructureFixture(): array
     {
+        $h1Text = 'Kapittel 2 tekst. ' . $this->repeatedWords('kapitteltekst', 40);
+        $preTableText = 'Innledning før tabell. ' . $this->repeatedWords('innledningsord', 40);
+        $postTableText = 'Etter tabell. ' . $this->repeatedWords('avslutningsord', 40);
+
         return $this->buildRuleBasedStructureFixture([
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 2',
-                'text' => 'Kapittel 2 tekst.',
+                'text' => $h1Text,
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > Underseksjon A',
-                'text' => 'Innledning før tabell.',
+                'text' => $preTableText,
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
@@ -2860,7 +2864,7 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > Underseksjon A',
-                'text' => 'Etter tabell.',
+                'text' => $postTableText,
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
