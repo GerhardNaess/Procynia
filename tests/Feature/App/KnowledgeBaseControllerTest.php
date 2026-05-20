@@ -188,26 +188,30 @@ class KnowledgeBaseControllerTest extends TestCase
             ->orderBy('chunk_index')
             ->get();
 
-        $this->assertSame(2, $chunks->count());
+        $expectedSourceText = implode("\n\n", [
+            'Intro before first heading.',
+            'Første avsnitt under hovedseksjonen.',
+            'Underseksjon A',
+            'Mer tekst i underseksjonen.',
+            'Avsluttende avsnitt.',
+        ]);
+
+        // This fixture is intentionally short, so the controller should fall back to one document chunk.
+        $this->assertSame(1, $chunks->count());
         $this->assertSame(0, (int) $chunks[0]->start_offset);
-        $this->assertGreaterThan((int) $chunks[0]->start_offset, (int) $chunks[0]->end_offset);
-        $this->assertSame((int) $chunks[0]->end_offset, (int) $chunks[1]->start_offset);
-        $this->assertSame('Underseksjon A', $chunks[0]->heading_path);
-        $this->assertSame('semantic', $chunks[0]->chunk_type);
-        $this->assertSame('Andre hovedseksjon', $chunks[1]->heading_path);
-        $this->assertSame('semantic', $chunks[1]->chunk_type);
-        $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Andre hovedseksjon', (string) $chunks[1]->content);
+        $this->assertSame(mb_strlen($expectedSourceText, 'UTF-8'), (int) $chunks[0]->end_offset);
+        $this->assertSame(null, $chunks[0]->heading_path);
+        $this->assertSame('document', $chunks[0]->chunk_type);
+        $this->assertSame($expectedSourceText, (string) $chunks[0]->content);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
         $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
-                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === 'Underseksjon A'
-                && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
-                && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
+                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === null
+                && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'document'
+                && data_get($page, 'props.knowledgeItem.chunks.0.start_offset') === 0;
         });
     }
 
