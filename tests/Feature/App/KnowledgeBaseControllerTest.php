@@ -521,6 +521,7 @@ class KnowledgeBaseControllerTest extends TestCase
                     'alt_text' => 'Arkitekturdiagram med integrasjoner',
                 ],
                 ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
