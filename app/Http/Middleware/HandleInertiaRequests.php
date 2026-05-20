@@ -50,6 +50,7 @@ class HandleInertiaRequests extends Middleware
                     'is_bid_manager' => $user->isBidManager(),
                     'can_manage_customer_users' => $this->customerContext->canManageCustomerUsers($user),
                     'can_manage_customer_departments' => $this->customerContext->canCreateCustomerDepartments($user),
+                    'can_manage_document_templates' => $this->customerContext->canManageCustomerDocumentTemplates($user),
                     'can_manage_watch_profiles' => $user->canAccessCustomerFrontend(),
                     'can_manage_department_watch_profiles' => $this->customerContext->isCustomerAdmin($user) || $this->customerContext->hasDepartmentMembership($user),
                     'customer' => $customer ? [
