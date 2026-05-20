@@ -579,7 +579,7 @@ class DocumentTextExtractor
             return '';
         }
 
-        return $this->normalizeBlockText($result->output());
+        return $this->removePdfRunningHeaderFooterText($this->normalizeBlockText($result->output()));
     }
 
     /**
@@ -667,7 +667,7 @@ class DocumentTextExtractor
         $this->flushPdfLine($currentLine, $currentBlockLines);
         $this->flushPdfBlock($currentBlockLines, $blocks);
 
-        return $this->normalizeBlockText(implode("\n\n", $blocks));
+        return $this->removePdfRunningHeaderFooterText($this->normalizeBlockText(implode("\n\n", $blocks)));
     }
 
     /**
@@ -758,6 +758,75 @@ class DocumentTextExtractor
 
         $blocks[] = implode("\n", $currentBlockLines);
         $currentBlockLines = [];
+    }
+
+    /**
+     * Purpose: Remove conservative PDF running header/footer lines from extracted text.
+     * Inputs: Normalized extracted text.
+     * Returns: The same text without safe footer/header lines.
+     * Side effects: None.
+     */
+    private function removePdfRunningHeaderFooterText(string $value): string
+    {
+        if (trim($value) === '') {
+            return '';
+        }
+
+        $filteredLines = [];
+
+        foreach (preg_split('/\n/u', str_replace(["\r\n", "\r"], "\n", $value)) ?: [] as $line) {
+            $normalizedLine = $this->normalizeLineText((string) $line);
+
+            if ($normalizedLine === '') {
+                $filteredLines[] = '';
+                continue;
+            }
+
+            if ($this->isPdfRunningHeaderFooterText($normalizedLine)) {
+                continue;
+            }
+
+            $filteredLines[] = $normalizedLine;
+        }
+
+        return $this->normalizeBlockText(implode("\n", $filteredLines));
+    }
+
+    /**
+     * Purpose: Detect safe PDF running header/footer text patterns.
+     * Inputs: One normalized line of PDF text.
+     * Returns: True only when the line is a conservative page marker or footer pattern.
+     * Side effects: None.
+     */
+    private function isPdfRunningHeaderFooterText(string $text): bool
+    {
+        $normalized = $this->normalizeLineText($text);
+
+        if ($normalized === '' || mb_strlen($normalized, 'UTF-8') > 120) {
+            return false;
+        }
+
+        if (preg_match('/^(?:Side|Page)\s+\d+\s+(?:av|of)\s+\d+$/iu', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\d+\s*(?:\/|of)\s*\d+$/iu', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^(?:©|\(c\)|copyright\b).{0,80}\b(?:Side|Page)\s+\d+\s+(?:av|of)\s+\d+$/iu', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\d{2}\.\d{2}\.\d{4}\s+(?:Side|Page)\s+\d+\s+(?:av|of)\s+\d+$/iu', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^(?:©|\(c\)|copyright\b).{0,80}\d{2}\.\d{2}\.\d{4}\s+(?:Side|Page)\s+\d+\s+(?:av|of)\s+\d+$/iu', $normalized) === 1) {
+            return true;
+        }
+
+        return false;
     }
 
     /**

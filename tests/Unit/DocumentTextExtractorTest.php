@@ -154,18 +154,7 @@ XML;
 
     public function test_it_preserves_pdf_block_boundaries(): void
     {
-        // Respect configured binary; fall back to PATH for local dev; skip if unavailable.
-        $binary = config('services.pdftotext.binary');
-
-        if (empty($binary)) {
-            $binary = trim((string) shell_exec('which pdftotext 2>/dev/null'));
-        }
-
-        if (empty($binary) || ! is_executable($binary)) {
-            $this->markTestSkipped('pdftotext is not available; set PDFTOTEXT_BINARY to run this test.');
-        }
-
-        config(['services.pdftotext.binary' => $binary]);
+        $this->configurePdftotextBinary();
 
         $path = $this->tempDocumentPath('pdf');
 
@@ -183,8 +172,117 @@ XML;
         }
     }
 
-    private function writeValidTestPdf(string $path): void
+    public function test_it_removes_pdf_running_footer_lines_from_extracted_text(): void
     {
+        $this->configurePdftotextBinary();
+
+        $path = $this->tempDocumentPath('pdf');
+
+        try {
+            $this->writeValidTestPdf($path, [
+                'Overskrift',
+                'Se side 12 for mer informasjon om dette temaet.',
+                'Referater med tydelig ansvar og frister distribueres etter hvert m\370te.',
+                '\251 Advania Norge AS 29.09.2025 Side 2 av 31',
+            ]);
+
+            $extractor = new DocumentTextExtractor();
+
+            $this->assertSame(
+                "Overskrift\n\nSe side 12 for mer informasjon om dette temaet.\n\nReferater med tydelig ansvar og frister distribueres etter hvert møte.",
+                $extractor->extractText($path),
+            );
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_removes_pdf_running_footer_lines_from_structured_text(): void
+    {
+        $this->configurePdftotextBinary();
+
+        $path = $this->tempDocumentPath('pdf');
+
+        try {
+            $this->writeValidTestPdf($path, [
+                'Overskrift',
+                'F\370rste avsnitt med tekst.',
+                'Page 2 of 31',
+                'Andre avsnitt med mer tekst.',
+            ]);
+
+            $extractor = new DocumentTextExtractor();
+            $blocks = $extractor->extractStructuredText($path);
+            $texts = array_column($blocks, 'text');
+
+            $this->assertContains('Overskrift', $texts);
+            $this->assertContains('Første avsnitt med tekst.', $texts);
+            $this->assertContains('Andre avsnitt med mer tekst.', $texts);
+            $this->assertNotContains('Page 2 of 31', $texts);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_it_keeps_docx_text_containing_side_untouched(): void
+    {
+        $path = $this->tempDocumentPath('docx');
+
+        try {
+            $zip = new ZipArchive();
+            $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE));
+
+            $xml = <<<'XML'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+        <w:p><w:r><w:t>Se side 12 for mer informasjon om dette temaet.</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Ordinær DOCX-tekst.</w:t></w:r></w:p>
+    </w:body>
+</w:document>
+XML;
+
+            $zip->addFromString('word/document.xml', $xml);
+            $zip->close();
+
+            $extractor = new DocumentTextExtractor();
+
+            $this->assertSame(
+                "Se side 12 for mer informasjon om dette temaet.\n\nOrdinær DOCX-tekst.",
+                $extractor->extractText($path),
+            );
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    private function configurePdftotextBinary(): void
+    {
+        // Respect configured binary; fall back to PATH for local dev; skip if unavailable.
+        $binary = config('services.pdftotext.binary');
+
+        if (empty($binary)) {
+            $binary = trim((string) shell_exec('which pdftotext 2>/dev/null'));
+        }
+
+        if (empty($binary) || ! is_executable($binary)) {
+            $this->markTestSkipped('pdftotext is not available; set PDFTOTEXT_BINARY to run this test.');
+        }
+
+        config(['services.pdftotext.binary' => $binary]);
+    }
+
+    /**
+     * @param array<int, string>|null $lines
+     */
+    private function writeValidTestPdf(string $path, ?array $lines = null): void
+    {
+        $lines ??= [
+            'Overskrift',
+            'F\370rste avsnitt med tekst.',
+            'Andre avsnitt med mer tekst.',
+        ];
+
         // A minimal but structurally complete PDF that pdftotext can parse.
         // WinAnsiEncoding maps 0xF8 → ø, giving us "Første" with correct UTF-8 output.
         $header = "%PDF-1.4\n";
@@ -193,10 +291,18 @@ XML;
         $obj3   = "3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R"
             . " /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica"
             . " /Encoding /WinAnsiEncoding>>>>>>\n>>\nendobj\n";
-        // \370 is octal 0xF8 = ø in WinAnsiEncoding
-        $stream = "BT /F1 14 Tf 72 720 Td (Overskrift) Tj"
-            . " 0 -100 Td (F\370rste avsnitt med tekst.) Tj"
-            . " 0 -100 Td (Andre avsnitt med mer tekst.) Tj ET\n";
+        // The lines are written as PDF string literals. \370 is octal 0xF8 = ø in WinAnsiEncoding.
+        $stream = "BT /F1 14 Tf 72 720 Td";
+
+        foreach ($lines as $index => $line) {
+            if ($index > 0) {
+                $stream .= " 0 -100 Td";
+            }
+
+            $stream .= ' ('.$line.') Tj';
+        }
+
+        $stream .= " ET\n";
         $obj4 = "4 0 obj\n<</Length " . strlen($stream) . ">>\nstream\n{$stream}endstream\nendobj\n";
 
         $o1 = strlen($header);
