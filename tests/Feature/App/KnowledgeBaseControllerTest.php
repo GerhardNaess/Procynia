@@ -1066,39 +1066,31 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->bindKnowledgeChunkBoundaryService(true, true);
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->twice()
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Tema '.($chunk->chunk_index + 1),
-                    'sub_topic' => 'Underemne '.($chunk->chunk_index + 1),
-                    'keywords' => [
-                        'stikkord-'.($chunk->chunk_index + 1).'-a',
-                        'stikkord-'.($chunk->chunk_index + 1).'-b',
-                        'stikkord-'.($chunk->chunk_index + 1).'-c',
-                    ],
-                    'matched_terms' => [],
-                    'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
-                    'confidence_score' => 0.25,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Tema '.($chunk->chunk_index + 1),
-                        'Sub-topic: Underemne '.($chunk->chunk_index + 1),
-                        'Keywords: '.implode(', ', [
-                            'stikkord-'.($chunk->chunk_index + 1).'-a',
-                            'stikkord-'.($chunk->chunk_index + 1).'-b',
-                            'stikkord-'.($chunk->chunk_index + 1).'-c',
-                        ]),
-                        'Summary: Kort oppsummering for gjenfinning.',
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+        $metadataService->shouldReceive('generateForChunks')
+            ->once()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Tema '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => [
+                            'stikkord-'.$chunkNumber.'-a',
+                            'stikkord-'.$chunkNumber.'-b',
+                            'stikkord-'.$chunkNumber.'-c',
+                        ],
+                        'matched_terms' => [],
+                        'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+                        'confidence_score' => 0.25,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
@@ -1108,11 +1100,11 @@ class KnowledgeBaseControllerTest extends TestCase
             'document' => $this->createDocxUploadWithBlocks('structured-metadata.docx', [
                 ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Første avsnitt under hovedseksjonen. Leveransen inkluderer alle nødvendige tjenester og prosesser som er avtalt mellom partene. Systemet skal dokumenteres grundig og godkjennes av alle involverte parter. Konfigurasjon og vedlikehold av systemet inngår i leveransen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
                 ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => 'Avsluttende avsnitt om systemet og leveransen. Alle krav er ivaretatt i henhold til den avtalte kontrakten og tilhørende spesifikasjoner. Systemet er nå ferdig og klart til produksjon og videre drift. Dokumentasjonen er godkjent av alle parter og er i tråd med kravene.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1219,51 +1211,44 @@ class KnowledgeBaseControllerTest extends TestCase
         $context = $this->customerContext('Customer Four Structured Six Chunk Metadata AS');
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->times(6)
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                $chunkNumber = $chunk->chunk_index + 1;
+        $metadataService->shouldReceive('generateForChunks')
+            ->twice()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                        'matched_terms' => ['term '.$chunkNumber],
+                        'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
 
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Emne '.$chunkNumber,
-                    'sub_topic' => 'Underemne '.$chunkNumber,
-                    'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
-                    'matched_terms' => ['term '.$chunkNumber],
-                    'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
-                    'confidence_score' => 0.91,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Emne '.$chunkNumber,
-                        'Sub-topic: Underemne '.$chunkNumber,
-                        'Keywords: stikkord-'.$chunkNumber.'-a, stikkord-'.$chunkNumber.'-b',
-                        'Matched terms: term '.$chunkNumber,
-                        'Summary: Kort oppsummering '.$chunkNumber,
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-six.docx', [
                 ['text' => 'Kapittel 1', 'style' => 'Heading1'],
-                ['text' => 'Tekst 1.', 'style' => 'Normal'],
+                ['text' => 'Tekst 1. '.$this->repeatedWords('kap1', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 2', 'style' => 'Heading1'],
-                ['text' => 'Tekst 2.', 'style' => 'Normal'],
+                ['text' => 'Tekst 2. '.$this->repeatedWords('kap2', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 3', 'style' => 'Heading1'],
-                ['text' => 'Tekst 3.', 'style' => 'Normal'],
+                ['text' => 'Tekst 3. '.$this->repeatedWords('kap3', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 4', 'style' => 'Heading1'],
-                ['text' => 'Tekst 4.', 'style' => 'Normal'],
+                ['text' => 'Tekst 4. '.$this->repeatedWords('kap4', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 5', 'style' => 'Heading1'],
-                ['text' => 'Tekst 5.', 'style' => 'Normal'],
+                ['text' => 'Tekst 5. '.$this->repeatedWords('kap5', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 6', 'style' => 'Heading1'],
-                ['text' => 'Tekst 6.', 'style' => 'Normal'],
+                ['text' => 'Tekst 6. '.$this->repeatedWords('kap6', 36), 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1297,25 +1282,46 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $openAiClient = Mockery::mock(OpenAiClient::class);
         $openAiClient->shouldReceive('createResponse')
-            ->twice()
-            ->andReturnUsing(function (): array {
-                static $chunkNumber = 0;
+            ->andReturnUsing(function (array $payload): array {
+                static $callCount = 0;
+                $callCount++;
 
-                $chunkNumber++;
-                $summary = 'Kort oppsummering '.$chunkNumber;
+                $inputText = data_get($payload, 'input.1.content.0.text', '');
+                $decoded = json_decode($inputText, true);
+
+                if (is_array($decoded) && isset($decoded['chunks'])) {
+                    $chunkPayloads = $decoded['chunks'] ?? [];
+                    $chunks = [];
+                    $chunkNumber = 0;
+                    foreach ($chunkPayloads as $cp) {
+                        $chunkNumber++;
+                        $chunks[] = [
+                            'chunk_id' => (int) data_get($cp, 'id', 0),
+                            'service_product_tag' => '',
+                            'theme_tag' => '',
+                            'topic' => '',
+                            'sub_topic' => '',
+                            'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                            'matched_terms' => [],
+                            'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
+                            'new_term_suggestions' => [],
+                            'confidence_score' => 0.42,
+                        ];
+                    }
+
+                    return [
+                        'id' => 'resp_blank_batch',
+                        'output_text' => json_encode(['chunks' => $chunks], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    ];
+                }
 
                 return [
-                    'id' => 'resp_blank_metadata_'.$chunkNumber,
+                    'id' => 'resp_vocab_'.$callCount,
                     'output_text' => json_encode([
-                        'service_product_tag' => '',
-                        'theme_tag' => '',
-                        'topic' => '',
-                        'sub_topic' => '',
-                        'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
-                        'matched_terms' => [],
-                        'summary_for_retrieval' => $summary,
-                        'new_term_suggestions' => [],
-                        'confidence_score' => 0.42,
+                        'canonical_name' => 'Kanonisk term',
+                        'synonyms' => ['synonym-a', 'synonym-b'],
+                        'description' => 'Beskrivelse av term.',
+                        'reason' => 'Foreslått fra chunk-metadata.',
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
@@ -1332,13 +1338,11 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-blanks.docx', [
-                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
-                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Intro before first heading. '.$this->repeatedWords('innhold', 37), 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => $this->repeatedWords('avslutning', 38), 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1530,19 +1534,37 @@ class KnowledgeBaseControllerTest extends TestCase
                     && str_contains($promptText, 'Tabell A | Tabell B')
                     && str_contains($promptText, 'source_text');
             }))
+            ->andReturnUsing(function (array $payload): array {
+                $inputText = data_get($payload, 'input.1.content.0.text', '');
+                $decoded = json_decode($inputText, true) ?? [];
+                $chunkPayloads = data_get($decoded, 'chunks', []);
+                $chunkId = (int) data_get($chunkPayloads[0] ?? [], 'id', 0);
+
+                return [
+                    'id' => 'resp_table_summary',
+                    'output_text' => json_encode(['chunks' => [[
+                        'chunk_id' => $chunkId,
+                        'service_product_tag' => 'samhandling',
+                        'theme_tag' => 'driftsmodell',
+                        'topic' => 'sikkerhetsparametere',
+                        'sub_topic' => 'SOC-tjeneste',
+                        'keywords' => ['SOC', 'sikkerhetsparametere'],
+                        'matched_terms' => ['SOC'],
+                        'summary_for_retrieval' => 'Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.',
+                        'new_term_suggestions' => [],
+                        'confidence_score' => 0.92,
+                    ]]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+        $openAiClient->shouldReceive('createResponse')
             ->andReturn([
-                'id' => 'resp_table_summary',
+                'id' => 'resp_vocab',
                 'output_text' => json_encode([
-                    'service_product_tag' => 'samhandling',
-                    'theme_tag' => 'driftsmodell',
-                    'topic' => 'sikkerhetsparametere',
-                    'sub_topic' => 'SOC-tjeneste',
-                    'keywords' => ['SOC', 'sikkerhetsparametere'],
-                    'matched_terms' => ['SOC'],
-                    'summary_for_retrieval' => 'Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.',
-                    'new_term_suggestions' => [],
-                    'confidence_score' => 0.92,
-                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'canonical_name' => 'Kanonisk term',
+                    'synonyms' => [],
+                    'description' => null,
+                    'reason' => null,
+                ]),
             ]);
         $this->app->instance(OpenAiClient::class, $openAiClient);
 
@@ -2339,28 +2361,28 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 1',
-                'text' => 'Kapittel 1 tekst.',
+                'text' => 'Kapittel 1 tekst. '.$this->repeatedWords('kap1', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.1 Sammendrag og helhetlig løsningsforslag',
-                'text' => 'Sammendrag og helhetlig løsningsforslag.',
+                'text' => 'Sammendrag og helhetlig løsningsforslag. '.$this->repeatedWords('sam', 36),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.2 Strategisk partnerskap, veikart og måloppnåelse',
-                'text' => 'Strategisk partnerskap, veikart og måloppnåelse.',
+                'text' => 'Strategisk partnerskap, veikart og måloppnåelse. '.$this->repeatedWords('str', 35),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 3',
-                'text' => 'Kapittel 3 tekst.',
+                'text' => 'Kapittel 3 tekst. '.$this->repeatedWords('kap3', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2395,7 +2417,7 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 1',
-                'text' => 'Kapittel 1 tekst.',
+                'text' => 'Kapittel 1 tekst. '.$this->repeatedWords('kap1', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2409,14 +2431,14 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.2 Kort oppsummering',
-                'text' => 'Kort oppsummering.',
+                'text' => 'Kort oppsummering. '.$this->repeatedWords('ops', 38),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 3',
-                'text' => 'Kapittel 3 tekst.',
+                'text' => 'Kapittel 3 tekst. '.$this->repeatedWords('kap3', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
