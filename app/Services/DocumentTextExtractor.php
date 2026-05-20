@@ -383,6 +383,8 @@ class DocumentTextExtractor
                 return ((int) ($left['order_index'] ?? 0)) <=> ((int) ($right['order_index'] ?? 0));
             });
 
+            $blocks = $this->suppressPdfRunningHeaderFooterBlocks($blocks);
+
             return $this->mergePopplerPdfTableBlocksAcrossPages($blocks);
         } finally {
             libxml_clear_errors();
@@ -2742,6 +2744,110 @@ class DocumentTextExtractor
         return $this->looksLikePdfHeaderFooterMarker($text)
             || $this->isPdfTocHeadingLine($text)
             || $this->isPdfTocOutlineLine($text);
+    }
+
+    /**
+     * Purpose: Remove running PDF header and footer blocks from the extracted block list.
+     * Inputs: All blocks from one PDF after sorting.
+     * Returns: Blocks with running header/footer text removed.
+     * Side effects: None.
+     *
+     * A block is suppressed when it is a paragraph or list block positioned in the top 10 %
+     * or bottom 12 % of its page AND either (a) its text matches the page-marker heuristic
+     * or (b) its normalised text (with integers replaced by N) appears in that same edge zone
+     * on two or more distinct pages.  Heading, table, and image blocks are never touched.
+     * Blocks without a valid page_height pass through unchanged, which keeps DOCX and other
+     * non-PDF extraction paths unaffected even if this method were ever called on their output.
+     *
+     * @param array<int, array<string, mixed>> $blocks
+     * @return array<int, array<string, mixed>>
+     */
+    private function suppressPdfRunningHeaderFooterBlocks(array $blocks): array
+    {
+        /** @var array<string, list<int>> $edgeTextPages normalised_text => [page_number, ...] */
+        $edgeTextPages = [];
+
+        foreach ($blocks as $block) {
+            if (! in_array($block['type'] ?? '', ['paragraph', 'list'], true)) {
+                continue;
+            }
+
+            $pageHeight = (int) ($block['page_height'] ?? 0);
+
+            if ($pageHeight <= 0) {
+                continue;
+            }
+
+            $text = trim((string) ($block['text'] ?? ''));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $topRatio = (int) ($block['top'] ?? 0) / $pageHeight;
+
+            if ($topRatio > 0.10 && $topRatio < 0.88) {
+                continue;
+            }
+
+            $normalized = $this->normalizePdfRunningLineText($text);
+            $pageNumber = (int) ($block['page_number'] ?? 0);
+
+            if (! isset($edgeTextPages[$normalized])) {
+                $edgeTextPages[$normalized] = [];
+            }
+
+            if (! in_array($pageNumber, $edgeTextPages[$normalized], true)) {
+                $edgeTextPages[$normalized][] = $pageNumber;
+            }
+        }
+
+        $repeatedEdgeTexts = array_flip(
+            array_keys(array_filter($edgeTextPages, static fn (array $pages): bool => count($pages) >= 2))
+        );
+
+        return array_values(array_filter($blocks, function (array $block) use ($repeatedEdgeTexts): bool {
+            if (! in_array($block['type'] ?? '', ['paragraph', 'list'], true)) {
+                return true;
+            }
+
+            $pageHeight = (int) ($block['page_height'] ?? 0);
+
+            if ($pageHeight <= 0) {
+                return true;
+            }
+
+            $text = trim((string) ($block['text'] ?? ''));
+
+            if ($text === '') {
+                return true;
+            }
+
+            $topRatio = (int) ($block['top'] ?? 0) / $pageHeight;
+
+            if ($topRatio > 0.10 && $topRatio < 0.88) {
+                return true;
+            }
+
+            if ($this->looksLikePdfHeaderFooterMarker($text)) {
+                return false;
+            }
+
+            return ! isset($repeatedEdgeTexts[$this->normalizePdfRunningLineText($text)]);
+        }));
+    }
+
+    /**
+     * Purpose: Normalise a PDF line for cross-page repetition detection.
+     * Inputs: Raw line text.
+     * Returns: Lowercase text with standalone integers replaced by N.
+     * Side effects: None.
+     */
+    private function normalizePdfRunningLineText(string $text): string
+    {
+        $normalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $text) ?? $text), 'UTF-8');
+
+        return preg_replace('/\b\d+\b/u', 'N', $normalized) ?? $normalized;
     }
 
     /**

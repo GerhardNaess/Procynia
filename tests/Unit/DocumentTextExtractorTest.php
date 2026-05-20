@@ -1784,4 +1784,140 @@ XML;
             'page_number' => 1,
         ], $overrides);
     }
+
+    // --- Running header/footer suppression tests ---
+
+    public function test_it_suppresses_pdf_copyright_footer_with_side_x_av_y(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // A4 page (842pt). Footer sits at ~795pt — top ratio 0.944, inside the bottom edge zone.
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Ukentlige prosjektmøter med gjennomgang av fremdrift.', 300, 842, 2),
+            $this->fakePdfBlock('paragraph', '© Advania Norge AS 29.09.2025 Side 2 av 31', 795, 842, 2),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $texts = array_column($result, 'text');
+        $this->assertContains('Ukentlige prosjektmøter med gjennomgang av fremdrift.', $texts);
+        $this->assertNotContains('© Advania Norge AS 29.09.2025 Side 2 av 31', $texts);
+    }
+
+    public function test_it_suppresses_pdf_page_x_of_y_footer(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Egne tekniske koordineringsmøter ved behov.', 400, 842, 5),
+            $this->fakePdfBlock('paragraph', 'Page 5 of 31', 800, 842, 5),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $texts = array_column($result, 'text');
+        $this->assertContains('Egne tekniske koordineringsmøter ved behov.', $texts);
+        $this->assertNotContains('Page 5 of 31', $texts);
+    }
+
+    public function test_it_keeps_body_text_containing_the_word_side(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // "side" inside a sentence, positioned well within the body — must not be removed.
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Se side 12 for mer informasjon om dette temaet.', 400, 842, 3),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Se side 12 for mer informasjon om dette temaet.', $result[0]['text']);
+    }
+
+    public function test_it_keeps_real_text_near_bottom_without_page_marker(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // Legitimate last sentence on a page, near the bottom but no page-number pattern and no digits.
+        // top=795, page_height=842 → ratio 0.944 (inside edge zone), but text has no digits and is long.
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Referater med tydelig ansvar og frister distribueres etter hvert møte.', 795, 842, 1),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame('Referater med tydelig ansvar og frister distribueres etter hvert møte.', $result[0]['text']);
+    }
+
+    public function test_it_suppresses_repeated_header_text_across_pages_by_repetition_rule(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // Company header repeated on three pages — no page number, but repetition rule should catch it.
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Advania Norge AS – Internt dokument', 25, 842, 1),
+            $this->fakePdfBlock('paragraph', 'Advania Norge AS – Internt dokument', 25, 842, 2),
+            $this->fakePdfBlock('paragraph', 'Advania Norge AS – Internt dokument', 25, 842, 3),
+            $this->fakePdfBlock('paragraph', 'Styringsgruppemøter på avtalte milepæler.', 400, 842, 2),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $texts = array_column($result, 'text');
+        $this->assertContains('Styringsgruppemøter på avtalte milepæler.', $texts);
+        $this->assertNotContains('Advania Norge AS – Internt dokument', $texts);
+    }
+
+    public function test_it_does_not_suppress_heading_blocks_near_page_edge(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // Headings must never be filtered regardless of position or content.
+        $blocks = [
+            $this->fakePdfBlock('heading', '3 Konklusjon', 800, 842, 10),
+            $this->fakePdfBlock('heading', '1.1 Innledning', 20, 842, 4),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $this->assertCount(2, $result);
+    }
+
+    public function test_it_leaves_blocks_without_page_height_untouched(): void
+    {
+        $extractor = new DocumentTextExtractor();
+
+        // page_height=0 means the block did not come through the PDF pipeline.
+        // These must never be filtered — ensures DOCX/non-PDF blocks are safe.
+        $blocks = [
+            $this->fakePdfBlock('paragraph', 'Side 2 av 31', 0, 0, 1),
+            $this->fakePdfBlock('list', 'Page 1 of 10', 0, 0, 1),
+        ];
+
+        $result = $this->invokeDocumentTextExtractorMethod($extractor, 'suppressPdfRunningHeaderFooterBlocks', [$blocks]);
+
+        $this->assertCount(2, $result);
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private function fakePdfBlock(string $type, string $text, int $top, int $pageHeight, int $pageNumber = 1, array $overrides = []): array
+    {
+        return array_merge([
+            'type' => $type,
+            'text' => $text,
+            'top' => $top,
+            'page_height' => $pageHeight,
+            'page_number' => $pageNumber,
+            'left' => 72,
+            'width' => 400,
+            'height' => 14,
+            'style' => null,
+            'level' => null,
+        ], $overrides);
+    }
 }
