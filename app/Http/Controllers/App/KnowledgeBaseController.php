@@ -1400,6 +1400,11 @@ class KnowledgeBaseController extends Controller
         }
 
         $chunkRanges = $this->subtractTableRangesFromSemanticRanges($chunkRanges);
+        $figureChunkRanges = $this->buildFigureChunkRangesFromGaps($chunkRanges, $sourceText);
+
+        if ($figureChunkRanges !== []) {
+            $chunkRanges = array_merge($chunkRanges, $figureChunkRanges);
+        }
 
         if ($chunkRanges !== []) {
             usort(
@@ -2149,6 +2154,165 @@ class KnowledgeBaseController extends Controller
             'source_metadata' => is_array(data_get($imageElement, 'source_metadata', null)) ? data_get($imageElement, 'source_metadata') : null,
             'image_index_in_document' => $imageIndexInDocument,
         ]];
+    }
+
+    /**
+     * Purpose: Convert uncovered text gaps between existing chunk ranges into conservative figure-like image chunks.
+     * Inputs: Ordered chunk ranges already produced for the document and the canonical source text.
+     * Returns: Additional image chunk ranges for gaps that resemble embedded figures or diagrams.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $chunkRanges
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildFigureChunkRangesFromGaps(array $chunkRanges, string $sourceText): array
+    {
+        if ($chunkRanges === [] || trim($sourceText) === '') {
+            return [];
+        }
+
+        usort(
+            $chunkRanges,
+            static function (array $left, array $right): int {
+                $startComparison = ((int) ($left['start_offset'] ?? 0)) <=> ((int) ($right['start_offset'] ?? 0));
+
+                if ($startComparison !== 0) {
+                    return $startComparison;
+                }
+
+                return ((int) ($left['end_offset'] ?? 0)) <=> ((int) ($right['end_offset'] ?? 0));
+            },
+        );
+
+        $normalizeLine = static fn (string $line): string => trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+        $wordCount = static fn (string $text): int => count(preg_split('/\s+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        $isTitleLikeLine = static function (string $line) use ($wordCount): bool {
+            $line = trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+
+            if ($line === '') {
+                return false;
+            }
+
+            $lineWordCount = $wordCount($line);
+
+            if ($lineWordCount < 2 || $lineWordCount > 4) {
+                return false;
+            }
+
+            if (mb_strlen($line, 'UTF-8') > 40) {
+                return false;
+            }
+
+            if (preg_match('/[.!?:;]$/u', $line)) {
+                return false;
+            }
+
+            return preg_match('/^[\p{Lu}\d]/u', $line) === 1;
+        };
+        $isListLikeLine = static fn (string $line): bool => preg_match('/^(?:\d+\.|\d+\)|[•\-–])\s*/u', trim($line)) === 1;
+        $figureChunkRanges = [];
+        $rangeCount = count($chunkRanges);
+
+        for ($index = 0; $index < $rangeCount - 1; $index++) {
+            $leftRange = $chunkRanges[$index];
+            $rightRange = $chunkRanges[$index + 1];
+            $leftKind = (string) ($leftRange['chunk_kind'] ?? '');
+            $rightKind = (string) ($rightRange['chunk_kind'] ?? '');
+
+            if (in_array($leftKind, ['table', 'image'], true) || in_array($rightKind, ['table', 'image'], true)) {
+                continue;
+            }
+
+            $gapStart = (int) ($leftRange['end_offset'] ?? 0);
+            $gapEnd = (int) ($rightRange['start_offset'] ?? 0);
+
+            if ($gapEnd <= $gapStart) {
+                continue;
+            }
+
+            $gapText = trim((string) mb_substr($sourceText, $gapStart, $gapEnd - $gapStart, 'UTF-8'));
+
+            if ($gapText === '') {
+                continue;
+            }
+
+            $lines = array_values(array_filter(array_map(
+                $normalizeLine,
+                preg_split('/\n+/u', $gapText) ?: [],
+            ), static fn (string $line): bool => $line !== ''));
+
+            if ($lines === []) {
+                continue;
+            }
+
+            $titleLineIndex = null;
+
+            foreach ($lines as $lineIndex => $line) {
+                if ($isTitleLikeLine($line)) {
+                    $titleLineIndex = $lineIndex;
+
+                    break;
+                }
+            }
+
+            if ($titleLineIndex === null) {
+                continue;
+            }
+
+            $suffixLines = array_slice($lines, $titleLineIndex + 1);
+
+            if (count($suffixLines) < 3) {
+                continue;
+            }
+
+            $shortSuffixLineCount = 0;
+            $listLikeSuffixLineCount = 0;
+
+            foreach ($suffixLines as $suffixLine) {
+                if ($wordCount($suffixLine) <= 6) {
+                    $shortSuffixLineCount++;
+                }
+
+                if ($isListLikeLine($suffixLine)) {
+                    $listLikeSuffixLineCount++;
+                }
+            }
+
+            if ($shortSuffixLineCount < 3 && $listLikeSuffixLineCount < 2) {
+                continue;
+            }
+
+            $figureHeadingPath = $this->cleanNullableString($leftRange['section_path'] ?? $leftRange['heading_path'] ?? null, 255)
+                ?? $this->cleanNullableString($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null, 255);
+
+            if ($figureHeadingPath === null || $figureHeadingPath === '') {
+                continue;
+            }
+
+            $figureCaption = $normalizeLine($lines[$titleLineIndex] ?? '');
+            $figureElement = [
+                'heading_path' => $figureHeadingPath,
+                'start_offset' => $gapStart,
+                'end_offset' => $gapEnd,
+                'image_caption' => $figureCaption !== '' ? $figureCaption : null,
+                'image_alt_text' => $gapText,
+                'image_description' => $gapText,
+                'ocr_text' => $gapText,
+                'image_metadata' => [
+                    'source' => 'pdf_figure_gap',
+                    'derived_from_text' => true,
+                    'gap_character_count' => mb_strlen($gapText, 'UTF-8'),
+                    'gap_word_count' => $wordCount($gapText),
+                    'gap_line_count' => count($lines),
+                ],
+            ];
+
+            foreach ($this->buildImageChunkRangesFromElement($figureElement) as $figureChunkRange) {
+                $figureChunkRanges[] = $figureChunkRange;
+            }
+        }
+
+        return $figureChunkRanges;
     }
 
     /**

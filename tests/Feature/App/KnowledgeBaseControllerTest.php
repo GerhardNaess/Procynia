@@ -610,6 +610,43 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertStringContainsString('Etter tabell.', $payloads[3]['content']);
     }
 
+    public function test_rule_based_h2_chunk_payload_builder_preserves_figure_like_gap_text_as_an_image_chunk(): void
+    {
+        $structure = $this->ruleBasedFigureGapStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $chunkTypes = array_values(array_map(
+            static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
+            $payloads,
+        ));
+
+        $imageIndex = array_search('image', $chunkTypes, true);
+
+        $this->assertNotFalse(
+            $imageIndex,
+            'Expected the figure-like gap to be preserved as a dedicated image chunk.',
+        );
+
+        $imagePayload = $payloads[$imageIndex];
+        $previousPayload = $payloads[$imageIndex - 1] ?? null;
+        $nextPayload = $payloads[$imageIndex + 1] ?? null;
+
+        $this->assertSame('image', $imagePayload['chunk_type']);
+        $this->assertStringContainsString('1.12', (string) ($imagePayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('1.12', (string) ($imagePayload['section_path'] ?? ''));
+        $this->assertNotNull($previousPayload);
+        $this->assertNotNull($nextPayload);
+        $this->assertSame('semantic', $previousPayload['chunk_type'] ?? null);
+        $this->assertSame('semantic', $nextPayload['chunk_type'] ?? null);
+        $this->assertStringContainsString('1.12', (string) ($previousPayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('1.13', (string) ($nextPayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('Advania Risk Management', (string) ($imagePayload['content'] ?? ''));
+        $this->assertStringContainsString('Kontroll', (string) ($imagePayload['content'] ?? ''));
+        $this->assertNotEmpty($imagePayload['image_caption'] ?? null);
+        $this->assertNotEmpty($imagePayload['ocr_text'] ?? null);
+        $this->assertNotEmpty($imagePayload['image_description'] ?? null);
+    }
+
     public function test_knowledge_document_upload_persists_table_chunks_separately_from_text_chunks(): void
     {
         Storage::fake('local');
@@ -2673,6 +2710,79 @@ class KnowledgeBaseControllerTest extends TestCase
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > Underseksjon A',
                 'text' => 'Etter tabell.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a synthetic fixture that mirrors the real PDF figure gap between 1.12 and 1.13.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with one H2 section, a figure-like text cluster, and the next H2 section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedFigureGapStructureFixture(): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => 'Prosess for risikohåndtering. Leverandøren er ansvarlig for nødvendig risikostyring i etableringsprosjektet. Risikostyring er en integrert og kontinuerlig del av Leverandørens prosjektstyring og må følges opp gjennom hele prosjektperioden. Risikoer skal identifiseres, vurderes, prioriteres og håndteres fortløpende. Tiltak skal dokumenteres, følges opp og revideres når forutsetningene endrer seg.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => 'Advania Risk Management',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "0. Identifisere\n1. Beskrivelse\n2. Analyse",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "Risiko register\nRisiko register",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "3. Planlegge\n4. Oppfølging\n5. Kontroll",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "Løste risikoer\nÅpne risikoer",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => 'Kontinuerlig risk prosess i dynamisk risiko analyse',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => '4. Oppfølging > 1.13 K OSTNADSSTYRING I PROSJEKTER',
+                'text' => "1.13 K OSTNADSSTYRING I PROSJEKTER\n\nProsess for kostnadsstyring og kostnadskontroll i prosjektfasen. Kostnadsstyring i prosjektet skal gjennomføres gjennom en strukturert prosess som sikrer løpende kontroll med prosjektet, tydelig oppfølging av avvik og god styring av budsjett, prognoser og beslutningsgrunnlag. Leverandøren skal kunne rapportere avvik, følge opp tiltak og gi Kunden et oppdatert grunnlag for styring og beslutninger.",
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
