@@ -447,6 +447,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
                     'knowledgeItem' => data_get($page, 'props.knowledgeItem.id'),
                     'chunk' => $imageChunk['id'],
+                    'v' => $imageChunk['image_hash'],
                 ])
                 && data_get($imageChunk, 'image_metadata.extension') === 'svg'
                 && data_get($imageChunk, 'image_metadata.image_kind') === 'unknown'
