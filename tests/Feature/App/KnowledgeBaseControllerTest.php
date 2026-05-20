@@ -3488,8 +3488,8 @@ XML;
     {
         config([
             'database.default' => 'pgsql',
-            'database.connections.pgsql.host' => '127.0.0.1',
-            'database.connections.pgsql.port' => 5432,
+            'database.connections.pgsql.host' => env('DB_HOST', '127.0.0.1'),
+            'database.connections.pgsql.port' => (int) env('DB_PORT', 5432),
             'database.connections.pgsql.database' => 'procynia_test',
             'database.connections.pgsql.url' => null,
         ]);

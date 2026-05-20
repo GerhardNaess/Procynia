@@ -51,6 +51,7 @@ abstract class TestCase extends BaseTestCase
             'DB_DATABASE' => 'procynia_test',
             'DB_USERNAME' => 'gehard',
             'DB_PASSWORD' => 'Opaque01',
+            'QUEUE_CONNECTION' => 'sync',
         ];
 
         foreach ($defaults as $key => $value) {
