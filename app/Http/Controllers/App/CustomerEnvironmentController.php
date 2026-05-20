@@ -5,10 +5,15 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Department;
+use App\Models\DocumentTemplate;
 use App\Models\User;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,8 +26,8 @@ class CustomerEnvironmentController extends Controller
 
     public function index(Request $request): Response
     {
-        [$actor, $customerId] = $this->customerBidManagerContext($request);
-        $activeTab = in_array($request->query('tab'), ['departments', 'users', 'permissions'], true)
+        [$actor, $customerId] = $this->customerEnvironmentContext($request);
+        $activeTab = in_array($request->query('tab'), ['departments', 'users', 'permissions', 'document-templates'], true)
             ? (string) $request->query('tab')
             : 'departments';
 
@@ -49,10 +54,20 @@ class CustomerEnvironmentController extends Controller
             ->map(fn (User $user): array => $this->userListItem($user, $actor, $customerId))
             ->all();
 
+        $documentTemplates = $this->scopedCustomerDocumentTemplatesQuery($customerId)
+            ->with(['customer'])
+            ->orderByDesc('is_default')
+            ->orderByDesc('updated_at')
+            ->get()
+            ->map(fn (DocumentTemplate $template): array => $this->documentTemplateListItem($template))
+            ->all();
+
         return Inertia::render('App/CustomerEnvironment/Index', [
             'activeTab' => $activeTab,
             'departments' => $departments,
             'users' => $users,
+            'documentTemplates' => $documentTemplates,
+            'canManageDocumentTemplates' => $this->customerContext->canManageCustomerDocumentTemplates($actor),
             'bidRoleOptions' => $this->bidRoleOptions($actor),
             'bidManagerScopeOptions' => collect(User::bidManagerScopeOptions())
                 ->map(fn (string $label, string $value): array => [
@@ -74,6 +89,7 @@ class CustomerEnvironmentController extends Controller
                 'users_store' => route('app.users.store'),
                 'users_create' => route('app.users.create'),
                 'permissions_update' => route('app.customer-environment.permissions.update'),
+                'document_templates_store' => route('app.customer-environment.document-templates.store'),
             ],
         ]);
     }
@@ -116,6 +132,134 @@ class CustomerEnvironmentController extends Controller
         $customer->save();
 
         return redirect()->route('app.customer-environment.index', ['tab' => 'permissions']);
+    }
+
+    public function storeDocumentTemplate(Request $request): RedirectResponse
+    {
+        [$actor, $customerId] = $this->customerDocumentTemplateContext($request);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'file_path' => ['required', 'file', 'mimes:docx'],
+            'is_active' => ['nullable', 'boolean'],
+            'is_default' => ['nullable', 'boolean'],
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
+            'customer_id' => ['prohibited'],
+            'template_type' => ['prohibited'],
+            'file_disk' => ['prohibited'],
+            'original_filename' => ['prohibited'],
+            'mime_type' => ['prohibited'],
+            'file_size' => ['prohibited'],
+        ]);
+
+        /** @var UploadedFile $uploadedFile */
+        $uploadedFile = $request->file('file_path');
+        DocumentTemplate::validateUploadedWordExportTemplate($uploadedFile);
+
+        [$storedPath, $originalFilename] = $this->storeWordExportTemplateFile($uploadedFile, $customerId);
+
+        DocumentTemplate::query()->create([
+            'customer_id' => $customerId,
+            'name' => Str::squish((string) $validated['name']),
+            'description' => $this->normalizeNullableText($validated['description'] ?? null),
+            'template_type' => DocumentTemplate::TEMPLATE_TYPE_WORD_EXPORT,
+            'file_disk' => 'local',
+            'file_path' => $storedPath,
+            'original_filename' => $originalFilename,
+            'is_active' => (bool) ($validated['is_active'] ?? true),
+            'is_default' => (bool) ($validated['is_default'] ?? false),
+            'created_by_user_id' => $actor->id,
+            'updated_by_user_id' => $actor->id,
+        ]);
+
+        return $this->successRedirect($request, 'document-templates', 'Dokumentmalen ble lastet opp.');
+    }
+
+    public function updateDocumentTemplate(Request $request, DocumentTemplate $documentTemplate): RedirectResponse
+    {
+        [$actor, $customerId] = $this->customerDocumentTemplateContext($request);
+        $record = $this->scopedCustomerDocumentTemplate($customerId, $documentTemplate->id);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'is_active' => ['nullable', 'boolean'],
+            'is_default' => ['nullable', 'boolean'],
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
+            'customer_id' => ['prohibited'],
+            'template_type' => ['prohibited'],
+            'file_path' => ['prohibited'],
+            'file_disk' => ['prohibited'],
+            'original_filename' => ['prohibited'],
+            'mime_type' => ['prohibited'],
+            'file_size' => ['prohibited'],
+        ]);
+
+        $isActive = (bool) ($validated['is_active'] ?? $record->is_active);
+        $isDefault = (bool) ($validated['is_default'] ?? $record->is_default);
+
+        if (! $isActive) {
+            $isDefault = false;
+        }
+
+        $record->fill([
+            'name' => Str::squish((string) $validated['name']),
+            'description' => $this->normalizeNullableText($validated['description'] ?? null),
+            'is_active' => $isActive,
+            'is_default' => $isDefault,
+            'updated_by_user_id' => $actor->id,
+        ])->save();
+
+        return $this->successRedirect($request, 'document-templates', 'Dokumentmalen ble oppdatert.');
+    }
+
+    public function toggleDocumentTemplateActive(Request $request, DocumentTemplate $documentTemplate): RedirectResponse
+    {
+        [$actor, $customerId] = $this->customerDocumentTemplateContext($request);
+        $record = $this->scopedCustomerDocumentTemplate($customerId, $documentTemplate->id);
+
+        $nextIsActive = ! (bool) $record->is_active;
+        $payload = [
+            'is_active' => $nextIsActive,
+            'updated_by_user_id' => $actor->id,
+        ];
+
+        if (! $nextIsActive) {
+            $payload['is_default'] = false;
+        }
+
+        $record->forceFill($payload)->save();
+
+        return $this->successRedirect(
+            $request,
+            'document-templates',
+            $nextIsActive ? 'Dokumentmalen ble aktivert.' : 'Dokumentmalen ble deaktivert.',
+        );
+    }
+
+    public function setDefaultDocumentTemplate(Request $request, DocumentTemplate $documentTemplate): RedirectResponse
+    {
+        [$actor, $customerId] = $this->customerDocumentTemplateContext($request);
+        $record = $this->scopedCustomerDocumentTemplate($customerId, $documentTemplate->id);
+
+        $record->forceFill([
+            'is_active' => true,
+            'is_default' => true,
+            'updated_by_user_id' => $actor->id,
+        ])->save();
+
+        return $this->successRedirect($request, 'document-templates', 'Dokumentmalen ble satt som standard.');
+    }
+
+    public function destroyDocumentTemplate(Request $request, DocumentTemplate $documentTemplate): RedirectResponse
+    {
+        [$actor, $customerId] = $this->customerDocumentTemplateContext($request);
+        $record = $this->scopedCustomerDocumentTemplate($customerId, $documentTemplate->id);
+
+        $record->delete();
+
+        return $this->successRedirect($request, 'document-templates', 'Dokumentmalen ble slettet.');
     }
 
     private function permissionSettingsPayload(User $actor, int $customerId): array
@@ -165,6 +309,41 @@ class CustomerEnvironmentController extends Controller
             $user instanceof User
             && $this->customerContext->canManageCustomerUsers($user)
             && $customerId !== null,
+            403,
+        );
+
+        return [$user, $customerId];
+    }
+
+    private function customerEnvironmentContext(Request $request): array
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        abort_unless(
+            $user instanceof User
+            && $customerId !== null
+            && (
+                $this->customerContext->canManageCustomerUsers($user)
+                || $this->customerContext->canManageCustomerDocumentTemplates($user)
+            ),
+            403,
+        );
+
+        return [$user, $customerId];
+    }
+
+    private function customerDocumentTemplateContext(Request $request): array
+    {
+        /** @var User|null $user */
+        $user = $request->user();
+        $customerId = $this->customerContext->currentCustomerId($user);
+
+        abort_unless(
+            $user instanceof User
+            && $customerId !== null
+            && $this->customerContext->canManageCustomerDocumentTemplates($user),
             403,
         );
 
@@ -366,6 +545,58 @@ class CustomerEnvironmentController extends Controller
         return $this->membershipDepartmentOptions($actor, $customerId);
     }
 
+    private function scopedCustomerDocumentTemplatesQuery(int $customerId)
+    {
+        return DocumentTemplate::query()
+            ->where('customer_id', $customerId)
+            ->where('template_type', DocumentTemplate::TEMPLATE_TYPE_WORD_EXPORT);
+    }
+
+    private function scopedCustomerDocumentTemplate(int $customerId, int $documentTemplateId): DocumentTemplate
+    {
+        return $this->scopedCustomerDocumentTemplatesQuery($customerId)
+            ->whereKey($documentTemplateId)
+            ->firstOrFail();
+    }
+
+    /**
+     * @return array{0:string,1:string}
+     */
+    private function storeWordExportTemplateFile(UploadedFile $file, int $customerId): array
+    {
+        $directory = 'document-templates/customer-'.$customerId;
+        $storedFilename = Str::ulid().'__'.$file->getClientOriginalName();
+        $storedPath = Storage::disk('local')->putFileAs($directory, $file, $storedFilename);
+
+        if (! is_string($storedPath) || $storedPath === '') {
+            throw ValidationException::withMessages([
+                'file_path' => __('procynia.document_templates.messages.file_missing'),
+            ]);
+        }
+
+        return [$storedPath, trim((string) $file->getClientOriginalName())];
+    }
+
+    private function documentTemplateListItem(DocumentTemplate $template): array
+    {
+        return [
+            'id' => $template->id,
+            'name' => $template->name,
+            'description' => $template->description,
+            'original_filename' => $template->original_filename,
+            'template_type' => DocumentTemplate::templateTypeLabel($template->template_type),
+            'template_type_value' => $template->template_type,
+            'is_active' => (bool) $template->is_active,
+            'is_default' => (bool) $template->is_default,
+            'updated_at' => optional($template->updated_at)?->toIso8601String(),
+            'update_url' => route('app.customer-environment.document-templates.update', ['documentTemplate' => $template->id]),
+            'edit_url' => route('app.customer-environment.document-templates.update', ['documentTemplate' => $template->id]),
+            'toggle_active_url' => route('app.customer-environment.document-templates.toggle-active', ['documentTemplate' => $template->id]),
+            'set_default_url' => route('app.customer-environment.document-templates.set-default', ['documentTemplate' => $template->id]),
+            'destroy_url' => route('app.customer-environment.document-templates.destroy', ['documentTemplate' => $template->id]),
+        ];
+    }
+
     private function bidManagerScopeSummary(User $user): ?string
     {
         if ($user->isSystemOwner()) {
@@ -391,5 +622,35 @@ class CustomerEnvironmentController extends Controller
         }
 
         return $count === 1 ? '1 avdeling' : "{$count} avdelinger";
+    }
+
+    private function normalizeNullableText(?string $value): ?string
+    {
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function successRedirect(Request $request, string $fallbackTab, string $message): RedirectResponse
+    {
+        $redirectTo = $this->redirectTarget($request);
+
+        if ($redirectTo !== null) {
+            return redirect()->to($redirectTo)->with('success', $message);
+        }
+
+        return redirect()->route('app.customer-environment.index', ['tab' => $fallbackTab])
+            ->with('success', $message);
+    }
+
+    private function redirectTarget(Request $request): ?string
+    {
+        $redirectTo = trim((string) $request->input('redirect_to'));
+
+        if ($redirectTo === '' || ! str_starts_with($redirectTo, '/app/customer-environment')) {
+            return null;
+        }
+
+        return $redirectTo;
     }
 }

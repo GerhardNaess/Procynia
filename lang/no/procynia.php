@@ -2259,4 +2259,51 @@ return [
             'code_required' => 'Kode må fylles ut.',
         ],
     ],
+    'document_templates' => [
+        'navigation_label' => 'Dokumentmaler',
+        'model_label' => 'dokumentmal',
+        'plural_model_label' => 'dokumentmaler',
+        'navigation_group' => 'Drift',
+        'pages' => [
+            'list' => 'Dokumentmaler',
+            'create' => 'Ny dokumentmal',
+            'edit' => 'Rediger dokumentmal',
+        ],
+        'sections' => [
+            'details' => 'Detaljer',
+            'file' => 'Fil og validering',
+            'status' => 'Status og standard',
+        ],
+        'subheading' => [
+            'list' => 'Last opp og administrer kundespesifikke Word-maler for eksport.',
+        ],
+        'fields' => [
+            'customer' => 'Kunde',
+            'name' => 'Navn',
+            'description' => 'Beskrivelse',
+            'file' => 'Word-mal (.docx)',
+            'template_type' => 'Maltype',
+            'original_filename' => 'Originalt filnavn',
+            'active' => 'Aktiv',
+            'default' => 'Standardmal',
+        ],
+        'template_types' => [
+            'word_export' => 'Word-eksport',
+        ],
+        'help' => [
+            'file' => 'Malen må være en .docx-fil. Se hjelpen for krav til innsettingspunkt.',
+            'customer_locked' => 'Kunden kan ikke endres etter opprettelse.',
+            'default' => 'Standardmal brukes når ingen annen aktiv mal er valgt for kunden.',
+        ],
+        'actions' => [
+            'edit' => 'Rediger',
+        ],
+        'messages' => [
+            'customer_required' => 'Kunde må velges.',
+            'must_be_docx' => 'Malen må være en .docx-fil.',
+            'invalid_docx' => 'Malen må være en gyldig .docx-fil.',
+            'placeholder_missing' => 'Word-malen mangler innsettingspunktet der Procynia skal sette inn kravbesvarelsen. Se hjelpen for dokumentmaler.',
+            'file_missing' => 'Dokumentmalfilen kunne ikke leses.',
+        ],
+    ],
 ];

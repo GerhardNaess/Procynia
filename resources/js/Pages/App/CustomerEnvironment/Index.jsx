@@ -51,10 +51,11 @@ function EnvironmentModal({ isOpen, title, description, onClose, children, foote
     );
 }
 
-function SectionTabs({ activeTab, onChange, showPermissions = false }) {
+function SectionTabs({ activeTab, onChange, showPermissions = false, showDocumentTemplates = false }) {
     const tabs = [
         { key: 'departments', label: 'Avdelinger' },
         { key: 'users', label: 'Brukere' },
+        ...(showDocumentTemplates ? [{ key: 'document-templates', label: 'Dokumentmaler' }] : []),
         ...(showPermissions ? [{ key: 'permissions', label: 'Tilganger' }] : []),
     ];
 
@@ -183,27 +184,37 @@ export default function CustomerEnvironmentIndex({
     activeTab,
     departments,
     users,
+    documentTemplates = [],
     bidRoleOptions,
     bidManagerScopeOptions,
     departmentOptions,
     managedDepartmentOptions,
     departmentFilterOptions,
     canCreateDepartments,
+    canManageDocumentTemplates = false,
     permissionSettings = null,
     routes,
 }) {
     const { locale = 'nb-NO' } = usePage().props;
     const [departmentModalState, setDepartmentModalState] = useState({ mode: null, department: null });
+    const [documentTemplateModalState, setDocumentTemplateModalState] = useState({ mode: null, template: null });
     const [togglingDepartmentId, setTogglingDepartmentId] = useState(null);
+    const [togglingDocumentTemplateId, setTogglingDocumentTemplateId] = useState(null);
     const [togglingUserId, setTogglingUserId] = useState(null);
     const [userSearch, setUserSearch] = useState('');
     const [userDepartmentFilter, setUserDepartmentFilter] = useState('');
     const [userStatusFilter, setUserStatusFilter] = useState('all');
 
-    const validTabs = ['departments', 'users', ...(permissionSettings ? ['permissions'] : [])];
+    const validTabs = [
+        'departments',
+        'users',
+        ...(canManageDocumentTemplates ? ['document-templates'] : []),
+        ...(permissionSettings ? ['permissions'] : []),
+    ];
     const currentTab = validTabs.includes(activeTab) ? activeTab : 'departments';
     const departmentsTabUrl = `${routes.index}?tab=departments`;
     const usersTabUrl = `${routes.index}?tab=users`;
+    const documentTemplatesTabUrl = `${routes.index}?tab=document-templates`;
     const [permissionSaving, setPermissionSaving] = useState(null);
     const userCreateHref = `${routes.users_create}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
     const userEditHref = (user) => `${user.edit_url}?redirect_to=${encodeURIComponent(usersTabUrl)}`;
@@ -212,6 +223,21 @@ export default function CustomerEnvironmentIndex({
         name: '',
         description: '',
         redirect_to: departmentsTabUrl,
+    });
+    const createDocumentTemplateForm = useForm({
+        name: '',
+        description: '',
+        file_path: null,
+        is_active: true,
+        is_default: false,
+        redirect_to: documentTemplatesTabUrl,
+    });
+    const editDocumentTemplateForm = useForm({
+        name: '',
+        description: '',
+        is_active: true,
+        is_default: false,
+        redirect_to: documentTemplatesTabUrl,
     });
 
     const normalizedSearch = userSearch.trim().toLowerCase();
@@ -231,6 +257,21 @@ export default function CustomerEnvironmentIndex({
 
         return matchesSearch && matchesDepartment && matchesStatus;
     });
+
+    const activeDefaultDocumentTemplate = documentTemplates.find((template) => template.is_active && template.is_default) ?? null;
+    const activeDocumentTemplateForm = documentTemplateModalState.mode === 'edit'
+        ? editDocumentTemplateForm
+        : createDocumentTemplateForm;
+    const firstDocumentTemplateError = Object.values(activeDocumentTemplateForm.errors)[0] ?? null;
+    const resolveDocumentTemplateError = (message) => {
+        if (!message) {
+            return message;
+        }
+
+        return String(message).includes('PROCYNIA_CONTENT')
+            ? 'Word-malen mangler innsettingspunktet der Procynia skal sette inn kravbesvarelsen. Se hjelpen for dokumentmaler.'
+            : message;
+    };
 
     const openCreateDepartment = () => {
         departmentForm.reset();
@@ -257,6 +298,113 @@ export default function CustomerEnvironmentIndex({
         setDepartmentModalState({ mode: null, department: null });
         departmentForm.reset();
         departmentForm.clearErrors();
+    };
+
+    const openCreateDocumentTemplate = () => {
+        createDocumentTemplateForm.reset();
+        createDocumentTemplateForm.clearErrors();
+        createDocumentTemplateForm.setData({
+            name: '',
+            description: '',
+            file_path: null,
+            is_active: true,
+            is_default: false,
+            redirect_to: documentTemplatesTabUrl,
+        });
+        setDocumentTemplateModalState({ mode: 'create', template: null });
+    };
+
+    const openEditDocumentTemplate = (template) => {
+        editDocumentTemplateForm.reset();
+        editDocumentTemplateForm.clearErrors();
+        editDocumentTemplateForm.setData({
+            name: template.name ?? '',
+            description: template.description ?? '',
+            is_active: Boolean(template.is_active),
+            is_default: Boolean(template.is_default),
+            redirect_to: documentTemplatesTabUrl,
+        });
+        setDocumentTemplateModalState({ mode: 'edit', template });
+    };
+
+    const closeDocumentTemplateModal = () => {
+        setDocumentTemplateModalState({ mode: null, template: null });
+        createDocumentTemplateForm.reset();
+        createDocumentTemplateForm.clearErrors();
+        editDocumentTemplateForm.reset();
+        editDocumentTemplateForm.clearErrors();
+    };
+
+    const submitDocumentTemplate = () => {
+        if (documentTemplateModalState.mode === 'edit' && documentTemplateModalState.template) {
+            editDocumentTemplateForm.patch(documentTemplateModalState.template.update_url, {
+                preserveScroll: true,
+                onSuccess: closeDocumentTemplateModal,
+            });
+
+            return;
+        }
+
+        createDocumentTemplateForm.post(routes.document_templates_store, {
+            preserveScroll: true,
+            forceFormData: true,
+            onSuccess: closeDocumentTemplateModal,
+        });
+    };
+
+    const handleDocumentTemplateSubmit = (event) => {
+        event.preventDefault();
+        submitDocumentTemplate();
+    };
+
+    const toggleDocumentTemplateActive = (template) => {
+        const confirmMessage = template.is_active
+            ? `Er du sikker på at du vil deaktivere ${template.name}?`
+            : `Er du sikker på at du vil aktivere ${template.name}?`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        setTogglingDocumentTemplateId(template.id);
+
+        router.patch(
+            template.toggle_active_url,
+            { redirect_to: documentTemplatesTabUrl },
+            {
+                preserveScroll: true,
+                onFinish: () => setTogglingDocumentTemplateId(null),
+            },
+        );
+    };
+
+    const setDefaultDocumentTemplate = (template) => {
+        const confirmMessage = `Er du sikker på at du vil sette ${template.name} som standardmal?`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        router.patch(
+            template.set_default_url,
+            { redirect_to: documentTemplatesTabUrl },
+            {
+                preserveScroll: true,
+            },
+        );
+    };
+
+    const deleteDocumentTemplate = (template) => {
+        const confirmMessage = `Er du sikker på at du vil slette ${template.name}?`;
+
+        if (!window.confirm(confirmMessage)) {
+            return;
+        }
+
+        router.delete(template.destroy_url, {
+            preserveScroll: true,
+            onSuccess: closeDocumentTemplateModal,
+        });
     };
 
     const submitDepartment = () => {
@@ -328,6 +476,7 @@ export default function CustomerEnvironmentIndex({
 
     const changeTab = (tab) => {
         closeDepartmentModal();
+        closeDocumentTemplateModal();
 
         router.get(routes.index, { tab }, {
             preserveScroll: true,
@@ -347,7 +496,12 @@ export default function CustomerEnvironmentIndex({
                     </p>
                 </section>
 
-                <SectionTabs activeTab={currentTab} onChange={changeTab} showPermissions={permissionSettings !== null} />
+                <SectionTabs
+                    activeTab={currentTab}
+                    onChange={changeTab}
+                    showPermissions={permissionSettings !== null}
+                    showDocumentTemplates={canManageDocumentTemplates}
+                />
 
                 {currentTab === 'departments' ? (
                     <section className="space-y-5">
@@ -682,6 +836,188 @@ export default function CustomerEnvironmentIndex({
                     </section>
                 )}
 
+                {currentTab === 'document-templates' ? (
+                    <section className="space-y-5">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="space-y-2">
+                                    <h2 className="text-lg font-semibold text-slate-950">Dokumentmaler</h2>
+                                    <p className="max-w-2xl text-sm leading-6 text-slate-500">
+                                        Last opp og administrer kundespesifikke Word-maler som brukes ved eksport av kravbesvarelser.
+                                    </p>
+                                </div>
+
+                                {canManageDocumentTemplates ? (
+                                    <button
+                                        type="button"
+                                        onClick={openCreateDocumentTemplate}
+                                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                    >
+                                        Last opp dokumentmal
+                                    </button>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        Standardmal for Word-eksport
+                                    </div>
+                                    {activeDefaultDocumentTemplate ? (
+                                        <>
+                                            <div className="mt-2 text-sm font-semibold text-slate-950">
+                                                {activeDefaultDocumentTemplate.name}
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                Denne malen brukes ved eksport av kravbesvarelser.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="mt-2 text-sm font-semibold text-slate-700">
+                                                Ingen standardmal valgt
+                                            </div>
+                                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                                                Procynia bruker standardoppsettet inntil en aktiv standardmal er valgt.
+                                            </p>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <section className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                            {documentTemplates.length === 0 ? (
+                                <div className="px-6 py-16 text-center">
+                                    <div className="text-lg font-semibold text-slate-900">
+                                        Ingen dokumentmaler er lastet opp
+                                    </div>
+                                    <p className="mt-2 text-sm text-slate-500">
+                                        Last opp en Word-mal hvis kunden skal bruke egen mal ved eksport. Hvis ingen mal er valgt, bruker Procynia standardoppsettet.
+                                    </p>
+                                    {canManageDocumentTemplates ? (
+                                        <div className="mt-6">
+                                            <button
+                                                type="button"
+                                                onClick={openCreateDocumentTemplate}
+                                                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                            >
+                                                Last opp dokumentmal
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-slate-200">
+                                        <thead className="bg-slate-50">
+                                            <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                <th className="px-6 py-4">Malnavn</th>
+                                                <th className="px-6 py-4">Type</th>
+                                                <th className="px-6 py-4">Status</th>
+                                                <th className="px-6 py-4">Standardmal</th>
+                                                <th className="px-6 py-4">Sist oppdatert</th>
+                                                <th className="px-6 py-4">Handlinger</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {documentTemplates.map((template) => (
+                                                <tr key={template.id} className="text-sm text-slate-700">
+                                                    <td className="px-6 py-4">
+                                                        <div className="font-medium text-slate-950">{template.name}</div>
+                                                        <div className="mt-1 text-xs text-slate-400">
+                                                            {template.original_filename || '—'}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className="inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+                                                            {template.template_type}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span
+                                                            className={
+                                                                template.is_active
+                                                                    ? 'inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
+                                                                    : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                            }
+                                                        >
+                                                            {template.is_active ? 'Aktiv' : 'Inaktiv'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span
+                                                            className={
+                                                                template.is_default
+                                                                    ? 'inline-flex rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700'
+                                                                    : 'inline-flex rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700'
+                                                            }
+                                                        >
+                                                            {template.is_default ? 'Ja' : 'Nei'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-slate-500">
+                                                        {formatDate(template.updated_at, locale)}
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        {canManageDocumentTemplates ? (
+                                                            <div className="flex flex-wrap gap-2">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openEditDocumentTemplate(template)}
+                                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                >
+                                                                    Rediger
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setDefaultDocumentTemplate(template)}
+                                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                >
+                                                                    Sett som standard
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={togglingDocumentTemplateId === template.id}
+                                                                    onClick={() => toggleDocumentTemplateActive(template)}
+                                                                    className={
+                                                                        template.is_active
+                                                                            ? 'inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-60'
+                                                                            : 'inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60'
+                                                                    }
+                                                                >
+                                                                    {template.is_active
+                                                                        ? togglingDocumentTemplateId === template.id
+                                                                            ? 'Deaktiverer...'
+                                                                            : 'Deaktiver'
+                                                                        : togglingDocumentTemplateId === template.id
+                                                                            ? 'Aktiverer...'
+                                                                            : 'Aktiver'}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => deleteDocumentTemplate(template)}
+                                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                >
+                                                                    Slett
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-xs font-medium text-slate-400">Kun interne brukere kan endre dokumentmaler</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </section>
+                    </section>
+                ) : null}
+
                 <EnvironmentModal
                     isOpen={departmentModalState.mode !== null}
                     title={departmentModalState.mode === 'edit' ? 'Rediger avdeling' : 'Opprett avdeling'}
@@ -734,6 +1070,127 @@ export default function CustomerEnvironmentIndex({
                                     {departmentForm.processing ? 'Lagrer...' : departmentModalState.mode === 'edit' ? 'Lagre avdeling' : 'Opprett avdeling'}
                                 </button>
                             </div>
+                        </div>
+                    </form>
+                </EnvironmentModal>
+
+                <EnvironmentModal
+                    isOpen={documentTemplateModalState.mode !== null}
+                    title={documentTemplateModalState.mode === 'edit' ? 'Rediger dokumentmal' : 'Last opp dokumentmal'}
+                    description="Dokumentmalen styrer layouten i Word-eksporten, men påvirker ikke AI-generering eller kildegrunnlag."
+                    onClose={closeDocumentTemplateModal}
+                    maxWidthClass="max-w-2xl"
+                    footer={(
+                        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={closeDocumentTemplateModal}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            >
+                                Avbryt
+                            </button>
+                            <button
+                                type="submit"
+                                form="document-template-environment-form"
+                                disabled={activeDocumentTemplateForm.processing}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {activeDocumentTemplateForm.processing
+                                    ? 'Lagrer...'
+                                    : documentTemplateModalState.mode === 'edit'
+                                        ? 'Lagre dokumentmal'
+                                        : 'Last opp dokumentmal'}
+                            </button>
+                        </div>
+                    )}
+                >
+                    <form id="document-template-environment-form" onSubmit={handleDocumentTemplateSubmit} className="space-y-6">
+                        {firstDocumentTemplateError ? (
+                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                                {resolveDocumentTemplateError(firstDocumentTemplateError)}
+                            </div>
+                        ) : null}
+
+                        <label className="block space-y-2">
+                            <span className="text-sm font-medium text-slate-700">Navn</span>
+                            <input
+                                type="text"
+                                value={activeDocumentTemplateForm.data.name}
+                                onChange={(event) => activeDocumentTemplateForm.setData('name', event.target.value)}
+                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            />
+                            {activeDocumentTemplateForm.errors.name ? <p className="text-sm text-rose-600">{activeDocumentTemplateForm.errors.name}</p> : null}
+                        </label>
+
+                        <label className="block space-y-2">
+                            <span className="text-sm font-medium text-slate-700">Beskrivelse</span>
+                            <textarea
+                                rows={4}
+                                value={activeDocumentTemplateForm.data.description}
+                                onChange={(event) => activeDocumentTemplateForm.setData('description', event.target.value)}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                            />
+                            {activeDocumentTemplateForm.errors.description ? <p className="text-sm text-rose-600">{activeDocumentTemplateForm.errors.description}</p> : null}
+                        </label>
+
+                        {documentTemplateModalState.mode === 'create' ? (
+                            <label className="block space-y-2">
+                                <span className="text-sm font-medium text-slate-700">Word-fil (.docx)</span>
+                                <input
+                                    type="file"
+                                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                    onChange={(event) => activeDocumentTemplateForm.setData('file_path', event.target.files?.[0] ?? null)}
+                                    className="block w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-violet-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-violet-700"
+                                />
+                                {activeDocumentTemplateForm.errors.file_path ? (
+                                    <p className="text-sm text-rose-600">
+                                        {resolveDocumentTemplateError(activeDocumentTemplateForm.errors.file_path)}
+                                    </p>
+                                ) : null}
+                                <p className="text-xs leading-5 text-slate-400">
+                                    Velg en Word-fil i .docx-format. Se hjelpen for krav til innsettingspunkt.
+                                </p>
+                            </label>
+                        ) : (
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                                Word-filen kan ikke byttes i denne versjonen. Opprett en ny mal dersom filen skal erstattes.
+                            </div>
+                        )}
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                                <input
+                                    type="checkbox"
+                                    checked={activeDocumentTemplateForm.data.is_active}
+                                    onChange={(event) => activeDocumentTemplateForm.setData('is_active', event.target.checked)}
+                                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                <div className="space-y-0.5">
+                                    <div className="text-sm font-semibold text-slate-900">
+                                        Aktiv
+                                    </div>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Aktive maler kan velges og brukes i Word-eksporten.
+                                    </p>
+                                </div>
+                            </label>
+
+                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                                <input
+                                    type="checkbox"
+                                    checked={activeDocumentTemplateForm.data.is_default}
+                                    onChange={(event) => activeDocumentTemplateForm.setData('is_default', event.target.checked)}
+                                    className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                <div className="space-y-0.5">
+                                    <div className="text-sm font-semibold text-slate-900">
+                                        Standardmal
+                                    </div>
+                                    <p className="text-xs leading-5 text-slate-500">
+                                        Standardmalen brukes automatisk i eksporten når den er aktiv.
+                                    </p>
+                                </div>
+                            </label>
                         </div>
                     </form>
                 </EnvironmentModal>
