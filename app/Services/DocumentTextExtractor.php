@@ -785,6 +785,10 @@ class DocumentTextExtractor
             return false;
         }
 
+        if ($this->isPopplerPdfTocEntryLine($line)) {
+            return false;
+        }
+
         $template = $this->popplerPdfTableColumnTemplate($line);
 
         if ($template === null) {
@@ -794,6 +798,33 @@ class DocumentTextExtractor
         $lineWidth = max(0, (int) ($line['right'] ?? 0) - (int) ($line['left'] ?? 0));
 
         if ($pageWidth > 0 && $lineWidth > (int) round($pageWidth * 0.92)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Purpose: Detect table-of-contents style lines so they can be excluded before table detection.
+     * Inputs: One Poppler line group with text and item metadata.
+     * Returns: True when the line looks like a TOC entry with a numbered prefix, leader dots or long spacing, and a trailing page marker.
+     * Side effects: None.
+     *
+     * @param array<string, mixed> $line
+     */
+    private function isPopplerPdfTocEntryLine(array $line): bool
+    {
+        $lineText = $this->normalizeLineText((string) ($line['text'] ?? $line['raw_text'] ?? ''));
+
+        if ($lineText === '' || mb_strlen($lineText, 'UTF-8') > 180) {
+            return false;
+        }
+
+        if (preg_match('/^\s*(?:\d+(?:\.\d+)*|bilag\s+\d+(?:-\d+)?|vedlegg\s+[A-Z0-9]+)\b/iu', $lineText) !== 1) {
+            return false;
+        }
+
+        if (preg_match('/(?:\.{4,}|\s{6,})\s*(?:\d{1,3}|[ivxlcdm]{1,5})\s*$/iu', $lineText) !== 1) {
             return false;
         }
 
@@ -2069,6 +2100,18 @@ class DocumentTextExtractor
         $currentParagraphLeft = null;
         $previousLine = null;
         $orderIndex = 0;
+        $pageHasTocEntries = false;
+
+        foreach ($lineGroups as $lineIndex => $line) {
+            if (isset($consumedLineIndexes[$lineIndex])) {
+                continue;
+            }
+
+            if ($this->isPopplerPdfTocEntryLine((array) $line)) {
+                $pageHasTocEntries = true;
+                break;
+            }
+        }
 
         $flushParagraph = function () use (&$blocks, &$currentParagraph, &$currentParagraphTop, &$currentParagraphLeft, &$orderIndex, $pageNumber): void {
             if ($currentParagraph === []) {
@@ -2109,6 +2152,18 @@ class DocumentTextExtractor
             $text = trim((string) ($line['text'] ?? ''));
 
             if ($text === '') {
+                $flushParagraph();
+                $previousLine = null;
+                continue;
+            }
+
+            if ($pageHasTocEntries && $this->isPopplerPdfTocHeadingLine($text)) {
+                $flushParagraph();
+                $previousLine = null;
+                continue;
+            }
+
+            if ($this->isPopplerPdfTocEntryLine((array) $line)) {
                 $flushParagraph();
                 $previousLine = null;
                 continue;
@@ -2391,6 +2446,30 @@ class DocumentTextExtractor
         }
 
         return $graphicAreaRatio <= 0.18 && $graphicWidth <= 360 && $graphicHeight <= 180;
+    }
+
+    /**
+     * Purpose: Determine whether a line is the standalone heading of a table-of-contents page.
+     * Inputs: One normalized line of text.
+     * Returns: True when the line is a TOC heading such as "Innholdsfortegnelse" or "Table of contents".
+     * Side effects: None.
+     */
+    private function isPopplerPdfTocHeadingLine(string $text): bool
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return in_array(mb_strtolower($normalized, 'UTF-8'), [
+            'innholdsfortegnelse',
+            'innhaldsliste',
+            'innhold',
+            'table of contents',
+            'contents',
+            'content',
+        ], true);
     }
 
     /**

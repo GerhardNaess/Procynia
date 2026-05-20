@@ -358,6 +358,161 @@ XML;
         $this->assertNull($tableBlock);
     }
 
+    public function test_it_does_not_classify_toc_dotted_leader_lines_with_page_numbers_as_tables(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                '1.1 Koordinering og samhandling i Etableringsprosjektet .................................................... 2',
+                100,
+                72,
+                760,
+                118,
+                [
+                    ['text' => '1.1', 'left' => 72, 'width' => 26],
+                    ['text' => 'Koordinering og samhandling i Etableringsprosjektet', 'left' => 112, 'width' => 430],
+                    ['text' => '....................................................', 'left' => 548, 'width' => 178],
+                    ['text' => '2', 'left' => 735, 'width' => 18],
+                ],
+                [
+                    'raw_text' => 'Koordinering og samhandling i Etableringsprosjektet .................................................... 2',
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.2 Leverandørens Testmetode .................................................... 4',
+                122,
+                72,
+                760,
+                140,
+                [
+                    ['text' => '1.2', 'left' => 72, 'width' => 26],
+                    ['text' => 'Leverandørens Testmetode', 'left' => 112, 'width' => 300],
+                    ['text' => '....................................................', 'left' => 548, 'width' => 178],
+                    ['text' => '4', 'left' => 735, 'width' => 18],
+                ],
+                [
+                    'raw_text' => 'Leverandørens Testmetode .................................................... 4',
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.3 Prosjektets faser .................................................... 5',
+                144,
+                72,
+                760,
+                162,
+                [
+                    ['text' => '1.3', 'left' => 72, 'width' => 26],
+                    ['text' => 'Prosjektets faser', 'left' => 112, 'width' => 220],
+                    ['text' => '....................................................', 'left' => 548, 'width' => 178],
+                    ['text' => '5', 'left' => 735, 'width' => 18],
+                ],
+                [
+                    'raw_text' => 'Prosjektets faser .................................................... 5',
+                ],
+            ),
+        ];
+
+        $runs = $this->invokeDocumentTextExtractorMethod($extractor, 'detectPopplerPdfTableRuns', [$lineGroups, 842]);
+
+        $this->assertSame([], $runs, 'TOC dotted-leader lines with page numbers must not be detected as Poppler table runs.');
+    }
+
+    public function test_it_does_not_emit_toc_dotted_leader_lines_into_semantic_blocks(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Innholdsfortegnelse',
+                92,
+                72,
+                240,
+                112,
+                [
+                    ['text' => 'Innholdsfortegnelse', 'left' => 72, 'width' => 168],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.11 Leverandørens oppbygging av prosjektplanen (WBS struktur mm.) .................................... 21',
+                120,
+                72,
+                760,
+                142,
+                [
+                    ['text' => '1.11', 'left' => 72, 'width' => 28],
+                    ['text' => 'Leverandørens oppbygging av prosjektplanen (WBS struktur mm.)', 'left' => 112, 'width' => 434],
+                    ['text' => '....................................', 'left' => 548, 'width' => 178],
+                    ['text' => '21', 'left' => 735, 'width' => 18],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.12 Risikostyring av prosjekter .................................... 22',
+                144,
+                72,
+                760,
+                166,
+                [
+                    ['text' => '1.12', 'left' => 72, 'width' => 28],
+                    ['text' => 'Risikostyring av prosjekter', 'left' => 112, 'width' => 260],
+                    ['text' => '....................................', 'left' => 548, 'width' => 178],
+                    ['text' => '22', 'left' => 735, 'width' => 18],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.13 Kostnadsstyring i prosjekter .................................... 23',
+                168,
+                72,
+                760,
+                190,
+                [
+                    ['text' => '1.13', 'left' => 72, 'width' => 28],
+                    ['text' => 'Kostnadsstyring i prosjekter', 'left' => 112, 'width' => 248],
+                    ['text' => '....................................', 'left' => 548, 'width' => 178],
+                    ['text' => '23', 'left' => 735, 'width' => 18],
+                ],
+            ),
+            $this->popplerLineGroup(
+                '1.14 Avvikshåndtering i prosjekter .................................... 24',
+                192,
+                72,
+                760,
+                214,
+                [
+                    ['text' => '1.14', 'left' => 72, 'width' => 28],
+                    ['text' => 'Avvikshåndtering i prosjekter', 'left' => 112, 'width' => 256],
+                    ['text' => '....................................', 'left' => 548, 'width' => 178],
+                    ['text' => '24', 'left' => 735, 'width' => 18],
+                ],
+            ),
+            $this->popplerLineGroup(
+                'Dette er reell innholdstekst etter TOC.',
+                236,
+                72,
+                410,
+                256,
+                [
+                    ['text' => 'Dette er reell innholdstekst etter TOC.', 'left' => 72, 'width' => 338],
+                ],
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 2]);
+        $semanticBlocks = array_values(array_filter(
+            $blocks,
+            static fn (array $block): bool => in_array((string) ($block['type'] ?? ''), ['paragraph', 'heading', 'list'], true),
+        ));
+        $semanticText = implode("\n", array_map(
+            static fn (array $block): string => trim(preg_replace('/\s+/u', ' ', (string) ($block['text'] ?? ''))),
+            $semanticBlocks,
+        ));
+
+        $this->assertStringNotContainsString('Innholdsfortegnelse', $semanticText);
+        $this->assertStringNotContainsString('1.11 Leverandørens oppbygging av prosjektplanen (WBS struktur mm.)', $semanticText);
+        $this->assertStringNotContainsString('1.12 Risikostyring av prosjekter', $semanticText);
+        $this->assertStringNotContainsString('1.13 Kostnadsstyring i prosjekter', $semanticText);
+        $this->assertStringNotContainsString('1.14 Avvikshåndtering i prosjekter', $semanticText);
+        $this->assertStringContainsString('Dette er reell innholdstekst etter TOC.', $semanticText);
+    }
+
     public function test_it_still_detects_real_poppler_table_runs_for_multicolumn_rows(): void
     {
         $extractor = new DocumentTextExtractor();
@@ -1382,16 +1537,17 @@ XML;
 
     /**
      * Purpose: Build one synthetic Poppler-like line group for private extractor tests.
-     * Inputs: The visible line text, geometry, and optional already split items.
+     * Inputs: The visible line text, geometry, optional already split items, and optional extra fields.
      * Returns: A line-group array compatible with the Poppler table/list detector.
      * Side effects: None.
      *
      * @param array<int, array<string, mixed>> $items
+     * @param array<string, mixed> $overrides
      * @return array<string, mixed>
      */
-    private function popplerLineGroup(string $text, int $top, int $left, int $right, int $bottom, array $items = []): array
+    private function popplerLineGroup(string $text, int $top, int $left, int $right, int $bottom, array $items = [], array $overrides = []): array
     {
-        return [
+        return array_merge([
             'text' => $text,
             'items' => $items !== [] ? $items : [
                 [
@@ -1405,6 +1561,6 @@ XML;
             'right' => $right,
             'bottom' => $bottom,
             'page_number' => 1,
-        ];
+        ], $overrides);
     }
 }
