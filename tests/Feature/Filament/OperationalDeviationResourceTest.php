@@ -219,6 +219,14 @@ class OperationalDeviationResourceTest extends TestCase
         $this->assertNotNull($avvik016->closed_at);
         $this->assertStringContainsString('retrieval_sources', (string) $avvik016->verification_notes);
 
+        $avvik013 = OperationalDeviation::query()->where('code', 'AVVIK-013')->firstOrFail();
+        $this->assertSame(OperationalDeviation::STATUS_CLOSED, $avvik013->status);
+        $this->assertNotNull($avvik013->started_at);
+        $this->assertNotNull($avvik013->verified_at);
+        $this->assertNotNull($avvik013->closed_at);
+        $this->assertStringContainsString('pgvector', Str::lower((string) $avvik013->verification_notes));
+        $this->assertStringContainsString('backfill', Str::lower((string) $avvik013->verification_notes));
+
         // Pre-created custom row is not overwritten by seeder
         $this->assertDatabaseHas('operational_deviations', [
             'code' => 'AVVIK-001',

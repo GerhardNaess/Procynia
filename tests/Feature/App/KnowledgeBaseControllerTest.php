@@ -1266,6 +1266,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertNull($chunks[0]->sub_topic);
         $this->assertTrue($chunks[0]->keywords === null || $chunks[0]->keywords === []);
         $this->assertNotNull($chunks[0]->embedding_vector);
+        $this->assertNotNull($chunks[0]->embedding_vector_pgvector);
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
@@ -1290,6 +1291,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector_pgvector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
         $this->assertNotNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_error);
@@ -1354,6 +1356,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(0.91, $chunk->confidence_score);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
         $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector_pgvector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
     }
 
@@ -1478,6 +1481,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $this->assertNull($chunk->embedding_vector);
+        $this->assertNull($chunk->embedding_vector_pgvector);
         $this->assertNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_model);
         $this->assertSame('OpenAI embedding request failed with HTTP status [503].', $chunk->embedding_error);
