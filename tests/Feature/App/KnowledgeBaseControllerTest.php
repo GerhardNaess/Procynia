@@ -17,7 +17,9 @@ use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
 use App\Services\Ai\Contracts\AiEmbeddingClient;
-use App\Services\OpenAi\OpenAiClient;
+use App\Services\Ai\Contracts\AiTextGenerationClient;
+use App\Services\Billing\BillingEntitlementService;
+
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -36,6 +38,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->useProjectPostgresConnection();
         DB::beginTransaction();
         $this->bindKnowledgeChunkBoundaryService();
+        $this->bindSuccessfulBillingEntitlementService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService();
         $this->bindSuccessfulEmbeddingService();
@@ -1138,8 +1141,8 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->bindKnowledgeChunkBoundaryService(true);
 
-        $openAiClient = Mockery::mock(OpenAiClient::class);
-        $openAiClient->shouldReceive('createResponse')
+        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
+        $textGenerationClient->shouldReceive('createResponse')
             ->twice()
             ->andReturnUsing(function (): array {
                 static $chunkNumber = 0;
@@ -1162,10 +1165,9 @@ class KnowledgeBaseControllerTest extends TestCase
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
-        $this->app->instance(OpenAiClient::class, $openAiClient);
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $openAiClient,
+            $textGenerationClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
@@ -1228,13 +1230,13 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         Storage::fake('local');
 
-        $openAiClient = Mockery::mock(OpenAiClient::class);
-        $openAiClient->shouldReceive('createResponse')
+        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
+        $textGenerationClient->shouldReceive('createResponse')
             ->once()
             ->andThrow(new RuntimeException('OpenAI metadata request failed with HTTP status [500].'));
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $openAiClient,
+            $textGenerationClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
@@ -1290,8 +1292,8 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('knowledge_item_id', $document->id)
             ->firstOrFail();
 
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector_pgvector);
+        $this->assertSame(array_fill(0, 1536, 0.1), $chunk->embedding_vector);
+        $this->assertCount(1536, $chunk->embedding_vector_pgvector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
         $this->assertNotNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_error);
@@ -1316,7 +1318,7 @@ class KnowledgeBaseControllerTest extends TestCase
             }))
             ->andReturn([
                 'ok' => true,
-                'embedding' => [0.11, 0.22, 0.33],
+                'embedding' => array_fill(0, 1536, 0.1),
                 'model' => 'text-embedding-3-small',
                 'usage' => [],
                 'error_type' => null,
@@ -1355,8 +1357,8 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->ai_summary);
         $this->assertSame(0.91, $chunk->confidence_score);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector_pgvector);
+        $this->assertSame(array_fill(0, 1536, 0.1), $chunk->embedding_vector);
+        $this->assertCount(1536, $chunk->embedding_vector_pgvector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
     }
 
@@ -1366,8 +1368,8 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $context = $this->customerContext('Customer Four E AS');
 
-        $openAiClient = Mockery::mock(OpenAiClient::class);
-        $openAiClient->shouldReceive('createResponse')
+        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
+        $textGenerationClient->shouldReceive('createResponse')
             ->once()
             ->with(Mockery::on(function (array $payload): bool {
                 $promptText = (string) data_get($payload, 'input.1.content.0.text', '');
@@ -1390,10 +1392,9 @@ class KnowledgeBaseControllerTest extends TestCase
                     'confidence_score' => 0.92,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $openAiClient);
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $openAiClient,
+            $textGenerationClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
@@ -1404,7 +1405,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->once()
             ->andReturn([
                 'ok' => true,
-                'embedding' => [0.11, 0.22, 0.33],
+                'embedding' => array_fill(0, 1536, 0.1),
                 'model' => 'text-embedding-3-small',
                 'usage' => [],
                 'error_type' => null,
@@ -2919,7 +2920,7 @@ XML;
             ->andReturnUsing(function (string $text): array {
                 return [
                     'ok' => true,
-                    'embedding' => [0.11, 0.22, 0.33],
+                    'embedding' => array_fill(0, 1536, 0.1),
                     'model' => 'text-embedding-3-small',
                     'usage' => [],
                     'error_type' => null,
@@ -2931,6 +2932,21 @@ XML;
             });
 
         $this->app->instance(AiEmbeddingClient::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a billing entitlement service that allows AI access for all test customers.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulBillingEntitlementService(): void
+    {
+        $service = Mockery::mock(BillingEntitlementService::class);
+        $service->shouldReceive('canUseAiOffer')
+            ->andReturn(true);
+
+        $this->app->instance(BillingEntitlementService::class, $service);
     }
 
     /**
