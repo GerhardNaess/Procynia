@@ -16,7 +16,7 @@ use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
-use App\Services\OpenAi\EmbeddingService;
+use App\Services\Ai\Contracts\AiEmbeddingClient;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -1303,7 +1303,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $context = $this->customerContext('Customer Four D AS');
 
-        $embeddingService = Mockery::mock(EmbeddingService::class);
+        $embeddingService = Mockery::mock(AiEmbeddingClient::class);
         $embeddingService->shouldReceive('tryEmbedText')
             ->once()
             ->with(Mockery::on(function (string $text): bool {
@@ -1325,7 +1325,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 'request_id' => 'test-request-id',
                 'response_body_excerpt' => null,
             ]);
-        $this->app->instance(EmbeddingService::class, $embeddingService);
+        $this->app->instance(AiEmbeddingClient::class, $embeddingService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('metadata-generation.docx', 'Metadata generation test content that should be chunked and embedded.'),
@@ -1399,7 +1399,7 @@ class KnowledgeBaseControllerTest extends TestCase
         );
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
-        $embeddingService = Mockery::mock(EmbeddingService::class);
+        $embeddingService = Mockery::mock(AiEmbeddingClient::class);
         $embeddingService->shouldReceive('tryEmbedText')
             ->once()
             ->andReturn([
@@ -1413,7 +1413,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 'request_id' => 'test-request-id',
                 'response_body_excerpt' => null,
             ]);
-        $this->app->instance(EmbeddingService::class, $embeddingService);
+        $this->app->instance(AiEmbeddingClient::class, $embeddingService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('table-summary.docx', [
@@ -1447,7 +1447,7 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         Storage::fake('local');
 
-        $service = Mockery::mock(EmbeddingService::class);
+        $service = Mockery::mock(AiEmbeddingClient::class);
         $service->shouldReceive('tryEmbedText')
             ->once()
             ->andReturn([
@@ -1461,7 +1461,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 'request_id' => 'test-request-id',
                 'response_body_excerpt' => '{"error":"upstream unavailable"}',
             ]);
-        $this->app->instance(EmbeddingService::class, $service);
+        $this->app->instance(AiEmbeddingClient::class, $service);
 
         $context = $this->customerContext('Customer Four C AS');
 
@@ -2914,7 +2914,7 @@ XML;
      */
     private function bindSuccessfulEmbeddingService(): void
     {
-        $service = Mockery::mock(EmbeddingService::class);
+        $service = Mockery::mock(AiEmbeddingClient::class);
         $service->shouldReceive('tryEmbedText')
             ->andReturnUsing(function (string $text): array {
                 return [
@@ -2930,7 +2930,7 @@ XML;
                 ];
             });
 
-        $this->app->instance(EmbeddingService::class, $service);
+        $this->app->instance(AiEmbeddingClient::class, $service);
     }
 
     /**

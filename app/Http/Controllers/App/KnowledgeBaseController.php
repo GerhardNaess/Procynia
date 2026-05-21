@@ -19,7 +19,7 @@ use App\Services\Knowledge\KnowledgeDocumentStructureParser;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
-use App\Services\OpenAi\EmbeddingService;
+use App\Services\Ai\Contracts\AiEmbeddingClient;
 use App\Support\CustomerContext;
 use App\Support\CosineSimilarity;
 use Illuminate\Support\Collection;
@@ -1205,7 +1205,7 @@ class KnowledgeBaseController extends Controller
             return;
         }
 
-        $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
+        $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
 
         if (! ($outcome['ok'] ?? false)) {
             $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
@@ -2790,7 +2790,7 @@ class KnowledgeBaseController extends Controller
 
             $this->knowledgeChunkVocabularyCandidateService->syncForChunk($knowledgeDocument, $chunk);
 
-            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
+            $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
 
             if (! ($outcome['ok'] ?? false)) {
                 $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
@@ -2841,7 +2841,7 @@ class KnowledgeBaseController extends Controller
                 'chunk_content_length' => mb_strlen($chunkText, 'UTF-8'),
             ]);
 
-            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
+            $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
 
             if (! ($outcome['ok'] ?? false)) {
                 $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
