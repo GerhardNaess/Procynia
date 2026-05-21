@@ -2,11 +2,11 @@
 
 namespace App\Services\Ai\Requirements;
 
+use App\Services\Ai\Contracts\AiTextGenerationClient;
 use App\Models\KnowledgeItem;
 use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
-use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -27,7 +27,7 @@ class RequirementAnswerDraftService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly OpenAiClient $openAiClient,
+        private readonly AiTextGenerationClient $textGenerationClient,
     ) {
     }
 
@@ -137,7 +137,7 @@ class RequirementAnswerDraftService
             );
         }
 
-        $response = $this->openAiClient->createResponse(
+        $response = $this->textGenerationClient->createResponse(
             $this->openAiRequestPayload(
                 $requirement,
                 $evidenceRows,
@@ -167,7 +167,7 @@ class RequirementAnswerDraftService
                     'estimated_word_count' => $this->estimatedWordCount($answerDraftText),
                 ]);
 
-                $retryResponse = $this->openAiClient->createResponse(
+                $retryResponse = $this->textGenerationClient->createResponse(
                     $this->openAiRequestPayload(
                         $requirement,
                         $evidenceRows,
@@ -319,7 +319,7 @@ class RequirementAnswerDraftService
         string $languageCode = 'no',
     ): string
     {
-        $response = $this->openAiClient->createResponse(
+        $response = $this->textGenerationClient->createResponse(
             $this->openAiRequestPayload(
                 $requirement,
                 $evidenceRows,
