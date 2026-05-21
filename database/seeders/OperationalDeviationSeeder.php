@@ -280,18 +280,13 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Embeddings lagres som JSON i PostgreSQL',
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_MEDIUM,
-            'status' => OperationalDeviation::STATUS_CLOSED,
+            'status' => OperationalDeviation::STATUS_NEW,
             'description' => 'Embeddings lagres som JSON i PostgreSQL, ikke i vektorindeksert struktur.',
             'impact' => 'Søk blir mindre effektivt ved vekst.',
             'recommended_action' => 'Vurder pgvector og migrering av embeddings til vektorkolonne.',
             'acceptance_criteria' => 'Det foreligger beslutning og plan for vektorsøk før større kundemengde.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
-            'started_at' => '2026-05-21 09:00:00',
-            'ready_for_verification_at' => '2026-05-21 09:30:00',
-            'verified_at' => '2026-05-21 10:00:00',
-            'closed_at' => '2026-05-21 10:00:00',
-            'verification_notes' => 'Pgvector er implementert for embeddings i Procynia. Tabellen knowledge_item_chunks har fått ny vektorkolonne embedding_vector_pgvector med dimensjon 1536. Eksisterende JSON-lagring beholdes midlertidig som fallback og for trygg migrering. Nye og oppdaterte embeddings lagres slik at pgvector kan brukes til vektorsøk, samtidig som eksisterende JSON-data ikke slettes. Søk er oppdatert til å bruke pgvector-basert nearest-neighbor-søk der vector-data finnes, med videreføring av tenant-/customer-scope. Det er også etablert en egen backfill-kommando som kan migrere eksisterende JSON-embeddings til vector-kolonnen uten å regenerere embeddings. Backfill er ikke kjørt i denne endringen og skal godkjennes separat før bruk.',
         ]);
 
         $this->seed([
@@ -374,13 +369,15 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'PDF-ekstraksjon håndterer ikke tabeller og grafikk godt nok',
             'category' => OperationalDeviation::CATEGORY_DOCUMENT_HANDLING,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_IN_PROGRESS,
             'description' => 'PDF-ekstraksjon er hovedsakelig tekstbasert og håndterer ikke tabeller/grafikk godt nok.',
             'impact' => 'Viktige krav og dokumentasjonsgrunnlag kan gå tapt.',
             'recommended_action' => 'Utvid parser eller prosess for robust tabell- og grafikkhåndtering i PDF.',
             'acceptance_criteria' => 'PDF-dokumenter med tabeller/grafikk gir brukbare chunks og kilder.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-18 22:52:00',
+            'verification_notes' => "Aktivt arbeid startet 18. mai 2026 på grenen fix-pdf-extraction.\n\nImplementert så langt:\n- Tabellelementer og bildelementer bevares under PDF-parsing (461f774, 2026-05-19)\n- Tabellrader holdes samlet på tvers av sideskift (0a74043, 2026-05-20)\n- Tabeller holdes samlet på tvers av sideskift (6992c4b, 2026-05-20)\n- Innholdsfortegnelsesstøy i PDF-er undertrykkes (7cc0592, 2026-05-20)\n- Tabell- og bildegrunnlag inkluderes i kunnskapsmatching (63922b1, 2026-05-20)\n- PDF-vektorfigurer bevares som bildeblokker (a4c977 og d24111e, 2026-05-20)\n- Forhåndsvisning av figurgap-chunks rendereres (50b7b9f og 553fb60, 2026-05-20)\n- Tabellkontinuasjonshåndtering for mellomkolonner og vertikalt overlapp (48da065, 55550ef, 2026-05-18)\n\nGjenstår: verifisering mot akseptansekriterie og lukking av grenen.",
         ]);
 
         $this->seed([
@@ -409,13 +406,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Manglende eksport til Word',
             'category' => OperationalDeviation::CATEGORY_PRODUCT,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Procynia mangler eksport av krav og svarutkast til Word.',
             'impact' => 'Brukerne får svak overgang fra Procynia til reelt tilbudsdokument.',
             'recommended_action' => 'Implementer Word-eksport med krav, svar, tabeller, grafikk og kilder.',
             'acceptance_criteria' => 'Brukeren kan eksportere relevante tilbudssvar til Word-format.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 22:00:00',
+            'ready_for_verification_at' => '2026-05-16 23:00:00',
+            'verified_at' => '2026-05-16 23:34:00',
+            'closed_at' => '2026-05-16 23:34:00',
+            'verification_notes' => 'Word-eksport er implementert og merget til main (commit 5312050, 2026-05-16 23:34).\n\nEksportfunksjonen lar brukere eksportere krav og svarutkast fra AI-arbeidsrommet direkte til .docx-format. Krav, svarutkast og kildegrunnlag inkluderes i eksporten. Brukeren aktiverer eksporten via AI-grensesnittet på SavedNotice.',
         ]);
 
         $this->seed([
@@ -467,13 +469,15 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Lite gjenbruk i React-komponenter',
             'category' => OperationalDeviation::CATEGORY_TECHNICAL_DEBT,
             'severity' => OperationalDeviation::SEVERITY_MEDIUM,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_IN_PROGRESS,
             'description' => 'Det er få delte React-komponenter sammenlignet med antall sider.',
             'impact' => 'UI kan bli inkonsistent og dyrere å vedlikeholde.',
             'recommended_action' => 'Etabler flere felles komponenter for tabeller, statuser, kort, modaler og tomtilstander.',
             'acceptance_criteria' => 'Nye og eksisterende sider bruker et tydelig sett med gjenbrukbare UI-komponenter.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 21:20:00',
+            'verification_notes' => "Arbeid startet 16. mai 2026. Fem delte React-komponenter er lagt til i resources/js/Components/App/Shared/:\n\n- StatusBadge — generisk statusindikatorbadge for gjenbruk på tvers av sider (9a44051, 2026-05-16)\n- EmptyStateBox — standardisert tom-tilstand-visning (008822d, 2026-05-16)\n- AlertBox — gjenbrukbart varselkomponent (9c2d4ca, 2026-05-16)\n- DepartmentCheckboxGroup — felles avdelingsvelger for bruker- og profilsider (9a44051, 2026-05-16)\n- FormButtonRow — standardisert knapperekke for skjemabunntekst (14d15f2, 2026-05-16)\n\nGjenstår: videre konsolidering av gjenbruksmønstre for tabeller, kort og modaler. Akseptansekriterie ikke fullt ut oppfylt.",
         ]);
 
         // --- Testing ---
@@ -502,13 +506,15 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Ingen AI-output kvalitetstester',
             'category' => OperationalDeviation::CATEGORY_TESTING,
             'severity' => OperationalDeviation::SEVERITY_HIGH,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_IN_PROGRESS,
             'description' => 'Pipelines testes teknisk, men det finnes ikke god nok kvalitetstest av AI-output.',
             'impact' => 'Svar kan være teknisk generert, men faglig svake.',
             'recommended_action' => 'Etabler evalueringssett og QA-tests for AI-svar.',
             'acceptance_criteria' => 'AI-svar testes mot kjente krav og forventet kvalitet.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-16 22:49:00',
+            'verification_notes' => "Arbeid startet 16. mai 2026.\n\nAVVIK-024A (feature-tester, 2026-05-16): Fem deterministiske tester lagt til i tests/Feature/App/AiControllerTest.php. Ingen ekte OpenAI-kall — alle bruker bind*Service-infrastruktur med Http::fake().\n- T1: Generering blokkeres og ingenting persisteres ved rød knowledge_grounding\n- T2: Generering blokkeres og ingenting persisteres når judge sier kan ikke generere\n- T3: Retrieval-kilder persisteres etter vellykket generering og overlever payload-readback\n- T4: answer_draft_payload returnerer generation_state=generated og retrieval_sources for lagret utkast\n- T5: answer_draft_payload returnerer null generation_state for krav uten utkast\n\nAVVIK-024B (unit-tester, 2026-05-16): Fire unit-tester lagt til i tests/Unit/Services/RequirementAnswerDraftServiceTest.php — kjøres uten Docker.\n- Ugyldig JSON fra OpenAI kaster RuntimeException uten DB-skriv\n- Manglende answer_draft_text-felt kaster RuntimeException\n- Tom tekst kaster RuntimeException\n- Gyldig minimal respons parses og persisteres korrekt\n\nGjenstår:\n- T6: RequirementAnswerDraftService med ugyldig JSON (delvis dekket av 024B)\n- T7: Grønn kvalitet uten retrieval_sources\n- Faglige evalueringstester mot kjente krav og forventet innhold",
         ]);
 
         // --- Dokumentasjon ---

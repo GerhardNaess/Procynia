@@ -5,8 +5,9 @@ namespace App\Services\Ai\Requirements;
 use App\Data\Ai\Requirements\DocumentRequirementSegmentData;
 use App\Data\Ai\Requirements\DocumentRequirementSegmentRelevanceData;
 use App\Models\SavedNoticeAiDocument;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use JsonException;
@@ -16,7 +17,7 @@ use Throwable;
 class RequirementSegmentRelevanceClassifier
 {
     public function __construct(
-        private readonly AiTextGenerationClient $textGenerationClient,
+        private readonly OpenAiClient $openAiClient,
         private readonly RequirementSegmentRelevancePromptBuilder $promptBuilder,
     ) {
     }
@@ -48,7 +49,7 @@ class RequirementSegmentRelevanceClassifier
         ));
 
         try {
-            $response = $this->textGenerationClient->createResponse($payload, 90);
+            $response = $this->openAiClient->post('responses', $payload, 90);
         } catch (ConnectionException $exception) {
             Log::warning('[PROCYNIA][AI_COST][RELEVANCE][POST_OPENAI] Segment relevance OpenAI call failed before a response was returned.', $this->logContext(
                 $document,
@@ -83,8 +84,6 @@ class RequirementSegmentRelevanceClassifier
                 errorMessage: $exception->getMessage(),
             );
         } catch (RuntimeException $exception) {
-            $status = $this->httpStatusFromMessage($exception->getMessage());
-
             Log::warning('[PROCYNIA][AI_COST][RELEVANCE][POST_OPENAI] Segment relevance OpenAI call failed before a response was returned.', $this->logContext(
                 $document,
                 $segment,
@@ -94,12 +93,12 @@ class RequirementSegmentRelevanceClassifier
                     'model' => $model,
                     'request_id' => null,
                     'response_id' => null,
-                    'status' => $status,
+                    'status' => null,
                     'input_tokens' => null,
                     'output_tokens' => null,
                     'total_tokens' => null,
                     'elapsed_ms' => $this->elapsedMs($startedAt),
-                    'error_type' => $status !== null ? $this->errorTypeForStatus($status) : 'openai_error',
+                    'error_type' => 'connection_error',
                     'error_message' => $exception->getMessage(),
                 ],
             ));
@@ -110,8 +109,7 @@ class RequirementSegmentRelevanceClassifier
                 runId: $runId,
                 model: $model,
                 elapsedMs: $this->elapsedMs($startedAt),
-                upstreamStatus: $status,
-                errorType: $status !== null ? $this->errorTypeForStatus($status) : 'openai_error',
+                errorType: 'connection_error',
                 errorMessage: $exception->getMessage(),
             );
         } catch (Throwable $exception) {
@@ -147,8 +145,8 @@ class RequirementSegmentRelevanceClassifier
 
         $requestId = $this->requestIdFrom($response);
         $responseId = $this->responseIdFrom($response);
-        $status = $this->statusFromResponse($response) ?? 200;
-        $rawResponseBody = trim($this->rawResponseBodyFrom($response));
+        $status = $response->status();
+        $rawResponseBody = trim($response->body());
         $tokenUsage = $this->tokenUsageFromResponse($response);
 
         Log::info('[PROCYNIA][AI_COST][RELEVANCE][POST_OPENAI] Segment relevance OpenAI call completed.', $this->logContext(
@@ -168,8 +166,25 @@ class RequirementSegmentRelevanceClassifier
             ],
         ));
 
+        if (! $response->successful()) {
+            return $this->failedResult(
+                document: $document,
+                segment: $segment,
+                runId: $runId,
+                model: $model,
+                requestId: $requestId,
+                responseId: $responseId,
+                upstreamStatus: $status,
+                rawOutput: $rawResponseBody,
+                tokenUsage: $tokenUsage,
+                elapsedMs: $this->elapsedMs($startedAt),
+                errorType: $this->errorTypeForStatus($status),
+                errorMessage: sprintf('OpenAI segment relevance request failed with HTTP status [%d].', $status),
+            );
+        }
+
         try {
-            $decoded = $this->decodePayload($response);
+            $decoded = $this->decodePayload($response->json());
             $validated = $this->validatePayload($decoded);
         } catch (Throwable $exception) {
             Log::warning('[PROCYNIA][AI][RELEVANCE] Segment relevance parsing failed.', [
@@ -328,38 +343,50 @@ class RequirementSegmentRelevanceClassifier
      * Returns: The request id or null when absent.
      * Side effects: None.
      */
-    private function requestIdFrom(array $response): ?string
+    private function requestIdFrom(Response $response): ?string
     {
-        $requestId = trim((string) data_get($response, '_meta.request_id', ''));
+        foreach (['x-request-id', 'x-openai-request-id', 'openai-request-id'] as $header) {
+            $requestId = trim((string) $response->header($header));
 
-        return $requestId !== '' ? $requestId : null;
+            if ($requestId !== '') {
+                return $requestId;
+            }
+        }
+
+        return null;
     }
 
     /**
      * Purpose: Extract the response id from a response payload.
-     * Inputs: The decoded AI response payload.
+     * Inputs: The raw HTTP response from OpenAI.
      * Returns: The response id or null when absent.
      * Side effects: None.
      */
-    private function responseIdFrom(array $response): ?string
+    private function responseIdFrom(Response $response): ?string
     {
-        $responseId = trim((string) data_get($response, 'id', ''));
+        $responseId = trim((string) data_get($response->json(), 'id', ''));
 
         return $responseId !== '' ? $responseId : null;
     }
 
     /**
      * Purpose: Extract token usage fields from an OpenAI response payload.
-     * Inputs: The decoded AI response payload.
+     * Inputs: The raw HTTP response from the OpenAI API.
      * Returns: Normalised input, output, and total token counts or null when absent.
      * Side effects: None.
      */
-    private function tokenUsageFromResponse(array $response): array
+    private function tokenUsageFromResponse(Response $response): array
     {
+        $decoded = $response->json();
+
+        if (! is_array($decoded)) {
+            return $this->emptyTokenUsage();
+        }
+
         return [
-            'input_tokens' => $this->normalizeTokenCount(data_get($response, 'usage.input_tokens')),
-            'output_tokens' => $this->normalizeTokenCount(data_get($response, 'usage.output_tokens')),
-            'total_tokens' => $this->normalizeTokenCount(data_get($response, 'usage.total_tokens')),
+            'input_tokens' => $this->normalizeTokenCount(data_get($decoded, 'usage.input_tokens')),
+            'output_tokens' => $this->normalizeTokenCount(data_get($decoded, 'usage.output_tokens')),
+            'total_tokens' => $this->normalizeTokenCount(data_get($decoded, 'usage.total_tokens')),
         ];
     }
 
@@ -551,60 +578,5 @@ class RequirementSegmentRelevanceClassifier
     private function segmentInputText(array $payload): string
     {
         return (string) data_get($payload, 'input.1.content.0.text', data_get($payload, 'input.0.content.0.text', ''));
-    }
-
-    /**
-     * Purpose: Extract the upstream status code from the decoded AI payload when available.
-     * Inputs: The decoded AI response payload.
-     * Returns: The upstream status code or null when absent.
-     * Side effects: None.
-     */
-    private function statusFromResponse(array $response): ?int
-    {
-        $status = data_get($response, '_meta.status');
-
-        if (is_int($status)) {
-            return $status;
-        }
-
-        if (is_string($status) && is_numeric($status)) {
-            return (int) $status;
-        }
-
-        return null;
-    }
-
-    /**
-     * Purpose: Extract the raw response body from the decoded AI payload when available.
-     * Inputs: The decoded AI response payload.
-     * Returns: The raw body string or a reasonable stringified fallback.
-     * Side effects: None.
-     */
-    private function rawResponseBodyFrom(array $response): string
-    {
-        $rawBody = data_get($response, '_meta.raw_body');
-
-        if (is_string($rawBody) && trim($rawBody) !== '') {
-            return $rawBody;
-        }
-
-        $json = json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-
-        return is_string($json) ? $json : '';
-    }
-
-    /**
-     * Purpose: Extract an upstream HTTP status code from an OpenAI exception message when available.
-     * Inputs: The exception message emitted by the existing AI client.
-     * Returns: The parsed HTTP status code or null when the message does not include one.
-     * Side effects: None.
-     */
-    private function httpStatusFromMessage(string $message): ?int
-    {
-        if (preg_match('/HTTP status \\[(\\d+)\\]/', $message, $matches) !== 1) {
-            return null;
-        }
-
-        return (int) $matches[1];
     }
 }

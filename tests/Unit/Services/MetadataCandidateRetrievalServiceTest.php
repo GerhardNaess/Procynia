@@ -154,44 +154,6 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertCount(0, $result);
     }
 
-    public function test_it_keeps_customer_scope_and_exposes_embedding_similarity_when_requirement_embeddings_are_used(): void
-    {
-        $service = app(MetadataCandidateRetrievalService::class);
-        $customer = $this->createCustomer('Metadata Vector Scope AS');
-        $foreignCustomer = $this->createCustomer('Metadata Vector Foreign AS');
-        $document = $this->createKnowledgeItem($customer, ['original_filename' => 'local-metadata.docx']);
-        $foreignDocument = $this->createKnowledgeItem($foreignCustomer, ['original_filename' => 'foreign-metadata.docx']);
-        $requirementEmbedding = $this->embeddingVector(1536, 0);
-
-        $localChunk = $this->createChunk($document, 0, [
-            'topic' => 'Tema A',
-            'content' => 'Innhold om tema a.',
-            'embedding_vector' => $this->embeddingVector(1536, 0),
-            'embedding_vector_pgvector' => $this->embeddingVector(1536, 0),
-        ]);
-        $this->createChunk($foreignDocument, 0, [
-            'topic' => 'Tema A',
-            'content' => 'Fremmed innhold som skal filtreres bort.',
-            'embedding_vector' => $this->embeddingVector(1536, 1),
-            'embedding_vector_pgvector' => $this->embeddingVector(1536, 1),
-        ]);
-
-        $result = $service->retrieveForCustomer($customer->id, [
-            'selected_metadata' => [
-                'topic' => ['Tema A'],
-            ],
-            'search_text' => 'tema a',
-            'intent_summary' => 'Leter etter tema a.',
-            'confidence' => 0.91,
-        ], $requirementEmbedding);
-
-        $this->assertCount(1, $result);
-        $this->assertSame($localChunk->id, $result->first()['chunk_id']);
-        $this->assertSame('Tema A', $result->first()['topic']);
-        $this->assertNotNull($result->first()['embedding_similarity']);
-        $this->assertSame(1.0, $result->first()['embedding_similarity']);
-    }
-
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -259,16 +221,5 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
             'section_title' => $overrides['section_title'] ?? null,
             'section_path' => $overrides['section_path'] ?? null,
         ], $overrides));
-    }
-
-    /**
-     * @return array<int, float>
-     */
-    private function embeddingVector(int $dimension, int $oneIndex): array
-    {
-        $vector = array_fill(0, $dimension, 0.0);
-        $vector[$oneIndex] = 1.0;
-
-        return $vector;
     }
 }

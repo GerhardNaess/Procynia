@@ -3,8 +3,8 @@
 namespace Tests\Unit\Services;
 
 use App\Models\SavedNoticeAiRequirement;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\OpenAi\OpenAiClient;
 use Mockery;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
@@ -22,7 +22,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_parses_and_validates_supported_judge_payloads_with_equivalent_technical_evidence(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $capturedPayload = null;
         $client->shouldReceive('createResponse')
             ->once()
@@ -115,7 +115,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_serializes_table_chunks_with_summary_and_table_text_into_the_prompt(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $capturedPayload = null;
         $client->shouldReceive('createResponse')
             ->once()
@@ -199,7 +199,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_accepts_partial_judge_payloads_that_block_generation(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->openAiResponse([
@@ -231,7 +231,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
         ]);
 
         $this->assertSame('partial', $result['status']);
-        $this->assertTrue($result['can_generate_answer']);
+        $this->assertFalse($result['can_generate_answer']);
         $this->assertSame('ITSM er dokumentert.', $result['directly_supported_points'][0]['requirement_point']);
         $this->assertSame('Etterspurt ITSM-støtte finnes, men ikke for alle konkrete kravpunkter.', $result['directly_supported_points'][0]['support_summary']);
         $this->assertSame([], $result['related_but_insufficient_points']);
@@ -241,7 +241,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_normalizes_supported_payloads_without_direct_support_evidence_into_partial_status(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->openAiResponse([
@@ -271,8 +271,8 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('supported', $result['status']);
-        $this->assertTrue($result['can_generate_answer']);
+        $this->assertSame('partial', $result['status']);
+        $this->assertFalse($result['can_generate_answer']);
         $this->assertSame([
             [
                 'requirement_point' => 'Telemetri fra Microsoft 365 og Azure.',
@@ -288,7 +288,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_normalizes_supported_payloads_without_directly_supported_points_into_partial_status(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->openAiResponse([
@@ -311,7 +311,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('unsupported', $result['status']);
+        $this->assertSame('partial', $result['status']);
         $this->assertFalse($result['can_generate_answer']);
         $this->assertSame([], $result['directly_supported_points']);
         $this->assertSame([], $result['related_but_insufficient_points']);
@@ -321,7 +321,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_normalizes_inconsistent_judge_payloads_into_partial_status(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->openAiResponse([
@@ -344,8 +344,8 @@ class RequirementGroundingJudgeServiceTest extends TestCase
             'sources_count' => 1,
         ]);
 
-        $this->assertSame('supported', $result['status']);
-        $this->assertTrue($result['can_generate_answer']);
+        $this->assertSame('partial', $result['status']);
+        $this->assertFalse($result['can_generate_answer']);
         $this->assertSame([
             [
                 'requirement_point' => 'ITSM er dokumentert.',
@@ -358,7 +358,7 @@ class RequirementGroundingJudgeServiceTest extends TestCase
 
     public function test_it_rejects_invalid_json_payloads(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([

@@ -11,15 +11,16 @@ use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
+use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
-use App\Services\Ai\Contracts\AiEmbeddingClient;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
-use App\Services\Billing\BillingEntitlementService;
-
+use App\Services\Knowledge\PdfFigurePreviewRenderer;
+use App\Services\OpenAi\EmbeddingService;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -39,6 +40,7 @@ class KnowledgeBaseControllerTest extends TestCase
         DB::beginTransaction();
         $this->bindKnowledgeChunkBoundaryService();
         $this->bindSuccessfulBillingEntitlementService();
+        $this->bindSuccessfulKnowledgeDocumentSummaryGenerationService();
         $this->bindSuccessfulKnowledgeMetadataGenerationService();
         $this->bindSuccessfulKnowledgeVocabularySuggestionEnrichmentService();
         $this->bindSuccessfulEmbeddingService();
@@ -147,6 +149,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $document->extraction_status);
         $this->assertSame('', (string) $document->extraction_error);
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $document->summary);
         $this->assertGreaterThan(0, $chunks->count());
         $this->assertSame(range(0, $chunks->count() - 1), $chunks->pluck('chunk_index')->all());
         $this->assertSame(
@@ -189,26 +192,30 @@ class KnowledgeBaseControllerTest extends TestCase
             ->orderBy('chunk_index')
             ->get();
 
-        $this->assertSame(2, $chunks->count());
+        $expectedSourceText = implode("\n\n", [
+            'Intro before first heading.',
+            'Første avsnitt under hovedseksjonen.',
+            'Underseksjon A',
+            'Mer tekst i underseksjonen.',
+            'Avsluttende avsnitt.',
+        ]);
+
+        // This fixture is intentionally short, so the controller should fall back to one document chunk.
+        $this->assertSame(1, $chunks->count());
         $this->assertSame(0, (int) $chunks[0]->start_offset);
-        $this->assertGreaterThan((int) $chunks[0]->start_offset, (int) $chunks[0]->end_offset);
-        $this->assertSame((int) $chunks[0]->end_offset, (int) $chunks[1]->start_offset);
-        $this->assertSame('Underseksjon A', $chunks[0]->heading_path);
-        $this->assertSame('semantic', $chunks[0]->chunk_type);
-        $this->assertSame('Andre hovedseksjon', $chunks[1]->heading_path);
-        $this->assertSame('semantic', $chunks[1]->chunk_type);
-        $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Andre hovedseksjon', (string) $chunks[1]->content);
+        $this->assertSame(mb_strlen($expectedSourceText, 'UTF-8'), (int) $chunks[0]->end_offset);
+        $this->assertSame(null, $chunks[0]->heading_path);
+        $this->assertSame('document', $chunks[0]->chunk_type);
+        $this->assertSame($expectedSourceText, (string) $chunks[0]->content);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
         $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
-                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === 'Underseksjon A'
-                && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'semantic'
-                && data_get($page, 'props.knowledgeItem.chunks.1.heading_path') === 'Andre hovedseksjon';
+                && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === null
+                && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'document'
+                && data_get($page, 'props.knowledgeItem.chunks.0.start_offset') === 0;
         });
     }
 
@@ -234,6 +241,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 ],
                 ['type' => 'paragraph', 'text' => 'Figur 1: Overordnet arkitektur', 'style' => 'Caption'],
                 ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['type' => 'paragraph', 'text' => 'Tekst etter H2.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
@@ -263,7 +271,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('png', $imageChunk->image_metadata['extension'] ?? null);
         $this->assertSame('unknown', $imageChunk->image_metadata['image_kind'] ?? null);
         $this->assertNotEmpty($imageChunk->content);
-        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $imageChunk->content);
         $this->assertStringContainsString('Arkitekturdiagram med integrasjoner', (string) $imageChunk->content);
         $this->assertStringContainsString('Figur 1: Overordnet arkitektur', (string) $imageChunk->content);
         $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
@@ -290,6 +298,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
                     'knowledgeItem' => $document->id,
                     'chunk' => $imageChunk['id'],
+                    'v' => $imageChunk['image_hash'],
                 ])
                 && ! empty($imageChunk['image_metadata'])
                 && data_get($imageChunk, 'image_metadata.extension') === 'png'
@@ -329,6 +338,7 @@ class KnowledgeBaseControllerTest extends TestCase
                     'media_bytes' => $this->docxSampleImageBytes(),
                 ],
                 ['text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['text' => 'Tekst etter H2.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
@@ -357,7 +367,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame('1 Overskrift test', $imageChunk->heading_path);
         $this->assertSame('1 Overskrift test', $imageChunk->section_path);
-        $this->assertStringContainsString('Bilde i seksjon: 1 Overskrift test', (string) $imageChunk->content);
+        $this->assertStringContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $imageChunk->content);
         $this->assertStringNotContainsString('1.1 Dokumentasjonskrav for drift', (string) $imageChunk->content);
 
         $this->assertSame('1 Overskrift test', $tableChunk->heading_path);
@@ -366,7 +376,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame('1.1 Dokumentasjonskrav for drift', $postH2Chunk->heading_path);
         $this->assertStringContainsString('Tekst etter H2.', (string) $postH2Chunk->content);
-        $this->assertStringNotContainsString('Bilde i seksjon: 1 Overskrift test', (string) $postH2Chunk->content);
+        $this->assertStringNotContainsString('Grafikk i seksjon: 1 Overskrift test', (string) $postH2Chunk->content);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
@@ -378,7 +388,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
             return $imageChunk !== null
                 && data_get($imageChunk, 'section_path') === '1 Overskrift test'
-                && str_contains((string) data_get($imageChunk, 'content', ''), 'Bilde i seksjon: 1 Overskrift test')
+                && str_contains((string) data_get($imageChunk, 'content', ''), 'Grafikk i seksjon: 1 Overskrift test')
                 && ! str_contains((string) data_get($imageChunk, 'content', ''), '1.1 Dokumentasjonskrav for drift')
                 && $postH2Chunk !== null
                 && data_get($postH2Chunk, 'heading_path') === '1.1 Dokumentasjonskrav for drift'
@@ -441,6 +451,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 && $imageChunk['image_url'] === route('app.ai.knowledge-base.chunks.image', [
                     'knowledgeItem' => data_get($page, 'props.knowledgeItem.id'),
                     'chunk' => $imageChunk['id'],
+                    'v' => $imageChunk['image_hash'],
                 ])
                 && data_get($imageChunk, 'image_metadata.extension') === 'svg'
                 && data_get($imageChunk, 'image_metadata.image_kind') === 'unknown'
@@ -514,6 +525,7 @@ class KnowledgeBaseControllerTest extends TestCase
                     'alt_text' => 'Arkitekturdiagram med integrasjoner',
                 ],
                 ['type' => 'paragraph', 'text' => '1.1 Dokumentasjonskrav for drift', 'style' => 'Heading2'],
+                ['type' => 'paragraph', 'text' => 'Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -613,6 +625,275 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertStringContainsString('Etter tabell.', $payloads[3]['content']);
     }
 
+    public function test_rule_based_h2_chunk_payload_builder_preserves_figure_like_gap_text_as_an_image_chunk(): void
+    {
+        $structure = $this->ruleBasedFigureGapStructureFixture();
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+
+        $prefixPayload = collect($payloads)->first(static function (array $payload): bool {
+            return data_get($payload, 'chunk_type') === 'semantic'
+                && str_contains((string) ($payload['content'] ?? ''), 'Det skal holdes egne møter for risikostyring jevnlig');
+        });
+
+        $chunkTypes = array_values(array_map(
+            static fn (array $payload): ?string => $payload['chunk_type'] ?? null,
+            $payloads,
+        ));
+
+        $imageIndex = array_search('image', $chunkTypes, true);
+
+        $this->assertNotFalse(
+            $imageIndex,
+            'Expected the figure-like gap to be preserved as a dedicated image chunk.',
+        );
+
+        $imagePayload = $payloads[$imageIndex];
+        $previousPayload = $payloads[$imageIndex - 1] ?? null;
+        $nextPayload = $payloads[$imageIndex + 1] ?? null;
+
+        $this->assertNotNull($prefixPayload, 'Expected the narrative text before the figure to remain a semantic chunk.');
+        $this->assertStringContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) ($prefixPayload['content'] ?? ''));
+        $this->assertSame('image', $imagePayload['chunk_type']);
+        $this->assertStringContainsString('1.12', (string) ($imagePayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('1.12', (string) ($imagePayload['section_path'] ?? ''));
+        $this->assertNotNull($previousPayload);
+        $this->assertNotNull($nextPayload);
+        $this->assertSame('semantic', $previousPayload['chunk_type'] ?? null);
+        $this->assertSame('semantic', $nextPayload['chunk_type'] ?? null);
+        $this->assertStringContainsString('1.12', (string) ($previousPayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('1.13', (string) ($nextPayload['heading_path'] ?? ''));
+        $this->assertStringContainsString('Advania Risk Management', (string) ($imagePayload['content'] ?? ''));
+        $this->assertStringContainsString('Kontroll', (string) ($imagePayload['content'] ?? ''));
+        $this->assertStringNotContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) ($imagePayload['content'] ?? ''));
+        $this->assertSame('pdf_figure_gap', data_get($imagePayload, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($imagePayload, 'image_metadata.derived_from_text'));
+        $this->assertSame('Advania Risk Management', $imagePayload['image_caption'] ?? null);
+        foreach ([
+            'Identifisere',
+            'Beskrivelse',
+            'Analyse',
+            'Planlegge',
+            'Oppfølging',
+            'Kontroll',
+        ] as $term) {
+            $this->assertStringContainsString($term, (string) ($imagePayload['image_description'] ?? ''));
+        }
+        $this->assertNotEmpty($imagePayload['image_caption'] ?? null);
+        $this->assertNotEmpty($imagePayload['ocr_text'] ?? null);
+        $this->assertNotEmpty($imagePayload['image_description'] ?? null);
+    }
+
+    public function test_rule_based_h2_chunk_payload_builder_does_not_create_pdf_figure_gap_for_body_text_without_strong_figure_evidence(): void
+    {
+        $structure = $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'B ILAG 1-11 > 1.10 L EVERANDØRENS STANDARD ORGANISERING AV PROSJEKTER',
+                'text' => 'Innledning før sjekklister. Leverandøren beskriver her hvordan kick-off for prosjektet skal gjennomføres.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11 > 1.10 L EVERANDØRENS STANDARD ORGANISERING AV PROSJEKTER',
+                'text' => "Sjekklister for prosjekt kick-off\nLeverandøren benytter etablerte sjekklister for gjennomføring av prosjektets kick-off. Disse sjekklistene sikrer at alle sentrale temaer behandles ved prosjektoppstart. Dette omfatter blant annet gjennomgang av prosjektmål, leveranseomfang, organisering, rollefordeling, fremdriftsplan, samhandlingsmodell, rapporteringsstruktur og beslutningsprosesser.\nSjekklistene bidrar til å etablere en felles forståelse av prosjektet mellom partene før prosjektets operative aktiviteter starter.\nSjekklister for milepæler og beslutningspunkter\nVed sentrale milepæler i prosjektet benyttes strukturerte sjekklister som dokumenterer at nødvendige aktiviteter er gjennomført før prosjektet går videre til neste fase. Sjekklistene benyttes som grunnlag for beslutningsunderlag i prosjektledelsen og i styringsgruppen.\nBeslutningsunderlaget kan blant annet omfatte:",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => '4. Oppfølging > 1.11 L EVERANDØRENS OPPBYGGING AV PROSJEKTPLANEN (WBS STRUKTUR MM .)',
+                'text' => "1.11 L EVERANDØRENS OPPBYGGING AV PROSJEKTPLANEN (WBS STRUKTUR MM .)\n\nOppbygging av WBS-struktur i prosjektplanen. Leverandøren benytter en strukturert Work Breakdown Structure (WBS) som grunnlag for planlegging, styring og oppfølging av prosjektet.",
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+
+        $payloads = $this->invokeBuildRuleBasedH2ChunkPayloads($structure);
+        $imagePayloads = array_values(array_filter(
+            $payloads,
+            static fn (array $payload): bool => ($payload['chunk_type'] ?? null) === 'image',
+        ));
+        $semanticPayload = collect($payloads)->first(static function (array $payload): bool {
+            return ($payload['chunk_type'] ?? null) === 'semantic'
+                && str_contains((string) ($payload['content'] ?? ''), 'Sjekklister for prosjekt kick-off');
+        });
+
+        $this->assertCount(0, $imagePayloads, 'Long body text without figure evidence should remain semantic text.');
+        $this->assertNotNull($semanticPayload, 'The checklist text should remain a semantic chunk.');
+        $this->assertStringContainsString('Leverandøren benytter etablerte sjekklister', (string) ($semanticPayload['content'] ?? ''));
+    }
+
+    public function test_real_pdf_import_keeps_existing_pdf_graphics_and_drops_competing_pdf_figure_gaps(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Real Pdf AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->realKnowledgePdfUpload(),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->firstOrFail();
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        $pageNineGraphic = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.page_number') === 9
+                && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+        });
+
+        $pageEighteenGraphic = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.page_number') === 18
+                && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+        });
+
+        $pageTwentyThreeFigure = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                && data_get($chunk, 'image_metadata.derived_from_text') === true
+                && data_get($chunk, 'image_caption') === 'Advania Risk Management'
+                && str_contains((string) $chunk->heading_path, '1.12');
+        });
+
+        $pageTwentyThreeNarrative = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'semantic'
+                && str_contains((string) $chunk->content, 'Det skal holdes egne møter for risikostyring jevnlig');
+        });
+
+        $sjekklisterChunk = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return str_contains((string) $chunk->content, 'Sjekklister for prosjekt kick-off');
+        });
+
+        $competingFigureGapInSectionOneFour = $chunks->first(static function (KnowledgeItemChunk $chunk): bool {
+            return data_get($chunk, 'chunk_type') === 'image'
+                && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                && str_contains((string) $chunk->heading_path, '1.4');
+        });
+
+        $this->assertNotNull($pageNineGraphic);
+        $this->assertNotNull($pageEighteenGraphic);
+        $this->assertNotNull($pageTwentyThreeFigure);
+        $this->assertNotNull($pageTwentyThreeNarrative, 'The paragraph before the figure should remain a semantic chunk.');
+        $this->assertNotNull($sjekklisterChunk, 'Checklist text should still be present in the imported chunks.');
+        $this->assertSame('semantic', data_get($sjekklisterChunk, 'chunk_type'));
+        $this->assertNull($competingFigureGapInSectionOneFour, 'Existing 1.4 graphic must not be replaced by a derived pdf_figure_gap chunk.');
+
+        $this->assertSame('pdf_graphic', data_get($pageNineGraphic, 'image_metadata.source_type'));
+        $this->assertSame(9, data_get($pageNineGraphic, 'image_metadata.page_number'));
+        $this->assertNotEmpty($pageNineGraphic->image_path);
+        $this->assertNotEmpty($pageNineGraphic->image_metadata['source_image_path'] ?? null);
+
+        $this->assertSame('pdf_graphic', data_get($pageEighteenGraphic, 'image_metadata.source_type'));
+        $this->assertSame(18, data_get($pageEighteenGraphic, 'image_metadata.page_number'));
+        $this->assertNotEmpty($pageEighteenGraphic->image_path);
+
+        $this->assertSame('pdf_figure_gap', data_get($pageTwentyThreeFigure, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.derived_from_text'));
+        $this->assertSame('Advania Risk Management', $pageTwentyThreeFigure->image_caption);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_description ?? null);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_path);
+        $this->assertSame('image/png', $pageTwentyThreeFigure->image_mime_type);
+        $this->assertNotEmpty($pageTwentyThreeFigure->image_hash);
+        $this->assertTrue(Storage::disk('local')->exists($pageTwentyThreeFigure->image_path));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.preview_generated'));
+        $this->assertSame(24, data_get($pageTwentyThreeFigure, 'image_metadata.preview_page_number'));
+        $this->assertStringNotContainsString('Det skal holdes egne møter for risikostyring jevnlig', (string) $pageTwentyThreeFigure->content);
+        $this->assertStringNotContainsString('Sjekklister for prosjekt kick-off', (string) $pageTwentyThreeFigure->content);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document, $pageTwentyThreeNarrative): bool {
+            $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
+
+            $pageNineGraphic = $chunks->first(static function (array $chunk): bool {
+                return data_get($chunk, 'chunk_type') === 'image'
+                    && data_get($chunk, 'image_metadata.page_number') === 9
+                    && data_get($chunk, 'image_metadata.source_type') === 'pdf_graphic';
+            });
+
+            $pageTwentyThreeFigure = $chunks->first(static function (array $chunk): bool {
+                return data_get($chunk, 'chunk_type') === 'image'
+                    && data_get($chunk, 'image_metadata.source') === 'pdf_figure_gap'
+                    && data_get($chunk, 'image_metadata.derived_from_text') === true
+                    && data_get($chunk, 'image_caption') === 'Advania Risk Management';
+            });
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && $pageNineGraphic !== null
+                && ! empty($pageNineGraphic['image_url'])
+                && $pageTwentyThreeNarrative !== null
+                && $pageTwentyThreeFigure !== null
+                && ! empty($pageTwentyThreeFigure['image_url'])
+                && data_get($pageTwentyThreeFigure, 'image_caption') === 'Advania Risk Management';
+        });
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $pageNineGraphic->id,
+            ]))
+            ->assertOk();
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.chunks.image', [
+                'knowledgeItem' => $document->id,
+                'chunk' => $pageTwentyThreeFigure->id,
+            ]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png');
+    }
+
+    public function test_real_pdf_import_keeps_the_figure_chunk_when_preview_rendering_fails(): void
+    {
+        Storage::fake('local');
+
+        $this->app->instance(PdfFigurePreviewRenderer::class, Mockery::mock(PdfFigurePreviewRenderer::class, function ($mock): void {
+            $mock->shouldReceive('renderPreview')->andReturnNull();
+        }));
+
+        $context = $this->customerContext('Customer Real Pdf Preview Fallback AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->realKnowledgePdfUpload(),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->firstOrFail();
+
+        $pageTwentyThreeFigure = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('chunk_type', 'image')
+            ->where('image_caption', 'Advania Risk Management')
+            ->firstOrFail();
+
+        $this->assertSame('pdf_figure_gap', data_get($pageTwentyThreeFigure, 'image_metadata.source'));
+        $this->assertTrue((bool) data_get($pageTwentyThreeFigure, 'image_metadata.derived_from_text'));
+        $this->assertNull($pageTwentyThreeFigure->image_path);
+        $this->assertNull($pageTwentyThreeFigure->image_url ?? null);
+        $this->assertStringContainsString('Advania Risk Management', (string) $pageTwentyThreeFigure->content);
+    }
+
     public function test_knowledge_document_upload_persists_table_chunks_separately_from_text_chunks(): void
     {
         Storage::fake('local');
@@ -622,11 +903,11 @@ class KnowledgeBaseControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('table-pipeline.docx', [
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Innledning før tabell.', 'style' => 'Normal'],
+                ['text' => 'Innledning før tabell. Systemet skal oppdateres regelmessig for å sikre stabil og pålitelig drift av alle komponenter. Alle kritiske oppdateringer skal testes i et isolert testmiljø før de rulles ut i produksjon. Vedlikeholdsvinduet er klart definert i driftsavtalen og gjelder for alle planlagte nedetider.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
-                ['text' => 'Tekst før tabell.', 'style' => 'Normal'],
+                ['text' => 'Tekst før tabell. Kravene til dokumentasjon for drift av systemet skal dekke alle aspekter ved vedlikehold og løpende operasjon. Dette inkluderer detaljerte prosedyrer for oppstart, avvikling, sikkerhetskopiering og gjenoppretting av data og systemtilstand. Alle prosedyrer skal testes regelmessig og resultatene dokumenteres.', 'style' => 'Normal'],
                 ['text' => '', 'style' => 'Table'],
-                ['text' => 'Tekst etter tabell.', 'style' => 'Normal'],
+                ['text' => 'Tekst etter tabell. Resultater fra testing av systemet skal dokumenteres og oppbevares i henhold til gjeldende retningslinjer for intern kvalitetssikring. Avvik fra forventede resultater skal rapporteres og håndteres i henhold til avviksprosedyren. Ansvaret for oppdatering og videre oppfølging tilhører den ansvarlige driftslederen.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -904,39 +1185,31 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->bindKnowledgeChunkBoundaryService(true, true);
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->twice()
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Tema '.($chunk->chunk_index + 1),
-                    'sub_topic' => 'Underemne '.($chunk->chunk_index + 1),
-                    'keywords' => [
-                        'stikkord-'.($chunk->chunk_index + 1).'-a',
-                        'stikkord-'.($chunk->chunk_index + 1).'-b',
-                        'stikkord-'.($chunk->chunk_index + 1).'-c',
-                    ],
-                    'matched_terms' => [],
-                    'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
-                    'confidence_score' => 0.25,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Tema '.($chunk->chunk_index + 1),
-                        'Sub-topic: Underemne '.($chunk->chunk_index + 1),
-                        'Keywords: '.implode(', ', [
-                            'stikkord-'.($chunk->chunk_index + 1).'-a',
-                            'stikkord-'.($chunk->chunk_index + 1).'-b',
-                            'stikkord-'.($chunk->chunk_index + 1).'-c',
-                        ]),
-                        'Summary: Kort oppsummering for gjenfinning.',
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+        $metadataService->shouldReceive('generateForChunks')
+            ->once()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Tema '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => [
+                            'stikkord-'.$chunkNumber.'-a',
+                            'stikkord-'.$chunkNumber.'-b',
+                            'stikkord-'.$chunkNumber.'-c',
+                        ],
+                        'matched_terms' => [],
+                        'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+                        'confidence_score' => 0.25,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
@@ -946,11 +1219,11 @@ class KnowledgeBaseControllerTest extends TestCase
             'document' => $this->createDocxUploadWithBlocks('structured-metadata.docx', [
                 ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Første avsnitt under hovedseksjonen. Leveransen inkluderer alle nødvendige tjenester og prosesser som er avtalt mellom partene. Systemet skal dokumenteres grundig og godkjennes av alle involverte parter. Konfigurasjon og vedlikehold av systemet inngår i leveransen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
                 ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => 'Avsluttende avsnitt om systemet og leveransen. Alle krav er ivaretatt i henhold til den avtalte kontrakten og tilhørende spesifikasjoner. Systemet er nå ferdig og klart til produksjon og videre drift. Dokumentasjonen er godkjent av alle parter og er i tråd med kravene.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -985,36 +1258,28 @@ class KnowledgeBaseControllerTest extends TestCase
         $context = $this->customerContext('Customer Four Structured Metadata Calls AS');
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->twice()
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                $chunkNumber = $chunk->chunk_index + 1;
-                $summary = 'Kort oppsummering '.$chunkNumber;
-                $keywords = ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'];
-
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Emne '.$chunkNumber,
-                    'sub_topic' => 'Underemne '.$chunkNumber,
-                    'keywords' => $keywords,
-                    'matched_terms' => ['term '.$chunkNumber],
-                    'summary_for_retrieval' => $summary,
-                    'confidence_score' => 0.91,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Emne '.$chunkNumber,
-                        'Sub-topic: Underemne '.$chunkNumber,
-                        'Keywords: '.implode(', ', $keywords),
-                        'Matched terms: term '.$chunkNumber,
-                        'Summary: '.$summary,
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+        $metadataService->shouldReceive('generateForChunks')
+            ->once()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $summary = 'Kort oppsummering '.$chunkNumber;
+                    $keywords = ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'];
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => $keywords,
+                        'matched_terms' => ['term '.$chunkNumber],
+                        'summary_for_retrieval' => $summary,
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
@@ -1022,11 +1287,11 @@ class KnowledgeBaseControllerTest extends TestCase
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-calls.docx', [
                 ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Første avsnitt under hovedseksjonen. Leveransen inkluderer alle nødvendige tjenester og prosesser som er avtalt mellom partene. Systemet skal dokumenteres grundig og godkjennes av alle involverte parter. Konfigurasjon og vedlikehold av systemet inngår i leveransen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
                 ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => 'Avsluttende avsnitt om systemet og leveransen. Alle krav er ivaretatt i henhold til den avtalte kontrakten og tilhørende spesifikasjoner. Systemet er nå ferdig og klart til produksjon og videre drift. Dokumentasjonen er godkjent av alle parter og er i tråd med kravene.', 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1050,7 +1315,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(['stikkord-1-a', 'stikkord-1-b'], $chunks[0]->keywords);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunks[0]->metadata_status);
         $this->assertStringContainsString('Intro before first heading.', (string) $chunks[0]->content);
-        $this->assertStringContainsString('Underseksjon A', (string) $chunks[0]->content);
+        $this->assertStringContainsString('Strategisk samhandling', (string) $chunks[0]->content);
         $this->assertSame('Emne 2', $chunks[1]->topic);
         $this->assertSame('Underemne 2', $chunks[1]->sub_topic);
         $this->assertSame(['stikkord-2-a', 'stikkord-2-b'], $chunks[1]->keywords);
@@ -1065,51 +1330,44 @@ class KnowledgeBaseControllerTest extends TestCase
         $context = $this->customerContext('Customer Four Structured Six Chunk Metadata AS');
 
         $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
-        $metadataService->shouldReceive('generateForChunk')
-            ->times(6)
-            ->andReturnUsing(function (KnowledgeItem $document, KnowledgeItemChunk $chunk): array {
-                $chunkNumber = $chunk->chunk_index + 1;
+        $metadataService->shouldReceive('generateForChunks')
+            ->twice()
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $chunkNumber = $chunk->chunk_index + 1;
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne '.$chunkNumber,
+                        'sub_topic' => 'Underemne '.$chunkNumber,
+                        'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                        'matched_terms' => ['term '.$chunkNumber],
+                        'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
 
-                return [
-                    'service_product_tag' => 'Produkt A',
-                    'theme_tag' => 'Tema A',
-                    'topic' => 'Emne '.$chunkNumber,
-                    'sub_topic' => 'Underemne '.$chunkNumber,
-                    'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
-                    'matched_terms' => ['term '.$chunkNumber],
-                    'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
-                    'confidence_score' => 0.91,
-                    'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
-                    'new_term_suggestions' => [],
-                    'embedding_input' => implode("\n", array_filter([
-                        'Title: '.trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title)),
-                        'Service/product tag: Produkt A',
-                        'Theme tag: Tema A',
-                        'Topic: Emne '.$chunkNumber,
-                        'Sub-topic: Underemne '.$chunkNumber,
-                        'Keywords: stikkord-'.$chunkNumber.'-a, stikkord-'.$chunkNumber.'-b',
-                        'Matched terms: term '.$chunkNumber,
-                        'Summary: Kort oppsummering '.$chunkNumber,
-                        'Content: '.trim((string) $chunk->content),
-                    ])),
-                ];
+                return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-six.docx', [
                 ['text' => 'Kapittel 1', 'style' => 'Heading1'],
-                ['text' => 'Tekst 1.', 'style' => 'Normal'],
+                ['text' => 'Tekst 1. '.$this->repeatedWords('kap1', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 2', 'style' => 'Heading1'],
-                ['text' => 'Tekst 2.', 'style' => 'Normal'],
+                ['text' => 'Tekst 2. '.$this->repeatedWords('kap2', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 3', 'style' => 'Heading1'],
-                ['text' => 'Tekst 3.', 'style' => 'Normal'],
+                ['text' => 'Tekst 3. '.$this->repeatedWords('kap3', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 4', 'style' => 'Heading1'],
-                ['text' => 'Tekst 4.', 'style' => 'Normal'],
+                ['text' => 'Tekst 4. '.$this->repeatedWords('kap4', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 5', 'style' => 'Heading1'],
-                ['text' => 'Tekst 5.', 'style' => 'Normal'],
+                ['text' => 'Tekst 5. '.$this->repeatedWords('kap5', 36), 'style' => 'Normal'],
                 ['text' => 'Kapittel 6', 'style' => 'Heading1'],
-                ['text' => 'Tekst 6.', 'style' => 'Normal'],
+                ['text' => 'Tekst 6. '.$this->repeatedWords('kap6', 36), 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1141,33 +1399,55 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->bindKnowledgeChunkBoundaryService(true);
 
-        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
-        $textGenerationClient->shouldReceive('createResponse')
-            ->twice()
-            ->andReturnUsing(function (): array {
-                static $chunkNumber = 0;
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
+            ->andReturnUsing(function (array $payload): array {
+                static $callCount = 0;
+                $callCount++;
 
-                $chunkNumber++;
-                $summary = 'Kort oppsummering '.$chunkNumber;
+                $inputText = data_get($payload, 'input.1.content.0.text', '');
+                $decoded = json_decode($inputText, true);
+
+                if (is_array($decoded) && isset($decoded['chunks'])) {
+                    $chunkPayloads = $decoded['chunks'] ?? [];
+                    $chunks = [];
+                    $chunkNumber = 0;
+                    foreach ($chunkPayloads as $cp) {
+                        $chunkNumber++;
+                        $chunks[] = [
+                            'chunk_id' => (int) data_get($cp, 'id', 0),
+                            'service_product_tag' => '',
+                            'theme_tag' => '',
+                            'topic' => '',
+                            'sub_topic' => '',
+                            'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
+                            'matched_terms' => [],
+                            'summary_for_retrieval' => 'Kort oppsummering '.$chunkNumber,
+                            'new_term_suggestions' => [],
+                            'confidence_score' => 0.42,
+                        ];
+                    }
+
+                    return [
+                        'id' => 'resp_blank_batch',
+                        'output_text' => json_encode(['chunks' => $chunks], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    ];
+                }
 
                 return [
-                    'id' => 'resp_blank_metadata_'.$chunkNumber,
+                    'id' => 'resp_vocab_'.$callCount,
                     'output_text' => json_encode([
-                        'service_product_tag' => '',
-                        'theme_tag' => '',
-                        'topic' => '',
-                        'sub_topic' => '',
-                        'keywords' => ['stikkord-'.$chunkNumber.'-a', 'stikkord-'.$chunkNumber.'-b'],
-                        'matched_terms' => [],
-                        'summary_for_retrieval' => $summary,
-                        'new_term_suggestions' => [],
-                        'confidence_score' => 0.42,
+                        'canonical_name' => 'Kanonisk term',
+                        'synonyms' => ['synonym-a', 'synonym-b'],
+                        'description' => 'Beskrivelse av term.',
+                        'reason' => 'Foreslått fra chunk-metadata.',
                     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ];
             });
+        $this->app->instance(OpenAiClient::class, $openAiClient);
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $textGenerationClient,
+            $openAiClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
@@ -1177,13 +1457,11 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('structured-metadata-blanks.docx', [
-                ['text' => 'Intro before first heading.', 'style' => 'Normal'],
                 ['text' => 'Strategisk samhandling', 'style' => 'Heading1'],
-                ['text' => 'Første avsnitt under hovedseksjonen.', 'style' => 'Normal'],
                 ['text' => 'Underseksjon A', 'style' => 'Heading2'],
-                ['text' => 'Mer tekst i underseksjonen.', 'style' => 'Normal'],
+                ['text' => 'Intro before first heading. '.$this->repeatedWords('innhold', 37), 'style' => 'Normal'],
                 ['text' => 'Andre hovedseksjon', 'style' => 'Heading1'],
-                ['text' => 'Avsluttende avsnitt.', 'style' => 'Normal'],
+                ['text' => $this->repeatedWords('avslutning', 38), 'style' => 'Normal'],
             ]),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'is_active' => true,
@@ -1230,13 +1508,13 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         Storage::fake('local');
 
-        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
-        $textGenerationClient->shouldReceive('createResponse')
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
             ->once()
             ->andThrow(new RuntimeException('OpenAI metadata request failed with HTTP status [500].'));
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $textGenerationClient,
+            $openAiClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
@@ -1268,7 +1546,6 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertNull($chunks[0]->sub_topic);
         $this->assertTrue($chunks[0]->keywords === null || $chunks[0]->keywords === []);
         $this->assertNotNull($chunks[0]->embedding_vector);
-        $this->assertNotNull($chunks[0]->embedding_vector_pgvector);
     }
 
     public function test_knowledge_document_upload_generates_chunk_embeddings_when_embedding_generation_succeeds(): void
@@ -1292,8 +1569,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('knowledge_item_id', $document->id)
             ->firstOrFail();
 
-        $this->assertSame(array_fill(0, 1536, 0.1), $chunk->embedding_vector);
-        $this->assertCount(1536, $chunk->embedding_vector_pgvector);
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
         $this->assertNotNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_error);
@@ -1305,29 +1581,29 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $context = $this->customerContext('Customer Four D AS');
 
-        $embeddingService = Mockery::mock(AiEmbeddingClient::class);
-        $embeddingService->shouldReceive('tryEmbedText')
+        $metadataService = Mockery::mock(KnowledgeChunkMetadataGenerationService::class);
+        $metadataService->shouldReceive('generateForChunks')
             ->once()
-            ->with(Mockery::on(function (string $text): bool {
-                return str_contains($text, 'Summary: Kort oppsummering for gjenfinning.')
-                    && str_contains($text, 'Service/product tag: Produkt A')
-                    && str_contains($text, 'Theme tag: Tema A')
-                    && str_contains($text, 'Topic: Emne A')
-                    && str_contains($text, 'Sub-topic: Underemne A')
-                    && str_contains($text, 'Content: Metadata generation test content');
-            }))
-            ->andReturn([
-                'ok' => true,
-                'embedding' => array_fill(0, 1536, 0.1),
-                'model' => 'text-embedding-3-small',
-                'usage' => [],
-                'error_type' => null,
-                'error_message' => null,
-                'upstream_status' => 200,
-                'request_id' => 'test-request-id',
-                'response_body_excerpt' => null,
-            ]);
-        $this->app->instance(AiEmbeddingClient::class, $embeddingService);
+            ->andReturnUsing(function (KnowledgeItem $document, iterable $chunks, string $languageCode): array {
+                $result = [];
+                foreach ($chunks as $chunk) {
+                    $result[(int) $chunk->id] = [
+                        'service_product_tag' => 'Produkt A',
+                        'theme_tag' => 'Tema A',
+                        'topic' => 'Emne A',
+                        'sub_topic' => 'Underemne A',
+                        'keywords' => ['stikkord a', 'stikkord b'],
+                        'matched_terms' => ['term a'],
+                        'summary_for_retrieval' => 'Kort oppsummering for gjenfinning.',
+                        'confidence_score' => 0.91,
+                        'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED,
+                        'new_term_suggestions' => [],
+                    ];
+                }
+
+                return $result;
+            });
+        $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('metadata-generation.docx', 'Metadata generation test content that should be chunked and embedded.'),
@@ -1357,8 +1633,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->ai_summary);
         $this->assertSame(0.91, $chunk->confidence_score);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
-        $this->assertSame(array_fill(0, 1536, 0.1), $chunk->embedding_vector);
-        $this->assertCount(1536, $chunk->embedding_vector_pgvector);
+        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
     }
 
@@ -1368,8 +1643,8 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $context = $this->customerContext('Customer Four E AS');
 
-        $textGenerationClient = Mockery::mock(AiTextGenerationClient::class);
-        $textGenerationClient->shouldReceive('createResponse')
+        $openAiClient = Mockery::mock(OpenAiClient::class);
+        $openAiClient->shouldReceive('createResponse')
             ->once()
             ->with(Mockery::on(function (array $payload): bool {
                 $promptText = (string) data_get($payload, 'input.1.content.0.text', '');
@@ -1378,34 +1653,53 @@ class KnowledgeBaseControllerTest extends TestCase
                     && str_contains($promptText, 'Tabell A | Tabell B')
                     && str_contains($promptText, 'source_text');
             }))
+            ->andReturnUsing(function (array $payload): array {
+                $inputText = data_get($payload, 'input.1.content.0.text', '');
+                $decoded = json_decode($inputText, true) ?? [];
+                $chunkPayloads = data_get($decoded, 'chunks', []);
+                $chunkId = (int) data_get($chunkPayloads[0] ?? [], 'id', 0);
+
+                return [
+                    'id' => 'resp_table_summary',
+                    'output_text' => json_encode(['chunks' => [[
+                        'chunk_id' => $chunkId,
+                        'service_product_tag' => 'samhandling',
+                        'theme_tag' => 'driftsmodell',
+                        'topic' => 'sikkerhetsparametere',
+                        'sub_topic' => 'SOC-tjeneste',
+                        'keywords' => ['SOC', 'sikkerhetsparametere'],
+                        'matched_terms' => ['SOC'],
+                        'summary_for_retrieval' => 'Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.',
+                        'new_term_suggestions' => [],
+                        'confidence_score' => 0.92,
+                    ]]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+        $openAiClient->shouldReceive('createResponse')
             ->andReturn([
-                'id' => 'resp_table_summary',
+                'id' => 'resp_vocab',
                 'output_text' => json_encode([
-                    'service_product_tag' => 'samhandling',
-                    'theme_tag' => 'driftsmodell',
-                    'topic' => 'sikkerhetsparametere',
-                    'sub_topic' => 'SOC-tjeneste',
-                    'keywords' => ['SOC', 'sikkerhetsparametere'],
-                    'matched_terms' => ['SOC'],
-                    'summary_for_retrieval' => 'Tabellen beskriver sikkerhetsparametere for SOC-tjenesten og viser loggovervåking, hendelseshåndtering og eskalering.',
-                    'new_term_suggestions' => [],
-                    'confidence_score' => 0.92,
-                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'canonical_name' => 'Kanonisk term',
+                    'synonyms' => [],
+                    'description' => null,
+                    'reason' => null,
+                ]),
             ]);
+        $this->app->instance(OpenAiClient::class, $openAiClient);
 
         $metadataService = new KnowledgeChunkMetadataGenerationService(
-            $textGenerationClient,
+            $openAiClient,
             app(KnowledgeMetadataVocabularyService::class),
             app(KnowledgeChunkMetadataValidator::class),
         );
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
 
-        $embeddingService = Mockery::mock(AiEmbeddingClient::class);
+        $embeddingService = Mockery::mock(EmbeddingService::class);
         $embeddingService->shouldReceive('tryEmbedText')
             ->once()
             ->andReturn([
                 'ok' => true,
-                'embedding' => array_fill(0, 1536, 0.1),
+                'embedding' => [0.11, 0.22, 0.33],
                 'model' => 'text-embedding-3-small',
                 'usage' => [],
                 'error_type' => null,
@@ -1414,7 +1708,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 'request_id' => 'test-request-id',
                 'response_body_excerpt' => null,
             ]);
-        $this->app->instance(AiEmbeddingClient::class, $embeddingService);
+        $this->app->instance(EmbeddingService::class, $embeddingService);
 
         $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUploadWithBlocks('table-summary.docx', [
@@ -1448,7 +1742,7 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         Storage::fake('local');
 
-        $service = Mockery::mock(AiEmbeddingClient::class);
+        $service = Mockery::mock(EmbeddingService::class);
         $service->shouldReceive('tryEmbedText')
             ->once()
             ->andReturn([
@@ -1462,7 +1756,7 @@ class KnowledgeBaseControllerTest extends TestCase
                 'request_id' => 'test-request-id',
                 'response_body_excerpt' => '{"error":"upstream unavailable"}',
             ]);
-        $this->app->instance(AiEmbeddingClient::class, $service);
+        $this->app->instance(EmbeddingService::class, $service);
 
         $context = $this->customerContext('Customer Four C AS');
 
@@ -1482,7 +1776,6 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $this->assertNull($chunk->embedding_vector);
-        $this->assertNull($chunk->embedding_vector_pgvector);
         $this->assertNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_model);
         $this->assertSame('OpenAI embedding request failed with HTTP status [503].', $chunk->embedding_error);
@@ -1841,6 +2134,224 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_document_show_generates_an_ai_summary_from_the_full_document_context(): void
+    {
+        $context = $this->customerContext('Customer Summary AI AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'ai-summary.pdf',
+            'content' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'original_filename' => 'ai-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/ai-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Første del av dokumentet beskriver koordinering, roller og samhandling.',
+            'start_offset' => 0,
+            'end_offset' => 72,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Andre del beskriver risiko, oppfølging og kostnadsstyring.',
+            'start_offset' => 73,
+            'end_offset' => 131,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $summary = (string) data_get($page, 'props.knowledgeItem.summary', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && str_starts_with($summary, 'AI-oppsummering:')
+                && str_contains($summary, 'Første del av dokumentet beskriver koordinering')
+                && str_contains($summary, 'Andre del beskriver risiko, oppfølging og kostnadsstyring')
+                && $summary !== (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+        });
+
+        $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $updatedDocument->summary);
+        $this->assertStringContainsString('Første del av dokumentet beskriver koordinering', (string) $updatedDocument->summary);
+        $this->assertStringContainsString('Andre del beskriver risiko, oppfølging og kostnadsstyring', (string) $updatedDocument->summary);
+    }
+
+    public function test_knowledge_document_summary_prefers_semantic_chunks_over_toc_text(): void
+    {
+        $context = $this->customerContext('Customer Summary Semantic AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'toc-summary.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
+            'original_filename' => 'toc-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Dette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.',
+            'start_offset' => 0,
+            'end_offset' => 110,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Mer faktisk innhold som skal kunne bidra til en kort dokumentoppsummering.',
+            'start_offset' => 111,
+            'end_offset' => 188,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $contentExcerpt = (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && str_contains($contentExcerpt, 'Dette er faktisk innhold fra dokumentets semantiske del')
+                && str_contains($contentExcerpt, 'Mer faktisk innhold som skal kunne bidra')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'Innholdsfortegnelse');
+        });
+    }
+
+    public function test_knowledge_document_summary_falls_back_to_cleaned_raw_text_without_toc_noise(): void
+    {
+        $context = $this->customerContext('Customer Summary Fallback AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'toc-fallback.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2 Reell innholdstekst etter TOC.',
+            'original_filename' => 'toc-fallback.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-fallback.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nReell innholdstekst etter TOC. Denne teksten skal brukes i oppsummeringen.",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $contentExcerpt = (string) data_get($page, 'props.knowledgeItem.content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && str_contains($contentExcerpt, 'Reell innholdstekst etter TOC.')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'BILAG 1-11');
+        });
+    }
+
+    public function test_knowledge_document_index_uses_semantic_excerpt_instead_of_toc_text(): void
+    {
+        $context = $this->customerContext('Customer Summary Index AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'index-toc-summary.pdf',
+            'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
+            'original_filename' => 'index-toc-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/index-toc-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nDette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.",
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 0,
+            'content' => 'Dette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.',
+            'start_offset' => 0,
+            'end_offset' => 110,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'chunk_index' => 1,
+            'content' => 'Mer faktisk innhold som skal kunne bidra til en kort dokumentoppsummering.',
+            'start_offset' => 111,
+            'end_offset' => 188,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW,
+            'chunk_type' => 'semantic',
+            'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+            $item = $items->firstWhere('id', $document->id);
+            $contentExcerpt = (string) data_get($item, 'content_excerpt', '');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $item !== null
+                && str_contains($contentExcerpt, 'Dette er faktisk innhold fra dokumentets semantiske del')
+                && str_contains($contentExcerpt, 'Mer faktisk innhold som skal kunne bidra')
+                && ! str_contains($contentExcerpt, '1 Leverandørens Masterdata for prosjekter........................ 2')
+                && ! str_contains($contentExcerpt, 'BILAG 1-11');
+        });
+    }
+
     public function test_knowledge_document_update_allows_metadata_only_changes_and_keeps_chunks_intact(): void
     {
         Storage::fake('local');
@@ -2148,6 +2659,29 @@ class KnowledgeBaseControllerTest extends TestCase
     }
 
     /**
+     * Purpose: Reuse the real PDF fixture that previously exposed the figure-gap regression.
+     * Inputs: None.
+     * Returns: A test uploaded file backed by the actual PDF used during manual diagnosis.
+     * Side effects: None.
+     */
+    private function realKnowledgePdfUpload(): UploadedFile
+    {
+        $path = storage_path('app/private/customers/2162/knowledge-documents/01KS34FX95FEPJDW15HEYE1W7H.pdf');
+
+        if (! is_file($path)) {
+            throw new RuntimeException('Unable to locate the real PDF fixture used for regression testing.');
+        }
+
+        return new UploadedFile(
+            $path,
+            'Masterdata Prosjekt_pdf.pdf',
+            'application/pdf',
+            null,
+            true,
+        );
+    }
+
+    /**
      * Purpose: Build a synthetic structure fixture for the rule-based H1/H2 chunk payload builder.
      * Inputs: None.
      * Returns: A parsed-structure shaped array with one H1-only section, one H1 with H2 subsections, and another H1-only section.
@@ -2164,28 +2698,28 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 1',
-                'text' => 'Kapittel 1 tekst.',
+                'text' => 'Kapittel 1 tekst. '.$this->repeatedWords('kap1', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.1 Sammendrag og helhetlig løsningsforslag',
-                'text' => 'Sammendrag og helhetlig løsningsforslag.',
+                'text' => 'Sammendrag og helhetlig løsningsforslag. '.$this->repeatedWords('sam', 36),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.2 Strategisk partnerskap, veikart og måloppnåelse',
-                'text' => 'Strategisk partnerskap, veikart og måloppnåelse.',
+                'text' => 'Strategisk partnerskap, veikart og måloppnåelse. '.$this->repeatedWords('str', 35),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 3',
-                'text' => 'Kapittel 3 tekst.',
+                'text' => 'Kapittel 3 tekst. '.$this->repeatedWords('kap3', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2220,7 +2754,7 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 1',
-                'text' => 'Kapittel 1 tekst.',
+                'text' => 'Kapittel 1 tekst. '.$this->repeatedWords('kap1', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2234,14 +2768,14 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > 2.2 Kort oppsummering',
-                'text' => 'Kort oppsummering.',
+                'text' => 'Kort oppsummering. '.$this->repeatedWords('ops', 38),
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 3',
-                'text' => 'Kapittel 3 tekst.',
+                'text' => 'Kapittel 3 tekst. '.$this->repeatedWords('kap3', 35),
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2306,11 +2840,14 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedPreH2TableStructureFixture(): array
     {
+        $preH2Text = 'Tekst før tabell. ' . $this->repeatedWords('forklaring', 40);
+        $h2Text = "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2. " . $this->repeatedWords('dokumentasjon', 35);
+
         return $this->buildRuleBasedStructureFixture([
             [
                 'type' => 'paragraph',
                 'heading_path' => '1 Overskrift test',
-                'text' => 'Tekst før tabell.',
+                'text' => $preH2Text,
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
@@ -2478,7 +3015,7 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => '1 Overskrift test > 1.1 Dokumentasjonskrav for drift',
-                'text' => "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2.",
+                'text' => $h2Text,
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
@@ -2498,18 +3035,22 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedTableChunkStructureFixture(): array
     {
+        $h1Text = 'Kapittel 2 tekst. ' . $this->repeatedWords('kapitteltekst', 40);
+        $preTableText = 'Innledning før tabell. ' . $this->repeatedWords('innledningsord', 40);
+        $postTableText = 'Etter tabell. ' . $this->repeatedWords('avslutningsord', 40);
+
         return $this->buildRuleBasedStructureFixture([
             [
                 'type' => 'paragraph',
                 'heading_path' => 'Kapittel 2',
-                'text' => 'Kapittel 2 tekst.',
+                'text' => $h1Text,
                 'heading_level' => null,
                 'relation_hint' => null,
             ],
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > Underseksjon A',
-                'text' => 'Innledning før tabell.',
+                'text' => $preTableText,
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
@@ -2677,7 +3218,94 @@ class KnowledgeBaseControllerTest extends TestCase
             [
                 'type' => 'h2_section',
                 'heading_path' => 'Kapittel 2 > Underseksjon A',
-                'text' => 'Etter tabell.',
+                'text' => $postTableText,
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+        ]);
+    }
+
+    /**
+     * Purpose: Build a synthetic fixture that mirrors the real PDF figure gap between 1.12 and 1.13.
+     * Inputs: None.
+     * Returns: A parsed-structure shaped array with one H2 section, a figure-like text cluster, and the next H2 section.
+     * Side effects: None.
+     *
+     * @return array{
+     *     source_text: string,
+     *     elements: array<int, array<string, mixed>>
+     * }
+     */
+    private function ruleBasedFigureGapStructureFixture(): array
+    {
+        return $this->buildRuleBasedStructureFixture([
+            [
+                'type' => 'h2_section',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => 'Prosess for risikohåndtering. Leverandøren er ansvarlig for nødvendig risikostyring i etableringsprosjektet. Risikostyring er en integrert og kontinuerlig del av Leverandørens prosjektstyring og må følges opp gjennom hele prosjektperioden. Risikoer skal identifiseres, vurderes, prioriteres og håndteres fortløpende. Tiltak skal dokumenteres, følges opp og revideres når forutsetningene endrer seg.',
+                'heading_level' => 2,
+                'relation_hint' => 'h2_section',
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => 'Det skal holdes egne møter for risikostyring jevnlig for å overvåke eksisterende risiko, identifisere nye risikoer og for å avtale risikostrategi og tiltak for å kunne styre risiko gjennom prosjektet. Hyppigheten av disse møtene avtales mellom Kunden og Leverandøren i planleggingsfasen når alle innledende risikoer er identifisert og analysert. Risikorapportering vil være en naturlig del av styringsgruppe- og prosjektrapportering. Leverandøren har etablert maler for å identifisere, håndtere og presentere identifiserte risikoer i prosjektprosessen. Risikostyring og identifisering er også et kontinuerlig arbeid for prosjektlederen i prosjektperioden og er tydelig definert i prosjektprosessen til selskapet som er revidert av DNV-GL og sertifisert til standarden 9001:2015. Leverandøren vil først og fremst gjennomføre risiko opp mot: Kvalitet, Kost og Fremdrift (tid).',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => "• Kvalitet\n• Kost\n• Fremdrift (tid)",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11 > 1.12 R ISIKOSTYRING AV PROSJEKTER',
+                'text' => 'Advania Risk Management',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "0. Identifisere\n1. Beskrivelse\n2. Analyse",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "Risiko register\nRisiko register",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'list',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "3. Planlegge\n4. Oppfølging\n5. Kontroll",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => "Løste risikoer\nÅpne risikoer",
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'paragraph',
+                'heading_path' => 'B ILAG 1-11',
+                'text' => 'Kontinuerlig risk prosess i dynamisk risiko analyse',
+                'heading_level' => null,
+                'relation_hint' => null,
+            ],
+            [
+                'type' => 'h2_section',
+                'heading_path' => '4. Oppfølging > 1.13 K OSTNADSSTYRING I PROSJEKTER',
+                'text' => "1.13 K OSTNADSSTYRING I PROSJEKTER\n\nProsess for kostnadsstyring og kostnadskontroll i prosjektfasen. Kostnadsstyring i prosjektet skal gjennomføres gjennom en strukturert prosess som sikrer løpende kontroll med prosjektet, tydelig oppfølging av avvik og god styring av budsjett, prognoser og beslutningsgrunnlag. Leverandøren skal kunne rapportere avvik, følge opp tiltak og gi Kunden et oppdatert grunnlag for styring og beslutninger.",
                 'heading_level' => 2,
                 'relation_hint' => 'h2_section',
             ],
@@ -2915,12 +3543,12 @@ XML;
      */
     private function bindSuccessfulEmbeddingService(): void
     {
-        $service = Mockery::mock(AiEmbeddingClient::class);
+        $service = Mockery::mock(EmbeddingService::class);
         $service->shouldReceive('tryEmbedText')
             ->andReturnUsing(function (string $text): array {
                 return [
                     'ok' => true,
-                    'embedding' => array_fill(0, 1536, 0.1),
+                    'embedding' => [0.11, 0.22, 0.33],
                     'model' => 'text-embedding-3-small',
                     'usage' => [],
                     'error_type' => null,
@@ -2931,11 +3559,46 @@ XML;
                 ];
             });
 
-        $this->app->instance(AiEmbeddingClient::class, $service);
+        $this->app->instance(EmbeddingService::class, $service);
     }
 
     /**
-     * Purpose: Bind a billing entitlement service that allows AI access for all test customers.
+     * Purpose: Bind a deterministic document summary generation service for knowledge base tests.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Replaces the container binding with a predictable fake service.
+     */
+    private function bindSuccessfulKnowledgeDocumentSummaryGenerationService(): void
+    {
+        $service = Mockery::mock(KnowledgeDocumentSummaryGenerationService::class);
+        $service->shouldReceive('generateForDocument')
+            ->andReturnUsing(function (KnowledgeItem $document): ?string {
+                $chunks = $document->relationLoaded('chunks')
+                    ? $document->chunks
+                    : $document->chunks()->orderBy('chunk_index')->get();
+
+                $chunkText = $chunks
+                    ->map(static fn (KnowledgeItemChunk $chunk): string => trim((string) $chunk->content))
+                    ->filter(static fn (string $content): bool => $content !== '')
+                    ->take(4)
+                    ->implode(' ');
+
+                if ($chunkText === '') {
+                    $chunkText = trim((string) ($document->extracted_text ?: $document->content));
+                }
+
+                if ($chunkText === '') {
+                    return null;
+                }
+
+                return Str::limit('AI-oppsummering: '.Str::squish($chunkText), 240, '');
+            });
+
+        $this->app->instance(KnowledgeDocumentSummaryGenerationService::class, $service);
+    }
+
+    /**
+     * Purpose: Bind a deterministic billing entitlement service for knowledge base tests.
      * Inputs: None.
      * Returns: None.
      * Side effects: Replaces the container binding with a predictable fake service.
@@ -2944,7 +3607,7 @@ XML;
     {
         $service = Mockery::mock(BillingEntitlementService::class);
         $service->shouldReceive('canUseAiOffer')
-            ->andReturn(true);
+            ->andReturnTrue();
 
         $this->app->instance(BillingEntitlementService::class, $service);
     }
@@ -3211,7 +3874,10 @@ XML;
     {
         config([
             'database.default' => 'pgsql',
+            'database.connections.pgsql.host' => env('DB_HOST', '127.0.0.1'),
+            'database.connections.pgsql.port' => (int) env('DB_PORT', 5432),
             'database.connections.pgsql.database' => 'procynia_test',
+            'database.connections.pgsql.url' => null,
         ]);
 
         DB::purge('pgsql');

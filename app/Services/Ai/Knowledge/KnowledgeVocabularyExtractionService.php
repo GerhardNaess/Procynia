@@ -6,7 +6,7 @@ use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeVocabularyAnalysisBatch;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -21,7 +21,7 @@ class KnowledgeVocabularyExtractionService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly AiTextGenerationClient $textGenerationClient,
+        private readonly OpenAiClient $openAiClient,
     ) {
     }
 
@@ -47,7 +47,7 @@ class KnowledgeVocabularyExtractionService
             'approved_term_count' => array_sum((array) data_get($approvedVocabularyCatalog, 'type_counts', [])),
         ]);
 
-        $response = $this->textGenerationClient->createResponse($payload);
+        $response = $this->openAiClient->createResponse($payload);
         $decoded = $this->decodePayload($response);
 
         Log::info('[PROCYNIA][KNOWLEDGE_VOCABULARY] Vocabulary extraction completed.', [

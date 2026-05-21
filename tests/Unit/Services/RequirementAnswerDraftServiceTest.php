@@ -3,8 +3,8 @@
 namespace Tests\Unit\Services;
 
 use App\Models\SavedNoticeAiRequirement;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\DB;
 use Mockery;
 use RuntimeException;
@@ -32,7 +32,7 @@ class RequirementAnswerDraftServiceTest extends TestCase
      */
     public function test_invalid_json_from_openai_does_not_persist_draft(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->fakeAiResponse('ikke json {'));
@@ -60,7 +60,7 @@ class RequirementAnswerDraftServiceTest extends TestCase
     {
         $malformed = json_encode(['wrong_key' => 'Dette er ikke riktig struktur']);
 
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->fakeAiResponse((string) $malformed));
@@ -88,7 +88,7 @@ class RequirementAnswerDraftServiceTest extends TestCase
     {
         $emptyDraft = json_encode(['answer_draft_text' => '   ']);
 
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->fakeAiResponse((string) $emptyDraft));
@@ -118,7 +118,7 @@ class RequirementAnswerDraftServiceTest extends TestCase
         $draftText = 'Dette er et deterministisk testutkast.';
         $validPayload = json_encode(['answer_draft_text' => $draftText]);
 
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn($this->fakeAiResponse((string) $validPayload));

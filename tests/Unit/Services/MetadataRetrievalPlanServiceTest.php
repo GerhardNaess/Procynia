@@ -3,7 +3,7 @@
 namespace Tests\Unit\Services;
 
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
+use App\Services\OpenAi\OpenAiClient;
 use Mockery;
 use Tests\TestCase;
 
@@ -18,7 +18,7 @@ class MetadataRetrievalPlanServiceTest extends TestCase
 
     public function test_it_returns_a_structured_plan_and_only_uses_declared_metadata_fields(): void
     {
-        $client = Mockery::mock(AiTextGenerationClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->with(Mockery::on(function (array $payload): bool {

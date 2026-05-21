@@ -6232,9 +6232,8 @@ class AiControllerTest extends TestCase
             ->get(route('app.ai.requirements.export.docx', ['savedNotice' => $savedNotice->id]));
 
         $response->assertOk();
-        $response->assertStreamed();
         $response->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-        $this->assertStringStartsWith('PK', $response->streamedContent());
+        $this->assertStringStartsWith('PK', (string) $response->getContent());
     }
 
     /**

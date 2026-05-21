@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Services;
 
+use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
+use Mockery;
 use RuntimeException;
 use Tests\TestCase;
 use ZipArchive;
@@ -521,6 +523,195 @@ XML,
             $result['elements'],
             static fn (array $element): bool => (string) ($element['type'] ?? '') === 'table',
         )));
+    }
+
+    public function test_it_loses_pdf_table_and_image_blocks_when_parsing_structured_pdf_blocks(): void
+    {
+        $structuredPdfBlocks = [
+            [
+                'type' => 'heading',
+                'page_number' => 1,
+                'page_width' => 892,
+                'page_height' => 1262,
+                'top' => 72,
+                'left' => 58,
+                'width' => 620,
+                'height' => 26,
+                'title' => null,
+                'text' => '1 Prosjektgjennomføring',
+                'style' => null,
+                'level' => 1,
+                'source_metadata' => [
+                    'source_type' => 'pdf_text',
+                    'page_number' => 1,
+                ],
+            ],
+            [
+                'type' => 'paragraph',
+                'page_number' => 1,
+                'page_width' => 892,
+                'page_height' => 1262,
+                'top' => 116,
+                'left' => 58,
+                'width' => 760,
+                'height' => 36,
+                'title' => null,
+                'text' => 'Innledende forklaring før tabellen.',
+                'style' => null,
+                'level' => null,
+                'source_metadata' => [
+                    'source_type' => 'pdf_text',
+                    'page_number' => 1,
+                ],
+            ],
+            [
+                'type' => 'table',
+                'page_number' => 1,
+                'page_width' => 892,
+                'page_height' => 1262,
+                'top' => 176,
+                'left' => 58,
+                'width' => 760,
+                'height' => 96,
+                'title' => 'Tabell 1 – side 1',
+                'text' => "Krav-ID | Krav | Dokumentasjon\nK-01 | Leverandøren skal etablere prosjektplan | Plan vedlegges",
+                'style' => null,
+                'level' => null,
+                'table_json' => [
+                    'source_type' => 'pdf_table',
+                    'complexity' => 'simple',
+                    'warnings' => [],
+                    'row_count' => 2,
+                    'column_count' => 3,
+                    'title_row_index' => 0,
+                    'header_row_indices' => [1],
+                    'rows' => [
+                        [
+                            'row_index' => 0,
+                            'row_type' => 'title',
+                            'is_title' => true,
+                            'is_header' => false,
+                            'is_empty' => false,
+                            'cells' => [
+                                [
+                                    'column_index' => 0,
+                                    'text' => 'Krav-ID | Krav | Dokumentasjon',
+                                ],
+                            ],
+                        ],
+                        [
+                            'row_index' => 1,
+                            'row_type' => 'data',
+                            'is_title' => false,
+                            'is_header' => false,
+                            'is_empty' => false,
+                            'cells' => [
+                                [
+                                    'column_index' => 0,
+                                    'text' => 'K-01',
+                                ],
+                                [
+                                    'column_index' => 1,
+                                    'text' => 'Leverandøren skal etablere prosjektplan',
+                                ],
+                                [
+                                    'column_index' => 2,
+                                    'text' => 'Plan vedlegges',
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'table_html' => '<table><tr><th>Krav-ID</th><th>Krav</th><th>Dokumentasjon</th></tr><tr><td>K-01</td><td>Leverandøren skal etablere prosjektplan</td><td>Plan vedlegges</td></tr></table>',
+                'table_markdown' => "| Krav-ID | Krav | Dokumentasjon |\n| --- | --- | --- |\n| K-01 | Leverandøren skal etablere prosjektplan | Plan vedlegges |",
+                'table_text' => "Krav-ID | Krav | Dokumentasjon\nK-01 | Leverandøren skal etablere prosjektplan | Plan vedlegges",
+                'table_complexity' => 'simple',
+                'table_warnings' => [],
+                'table_index_in_document' => 0,
+                'source_metadata' => [
+                    'source_type' => 'pdf_table',
+                    'page_number' => 1,
+                    'table_sequence_in_document' => 1,
+                    'display_title' => 'Tabell 1 – side 1',
+                ],
+            ],
+            [
+                'type' => 'image',
+                'page_number' => 2,
+                'page_width' => 892,
+                'page_height' => 1262,
+                'top' => 84,
+                'left' => 58,
+                'width' => 760,
+                'height' => 280,
+                'title' => 'Grafikk 1 – side 2',
+                'text' => "Grafikk 1 – side 2\n\nProsessdiagram for leveranseflyt",
+                'style' => null,
+                'level' => null,
+                'image_bytes' => 'fake-image-bytes',
+                'image_path' => 'knowledge-images/132/graphic-1.png',
+                'image_disk' => 'local',
+                'image_mime_type' => 'image/png',
+                'image_original_filename' => 'graphic-1.png',
+                'image_width' => 640,
+                'image_height' => 360,
+                'image_hash' => 'graphic-1',
+                'image_metadata' => [
+                    'source_type' => 'pdf_image',
+                    'page_number' => 2,
+                    'image_index_in_document' => 1,
+                ],
+                'image_alt_text' => 'Prosessdiagram for leveranseflyt',
+                'image_caption' => 'Figur 1: Leveranseflyt',
+                'ocr_text' => 'Prosessdiagram for leveranseflyt',
+                'image_description' => 'Viser hovedflyten for leveranse',
+                'image_index_in_document' => 1,
+                'source_metadata' => [
+                    'source_type' => 'pdf_image',
+                    'page_number' => 2,
+                    'image_sequence_in_document' => 1,
+                ],
+            ],
+        ];
+
+        $extractor = Mockery::mock(DocumentTextExtractor::class);
+        $extractor->shouldReceive('extractStructuredText')
+            ->once()
+            ->andReturn($structuredPdfBlocks);
+        $extractor->shouldNotReceive('extractText');
+        $this->app->instance(DocumentTextExtractor::class, $extractor);
+
+        $path = $this->tempDocumentPath('pdf');
+        file_put_contents($path, "%PDF-1.4\n");
+
+        try {
+            $result = app(KnowledgeDocumentStructureParser::class)->parse($path);
+        } finally {
+            @unlink($path);
+        }
+
+        $this->assertStringContainsString('Innledende forklaring før tabellen.', $result['source_text']);
+        $this->assertStringContainsString('Krav-ID | Krav | Dokumentasjon', $result['source_text']);
+
+        $parsedTypes = array_values(array_map(
+            static fn (array $element): string => (string) ($element['type'] ?? ''),
+            $result['elements'],
+        ));
+
+        $this->assertContains('table', $parsedTypes);
+        $this->assertContains('image', $parsedTypes);
+
+        $tableElement = collect($result['elements'])->firstWhere('type', 'table');
+        $imageElement = collect($result['elements'])->firstWhere('type', 'image');
+
+        $this->assertNotNull($tableElement);
+        $this->assertNotNull($imageElement);
+        $this->assertSame('1 Prosjektgjennomføring', $tableElement['heading_path']);
+        $this->assertSame('1 Prosjektgjennomføring', $imageElement['heading_path']);
+        $this->assertSame('Tabell 1 – side 1', $tableElement['title']);
+        $this->assertSame('Grafikk 1 – side 2', $imageElement['title']);
+        $this->assertSame('table', $tableElement['type']);
+        $this->assertSame('image', $imageElement['type']);
     }
 
     /**

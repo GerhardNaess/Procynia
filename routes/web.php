@@ -77,13 +77,6 @@ Route::prefix('app')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
-        Route::prefix('/customer-environment/document-templates')->name('customer-environment.document-templates.')->group(function (): void {
-            Route::post('/', [CustomerEnvironmentController::class, 'storeDocumentTemplate'])->name('store');
-            Route::patch('/{documentTemplate}', [CustomerEnvironmentController::class, 'updateDocumentTemplate'])->name('update');
-            Route::patch('/{documentTemplate}/toggle-active', [CustomerEnvironmentController::class, 'toggleDocumentTemplateActive'])->name('toggle-active');
-            Route::patch('/{documentTemplate}/set-default', [CustomerEnvironmentController::class, 'setDefaultDocumentTemplate'])->name('set-default');
-            Route::delete('/{documentTemplate}', [CustomerEnvironmentController::class, 'destroyDocumentTemplate'])->name('destroy');
-        });
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::prefix('/ai/knowledge-vocabulary')->name('ai.knowledge-vocabulary.')->group(function (): void {

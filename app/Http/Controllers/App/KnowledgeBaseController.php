@@ -11,15 +11,17 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
 use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
 use App\Services\Knowledge\KnowledgeChunkBuilder;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
+use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
-use App\Services\Ai\Contracts\AiEmbeddingClient;
+use App\Services\OpenAi\EmbeddingService;
 use App\Support\CustomerContext;
 use App\Support\CosineSimilarity;
 use Illuminate\Support\Collection;
@@ -51,7 +53,9 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkBuilder $knowledgeChunkBuilder,
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
+        private readonly KnowledgeDocumentSummaryGenerationService $knowledgeDocumentSummaryGenerationService,
         private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
+        private readonly PdfFigurePreviewRenderer $pdfFigurePreviewRenderer,
         private readonly AiUsageGuard $aiUsageGuard,
     ) {
     }
@@ -67,7 +71,12 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
 
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
-            ->with(['uploadedBy'])
+            ->with([
+                'uploadedBy',
+                'chunks' => static fn ($query) => $query
+                    ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
+                    ->orderBy('chunk_index'),
+            ])
             ->withCount('chunks')
             ->orderByDesc('updated_at')
             ->orderByDesc('id')
@@ -100,6 +109,9 @@ class KnowledgeBaseController extends Controller
             ->withCount('chunks')
             ->whereKey($knowledgeItem->id)
             ->firstOrFail();
+
+        $this->ensureDocumentSummary($record);
+
         return Inertia::render('App/AI/KnowledgeBase/Show', [
             'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
             'knowledgeItem' => $this->documentDetailPayload($record),
@@ -275,6 +287,7 @@ class KnowledgeBaseController extends Controller
                 $payload,
                 $request,
                 $storedPath,
+                $absolutePath,
                 $extractedText,
                 $chunkPayloads,
                 $extractionFailed,
@@ -304,11 +317,12 @@ class KnowledgeBaseController extends Controller
 
                 return [
                     'knowledge_document' => $knowledgeDocument,
-                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads),
+                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads, $absolutePath),
                 ];
             });
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
+            $this->ensureDocumentSummary($result['knowledge_document']);
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
@@ -333,6 +347,12 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $record->loadMissing([
+            'uploadedBy',
+            'chunks' => static fn ($query) => $query
+                ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
+                ->orderBy('chunk_index'),
+        ]);
 
         return Inertia::render('App/AI/KnowledgeBase/Edit', [
             'pageTitle' => 'Kunnskapsdokumenter · Rediger',
@@ -423,6 +443,45 @@ class KnowledgeBaseController extends Controller
     private function assertAiAccess(Customer $customer): void
     {
         abort_unless(app(BillingEntitlementService::class)->canUseAiOffer($customer), 403, __('procynia.ai.ai_access_unavailable_message'));
+    }
+
+    /**
+     * Purpose: Ensure the document has a persisted AI summary when the customer may use AI features.
+     * Inputs: The knowledge document loaded for the current customer.
+     * Returns: The persisted summary string when one is available, otherwise null.
+     * Side effects: May call OpenAI and updates the document summary column.
+     */
+    private function ensureDocumentSummary(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $existingSummary = trim((string) $knowledgeDocument->summary);
+
+        if ($existingSummary !== '') {
+            return $existingSummary;
+        }
+
+        if ($knowledgeDocument->extraction_status !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
+            return null;
+        }
+
+        $customer = Customer::query()->find($knowledgeDocument->customer_id);
+
+        if (! $customer instanceof Customer || ! app(BillingEntitlementService::class)->canUseAiOffer($customer)) {
+            return null;
+        }
+
+        $summary = $this->knowledgeDocumentSummaryGenerationService->generateForDocument($knowledgeDocument);
+        $summary = $this->cleanNullableString($summary, 20000);
+
+        if ($summary === null) {
+            return null;
+        }
+
+        $knowledgeDocument->forceFill([
+            'summary' => $summary,
+        ])->save();
+        $knowledgeDocument->summary = $summary;
+
+        return $summary;
     }
 
     /**
@@ -1179,7 +1238,6 @@ class KnowledgeBaseController extends Controller
             'confidence_score' => null,
             'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
             'embedding_vector' => null,
-            'embedding_vector_pgvector' => null,
             'embedding_model' => null,
             'embedding_generated_at' => null,
             'embedding_error' => null,
@@ -1205,7 +1263,7 @@ class KnowledgeBaseController extends Controller
             return;
         }
 
-        $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
+        $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
 
         if (! ($outcome['ok'] ?? false)) {
             $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
@@ -1217,7 +1275,12 @@ class KnowledgeBaseController extends Controller
             return;
         }
 
-        $this->persistChunkEmbedding($chunk, $outcome);
+        $chunk->forceFill([
+            'embedding_vector' => $outcome['embedding'] ?? null,
+            'embedding_model' => $outcome['model'] ?? null,
+            'embedding_generated_at' => now(),
+            'embedding_error' => null,
+        ])->save();
     }
 
     /**
@@ -1233,25 +1296,6 @@ class KnowledgeBaseController extends Controller
         }
 
         return trim((string) $chunk->content);
-    }
-
-    /**
-     * Purpose: Persist the same embedding payload in both the JSON fallback column and the pgvector column.
-     * Inputs: The chunk and the successful embedding outcome.
-     * Returns: None.
-     * Side effects: Updates the chunk embedding fields in the database.
-     */
-    private function persistChunkEmbedding(KnowledgeItemChunk $chunk, array $outcome): void
-    {
-        $embedding = is_array($outcome['embedding'] ?? null) ? array_values($outcome['embedding']) : null;
-
-        $chunk->forceFill([
-            'embedding_vector' => $embedding,
-            'embedding_vector_pgvector' => $embedding,
-            'embedding_model' => $outcome['model'] ?? null,
-            'embedding_generated_at' => now(),
-            'embedding_error' => null,
-        ])->save();
     }
 
     /**
@@ -1415,6 +1459,11 @@ class KnowledgeBaseController extends Controller
         }
 
         $chunkRanges = $this->subtractTableRangesFromSemanticRanges($chunkRanges);
+        $figureChunkRanges = $this->buildFigureChunkRangesFromGaps($chunkRanges, $sourceText);
+
+        if ($figureChunkRanges !== []) {
+            $chunkRanges = array_merge($chunkRanges, $figureChunkRanges);
+        }
 
         if ($chunkRanges !== []) {
             usort(
@@ -2167,6 +2216,260 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Convert uncovered text gaps between existing chunk ranges into conservative figure-like image chunks.
+     * Inputs: Ordered chunk ranges already produced for the document and the canonical source text.
+     * Returns: Additional image chunk ranges for gaps that resemble embedded figures or diagrams.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $chunkRanges
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildFigureChunkRangesFromGaps(array $chunkRanges, string $sourceText): array
+    {
+        if ($chunkRanges === [] || trim($sourceText) === '') {
+            return [];
+        }
+
+        usort(
+            $chunkRanges,
+            static function (array $left, array $right): int {
+                $startComparison = ((int) ($left['start_offset'] ?? 0)) <=> ((int) ($right['start_offset'] ?? 0));
+
+                if ($startComparison !== 0) {
+                    return $startComparison;
+                }
+
+                return ((int) ($left['end_offset'] ?? 0)) <=> ((int) ($right['end_offset'] ?? 0));
+            },
+        );
+
+        $normalizeLine = static fn (string $line): string => trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+        $wordCount = static fn (string $text): int => count(preg_split('/\s+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        $normalizePath = static fn (mixed $value): string => trim(preg_replace('/\s+/u', ' ', (string) ($value ?? '')) ?? '');
+        $isTitleLikeLine = static function (string $line) use ($wordCount): bool {
+            $line = trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+
+            if ($line === '') {
+                return false;
+            }
+
+            $lineWordCount = $wordCount($line);
+
+            if ($lineWordCount < 2 || $lineWordCount > 4) {
+                return false;
+            }
+
+            if (mb_strlen($line, 'UTF-8') > 40) {
+                return false;
+            }
+
+            if (preg_match('/[.!?:;]$/u', $line)) {
+                return false;
+            }
+
+            return preg_match('/^[\p{Lu}\d]/u', $line) === 1;
+        };
+        $isListLikeLine = static fn (string $line): bool => preg_match('/^(?:\d+\.|\d+\)|[•\-–])\s*/u', trim($line)) === 1;
+        $existingImagePaths = [];
+
+        foreach ($chunkRanges as $chunkRange) {
+            if ((string) ($chunkRange['chunk_kind'] ?? '') !== 'image') {
+                continue;
+            }
+
+            $existingHeadingPath = $normalizePath($chunkRange['heading_path'] ?? null);
+            $existingSectionPath = $normalizePath($chunkRange['section_path'] ?? null);
+
+            if ($existingHeadingPath !== '') {
+                $existingImagePaths['heading:'.$existingHeadingPath] = true;
+            }
+
+            if ($existingSectionPath !== '') {
+                $existingImagePaths['section:'.$existingSectionPath] = true;
+            }
+        }
+
+        $figureChunkRanges = [];
+        $rangeCount = count($chunkRanges);
+
+        for ($index = 0; $index < $rangeCount - 1; $index++) {
+            $leftRange = $chunkRanges[$index];
+            $rightRange = $chunkRanges[$index + 1];
+            $leftKind = (string) ($leftRange['chunk_kind'] ?? '');
+            $rightKind = (string) ($rightRange['chunk_kind'] ?? '');
+
+            if (in_array($leftKind, ['table', 'image'], true) || in_array($rightKind, ['table', 'image'], true)) {
+                continue;
+            }
+
+            $gapStart = (int) ($leftRange['end_offset'] ?? 0);
+            $gapEnd = (int) ($rightRange['start_offset'] ?? 0);
+
+            if ($gapEnd <= $gapStart) {
+                continue;
+            }
+
+            $gapText = trim((string) mb_substr($sourceText, $gapStart, $gapEnd - $gapStart, 'UTF-8'));
+
+            if ($gapText === '') {
+                continue;
+            }
+
+            $lineInfos = [];
+            $lineCursor = 0;
+
+            foreach (preg_split('/\n+/u', $gapText) ?: [] as $rawLine) {
+                $rawLine = trim((string) $rawLine);
+
+                if ($rawLine === '') {
+                    continue;
+                }
+
+                $relativeStart = mb_strpos($gapText, $rawLine, $lineCursor, 'UTF-8');
+
+                if ($relativeStart === false) {
+                    $relativeStart = $lineCursor;
+                }
+
+                $relativeEnd = $relativeStart + mb_strlen($rawLine, 'UTF-8');
+                $lineCursor = $relativeEnd;
+
+                $lineInfos[] = [
+                    'raw' => $rawLine,
+                    'normalized' => $normalizeLine($rawLine),
+                    'relative_start' => $relativeStart,
+                    'relative_end' => $relativeEnd,
+                ];
+            }
+
+            $lines = array_values(array_filter(array_map(
+                static fn (array $lineInfo): string => (string) ($lineInfo['normalized'] ?? ''),
+                $lineInfos,
+            ), static fn (string $line): bool => $line !== ''));
+
+            if ($lines === []) {
+                continue;
+            }
+
+            $titleLineIndex = null;
+
+            foreach ($lines as $lineIndex => $line) {
+                if ($isTitleLikeLine($line)) {
+                    $titleLineIndex = $lineIndex;
+
+                    break;
+                }
+            }
+
+            if ($titleLineIndex === null) {
+                continue;
+            }
+
+            $suffixLines = array_slice($lines, $titleLineIndex + 1);
+
+            if (count($suffixLines) < 3) {
+                continue;
+            }
+
+            $shortSuffixLineCount = 0;
+            $listLikeSuffixLineCount = 0;
+            $longSuffixLineCount = 0;
+
+            foreach ($suffixLines as $suffixLine) {
+                $suffixWordCount = $wordCount($suffixLine);
+
+                if ($suffixWordCount <= 6) {
+                    $shortSuffixLineCount++;
+                }
+
+                if ($isListLikeLine($suffixLine)) {
+                    $listLikeSuffixLineCount++;
+                }
+
+                if ($suffixWordCount > 12 || mb_strlen($suffixLine, 'UTF-8') > 90 || preg_match('/[.!?]\s*$/u', $suffixLine) === 1) {
+                    $longSuffixLineCount++;
+                }
+            }
+
+            $isFigureLikeGap = $shortSuffixLineCount >= 3
+                && $listLikeSuffixLineCount >= 2
+                && $longSuffixLineCount === 0;
+
+            $figureHeadingPath = $this->cleanNullableString($leftRange['section_path'] ?? $leftRange['heading_path'] ?? null, 255)
+                ?? $this->cleanNullableString($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null, 255);
+
+            if ($figureHeadingPath === null || $figureHeadingPath === '') {
+                continue;
+            }
+
+            $figureHeadingKey = $normalizePath($figureHeadingPath);
+            $figureSectionKey = $normalizePath($leftRange['section_path'] ?? $leftRange['heading_path'] ?? null);
+
+            if ($figureSectionKey === '') {
+                $figureSectionKey = $normalizePath($rightRange['section_path'] ?? $rightRange['heading_path'] ?? null);
+            }
+
+            // Existing real image chunks win over synthetic figure gaps in the same section or heading.
+            if (($figureHeadingKey !== '' && isset($existingImagePaths['heading:'.$figureHeadingKey]))
+                || ($figureSectionKey !== '' && isset($existingImagePaths['section:'.$figureSectionKey]))) {
+                continue;
+            }
+
+            if (! $isFigureLikeGap) {
+                if ($longSuffixLineCount > 0 || $wordCount($gapText) >= self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
+                    $figureChunkRanges[] = [
+                        'heading_path' => $figureHeadingPath,
+                        'section_path' => $figureHeadingPath,
+                        'start_offset' => $gapStart,
+                        'end_offset' => $gapEnd,
+                        'chunk_kind' => 'semantic',
+                    ];
+                }
+
+                continue;
+            }
+
+            $figureCaption = $normalizeLine($lines[$titleLineIndex] ?? '');
+            $figureStartRelative = (int) ($lineInfos[$titleLineIndex]['relative_start'] ?? 0);
+            $figureText = trim((string) mb_substr($gapText, $figureStartRelative, $gapEnd - $gapStart - $figureStartRelative, 'UTF-8'));
+            $prefixText = trim((string) mb_substr($gapText, 0, $figureStartRelative, 'UTF-8'));
+
+            if ($prefixText !== '' && $wordCount($prefixText) >= self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
+                $figureChunkRanges[] = [
+                    'heading_path' => $figureHeadingPath,
+                    'section_path' => $figureHeadingPath,
+                    'start_offset' => $gapStart,
+                    'end_offset' => $gapStart + $figureStartRelative,
+                    'chunk_kind' => 'semantic',
+                ];
+            }
+
+            $figureElement = [
+                'heading_path' => $figureHeadingPath,
+                'start_offset' => $gapStart + $figureStartRelative,
+                'end_offset' => $gapEnd,
+                'image_caption' => $figureCaption !== '' ? $figureCaption : null,
+                'image_alt_text' => $figureText,
+                'image_description' => $figureText,
+                'ocr_text' => $figureText,
+                'image_metadata' => [
+                    'source' => 'pdf_figure_gap',
+                    'derived_from_text' => true,
+                    'gap_character_count' => mb_strlen($figureText, 'UTF-8'),
+                    'gap_word_count' => $wordCount($figureText),
+                    'gap_line_count' => count(array_slice($lineInfos, $titleLineIndex)),
+                ],
+            ];
+
+            foreach ($this->buildImageChunkRangesFromElement($figureElement) as $figureChunkRange) {
+                $figureChunkRanges[] = $figureChunkRange;
+            }
+        }
+
+        return $figureChunkRanges;
+    }
+
+    /**
      * Purpose: Remove any table overlaps from text ranges so table content only lives in table chunks.
      * Inputs: Ordered chunk ranges that may include semantic, table, and image ranges.
      * Returns: Chunk ranges where semantic ranges have been split around structural ranges.
@@ -2602,7 +2905,7 @@ class KnowledgeBaseController extends Controller
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads): Collection
+    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads, ?string $sourceDocumentPath = null): Collection
     {
         $knowledgeDocument->chunks()->delete();
 
@@ -2611,7 +2914,7 @@ class KnowledgeBaseController extends Controller
         }
 
         $chunkAttributes = array_map(
-            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument): array {
+            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument, $sourceDocumentPath): array {
                 $chunkType = (string) ($chunkPayload['chunk_type'] ?? '');
                 $attributes = [
                     'chunk_index' => $chunkIndex,
@@ -2654,6 +2957,34 @@ class KnowledgeBaseController extends Controller
                     $imageMimeType = $this->cleanNullableString($attributes['image_mime_type'] ?? null, 191);
                     $imageOriginalFilename = $this->cleanNullableString($attributes['image_original_filename'] ?? null, 255) ?? 'image';
                     $imageHash = $this->cleanNullableString($attributes['image_hash'] ?? null, 128);
+                    $imageMetadata = is_array($attributes['image_metadata'] ?? null) ? $attributes['image_metadata'] : [];
+
+                    if ((! is_string($imageBytes) || trim($imageBytes) === '')
+                        && is_string($sourceDocumentPath)
+                        && $sourceDocumentPath !== ''
+                        && (string) data_get($imageMetadata, 'source') === 'pdf_figure_gap'
+                        && (bool) data_get($imageMetadata, 'derived_from_text')) {
+                        $preview = $this->pdfFigurePreviewRenderer->renderPreview($sourceDocumentPath, $chunkPayload);
+
+                        if (is_array($preview)) {
+                            $previewBytes = $preview['image_bytes'] ?? null;
+
+                            if (is_string($previewBytes) && trim($previewBytes) !== '') {
+                                $imageBytes = $previewBytes;
+                                $imageMimeType = $this->cleanNullableString($preview['image_mime_type'] ?? null, 191) ?? 'image/png';
+                                $imageOriginalFilename = $this->cleanNullableString($preview['image_original_filename'] ?? null, 255) ?? $imageOriginalFilename;
+                                $attributes['image_width'] = $preview['image_width'] ?? $attributes['image_width'];
+                                $attributes['image_height'] = $preview['image_height'] ?? $attributes['image_height'];
+                                $imageMetadata = array_merge(
+                                    $imageMetadata,
+                                    is_array($preview['image_metadata'] ?? null) ? $preview['image_metadata'] : [],
+                                );
+                                $attributes['image_mime_type'] = $imageMimeType;
+                                $attributes['image_original_filename'] = $imageOriginalFilename;
+                                $attributes['image_metadata'] = $imageMetadata;
+                            }
+                        }
+                    }
 
                     if (is_string($imageBytes) && trim($imageBytes) !== '') {
                         $imageHash = $imageHash ?? hash('sha256', $imageBytes);
@@ -2790,7 +3121,7 @@ class KnowledgeBaseController extends Controller
 
             $this->knowledgeChunkVocabularyCandidateService->syncForChunk($knowledgeDocument, $chunk);
 
-            $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
+            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
 
             if (! ($outcome['ok'] ?? false)) {
                 $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
@@ -2802,7 +3133,12 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $this->persistChunkEmbedding($chunk, $outcome);
+            $chunk->forceFill([
+                'embedding_vector' => $outcome['embedding'] ?? null,
+                'embedding_model' => $outcome['model'] ?? null,
+                'embedding_generated_at' => now(),
+                'embedding_error' => null,
+            ])->save();
         }
     }
 
@@ -2841,7 +3177,7 @@ class KnowledgeBaseController extends Controller
                 'chunk_content_length' => mb_strlen($chunkText, 'UTF-8'),
             ]);
 
-            $outcome = app(AiEmbeddingClient::class)->tryEmbedText($chunkText);
+            $outcome = app(EmbeddingService::class)->tryEmbedText($chunkText);
 
             if (! ($outcome['ok'] ?? false)) {
                 $this->logChunkEmbeddingFailure($knowledgeDocument, $chunk, $outcome);
@@ -2853,7 +3189,12 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $this->persistChunkEmbedding($chunk, $outcome);
+            $chunk->forceFill([
+                'embedding_vector' => $outcome['embedding'] ?? null,
+                'embedding_model' => $outcome['model'] ?? null,
+                'embedding_generated_at' => now(),
+                'embedding_error' => null,
+            ])->save();
         }
     }
 
@@ -2939,17 +3280,150 @@ class KnowledgeBaseController extends Controller
      */
     private function contentExcerpt(KnowledgeItem $knowledgeDocument): string
     {
-        $text = trim(preg_replace('/\s+/u', ' ', (string) $knowledgeDocument->extracted_text) ?? '');
+        $summaryText = $this->documentSummaryText($knowledgeDocument);
 
-        if ($text !== '') {
-            return Str::limit($text, 360, '...');
+        if ($summaryText !== '') {
+            return Str::limit($summaryText, 360, '...');
         }
 
         if ($knowledgeDocument->extraction_status === KnowledgeItem::EXTRACTION_STATUS_FAILED) {
             return 'Tekstuttrekk feilet.';
         }
 
-        return 'Ingen ekstrahert tekst.';
+        return trim((string) $knowledgeDocument->extracted_text) !== '' ? '' : 'Ingen ekstrahert tekst.';
+    }
+
+    /**
+     * Purpose: Resolve the best summary source text for a knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: Clean semantic chunk text when available, otherwise filtered extracted text.
+     * Side effects: None.
+     */
+    private function documentSummaryText(KnowledgeItem $knowledgeDocument): string
+    {
+        $semanticText = $this->semanticChunkSummaryText($knowledgeDocument);
+
+        if ($semanticText !== '') {
+            $cleanSemanticText = $this->cleanDocumentSummaryText($semanticText);
+
+            if ($cleanSemanticText !== '') {
+                return $cleanSemanticText;
+            }
+        }
+
+        return $this->cleanDocumentSummaryText((string) $knowledgeDocument->extracted_text);
+    }
+
+    /**
+     * Purpose: Collect summary candidate text from loaded semantic/document chunks.
+     * Inputs: A customer-scoped knowledge document with optional chunk relation loading.
+     * Returns: Chunk text in reading order or an empty string when chunks are unavailable.
+     * Side effects: None.
+     */
+    private function semanticChunkSummaryText(KnowledgeItem $knowledgeDocument): string
+    {
+        if (! $knowledgeDocument->relationLoaded('chunks')) {
+            return '';
+        }
+
+        $chunks = $knowledgeDocument->chunks
+            ->filter(static function (KnowledgeItemChunk $chunk): bool {
+                return in_array($chunk->chunk_type, ['semantic', 'document'], true);
+            })
+            ->sortBy('chunk_index')
+            ->map(static fn (KnowledgeItemChunk $chunk): string => trim((string) $chunk->content))
+            ->filter(static fn (string $content): bool => $content !== '')
+            ->values()
+            ->all();
+
+        return implode("\n\n", $chunks);
+    }
+
+    /**
+     * Purpose: Remove TOC/dotted-leader noise from a summary candidate.
+     * Inputs: Raw semantic or extracted text.
+     * Returns: A compact body-text excerpt without TOC lines.
+     * Side effects: None.
+     */
+    private function cleanDocumentSummaryText(string $text): string
+    {
+        $text = trim(str_replace(["\r\n", "\r"], "\n", $text));
+
+        if ($text === '') {
+            return '';
+        }
+
+        $paragraphs = preg_split('/\n{2,}/u', $text) ?: [];
+        $cleanParagraphs = [];
+
+        foreach ($paragraphs as $paragraph) {
+            $lines = preg_split('/\n/u', trim($paragraph)) ?: [];
+            $cleanLines = [];
+
+            foreach ($lines as $line) {
+                $normalizedLine = $this->normalizeSummaryTextLine($line);
+
+                if ($normalizedLine === '' || $this->isTocSummaryLine($normalizedLine)) {
+                    continue;
+                }
+
+                $cleanLines[] = $normalizedLine;
+            }
+
+            $cleanParagraph = trim(implode(' ', $cleanLines));
+
+            if ($cleanParagraph === '') {
+                continue;
+            }
+
+            $cleanParagraphs[] = $cleanParagraph;
+        }
+
+        return trim(preg_replace('/\s+/u', ' ', implode("\n\n", $cleanParagraphs)) ?? '');
+    }
+
+    /**
+     * Purpose: Normalize one summary candidate line before TOC filtering.
+     * Inputs: A raw extracted line.
+     * Returns: A collapsed single-line string.
+     * Side effects: None.
+     */
+    private function normalizeSummaryTextLine(string $line): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $line) ?? '');
+    }
+
+    /**
+     * Purpose: Determine whether a line looks like TOC noise rather than document body text.
+     * Inputs: One normalized summary line.
+     * Returns: True when the line resembles a table of contents entry or heading.
+     * Side effects: None.
+     */
+    private function isTocSummaryLine(string $line): bool
+    {
+        if ($line === '') {
+            return false;
+        }
+
+        $normalized = Str::ascii(mb_strtolower(trim($line), 'UTF-8'));
+
+        if (preg_match('/\b(?:innholdsfortegnelse|table of contents|contents)\b/u', $normalized) === 1) {
+            return true;
+        }
+
+        if (preg_match('/^\s*(?:bilag|vedlegg)\b/iu', $normalized) === 1 && mb_strlen($normalized, 'UTF-8') <= 80 && ! preg_match('/[.!?]/u', $normalized)) {
+            return true;
+        }
+
+        if (mb_strlen($normalized, 'UTF-8') > 180) {
+            return false;
+        }
+
+        if (preg_match('/^\s*(?:\d+(?:\.\d+)*|bilag\s+\d+(?:-\d+)?|vedlegg\s+[a-z0-9]+)\b/iu', $normalized) !== 1) {
+            return false;
+        }
+
+        return preg_match('/(?:\.{4,}|\s{6,})\s*(?:\d{1,3}|[ivxlcdm]{1,5})\s*$/iu', $normalized) === 1;
     }
 
     private function cleanNullableString(mixed $value, int $maxLength): ?string

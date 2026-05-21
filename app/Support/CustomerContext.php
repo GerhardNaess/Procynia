@@ -87,19 +87,6 @@ class CustomerContext
         return $user instanceof User && $user->canManageCustomerUsers();
     }
 
-    public function canManageCustomerDocumentTemplates(?User $user = null): bool
-    {
-        $user ??= $this->currentUser();
-
-        return $user instanceof User
-            && $user->canAccessCustomerFrontend()
-            && in_array($user->resolvedBidRole(), [
-                User::BID_ROLE_SYSTEM_OWNER,
-                User::BID_ROLE_BID_MANAGER,
-                User::BID_ROLE_CONTRIBUTOR,
-            ], true);
-    }
-
     public function canCreateCustomerDepartments(?User $user = null): bool
     {
         $user ??= $this->currentUser();

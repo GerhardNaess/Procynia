@@ -2,8 +2,8 @@
 
 namespace App\Services\Ai\Requirements;
 
-use App\Services\Ai\Contracts\AiTextGenerationClient;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use JsonException;
@@ -17,7 +17,7 @@ class RequirementGroundingJudgeService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly AiTextGenerationClient $textGenerationClient,
+        private readonly OpenAiClient $openAiClient,
     ) {
     }
 
@@ -33,7 +33,7 @@ class RequirementGroundingJudgeService
         array $knowledgeGrounding,
         string $languageCode = 'no',
     ): array {
-        $response = $this->textGenerationClient->createResponse(
+        $response = $this->openAiClient->createResponse(
             $this->openAiRequestPayload($requirement, $retrievedKnowledgeRows, $knowledgeGrounding, $languageCode),
         );
 

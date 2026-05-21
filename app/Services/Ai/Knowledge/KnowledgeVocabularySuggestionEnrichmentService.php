@@ -5,7 +5,7 @@ namespace App\Services\Ai\Knowledge;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeMetadataTerm;
-use App\Services\Ai\Contracts\AiTextGenerationClient;
+use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Str;
 use JsonException;
 use RuntimeException;
@@ -18,7 +18,7 @@ class KnowledgeVocabularySuggestionEnrichmentService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly AiTextGenerationClient $textGenerationClient,
+        private readonly OpenAiClient $openAiClient,
     ) {
     }
 
@@ -36,7 +36,7 @@ class KnowledgeVocabularySuggestionEnrichmentService
     ): array {
         try {
             $payload = $this->openAiRequestPayload($document, $chunk, $field, $term);
-            $response = $this->textGenerationClient->createResponse($payload);
+            $response = $this->openAiClient->createResponse($payload);
             $decoded = $this->decodePayload($response);
 
             return $this->normalizeEnrichment($chunk, $field, $term, $decoded);
