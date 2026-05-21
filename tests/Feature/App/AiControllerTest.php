@@ -4584,9 +4584,11 @@ class AiControllerTest extends TestCase
         ]);
 
         $this->bindEmbeddingService(function (string $text): array {
+            $embeddingVector = $this->deterministicEmbeddingVector();
+
             return [
                 'ok' => true,
-                'embedding' => [0.11, 0.22, 0.33],
+                'embedding' => $embeddingVector,
                 'model' => 'text-embedding-3-small',
                 'usage' => [],
                 'error_type' => null,
@@ -6396,6 +6398,17 @@ class AiControllerTest extends TestCase
             ->andReturnUsing($handler);
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Provide a deterministic embedding vector that matches the pgvector dimension.
+     * Inputs: None.
+     * Returns: A 1536-dimensional embedding vector with stable values.
+     * Side effects: None.
+     */
+    private function deterministicEmbeddingVector(): array
+    {
+        return array_fill(0, 1536, 0.001);
     }
 
     /**

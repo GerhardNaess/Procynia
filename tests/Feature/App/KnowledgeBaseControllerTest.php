@@ -1569,7 +1569,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('knowledge_item_id', $document->id)
             ->firstOrFail();
 
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame($this->deterministicEmbeddingVector(), $chunk->embedding_vector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
         $this->assertNotNull($chunk->embedding_generated_at);
         $this->assertNull($chunk->embedding_error);
@@ -1633,7 +1633,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame('Kort oppsummering for gjenfinning.', $chunk->ai_summary);
         $this->assertSame(0.91, $chunk->confidence_score);
         $this->assertSame(KnowledgeItemChunk::METADATA_STATUS_AUTO_APPROVED, $chunk->metadata_status);
-        $this->assertSame([0.11, 0.22, 0.33], $chunk->embedding_vector);
+        $this->assertSame($this->deterministicEmbeddingVector(), $chunk->embedding_vector);
         $this->assertSame('text-embedding-3-small', $chunk->embedding_model);
     }
 
@@ -1699,7 +1699,7 @@ class KnowledgeBaseControllerTest extends TestCase
             ->once()
             ->andReturn([
                 'ok' => true,
-                'embedding' => [0.11, 0.22, 0.33],
+                'embedding' => $this->deterministicEmbeddingVector(),
                 'model' => 'text-embedding-3-small',
                 'usage' => [],
                 'error_type' => null,
@@ -3546,9 +3546,11 @@ XML;
         $service = Mockery::mock(EmbeddingService::class);
         $service->shouldReceive('tryEmbedText')
             ->andReturnUsing(function (string $text): array {
+                $embeddingVector = $this->deterministicEmbeddingVector();
+
                 return [
                     'ok' => true,
-                    'embedding' => [0.11, 0.22, 0.33],
+                    'embedding' => $embeddingVector,
                     'model' => 'text-embedding-3-small',
                     'usage' => [],
                     'error_type' => null,
@@ -3560,6 +3562,17 @@ XML;
             });
 
         $this->app->instance(EmbeddingService::class, $service);
+    }
+
+    /**
+     * Purpose: Provide a deterministic embedding vector that matches the pgvector dimension.
+     * Inputs: None.
+     * Returns: A 1536-dimensional embedding vector with stable values.
+     * Side effects: None.
+     */
+    private function deterministicEmbeddingVector(): array
+    {
+        return array_fill(0, 1536, 0.001);
     }
 
     /**

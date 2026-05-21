@@ -80,6 +80,7 @@ class KnowledgeItemChunk extends Model
         'table_text',
         'table_metadata',
         'embedding_vector',
+        'embedding_vector_pgvector',
         'embedding_model',
         'embedding_generated_at',
         'embedding_error',
