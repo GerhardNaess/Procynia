@@ -3,6 +3,7 @@
 namespace App\Services\Ai\Retrieval;
 
 use App\Services\OpenAi\OpenAiClient;
+use App\Services\Ai\Contracts\AiTextGenerationClient;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use JsonException;
@@ -16,7 +17,7 @@ class MetadataRetrievalPlanService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly OpenAiClient $openAiClient,
+        private readonly AiTextGenerationClient $textGenerationClient,
     ) {
     }
 
@@ -41,7 +42,7 @@ class MetadataRetrievalPlanService
         }
 
         try {
-            $response = $this->openAiClient->createResponse(
+            $response = $this->textGenerationClient->createResponse(
                 $this->openAiRequestPayload($requirementText, $metadataMap),
             );
             $decoded = $this->decodePayload($response);
