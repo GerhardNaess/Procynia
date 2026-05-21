@@ -39,11 +39,13 @@ use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
+use App\Support\PgVector;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -1173,19 +1175,19 @@ class AiController extends Controller
             );
         }
 
-        $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id);
-
         $requirementEmbeddings = $confirmedRequirements->mapWithKeys(function (SavedNoticeAiRequirement $requirement): array {
             return [$requirement->id => $this->requirementEmbeddingFor($requirement)];
         });
 
-        DB::transaction(function () use ($confirmedRequirements, $knowledgeChunks, $userId, $requirementEmbeddings): void {
+        DB::transaction(function () use ($confirmedRequirements, $record, $userId, $requirementEmbeddings): void {
             foreach ($confirmedRequirements as $requirement) {
+                $requirementEmbedding = $requirementEmbeddings->get($requirement->id);
+                $knowledgeChunks = $this->knowledgeChunksForMatching((int) $record->customer_id, $requirementEmbedding);
                 $this->syncRequirementEvidence(
                     $requirement,
                     $knowledgeChunks,
                     $userId,
-                    $requirementEmbeddings->get($requirement->id),
+                    $requirementEmbedding,
                 );
             }
         });
@@ -1792,26 +1794,50 @@ class AiController extends Controller
      * Returns: A compact collection of active knowledge chunks limited to a safe V1 cap.
      * Side effects: None.
      */
-    protected function knowledgeChunksForMatching(int $customerId): Collection
+    protected function knowledgeChunksForMatching(int $customerId, ?array $requirementEmbedding = null): Collection
     {
-        $knowledgeChunks = KnowledgeItemChunk::query()
+        $query = KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.is_active', true)
             ->whereNotNull('knowledge_items.storage_path')
             ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
-            ->orderByDesc('knowledge_items.updated_at')
-            ->orderByDesc('knowledge_items.id')
-            ->orderBy('knowledge_item_chunks.chunk_index')
-            ->orderBy('knowledge_item_chunks.id')
-            ->limit(1000)
-            ->get([
+            ->select([
                 'knowledge_item_chunks.*',
                 'knowledge_items.original_filename as knowledge_item_title',
                 'knowledge_items.document_type as content_type',
                 'knowledge_items.summary as knowledge_item_summary',
                 'knowledge_items.updated_at as knowledge_item_updated_at',
-            ])
+            ]);
+
+        if (
+            is_array($requirementEmbedding)
+            && $requirementEmbedding !== []
+            && count($requirementEmbedding) === 1536
+            && Schema::hasColumn('knowledge_item_chunks', 'embedding_vector_pgvector')
+        ) {
+            $vectorLiteral = PgVector::literal($requirementEmbedding);
+
+            $query->selectRaw(
+                'CASE WHEN knowledge_item_chunks.embedding_vector_pgvector IS NULL THEN NULL ELSE 1 - (knowledge_item_chunks.embedding_vector_pgvector <=> ?::vector) END as embedding_similarity',
+                [$vectorLiteral],
+            );
+            $query->orderByRaw('CASE WHEN knowledge_item_chunks.embedding_vector_pgvector IS NULL THEN 1 ELSE 0 END');
+            $query->orderByRaw('knowledge_item_chunks.embedding_vector_pgvector <=> ?::vector', [$vectorLiteral]);
+            $query->orderByDesc('knowledge_items.updated_at');
+            $query->orderByDesc('knowledge_items.id');
+            $query->orderBy('knowledge_item_chunks.chunk_index');
+            $query->orderBy('knowledge_item_chunks.id');
+        } else {
+            $query->orderByDesc('knowledge_items.updated_at')
+                ->orderByDesc('knowledge_items.id')
+                ->orderBy('knowledge_item_chunks.chunk_index')
+                ->orderBy('knowledge_item_chunks.id');
+        }
+
+        $knowledgeChunks = $query
+            ->limit(1000)
+            ->get()
             ->map(fn (KnowledgeItemChunk $chunk): array => [
                 'id' => (int) $chunk->id,
                 'chunk_id' => (int) $chunk->id,
@@ -1846,6 +1872,10 @@ class AiController extends Controller
                 'section_title' => (string) ($chunk->section_title ?? ''),
                 'section_path' => (string) ($chunk->section_path ?? ''),
                 'embedding_vector' => is_array($chunk->embedding_vector) ? $chunk->embedding_vector : null,
+                'embedding_vector_pgvector' => is_array($chunk->embedding_vector_pgvector) ? $chunk->embedding_vector_pgvector : null,
+                'embedding_similarity' => is_numeric($chunk->getAttribute('embedding_similarity'))
+                    ? (float) $chunk->getAttribute('embedding_similarity')
+                    : null,
                 'embedding_model' => (string) ($chunk->embedding_model ?? ''),
                 'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
                 'embedding_error' => $chunk->embedding_error,

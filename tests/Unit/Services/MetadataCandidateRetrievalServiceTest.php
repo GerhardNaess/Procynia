@@ -8,8 +8,10 @@ use App\Models\KnowledgeItemChunk;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
+use App\Support\PgVector;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -154,6 +156,60 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertCount(0, $result);
     }
 
+    public function test_it_uses_pgvector_similarity_and_exposes_it_when_requirement_embedding_is_1536_dimensions(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Pgvector Scope AS');
+        $foreignCustomer = $this->createCustomer('Pgvector Foreign AS');
+        $document = $this->createKnowledgeItem($customer, ['original_filename' => 'local-pgvector.docx']);
+        $foreignDocument = $this->createKnowledgeItem($foreignCustomer, ['original_filename' => 'foreign-pgvector.docx']);
+        $requirementEmbedding = $this->embeddingVector(1536, 0);
+
+        $localChunk = $this->createChunk($document, 0, [
+            'topic' => 'Tema Pgvector',
+            'content' => 'Innhold om pgvector tema.',
+            'embedding_vector_pgvector' => PgVector::literal($requirementEmbedding),
+        ]);
+        $this->createChunk($foreignDocument, 0, [
+            'topic' => 'Tema Pgvector',
+            'content' => 'Fremmed innhold som skal filtreres bort.',
+            'embedding_vector_pgvector' => PgVector::literal($this->embeddingVector(1536, 1)),
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Tema Pgvector']],
+            'search_text' => 'pgvector tema',
+            'intent_summary' => 'Leter etter pgvector tema.',
+            'confidence' => 0.91,
+        ], $requirementEmbedding);
+
+        $this->assertCount(1, $result);
+        $this->assertSame($localChunk->id, $result->first()['chunk_id']);
+        $this->assertNotNull($result->first()['embedding_similarity']);
+        $this->assertSame(1.0, $result->first()['embedding_similarity']);
+    }
+
+    public function test_it_falls_back_to_default_ordering_when_requirement_embedding_has_wrong_dimension(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Fallback Dim AS');
+        $document = $this->createKnowledgeItem($customer, ['original_filename' => 'dim-fallback.docx']);
+        $this->createChunk($document, 0, [
+            'topic' => 'Tema Dim',
+            'content' => 'Innhold om dim-fallback tema.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Tema Dim']],
+            'search_text' => 'dim fallback',
+            'intent_summary' => 'Leter etter dim tema.',
+            'confidence' => 0.9,
+        ], [0.5, 0.5, 0.0]);
+
+        $this->assertCount(1, $result);
+        $this->assertNull($result->first()['embedding_similarity']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -203,8 +259,10 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
     private function createChunk(KnowledgeItem $knowledgeItem, int $chunkIndex, array $overrides = []): KnowledgeItemChunk
     {
         $content = $overrides['content'] ?? sprintf('Chunk %d content.', $chunkIndex + 1);
+        $pgvector = isset($overrides['embedding_vector_pgvector']) ? $overrides['embedding_vector_pgvector'] : null;
+        unset($overrides['embedding_vector_pgvector']);
 
-        return KnowledgeItemChunk::query()->create(array_merge([
+        $chunk = KnowledgeItemChunk::query()->create(array_merge([
             'knowledge_item_id' => $knowledgeItem->id,
             'chunk_index' => $chunkIndex,
             'content' => $content,
@@ -221,5 +279,24 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
             'section_title' => $overrides['section_title'] ?? null,
             'section_path' => $overrides['section_path'] ?? null,
         ], $overrides));
+
+        if ($pgvector !== null) {
+            DB::table('knowledge_item_chunks')
+                ->where('id', $chunk->id)
+                ->update(['embedding_vector_pgvector' => $pgvector]);
+        }
+
+        return $chunk;
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function embeddingVector(int $dimension, int $oneIndex): array
+    {
+        $vector = array_fill(0, $dimension, 0.0);
+        $vector[$oneIndex] = 1.0;
+
+        return $vector;
     }
 }

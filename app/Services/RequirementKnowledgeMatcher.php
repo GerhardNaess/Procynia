@@ -151,7 +151,10 @@ class RequirementKnowledgeMatcher
                     'metadata_score' => $chunkMetadataScore,
                     'metadata_matches' => data_get($chunk, 'metadata_matches', []),
                     'embedding_vector' => data_get($chunk, 'embedding_vector'),
-                    'embedding_similarity' => null,
+                    'embedding_vector_pgvector' => data_get($chunk, 'embedding_vector_pgvector'),
+                    'embedding_similarity' => is_numeric(data_get($chunk, 'embedding_similarity'))
+                        ? (float) data_get($chunk, 'embedding_similarity')
+                        : null,
                     'final_score' => (float) $score,
                     'knowledge_item_updated_at' => (string) data_get($chunk, 'knowledge_item_updated_at', ''),
                 ];
@@ -182,13 +185,21 @@ class RequirementKnowledgeMatcher
         $finalRankedCandidates = $rankedCandidates
             ->map(function (array $candidate) use ($requirementEmbedding): array {
                 if (! is_array($requirementEmbedding) || $requirementEmbedding === []) {
-                    $candidate['embedding_similarity'] = null;
                     $candidate['final_score'] = (float) $candidate['base_score'];
 
                     return $candidate;
                 }
 
-                $chunkEmbedding = data_get($candidate, 'embedding_vector');
+                $precomputedSimilarity = data_get($candidate, 'embedding_similarity');
+
+                if (is_numeric($precomputedSimilarity)) {
+                    $candidate['embedding_similarity'] = (float) $precomputedSimilarity;
+                    $candidate['final_score'] = (float) $candidate['base_score'] + ((($candidate['embedding_similarity'] + 1.0) / 2.0) * self::EMBEDDING_WEIGHT);
+
+                    return $candidate;
+                }
+
+                $chunkEmbedding = $this->candidateEmbeddingVector($candidate);
 
                 if (! is_array($chunkEmbedding) || $chunkEmbedding === []) {
                     $candidate['embedding_similarity'] = null;
@@ -477,6 +488,29 @@ class RequirementKnowledgeMatcher
         }
 
         return min(array_sum($termWeights), self::METADATA_MAX_BOOST);
+    }
+
+    /**
+     * Purpose: Resolve the best available embedding vector for a candidate row.
+     * Inputs: One ranked candidate payload.
+     * Returns: The pgvector-backed vector first, then the JSON fallback vector.
+     * Side effects: None.
+     */
+    private function candidateEmbeddingVector(array $candidate): ?array
+    {
+        $vector = data_get($candidate, 'embedding_vector_pgvector');
+
+        if (is_array($vector) && $vector !== []) {
+            return $vector;
+        }
+
+        $vector = data_get($candidate, 'embedding_vector');
+
+        if (is_array($vector) && $vector !== []) {
+            return $vector;
+        }
+
+        return null;
     }
 
     /**

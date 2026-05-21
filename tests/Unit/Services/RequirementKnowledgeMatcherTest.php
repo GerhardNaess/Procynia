@@ -221,6 +221,51 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertGreaterThan($matches->last()['final_score'], $matches->get(1)['final_score']);
     }
 
+    public function test_it_prefers_pgvector_embedding_over_json_fallback_when_embedding_vector_pgvector_is_set(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'erfaring metode',
+            collect([
+                $this->chunkPayload(1, 'Pgvector first', 'erfaring metode', '2026-04-06 10:00:00', [0.0, 1.0], [
+                    'embedding_vector_pgvector' => [1.0, 0.0],
+                ]),
+                $this->chunkPayload(2, 'Json first', 'erfaring metode', '2026-04-06 10:01:00', [1.0, 0.0], [
+                    'embedding_vector_pgvector' => [0.0, 1.0],
+                ]),
+            ]),
+            [1.0, 0.0],
+        );
+
+        $this->assertSame([1, 2], $matches->pluck('chunk_id')->all());
+        $this->assertSame(1.0, $matches->first()['embedding_similarity']);
+        $this->assertSame([1.0, 0.0], $matches->first()['embedding_vector_pgvector']);
+    }
+
+    public function test_it_uses_precomputed_embedding_similarity_from_retrieval_and_skips_php_cosine(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'erfaring metode',
+            collect([
+                $this->chunkPayload(1, 'Low precomputed', 'erfaring metode', '2026-04-06 10:00:00', null, [
+                    'embedding_similarity' => 0.1,
+                ]),
+                $this->chunkPayload(2, 'High precomputed', 'erfaring metode', '2026-04-06 10:01:00', null, [
+                    'embedding_similarity' => 0.9,
+                ]),
+            ]),
+            [1.0, 0.0],
+        );
+
+        $this->assertSame([2, 1], $matches->pluck('chunk_id')->all());
+        $this->assertSame(0.9, $matches->first()['embedding_similarity']);
+        $this->assertSame(0.1, $matches->get(1)['embedding_similarity']);
+        $this->assertGreaterThan($matches->get(1)['final_score'], $matches->first()['final_score']);
+    }
+
     public function test_it_uses_a_precomputed_metadata_score_when_present(): void
     {
         $matcher = app(RequirementKnowledgeMatcher::class);
@@ -278,6 +323,8 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'chunk_index' => 0,
             'content' => $content,
             'embedding_vector' => $embeddingVector,
+            'embedding_vector_pgvector' => null,
+            'embedding_similarity' => null,
             'knowledge_item_updated_at' => $updatedAt,
             'metadata_score' => null,
             'metadata_matches' => [],
