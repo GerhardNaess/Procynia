@@ -9,9 +9,9 @@ use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Services\Ai\Contracts\AiTextGenerationClient;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
-use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Mockery;
@@ -33,7 +33,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
     {
         [$document, $chunk] = $this->fixtureBundle();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([
@@ -50,7 +50,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
                     'confidence_score' => 0.93,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);
@@ -72,7 +72,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
     {
         [$document, $chunk] = $this->fixtureBundle();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([
@@ -108,7 +108,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
                     'confidence_score' => 0.93,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);
@@ -129,7 +129,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
             'section_title' => '2.1 Sammendrag og helhetlig løsningsforslag',
         ])->save();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([
@@ -146,7 +146,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
                     'confidence_score' => 0.93,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);
@@ -172,7 +172,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
             'section_title' => '2.2 Strategisk partnerskap, veikart og måloppnåelse',
         ])->save();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([
@@ -189,7 +189,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
                     'confidence_score' => 0.93,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);
@@ -209,7 +209,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
             'section_title' => 'Generell seksjonstitel',
         ])->save();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andReturn([
@@ -226,7 +226,7 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
                     'confidence_score' => 0.93,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);
@@ -245,11 +245,11 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
     {
         [$document, $chunk] = $this->fixtureBundle();
 
-        $client = Mockery::mock(OpenAiClient::class);
+        $client = Mockery::mock(AiTextGenerationClient::class);
         $client->shouldReceive('createResponse')
             ->once()
             ->andThrow(new RuntimeException('OpenAI metadata request failed.'));
-        $this->app->instance(OpenAiClient::class, $client);
+        $this->app->instance(AiTextGenerationClient::class, $client);
 
         $service = app(KnowledgeChunkMetadataGenerationService::class);
         $result = $service->generateForChunk($document, $chunk);

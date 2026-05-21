@@ -6,7 +6,7 @@ use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
-use App\Services\OpenAi\OpenAiClient;
+use App\Services\Ai\Contracts\AiTextGenerationClient;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use JsonException;
@@ -22,7 +22,7 @@ class KnowledgeChunkMetadataGenerationService
     private const TEMPERATURE = 0;
 
     public function __construct(
-        private readonly OpenAiClient $openAiClient,
+        private readonly AiTextGenerationClient $textGenerationClient,
         private readonly KnowledgeMetadataVocabularyService $vocabularyService,
         private readonly KnowledgeChunkMetadataValidator $validator,
     ) {
@@ -53,7 +53,7 @@ class KnowledgeChunkMetadataGenerationService
         ]);
 
         try {
-            $response = $this->openAiClient->createResponse($payload);
+            $response = $this->textGenerationClient->createResponse($payload);
             $decoded = $this->decodePayload($response);
             $decoded = $this->applyDescriptiveMetadataFallbacks($chunk, $decoded);
             $validated = $this->validator->validate($document, $chunk, $decoded, $vocabularyMap);
@@ -139,7 +139,7 @@ class KnowledgeChunkMetadataGenerationService
         ]);
 
         try {
-            $response = $this->openAiClient->createResponse($payload);
+            $response = $this->textGenerationClient->createResponse($payload);
             $decoded = $this->decodePayload($response);
             $decodedChunks = data_get($decoded, 'chunks', []);
 
