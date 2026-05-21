@@ -5,6 +5,7 @@ namespace App\Services\Ai\Retrieval;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Services\KnowledgeChunkCoverageService;
+use App\Support\PgVector;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -96,7 +97,7 @@ class MetadataCandidateRetrievalService
      * Returns: The metadata-filtered candidate chunks, already ranked by metadata affinity.
      * Side effects: Logs the candidate retrieval summary only.
      */
-    public function retrieveForCustomer(int $customerId, array $validatedPlan): Collection
+    public function retrieveForCustomer(int $customerId, array $validatedPlan, ?array $requirementEmbedding = null): Collection
     {
         $selectedMetadata = $this->selectedMetadataFromPlan($validatedPlan);
         $searchText = $this->searchTextFromPlan($validatedPlan);
@@ -107,6 +108,7 @@ class MetadataCandidateRetrievalService
         }
 
         $query = $this->baseQuery($customerId)
+            ->select($this->selectColumns())
             ->where(function (Builder $candidateQuery) use ($selectedMetadata, $searchTerms): void {
                 $hasMetadataFilter = $selectedMetadata !== [];
                 $hasSearchFilter = $searchTerms !== [];
@@ -166,9 +168,29 @@ class MetadataCandidateRetrievalService
                 }
             });
 
+        if (
+            is_array($requirementEmbedding)
+            && $requirementEmbedding !== []
+            && Schema::hasColumn('knowledge_item_chunks', 'embedding_vector_pgvector')
+        ) {
+            $vectorLiteral = PgVector::literal($requirementEmbedding);
+
+            $query->selectRaw(
+                'CASE WHEN knowledge_item_chunks.embedding_vector_pgvector IS NULL THEN NULL ELSE 1 - (knowledge_item_chunks.embedding_vector_pgvector <=> ?::vector) END as embedding_similarity',
+                [$vectorLiteral],
+            );
+            $query->reorder();
+            $query->orderByRaw('CASE WHEN knowledge_item_chunks.embedding_vector_pgvector IS NULL THEN 1 ELSE 0 END');
+            $query->orderByRaw('knowledge_item_chunks.embedding_vector_pgvector <=> ?::vector', [$vectorLiteral]);
+            $query->orderByDesc('knowledge_items.updated_at');
+            $query->orderByDesc('knowledge_items.id');
+            $query->orderBy('knowledge_item_chunks.chunk_index');
+            $query->orderBy('knowledge_item_chunks.id');
+        }
+
         $rawRows = $query
             ->limit(self::MAX_QUERY_ROWS)
-            ->get($this->selectColumns())
+            ->get()
             ->map(fn (KnowledgeItemChunk $chunk): array => $this->chunkRowFromModel($chunk))
             ->values();
 
@@ -314,6 +336,10 @@ class MetadataCandidateRetrievalService
             'section_title' => (string) ($chunk->section_title ?? ''),
             'section_path' => (string) ($chunk->section_path ?? ''),
             'embedding_vector' => is_array($chunk->embedding_vector) ? $chunk->embedding_vector : null,
+            'embedding_vector_pgvector' => is_array($chunk->embedding_vector_pgvector) ? $chunk->embedding_vector_pgvector : null,
+            'embedding_similarity' => is_numeric($chunk->getAttribute('embedding_similarity'))
+                ? (float) $chunk->getAttribute('embedding_similarity')
+                : null,
             'embedding_model' => (string) ($chunk->embedding_model ?? ''),
             'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
             'embedding_error' => $chunk->embedding_error,

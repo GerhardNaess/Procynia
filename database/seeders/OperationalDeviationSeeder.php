@@ -280,13 +280,18 @@ class OperationalDeviationSeeder extends Seeder
             'title' => 'Embeddings lagres som JSON i PostgreSQL',
             'category' => OperationalDeviation::CATEGORY_AI,
             'severity' => OperationalDeviation::SEVERITY_MEDIUM,
-            'status' => OperationalDeviation::STATUS_NEW,
+            'status' => OperationalDeviation::STATUS_CLOSED,
             'description' => 'Embeddings lagres som JSON i PostgreSQL, ikke i vektorindeksert struktur.',
             'impact' => 'Søk blir mindre effektivt ved vekst.',
             'recommended_action' => 'Vurder pgvector og migrering av embeddings til vektorkolonne.',
             'acceptance_criteria' => 'Det foreligger beslutning og plan for vektorsøk før større kundemengde.',
             'source' => 'Statusrapport 15. mai 2026',
             'source_date' => '2026-05-15',
+            'started_at' => '2026-05-21 09:00:00',
+            'ready_for_verification_at' => '2026-05-21 09:30:00',
+            'verified_at' => '2026-05-21 10:00:00',
+            'closed_at' => '2026-05-21 10:00:00',
+            'verification_notes' => 'Pgvector er implementert for embeddings i Procynia. Tabellen knowledge_item_chunks har fått ny vektorkolonne embedding_vector_pgvector med dimensjon 1536. Eksisterende JSON-lagring beholdes midlertidig som fallback og for trygg migrering. Nye og oppdaterte embeddings lagres slik at pgvector kan brukes til vektorsøk, samtidig som eksisterende JSON-data ikke slettes. Søk er oppdatert til å bruke pgvector-basert nearest-neighbor-søk der vector-data finnes, med videreføring av tenant-/customer-scope. Det er også etablert en egen backfill-kommando som kan migrere eksisterende JSON-embeddings til vector-kolonnen uten å regenerere embeddings. Backfill er ikke kjørt i denne endringen og skal godkjennes separat før bruk.',
         ]);
 
         $this->seed([

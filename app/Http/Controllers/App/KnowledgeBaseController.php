@@ -1179,6 +1179,7 @@ class KnowledgeBaseController extends Controller
             'confidence_score' => null,
             'metadata_status' => KnowledgeItemChunk::METADATA_STATUS_PENDING_REVIEW,
             'embedding_vector' => null,
+            'embedding_vector_pgvector' => null,
             'embedding_model' => null,
             'embedding_generated_at' => null,
             'embedding_error' => null,
@@ -1216,12 +1217,7 @@ class KnowledgeBaseController extends Controller
             return;
         }
 
-        $chunk->forceFill([
-            'embedding_vector' => $outcome['embedding'] ?? null,
-            'embedding_model' => $outcome['model'] ?? null,
-            'embedding_generated_at' => now(),
-            'embedding_error' => null,
-        ])->save();
+        $this->persistChunkEmbedding($chunk, $outcome);
     }
 
     /**
@@ -1237,6 +1233,25 @@ class KnowledgeBaseController extends Controller
         }
 
         return trim((string) $chunk->content);
+    }
+
+    /**
+     * Purpose: Persist the same embedding payload in both the JSON fallback column and the pgvector column.
+     * Inputs: The chunk and the successful embedding outcome.
+     * Returns: None.
+     * Side effects: Updates the chunk embedding fields in the database.
+     */
+    private function persistChunkEmbedding(KnowledgeItemChunk $chunk, array $outcome): void
+    {
+        $embedding = is_array($outcome['embedding'] ?? null) ? array_values($outcome['embedding']) : null;
+
+        $chunk->forceFill([
+            'embedding_vector' => $embedding,
+            'embedding_vector_pgvector' => $embedding,
+            'embedding_model' => $outcome['model'] ?? null,
+            'embedding_generated_at' => now(),
+            'embedding_error' => null,
+        ])->save();
     }
 
     /**
@@ -2787,12 +2802,7 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $chunk->forceFill([
-                'embedding_vector' => $outcome['embedding'] ?? null,
-                'embedding_model' => $outcome['model'] ?? null,
-                'embedding_generated_at' => now(),
-                'embedding_error' => null,
-            ])->save();
+            $this->persistChunkEmbedding($chunk, $outcome);
         }
     }
 
@@ -2843,12 +2853,7 @@ class KnowledgeBaseController extends Controller
                 continue;
             }
 
-            $chunk->forceFill([
-                'embedding_vector' => $outcome['embedding'] ?? null,
-                'embedding_model' => $outcome['model'] ?? null,
-                'embedding_generated_at' => now(),
-                'embedding_error' => null,
-            ])->save();
+            $this->persistChunkEmbedding($chunk, $outcome);
         }
     }
 

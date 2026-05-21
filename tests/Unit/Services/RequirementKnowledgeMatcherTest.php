@@ -142,6 +142,28 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertGreaterThan($matches->last()['final_score'], $matches->get(1)['final_score']);
     }
 
+    public function test_it_prefers_pgvector_embeddings_over_json_fallback_vectors_when_available(): void
+    {
+        $matcher = app(RequirementKnowledgeMatcher::class);
+
+        $matches = $matcher->match(
+            'erfaring metode',
+            collect([
+                $this->chunkPayload(1, 'Pgvector first', 'erfaring metode', '2026-04-06 10:00:00', [0.0, 1.0], [
+                    'embedding_vector_pgvector' => [1.0, 0.0],
+                ]),
+                $this->chunkPayload(2, 'Json first', 'erfaring metode', '2026-04-06 10:01:00', [1.0, 0.0], [
+                    'embedding_vector_pgvector' => [0.0, 1.0],
+                ]),
+            ]),
+            [1.0, 0.0],
+        );
+
+        $this->assertSame([1, 2], $matches->pluck('chunk_id')->all());
+        $this->assertSame(1.0, $matches->first()['embedding_similarity']);
+        $this->assertSame([1.0, 0.0], $matches->first()['embedding_vector_pgvector']);
+    }
+
     public function test_it_uses_a_precomputed_metadata_score_when_present(): void
     {
         $matcher = app(RequirementKnowledgeMatcher::class);
@@ -213,6 +235,8 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'knowledge_item_summary' => '',
             'summary_for_retrieval' => '',
             'table_text' => '',
+            'embedding_vector_pgvector' => null,
+            'embedding_similarity' => null,
         ], $metadata);
     }
 }
