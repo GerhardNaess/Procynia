@@ -55,8 +55,8 @@ function SectionTabs({ activeTab, onChange, showPermissions = false, showDocumen
     const tabs = [
         { key: 'departments', label: 'Avdelinger' },
         { key: 'users', label: 'Brukere' },
-        ...(showDocumentTemplates ? [{ key: 'document-templates', label: 'Dokumentmaler' }] : []),
         ...(showPermissions ? [{ key: 'permissions', label: 'Tilganger' }] : []),
+        ...(showDocumentTemplates ? [{ key: 'document-templates', label: 'Dokumentmaler' }] : []),
     ];
 
     return (
