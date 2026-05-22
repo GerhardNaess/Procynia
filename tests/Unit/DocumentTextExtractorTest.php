@@ -513,6 +513,132 @@ XML;
         $this->assertStringContainsString('Dette er reell innholdstekst etter TOC.', $semanticText);
     }
 
+    public function test_pdf_visually_wrapped_lines_are_joined_with_space_into_one_paragraph(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Dette er første del av en lang setning som',
+                100,
+                72,
+                620,
+                120,
+            ),
+            $this->popplerLineGroup(
+                'fortsetter på neste linje i PDF-filen.',
+                122,
+                72,
+                540,
+                142,
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame('paragraph', $blocks[0]['type']);
+        $this->assertSame(
+            'Dette er første del av en lang setning som fortsetter på neste linje i PDF-filen.',
+            $blocks[0]['text'],
+        );
+    }
+
+    public function test_pdf_real_paragraph_break_produces_two_separate_blocks(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup('Første avsnitt.', 100, 72, 400, 120),
+            $this->popplerLineGroup('Andre avsnitt.', 160, 72, 380, 180),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(2, $blocks);
+        $this->assertSame('Første avsnitt.', $blocks[0]['text']);
+        $this->assertSame('Andre avsnitt.', $blocks[1]['text']);
+    }
+
+    public function test_pdf_hyphenated_line_ending_is_merged_without_hyphen_when_next_line_starts_lowercase(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Leverandøren skal sikre kontinuer-',
+                100,
+                72,
+                580,
+                120,
+            ),
+            $this->popplerLineGroup(
+                'lig tilgang til tjenesten.',
+                122,
+                72,
+                460,
+                142,
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame(
+            'Leverandøren skal sikre kontinuerlig tilgang til tjenesten.',
+            $blocks[0]['text'],
+        );
+    }
+
+    public function test_pdf_hyphen_is_preserved_when_next_line_starts_with_uppercase(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup(
+                'Tjenesten oppfyller kravene i EU-',
+                100,
+                72,
+                560,
+                120,
+            ),
+            $this->popplerLineGroup(
+                'Kommisjonen sine retningslinjer.',
+                122,
+                72,
+                500,
+                142,
+            ),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(1, $blocks);
+        $this->assertSame(
+            'Tjenesten oppfyller kravene i EU- Kommisjonen sine retningslinjer.',
+            $blocks[0]['text'],
+        );
+    }
+
+    public function test_pdf_list_items_are_emitted_individually_not_merged_into_paragraph(): void
+    {
+        $extractor = new DocumentTextExtractor();
+        $lineGroups = [
+            $this->popplerLineGroup('• Første listepunkt', 100, 72, 400, 120, [
+                ['text' => '•', 'left' => 72, 'width' => 12],
+                ['text' => 'Første listepunkt', 'left' => 96, 'width' => 280],
+            ]),
+            $this->popplerLineGroup('• Andre listepunkt', 122, 72, 390, 142, [
+                ['text' => '•', 'left' => 72, 'width' => 12],
+                ['text' => 'Andre listepunkt', 'left' => 96, 'width' => 270],
+            ]),
+        ];
+
+        $blocks = $this->invokeDocumentTextExtractorMethod($extractor, 'buildPopplerPdfTextBlocks', [$lineGroups, [], 1]);
+
+        $this->assertCount(2, $blocks);
+        $this->assertSame('list', $blocks[0]['type']);
+        $this->assertSame('list', $blocks[1]['type']);
+        $this->assertSame('• Første listepunkt', $blocks[0]['text']);
+        $this->assertSame('• Andre listepunkt', $blocks[1]['text']);
+    }
+
     public function test_it_keeps_real_page_six_failure_level_rows_in_one_table_run(): void
     {
         $extractor = new DocumentTextExtractor();

@@ -2132,7 +2132,7 @@ class DocumentTextExtractor
                 return;
             }
 
-            $text = $this->normalizeBlockText(implode("\n", $currentParagraph));
+            $text = $this->normalizeBlockText($this->joinPdfParagraphLines($currentParagraph));
 
             if ($text !== '') {
                 $blocks[] = [
@@ -3649,6 +3649,32 @@ class DocumentTextExtractor
      * Returns: A cleaned text value with single blank lines between blocks.
      * Side effects: None.
      */
+    /**
+     * Join visually-wrapped PDF lines into a single string.
+     * Lines ending with a hyphen followed by a lowercase letter on the next line
+     * are treated as soft hyphens — the hyphen is removed and the words merged.
+     * All other consecutive lines are joined with a single space.
+     *
+     * @param array<int, string> $lines
+     */
+    private function joinPdfParagraphLines(array $lines): string
+    {
+        $result = '';
+        foreach ($lines as $line) {
+            if ($result === '') {
+                $result = $line;
+                continue;
+            }
+            if (str_ends_with($result, '-') && preg_match('/^\p{Ll}/u', $line)) {
+                $result = mb_substr($result, 0, -1) . $line;
+            } else {
+                $result .= ' ' . $line;
+            }
+        }
+
+        return $result;
+    }
+
     private function normalizeBlockText(string $value): string
     {
         $value = str_replace(["\r\n", "\r"], "\n", $value);
