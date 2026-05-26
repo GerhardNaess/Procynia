@@ -98,6 +98,7 @@ class HandleInertiaRequests extends Middleware
                 'suppliers' => __('procynia.suppliers'),
                 'common' => [
                     'back' => __('procynia.frontend.back'),
+                    'cancel' => __('procynia.common.cancel'),
                     'customer' => __('procynia.common.customer'),
                     'deadline' => __('procynia.notice.deadline'),
                     'download' => __('procynia.frontend.download'),

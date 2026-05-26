@@ -1985,10 +1985,6 @@ class NoticeController extends Controller
                 'type' => 'RFI',
                 'at' => $notice->rfi_submission_deadline_at,
             ],
-            [
-                'type' => 'RFP',
-                'at' => $notice->rfp_submission_deadline_at,
-            ],
         ])
             ->merge($businessReviewCandidates)
             ->filter(fn (array $candidate): bool => $candidate['at'] !== null)

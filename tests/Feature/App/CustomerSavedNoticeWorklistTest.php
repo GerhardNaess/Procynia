@@ -638,64 +638,81 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame($rfiDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
     }
 
-    public function test_saved_payload_returns_rfp_deadline_when_only_rfp_is_upcoming(): void
+    public function test_saved_payload_ignores_rfp_submission_deadline_at_for_next_deadline(): void
     {
         $context = $this->customerAdminContext();
-        $rfpDeadline = now()->addDays(9)->startOfDay();
         $savedNotice = $this->createSavedNotice(
             $context['customer']->id,
             '2026-1011',
             'Bare RFP',
-            rfpSubmissionDeadlineAt: $rfpDeadline->toDateTimeString(),
+            rfpSubmissionDeadlineAt: now()->addDays(9)->startOfDay()->toDateTimeString(),
             status: null,
         );
 
         $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
 
-        $this->assertSame('upcoming', $payload['deadline_state']);
-        $this->assertSame('RFP', $payload['next_deadline_type']);
-        $this->assertSame($rfpDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertSame('missing', $payload['deadline_state']);
+        $this->assertNull($payload['next_deadline_type']);
+        $this->assertNull($payload['next_deadline_at']);
     }
 
-    public function test_saved_payload_returns_nearest_future_submission_deadline_when_both_exist(): void
+    public function test_saved_payload_returns_rfi_when_both_rfi_and_rfp_exist(): void
     {
         $context = $this->customerAdminContext();
         $rfiDeadline = now()->addDays(10)->startOfDay();
-        $rfpDeadline = now()->addDays(4)->startOfDay();
         $savedNotice = $this->createSavedNotice(
             $context['customer']->id,
             '2026-1012',
             'Begge frister',
             rfiSubmissionDeadlineAt: $rfiDeadline->toDateTimeString(),
-            rfpSubmissionDeadlineAt: $rfpDeadline->toDateTimeString(),
+            rfpSubmissionDeadlineAt: now()->addDays(4)->startOfDay()->toDateTimeString(),
             status: null,
         );
 
         $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
 
         $this->assertSame('upcoming', $payload['deadline_state']);
-        $this->assertSame('RFP', $payload['next_deadline_type']);
-        $this->assertSame($rfpDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertSame('RFI', $payload['next_deadline_type']);
+        $this->assertSame($rfiDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
     }
 
-    public function test_saved_payload_returns_rfp_when_rfi_is_past_and_rfp_is_upcoming(): void
+    public function test_saved_payload_returns_expired_when_rfi_is_past_and_rfp_submission_is_ignored(): void
     {
         $context = $this->customerAdminContext();
-        $rfpDeadline = now()->addDays(7)->startOfDay();
         $savedNotice = $this->createSavedNotice(
             $context['customer']->id,
             '2026-1013',
-            'RFI passert',
+            'RFI passert, RFP ignorert',
             rfiSubmissionDeadlineAt: now()->subDays(2)->startOfDay()->toDateTimeString(),
-            rfpSubmissionDeadlineAt: $rfpDeadline->toDateTimeString(),
+            rfpSubmissionDeadlineAt: now()->addDays(7)->startOfDay()->toDateTimeString(),
             status: null,
         );
 
         $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
 
-        $this->assertSame('upcoming', $payload['deadline_state']);
-        $this->assertSame('RFP', $payload['next_deadline_type']);
-        $this->assertSame($rfpDeadline->format('Y-m-d'), substr((string) $payload['next_deadline_at'], 0, 10));
+        $this->assertSame('expired', $payload['deadline_state']);
+        $this->assertNull($payload['next_deadline_type']);
+        $this->assertNull($payload['next_deadline_at']);
+    }
+
+    public function test_rfp_submission_deadline_at_does_not_influence_next_deadline_type(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-rfp-ignore',
+            'Kun gammel manuell RFP-frist',
+            deadline: '2026-06-22 00:00:00',
+            rfpSubmissionDeadlineAt: '2026-07-24 00:00:00',
+            status: null,
+        );
+
+        $payload = $this->savedNoticePayload($context['admin'], $savedNotice);
+
+        $this->assertSame('missing', $payload['deadline_state']);
+        $this->assertNull($payload['next_deadline_type']);
+        $this->assertNull($payload['next_deadline_at']);
+        $this->assertNotSame('2026-07-24', substr((string) $payload['next_deadline_at'], 0, 10));
     }
 
     public function test_saved_payload_marks_deadline_metadata_missing_when_neither_rfi_nor_rfp_exists(): void
@@ -3385,7 +3402,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame(1, count($page['props']['notice']['actions']['case_access']['accesses']));
     }
 
-    public function test_unrelated_bid_manager_cannot_grant_case_access(): void
+    public function test_company_wide_bid_manager_can_grant_case_access_even_if_not_assigned(): void
     {
         $context = $this->customerAdminContext();
         $assignedBidManager = User::factory()->create([
@@ -3399,9 +3416,9 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
             'primary_department_id' => null,
         ]);
-        $unrelatedBidManager = User::factory()->create([
-            'name' => 'Unrelated Bid Manager',
-            'email' => 'unrelated.manager@example.test',
+        $unassignedBidManager = User::factory()->create([
+            'name' => 'Unassigned Bid Manager',
+            'email' => 'unassigned.manager@example.test',
             'role' => User::ROLE_USER,
             'bid_role' => User::BID_ROLE_BID_MANAGER,
             'bid_manager_scope' => User::BID_MANAGER_SCOPE_COMPANY,
@@ -3418,7 +3435,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
             bidManagerUserId: $assignedBidManager->id,
         );
 
-        $this->actingAs($unrelatedBidManager)
+        $this->actingAs($unassignedBidManager)
             ->withSession(['_token' => 'test-token'])
             ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
             ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
@@ -3426,7 +3443,51 @@ class CustomerSavedNoticeWorklistTest extends TestCase
                 'user_id' => $assignedBidManager->id,
                 'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
             ])
-            ->assertForbidden();
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+    }
+
+    public function test_system_owner_can_manage_case_access_for_any_case(): void
+    {
+        $context = $this->customerAdminContext();
+        $contributor = User::factory()->create([
+            'name' => 'Some Contributor',
+            'email' => 'some.contributor@example.test',
+            'role' => User::ROLE_USER,
+            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+            'primary_affiliation_scope' => User::PRIMARY_AFFILIATION_SCOPE_COMPANY,
+            'primary_department_id' => null,
+        ]);
+        $savedNotice = $this->createSavedNotice(
+            $context['customer']->id,
+            '2026-1011-system-owner-access',
+            'System owner manages access',
+            bidStatus: SavedNotice::BID_STATUS_NEGOTIATION,
+        );
+
+        $page = $this->inertiaPage(
+            $this->actingAs($context['admin'])->get("/app/notices/saved/{$savedNotice->id}"),
+        );
+
+        $this->assertTrue($page['props']['notice']['actions']['case_access']['can_manage']);
+
+        $this->actingAs($context['admin'])
+            ->withSession(['_token' => 'test-token'])
+            ->withHeaders(['X-CSRF-TOKEN' => 'test-token'])
+            ->from(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.notices.saved.case-access.store', ['savedNotice' => $savedNotice->id]), [
+                'user_id' => $contributor->id,
+                'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            ])
+            ->assertRedirect(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]));
+
+        $this->assertDatabaseHas('saved_notice_user_access', [
+            'saved_notice_id' => $savedNotice->id,
+            'user_id' => $contributor->id,
+            'access_role' => SavedNoticeUserAccess::ACCESS_ROLE_CONTRIBUTOR,
+            'revoked_at' => null,
+        ]);
     }
 
     public function test_contributor_cannot_grant_case_access(): void

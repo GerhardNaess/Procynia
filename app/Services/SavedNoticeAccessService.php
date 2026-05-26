@@ -15,6 +15,14 @@ class SavedNoticeAccessService
             return false;
         }
 
+        if ($actor->isSystemOwner()) {
+            return true;
+        }
+
+        if ($actor->isBidManager() && $this->canManage($actor, $notice)) {
+            return true;
+        }
+
         return $actor->id === $notice->bid_manager_user_id
             || $actor->id === $notice->opportunity_owner_user_id;
     }

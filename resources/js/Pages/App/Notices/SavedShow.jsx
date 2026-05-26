@@ -311,15 +311,6 @@ function closureActionGuidance(actionStatus, text) {
     }
 }
 
-function deadlineStateLabel(notice, locale, text) {
-    if (!notice.next_deadline_at) {
-        return notice.deadline ? formatDate(notice.deadline, locale) : text.notRegistered;
-    }
-
-    const prefix = notice.next_deadline_type ? `${notice.next_deadline_type} ` : '';
-
-    return `${prefix}${formatDate(notice.next_deadline_at, locale)}`;
-}
 
 function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle, children }) {
     return (
@@ -424,7 +415,6 @@ export default function SavedNoticeShow({ notice }) {
         questions_rfi_deadline_at: '',
         rfi_submission_deadline_at: '',
         questions_rfp_deadline_at: '',
-        rfp_submission_deadline_at: '',
         award_date_at: '',
         reference_number: '',
         contact_person_name: '',
@@ -532,7 +522,6 @@ export default function SavedNoticeShow({ notice }) {
     const sourceTypeLabel = noticeSourceTypeLabel(notice, tsn);
     const externalLinkLabel = noticeExternalLinkLabel(notice, tsn);
     const sourceBadgeClassName = noticeSourceBadgeClassName(notice);
-    const deadlineSummary = deadlineStateLabel(notice, locale, tsn);
     const businessReviews = notice.business_reviews ?? [];
     const infoItemEntries = infoItems.items;
     const infoItemSummary = infoItemEntries.length > 0
@@ -587,7 +576,6 @@ export default function SavedNoticeShow({ notice }) {
             questions_rfi_deadline_at: dateInputValue(notice.questions_rfi_deadline_at),
             rfi_submission_deadline_at: dateInputValue(notice.rfi_submission_deadline_at),
             questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
-            rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
             award_date_at: dateInputValue(notice.award_date_at),
             reference_number: notice.reference_number ?? '',
             contact_person_name: notice.contact_person_name ?? '',
@@ -1178,12 +1166,8 @@ export default function SavedNoticeShow({ notice }) {
                                             <div className="text-sm font-medium text-slate-900">{formatDate(notice.publication_date, locale)}</div>
                                         </div>
                                         <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.deadline}</div>
-                                            <div className="text-sm font-medium text-slate-900">{formatDate(notice.deadline, locale)}</div>
-                                        </div>
-                                        <div className="space-y-1">
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.next_deadline}</div>
-                                            <div className="text-sm font-medium text-slate-900">{deadlineStateLabel(notice, locale)}</div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.official_deadline}</div>
+                                            <div className="text-sm font-medium text-slate-900">{notice.deadline ? formatDate(notice.deadline, locale) : '—'}</div>
                                         </div>
                                         <div className="space-y-1">
                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.cpv}</div>
@@ -2074,74 +2058,6 @@ export default function SavedNoticeShow({ notice }) {
                                             >
                                                 {submissionForm.processing ? tsn.registering : tsn.add_submission}
                                             </button>
-                                        ) : null}
-                                    </ActionAccordionSection>
-
-                                    <ActionAccordionSection
-                                        title={tsn.deadlines_title}
-                                        summary={deadlineSummary}
-                                        hint={tsn.deadlines_hint}
-                                        isOpen={openActionSection === 'deadlines'}
-                                        onToggle={() => setOpenActionSection((current) => (current === 'deadlines' ? null : 'deadlines'))}
-                                    >
-                                        {!isEditingDeadlines ? (
-                                            <button
-                                                type="button"
-                                                onClick={openDeadlineEditor}
-                                                className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
-                                            >
-                                                {tsn.deadlines_update}
-                                            </button>
-                                        ) : null}
-
-                                        {isEditingDeadlines ? (
-                                            <form
-                                                onSubmit={(event) => {
-                                                    event.preventDefault();
-                                                    submitDeadlineEditor();
-                                                }}
-                                                className="space-y-3"
-                                            >
-                                                {[
-                                                    { key: 'questions_deadline_at', label: tsn.deadline_questions_label },
-                                                    { key: 'questions_rfi_deadline_at', label: tsn.deadline_questions_rfi_label },
-                                                    { key: 'rfi_submission_deadline_at', label: tsn.deadline_rfi_submission_label },
-                                                    { key: 'questions_rfp_deadline_at', label: tsn.deadline_questions_rfp_label },
-                                                    { key: 'rfp_submission_deadline_at', label: tsn.deadline_rfp_submission_label },
-                                                    { key: 'award_date_at', label: tsn.deadline_award_date_label },
-                                                ].map((field) => (
-                                                    <label key={field.key} className="space-y-2">
-                                                        <span className="text-sm font-medium text-slate-700">{field.label}</span>
-                                                        <input
-                                                            type="date"
-                                                            value={deadlineForm.data[field.key]}
-                                                            onChange={(event) => deadlineForm.setData(field.key, event.target.value)}
-                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                        />
-                                                        {deadlineForm.errors[field.key] ? (
-                                                            <p className="text-sm text-rose-600">{deadlineForm.errors[field.key]}</p>
-                                                        ) : null}
-                                                    </label>
-                                                ))}
-
-                                                <div className="flex flex-wrap gap-2.5 pt-1">
-                                                    <button
-                                                        type="submit"
-                                                        disabled={!isDeadlineDirty || deadlineForm.processing}
-                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                {deadlineForm.processing ? common.loading : common.save}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={cancelDeadlineEditor}
-                                                        disabled={deadlineForm.processing}
-                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                                                    >
-                                                        {common.cancel}
-                                                    </button>
-                                                </div>
-                                            </form>
                                         ) : null}
                                     </ActionAccordionSection>
 

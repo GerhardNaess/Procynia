@@ -466,7 +466,7 @@ function savedNoticeTimelineSteps(notice, text) {
         { key: 'questions_rfi', label: text.questionsRfiLabel, date: notice.questions_rfi_deadline_at },
         { key: 'rfi', label: text.rfiLabel, date: notice.rfi_submission_deadline_at },
         { key: 'questions_rfp', label: text.questionsRfpLabel, date: notice.questions_rfp_deadline_at },
-        { key: 'rfp', label: text.rfpLabel, date: notice.rfp_submission_deadline_at },
+        { key: 'rfp', label: text.rfpLabel, date: notice.deadline },
         { key: 'award', label: text.awardLabel, date: notice.award_date_at },
     ];
 }
@@ -791,7 +791,6 @@ export default function NoticeIndex({
         questions_rfi_deadline_at: '',
         rfi_submission_deadline_at: '',
         questions_rfp_deadline_at: '',
-        rfp_submission_deadline_at: '',
         award_date_at: '',
         reference_number: '',
         contact_person_name: '',
@@ -990,7 +989,6 @@ export default function NoticeIndex({
             questions_rfi_deadline_at: dateInputValue(notice.questions_rfi_deadline_at),
             rfi_submission_deadline_at: dateInputValue(notice.rfi_submission_deadline_at),
             questions_rfp_deadline_at: dateInputValue(notice.questions_rfp_deadline_at),
-            rfp_submission_deadline_at: dateInputValue(notice.rfp_submission_deadline_at),
             award_date_at: dateInputValue(notice.award_date_at),
             reference_number: notice.reference_number ?? '',
             contact_person_name: notice.contact_person_name ?? '',
@@ -1895,10 +1893,23 @@ export default function NoticeIndex({
                                                 label: `${noticesText.deadlinePrefix} ${formatDate(notice.deadline, locale)}`,
                                                 className: 'bg-slate-100 text-slate-700 ring-slate-200',
                                             };
-                                        const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest ? savedNoticeTimelineSteps(notice, noticesText) : [];
+                                        const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
+                                        const timelineSteps = isSavedOrHistoryMode && !isPrivateRequest
+                                            ? savedNoticeTimelineSteps(
+                                                isEditingDeadlines
+                                                    ? {
+                                                        questions_rfi_deadline_at: deadlineForm.data.questions_rfi_deadline_at || null,
+                                                        rfi_submission_deadline_at: deadlineForm.data.rfi_submission_deadline_at || null,
+                                                        questions_rfp_deadline_at: deadlineForm.data.questions_rfp_deadline_at || null,
+                                                        award_date_at: deadlineForm.data.award_date_at || null,
+                                                        deadline: notice.deadline,
+                                                    }
+                                                    : notice,
+                                                noticesText,
+                                            )
+                                            : [];
                                         const businessReviews = (notice.business_reviews ?? []).filter((review) => review.business_review_at);
                                         const isDetailsExpanded = Boolean(expandedSavedNoticeIds[notice.id]);
-                                        const isEditingDeadlines = isSavedMode && editingSavedNoticeId === notice.id;
                                         const isEditingHistory = isHistoryMode && editingHistoryNoticeId === notice.id;
                                         const historyContractLabel = isHistoryMode ? historyContractSummary(notice, noticesText) : null;
                                         const needsHistorySelection = isHistoryMode ? historyNeedsStructuredSelection(notice) : false;
@@ -2185,19 +2196,11 @@ export default function NoticeIndex({
                                                                 Åpne sak
                                                             </Link>
                                                         ) : null}
-                                                        {isSavedOrHistoryMode ? (
+                                                        {isHistoryMode ? (
                                                             <button
                                                                 type="button"
                                                                 aria-expanded={isDetailsExpanded}
-                                                                onClick={() => {
-                                                                    if (isHistoryMode) {
-                                                                        toggleHistoryEditor(notice);
-
-                                                                        return;
-                                                                    }
-
-                                                                    toggleSavedNoticeDetails(notice.id);
-                                                                }}
+                                                                onClick={() => toggleHistoryEditor(notice)}
                                                                 className={classNames(
                                                                     'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
                                                                     isDetailsExpanded
@@ -2205,7 +2208,7 @@ export default function NoticeIndex({
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                             >
-                                                                                {isHistoryMode ? noticesText.addInformation : '...'}
+                                                                {noticesText.addInformation}
                                                             </button>
                                                         ) : null}
                                                         {isSavedMode ? (
@@ -2219,7 +2222,7 @@ export default function NoticeIndex({
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                                                 )}
                                                                 >
-                                                                Rediger
+                                                                Rediger frister
                                                             </button>
                                                         ) : null}
                                                         {isLiveMode ? (
@@ -2349,7 +2352,7 @@ export default function NoticeIndex({
                                                     </form>
                                                 ) : null}
 
-                                                        {isSavedOrHistoryMode && isDetailsExpanded ? (
+                                                        {(isSavedMode || (isHistoryMode && isDetailsExpanded)) ? (
                                                             <div className="mt-4 border-t border-slate-100 pt-4 text-sm text-slate-600">
                                                                 {isPrivateRequest ? (
                                                                     <div className="grid gap-2 sm:grid-cols-2">
@@ -2435,10 +2438,10 @@ export default function NoticeIndex({
                                                                                 <span>{formatDate(notice.questions_rfp_deadline_at, locale)}</span>
                                                                             </div>
                                                                         ) : null}
-                                                                        {notice.rfp_submission_deadline_at ? (
+                                                                        {notice.deadline ? (
                                                                             <div>
                                                                                 <span className="font-medium text-slate-700">{noticesText.rfpLabel}:</span>{' '}
-                                                                                <span>{formatDate(notice.rfp_submission_deadline_at, locale)}</span>
+                                                                                <span>{formatDate(notice.deadline, locale)}</span>
                                                                             </div>
                                                                         ) : null}
                                                                         {notice.award_date_at ? (
@@ -2531,19 +2534,6 @@ export default function NoticeIndex({
                                                                     </label>
 
                                                                     <label className="space-y-2">
-                                                                        <span className="text-sm font-medium text-slate-700">{noticesText.deadlineRfpSubmissionLabel}</span>
-                                                                        <input
-                                                                            type="date"
-                                                                            value={deadlineForm.data.rfp_submission_deadline_at}
-                                                                            onChange={(event) => deadlineForm.setData('rfp_submission_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                                                        />
-                                                                        {deadlineForm.errors.rfp_submission_deadline_at ? (
-                                                                            <p className="text-sm text-rose-600">{deadlineForm.errors.rfp_submission_deadline_at}</p>
-                                                                        ) : null}
-                                                                    </label>
-
-                                                                    <label className="space-y-2">
                                                                         <span className="text-sm font-medium text-slate-700">{noticesText.deadlineAwardDateLabel}</span>
                                                                         <input
                                                                             type="date"
@@ -2620,21 +2610,37 @@ export default function NoticeIndex({
                                                                     </div>
                                                                 </div>
 
-                                                                <div className="mt-4 flex flex-wrap gap-2.5">
-                                                                    <button
-                                                                        type="submit"
-                                                                        disabled={deadlineForm.processing}
-                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                    >
-                                                                        {deadlineForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
-                                                                    </button>
+                                                                <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5">
+                                                                    <div className="flex flex-wrap gap-2.5">
+                                                                        <button
+                                                                            type="submit"
+                                                                            disabled={deadlineForm.processing}
+                                                                            className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        >
+                                                                            {deadlineForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={cancelDeadlineEditor}
+                                                                            disabled={deadlineForm.processing}
+                                                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        >
+                                                                            {noticesText.cancelLabel}
+                                                                        </button>
+                                                                    </div>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={cancelDeadlineEditor}
                                                                         disabled={deadlineForm.processing}
-                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        onClick={() => deadlineForm.setData((data) => ({
+                                                                            ...data,
+                                                                            questions_rfi_deadline_at: '',
+                                                                            rfi_submission_deadline_at: '',
+                                                                            questions_rfp_deadline_at: '',
+                                                                            award_date_at: '',
+                                                                        }))}
+                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
-                                                                        {noticesText.cancelLabel}
+                                                                        Nullstill frister
                                                                     </button>
                                                                 </div>
                                                             </form>
