@@ -449,6 +449,7 @@ export default function SavedNoticeShow({ notice }) {
     const [openClosureStatus, setOpenClosureStatus] = useState(null);
     const [openActionSection, setOpenActionSection] = useState('decision');
     const [openCommentPhases, setOpenCommentPhases] = useState({});
+    const [isActivePhaseExpanded, setIsActivePhaseExpanded] = useState(true);
     const [isStatusActionProcessing, setIsStatusActionProcessing] = useState(false);
     const [isArchiveHistoryFormOpen, setIsArchiveHistoryFormOpen] = useState(false);
     const shouldShowSubmissions = notice.submissions.length > 0
@@ -1336,120 +1337,130 @@ export default function SavedNoticeShow({ notice }) {
 
                         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                             <div className="space-y-5">
-                                <div>
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                        <div className="min-w-0">
-                                            <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.phase_comment_title}</h2>
-                                            <p className="mt-1 text-sm text-slate-500">{tsn.phase_comment_active_label}: {activeCommentPhaseLabel}</p>
-                                        </div>
-
-                                        <div className="flex flex-wrap justify-end gap-2">
-                                            {commentPhaseOptions.map((phaseOption) => {
-                                                const isOpen = Boolean(openCommentPhases[phaseOption.status]);
-                                                const isCurrentPhase = notice.bid_status === phaseOption.status;
-
-                                                return (
-                                                    <button
-                                                        key={phaseOption.status}
-                                                        type="button"
-                                                        onClick={isCurrentPhase ? undefined : () => toggleCommentPhase(phaseOption.status)}
-                                                        aria-expanded={isCurrentPhase ? true : isOpen}
-                                                        disabled={isCurrentPhase}
-                                                        className={classNames(
-                                                            'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition disabled:cursor-default',
-                                                            isCurrentPhase
-                                                                ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                                                : isOpen
-                                                                    ? 'border-violet-200 bg-violet-50 text-violet-700'
-                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:text-violet-700',
-                                                        )}
-                                                    >
-                                                        <span className="text-[10px] font-bold uppercase tracking-[0.14em]">
-                                                            {phaseOption.number}
-                                                        </span>
-                                                        <span className="whitespace-nowrap">
-                                                            {phaseOption.label}
-                                                        </span>
-                                                        {isCurrentPhase ? (
-                                                            <span className="rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet-700">
-                                                                {tsn.active_label}
-                                                            </span>
-                                                        ) : (
-                                                            <span className="text-[10px] leading-none">
-                                                                {isOpen ? '−' : '+'}
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
+                                {/* Zone 1: Header */}
+                                <div className="flex items-center gap-2">
+                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.phase_comment_title}</h2>
+                                    <InfoHint size="sm" align="right" label={tsn.phase_comment_hint_label ?? 'Vis forklaring for fasekommentarer'} text={tsn.phase_comment_hint} />
                                 </div>
 
-                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                        {tsn.active_phase_label}
-                                    </div>
-                                    <div className="mt-2 text-sm font-semibold text-slate-950">
-                                        {guidance.phaseTitle}
-                                    </div>
-                                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                                        {guidance.description}
-                                    </p>
-                                    <div className="mt-3 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+                                {/* Zone 2: Phase selector */}
+                                <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                                    {commentPhaseOptions.map((phaseOption) => {
+                                        const isOpen = Boolean(openCommentPhases[phaseOption.status]);
+                                        const isCurrentPhase = notice.bid_status === phaseOption.status;
+                                        const isHighlighted = isCurrentPhase || isOpen;
 
-                                    <div className="mt-4 space-y-3">
-                                        {activePhaseCommentEntries.length > 0 ? (
-                                            activePhaseCommentEntries.map((comment) => (
-                                                <PhaseCommentCard key={comment.id} comment={comment} locale={locale} text={tsn} />
-                                            ))
-                                        ) : (
-                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                                                {tsn.phase_comment_empty}
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {canCommentOnCase ? (
-                                        <form
-                                            onSubmit={(event) => {
-                                                event.preventDefault();
-                                                submitPhaseComment();
-                                            }}
-                                            className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                                        >
-                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                                {tsn.phase_comment_new}
-                                            </div>
-
-                                            <label className="space-y-1.5">
-                                                <span className="text-sm font-medium text-slate-800">
-                                                    {tsn.phase_comment_form_label}
+                                        return (
+                                            <button
+                                                key={phaseOption.status}
+                                                type="button"
+                                                onClick={isCurrentPhase ? undefined : () => toggleCommentPhase(phaseOption.status)}
+                                                aria-expanded={isCurrentPhase ? true : isOpen}
+                                                disabled={isCurrentPhase}
+                                                className={classNames(
+                                                    'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition disabled:cursor-default',
+                                                    isHighlighted
+                                                        ? 'border-violet-200 bg-violet-50 text-violet-700'
+                                                        : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:text-violet-700',
+                                                )}
+                                            >
+                                                <span className="text-[10px] font-bold uppercase tracking-[0.14em] opacity-70">
+                                                    {phaseOption.number}
                                                 </span>
-                                                <textarea
-                                                    value={phaseCommentForm.data.comment}
-                                                    onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
-                                                    rows={4}
-                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
-                                                    placeholder={tsn.phase_comment_placeholder}
-                                                />
-                                            </label>
+                                                <span className="whitespace-nowrap">
+                                                    {phaseOption.label}
+                                                </span>
+                                                {isCurrentPhase && (
+                                                    <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-violet-700">
+                                                        {tsn.active_label}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
 
-                                            {(phaseCommentForm.errors.comment || errors.comment) ? (
-                                                <p className="text-sm text-rose-600">{phaseCommentForm.errors.comment ?? errors.comment}</p>
-                                            ) : null}
-
-                                            <div className="flex flex-wrap gap-3">
-                                                <button
-                                                    type="submit"
-                                                    disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
-                                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                                >
-                                                    {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
-                                                </button>
+                                {/* Zone 3: Active phase content */}
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsActivePhaseExpanded((v) => !v)}
+                                        className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                                    >
+                                        <div>
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                {tsn.active_phase_label}
                                             </div>
-                                        </form>
-                                    ) : null}
+                                            <div className="mt-1 text-sm font-semibold text-slate-950">
+                                                {guidance.phaseTitle}
+                                            </div>
+                                        </div>
+                                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700">
+                                            {isActivePhaseExpanded ? '−' : '+'}
+                                        </span>
+                                    </button>
+
+                                    {isActivePhaseExpanded && (
+                                        <div className="space-y-4 border-t border-slate-200 px-4 pb-4 pt-4">
+                                            <div>
+                                                <p className="text-sm leading-6 text-slate-600">{guidance.description}</p>
+                                                <div className="mt-2 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                {activePhaseCommentEntries.length > 0 ? (
+                                                    activePhaseCommentEntries.map((comment) => (
+                                                        <PhaseCommentCard key={comment.id} comment={comment} locale={locale} text={tsn} />
+                                                    ))
+                                                ) : (
+                                                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                                                        {tsn.phase_comment_empty}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {canCommentOnCase ? (
+                                                <form
+                                                    onSubmit={(event) => {
+                                                        event.preventDefault();
+                                                        submitPhaseComment();
+                                                    }}
+                                                    className="space-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                                                >
+                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                        {tsn.phase_comment_new}
+                                                    </div>
+
+                                                    <label className="space-y-1.5">
+                                                        <span className="text-sm font-medium text-slate-800">
+                                                            {tsn.phase_comment_form_label}
+                                                        </span>
+                                                        <textarea
+                                                            value={phaseCommentForm.data.comment}
+                                                            onChange={(event) => phaseCommentForm.setData('comment', event.target.value)}
+                                                            rows={4}
+                                                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                                            placeholder={tsn.phase_comment_placeholder}
+                                                        />
+                                                    </label>
+
+                                                    {(phaseCommentForm.errors.comment || errors.comment) ? (
+                                                        <p className="text-sm text-rose-600">{phaseCommentForm.errors.comment ?? errors.comment}</p>
+                                                    ) : null}
+
+                                                    <div className="flex flex-wrap gap-3">
+                                                        <button
+                                                            type="submit"
+                                                            disabled={phaseCommentForm.processing || phaseCommentForm.data.comment.trim() === ''}
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        >
+                                                            {phaseCommentForm.processing ? tsn.phase_comment_saving : tsn.phase_comment_save}
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            ) : null}
+                                        </div>
+                                    )}
                                 </div>
 
                                 {notice.bid_status === 'go_no_go' && goNoGoData ? (
@@ -1516,7 +1527,10 @@ export default function SavedNoticeShow({ notice }) {
                                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                             <div className="space-y-2">
                                                 <div>
-                                                    <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.info_center_title}</h2>
+                                                    <div className="flex items-center gap-2">
+                                                        <h2 className="text-xl font-semibold tracking-tight text-slate-950">{tsn.info_center_title}</h2>
+                                                        <InfoHint size="sm" align="right" label={tsn.info_center_hint_label ?? 'Vis forklaring for Informasjonssenter'} text={tsn.info_center_hint} />
+                                                    </div>
                                                     <p className="mt-1 text-sm text-slate-500">{tsn.info_center_description}</p>
                                                 </div>
                                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">
