@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\App\BillingController;
+use App\Http\Controllers\App\GoNoGoAssessmentController;
+use App\Http\Controllers\App\GoNoGoTemplateController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\Ops\QueueSchedulerHealthController;
@@ -263,4 +265,21 @@ Route::prefix('app')
         Route::post('/billing/cancel', [BillingController::class, 'cancel'])->name('billing.cancel');
         Route::post('/billing/resume', [BillingController::class, 'resume'])->name('billing.resume');
         Route::post('/billing/change-plan', [BillingController::class, 'changePlan'])->name('billing.change-plan');
+
+        // Go/No-go template admin (System Owner only)
+        Route::prefix('/go-no-go-templates')->name('go-no-go-templates.')->group(function (): void {
+            Route::get('/', [GoNoGoTemplateController::class, 'index'])->name('index');
+            Route::post('/', [GoNoGoTemplateController::class, 'store'])->name('store');
+            Route::get('/{template}/edit', [GoNoGoTemplateController::class, 'edit'])->name('edit');
+            Route::put('/{template}', [GoNoGoTemplateController::class, 'update'])->name('update');
+            Route::patch('/{template}/toggle-active', [GoNoGoTemplateController::class, 'toggleActive'])->name('toggle-active');
+            Route::patch('/{template}/set-default', [GoNoGoTemplateController::class, 'setDefault'])->name('set-default');
+            Route::post('/{template}/criteria', [GoNoGoTemplateController::class, 'storeCriterion'])->name('criteria.store');
+            Route::put('/{template}/criteria/{criterion}', [GoNoGoTemplateController::class, 'updateCriterion'])->name('criteria.update');
+            Route::patch('/{template}/criteria/{criterion}/toggle-active', [GoNoGoTemplateController::class, 'toggleActiveCriterion'])->name('criteria.toggle-active');
+        });
+
+        // Go/No-go assessment persistence (all users with case access)
+        Route::patch('/notices/saved/{savedNotice}/go-no-go-assessment', [GoNoGoAssessmentController::class, 'upsert'])
+            ->name('notices.saved.go-no-go-assessment.upsert');
     });

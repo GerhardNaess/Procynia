@@ -289,6 +289,7 @@ return [
         'alerts_nav' => 'Varsler',
         'worklist_nav' => 'Arbeidsliste',
         'infosenter_nav' => 'Infosenter',
+        'go_no_go_templates_nav' => 'Vurderingsmaler',
         'customer_area' => 'Kundeområde',
         'customer_footer' => 'Procynia AS · Kundeområde',
         'customer_access_required' => 'Denne brukeren har ikke tilgang til kundeområdet.',

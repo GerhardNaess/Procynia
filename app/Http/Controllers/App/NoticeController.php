@@ -14,9 +14,13 @@ use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
 use App\Models\WatchProfile;
 use App\Models\WatchProfileInboxRecord;
+use App\Models\GoNoGoAssessment;
+use App\Models\GoNoGoAssessmentCriterion;
+use App\Models\GoNoGoAssessmentTemplate;
 use App\Services\Cpv\CustomerNoticeCpvSearchService;
 use App\Services\Doffin\DoffinLiveSearchService;
 use App\Services\Doffin\DoffinNoticeDocumentService;
+use App\Services\GoNoGo\GoNoGoDefaultTemplateService;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use Illuminate\Support\Carbon;
@@ -41,6 +45,7 @@ class NoticeController extends Controller
         private readonly DoffinLiveSearchService $liveSearchService,
         private readonly DoffinNoticeDocumentService $documentService,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
+        private readonly GoNoGoDefaultTemplateService $goNoGoDefaultTemplateService,
     ) {
     }
 
@@ -697,8 +702,70 @@ class NoticeController extends Controller
         $canArchive = $this->savedNoticeAccess->canArchive($user, $record);
 
         return Inertia::render('App/Notices/SavedShow', [
-            'notice' => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive),
+            'notice'      => $this->savedNoticeCasePayload($record, $canManageCase, $canManageContributorAccess, $canComment, $canArchive),
+            'goNoGoData'  => $record->bid_status === SavedNotice::BID_STATUS_GO_NO_GO
+                ? $this->buildGoNoGoData($record, $customerId, $user)
+                : null,
         ]);
+    }
+
+    private function buildGoNoGoData(SavedNotice $record, int $customerId, User $user): array
+    {
+        $template = $this->goNoGoDefaultTemplateService->ensureDefaultExists($customerId);
+
+        $criteria = GoNoGoAssessmentCriterion::query()
+            ->where('template_id', $template->id)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (GoNoGoAssessmentCriterion $c): array => [
+                'id'                       => $c->id,
+                'title'                    => $c->title,
+                'short_description'        => $c->short_description,
+                'weight'                   => $c->weight,
+                'is_score_reversed'        => $c->is_score_reversed,
+                'sort_order'               => $c->sort_order,
+                'help_what_is_assessed'    => $c->help_what_is_assessed,
+                'help_why_it_matters'      => $c->help_why_it_matters,
+                'help_what_to_investigate' => $c->help_what_to_investigate,
+                'help_positive_indicators' => $c->help_positive_indicators,
+                'help_warning_signs'       => $c->help_warning_signs,
+                'help_example_assessment'  => $c->help_example_assessment,
+            ])
+            ->all();
+
+        $assessment = GoNoGoAssessment::query()
+            ->where('saved_notice_id', $record->id)
+            ->where('template_id', $template->id)
+            ->with('answers')
+            ->first();
+
+        $answers = $assessment
+            ? $assessment->answers->map(fn ($a) => [
+                'criterion_id'   => $a->criterion_id,
+                'selected_value' => $a->selected_value,
+                'comment'        => $a->comment,
+            ])->all()
+            : [];
+
+        return [
+            'template'   => [
+                'id'       => $template->id,
+                'name'     => $template->name,
+                'criteria' => $criteria,
+            ],
+            'assessment' => $assessment ? [
+                'id'             => $assessment->id,
+                'recommendation' => $assessment->recommendation,
+                'total_score'    => $assessment->total_score,
+                'max_score'      => $assessment->max_score,
+                'completed_at'   => $assessment->completed_at?->toIso8601String(),
+                'updated_at'     => $assessment->updated_at?->toIso8601String(),
+                'answers'        => $answers,
+            ] : null,
+            'save_url'   => route('app.notices.saved.go-no-go-assessment.upsert', ['savedNotice' => $record->id]),
+        ];
     }
 
     public function storeSavedNoticeCaseAccess(Request $request, SavedNotice $savedNotice): RedirectResponse

@@ -2,6 +2,7 @@ import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import BidStatusPipeline from '../../../Components/App/BidStatusPipeline';
+import GoNoGoAssessment from './GoNoGoAssessment';
 import InfoHint from '../../../Components/App/InfoHint';
 import PageHelpButton from '../../../Components/App/PageHelpButton';
 import StatusBadge from '../../../Components/App/StatusBadge';
@@ -394,7 +395,7 @@ function PhaseCommentCard({ comment, locale, text }) {
 
 export default function SavedNoticeShow({ notice }) {
     const page = usePage();
-    const { auth, errors = {}, translations = {} } = page.props;
+    const { auth, errors = {}, translations = {}, goNoGoData = null } = page.props;
     const tsn = translations?.saved_notice ?? {};
     const common = translations?.common ?? {};
     const frontend = translations?.frontend ?? {};
@@ -1466,6 +1467,14 @@ export default function SavedNoticeShow({ notice }) {
                                         </form>
                                     ) : null}
                                 </div>
+
+                                {notice.bid_status === 'go_no_go' && goNoGoData ? (
+                                    <GoNoGoAssessment
+                                        template={goNoGoData.template}
+                                        assessment={goNoGoData.assessment}
+                                        saveUrl={goNoGoData.save_url}
+                                    />
+                                ) : null}
 
                                 <div className="space-y-3">
                                     {commentPhaseOptions.map((phaseOption) => {
