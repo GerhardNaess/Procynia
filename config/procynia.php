@@ -17,4 +17,14 @@ return [
         'rpo_hours' => 1,
         'scheduler_heartbeat_stale_seconds' => 3600,
     ],
+
+    'public' => [
+        'contact' => [
+            'general_email' => env('PROCYNIA_CONTACT_EMAIL', 'kontakt@procynia.no'),
+            'sales_email' => env('PROCYNIA_SALES_EMAIL', 'salg@procynia.no'),
+            'support_email' => env('PROCYNIA_SUPPORT_EMAIL', 'support@procynia.no'),
+            'privacy_email' => env('PROCYNIA_PRIVACY_EMAIL', 'personvern@procynia.no'),
+            'phone' => env('PROCYNIA_PHONE', '+47 00 00 00 00'),
+        ],
+    ],
 ];

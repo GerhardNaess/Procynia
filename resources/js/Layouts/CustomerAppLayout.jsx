@@ -362,9 +362,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
                                 <Link href="/app/dashboard" className="flex items-center">
                                     <img
-                                        src="/images/procynia_logo.png"
+                                        src="/images/procynia_logo.png?v=2"
                                         alt="Procynia"
-                                        style={{ height: '64px', width: 'auto', maxWidth: '14.4rem' }}
+                                        style={{ height: '40px', width: 'auto', maxWidth: '180px' }}
                                         className="object-contain"
                                     />
                                 </Link>

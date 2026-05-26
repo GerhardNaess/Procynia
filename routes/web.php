@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PublicRegistrationController;
 use App\Http\Controllers\App\BillingController;
 use App\Http\Controllers\App\DashboardController;
 use App\Http\Controllers\App\AiController;
@@ -21,7 +22,10 @@ use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Admin\OperationalRunbookAttachmentDownloadController;
 use App\Http\Controllers\StripeWebhookController;
+use App\Models\Language;
+use App\Models\Nationality;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handleWebhook'])->name('cashier.webhook');
 
@@ -50,12 +54,69 @@ Route::get('/', function () {
     $user = auth()->user();
 
     if (! $user) {
-        return redirect()->route('login');
+        return Inertia::render('Public/Home');
     }
 
     return method_exists($user, 'canAccessCustomerFrontend') && $user->canAccessCustomerFrontend()
         ? redirect()->route('app.notices.index', ['mode' => 'saved'])
         : redirect()->route('filament.admin.pages.dashboard');
+});
+
+Route::name('public.')->group(function (): void {
+    Route::get('/funksjoner', fn () => Inertia::render('Public/Features'))->name('features');
+    Route::get('/priser', fn () => Inertia::render('Public/Pricing'))->name('pricing');
+    Route::get('/sikkerhet', fn () => Inertia::render('Public/Security'))->name('security');
+    Route::get('/kontakt', fn () => Inertia::render('Public/Contact'))->name('contact');
+    Route::get('/betingelser', fn () => Inertia::render('Public/Terms'))->name('terms');
+    Route::get('/personvern', fn () => Inertia::render('Public/Privacy'))->name('privacy');
+    Route::get('/faq', fn () => Inertia::render('Public/Faq'))->name('faq');
+    Route::get('/registrer', function (): \Inertia\Response {
+        $locale = app()->getLocale();
+
+        $languageOptions = Language::query()
+            ->orderBy('name_no')
+            ->get()
+            ->map(static function (Language $language) use ($locale): array {
+                $label = $locale === 'en'
+                    ? ($language->name_en ?: $language->name_no ?: $language->code)
+                    : ($language->name_no ?: $language->name_en ?: $language->code);
+
+                return [
+                    'id' => $language->id,
+                    'label' => $label,
+                    'code' => $language->code,
+                ];
+            })
+            ->values()
+            ->all();
+
+        $nationalityOptions = Nationality::query()
+            ->orderBy('name_no')
+            ->get()
+            ->map(static function (Nationality $nationality) use ($locale): array {
+                $label = $locale === 'en'
+                    ? ($nationality->name_en ?: $nationality->name_no ?: $nationality->code)
+                    : ($nationality->name_no ?: $nationality->name_en ?: $nationality->code);
+
+                return [
+                    'id' => $nationality->id,
+                    'label' => $label,
+                    'code' => $nationality->code,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return Inertia::render('Public/Register', [
+            'publicRegistration' => [
+                'languages' => $languageOptions,
+                'nationalities' => $nationalityOptions,
+            ],
+        ]);
+    })->name('register');
+    Route::post('/registrer', [PublicRegistrationController::class, 'store'])
+        ->middleware(['guest', 'throttle:public-registration'])
+        ->name('register.store');
 });
 
 Route::middleware('guest')->group(function (): void {

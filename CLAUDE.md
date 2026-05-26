@@ -2,6 +2,39 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Procynia strategidoktrine – følges i all videre utvikling
+
+Procynia skal ikke posisjoneres som en enkel AI-skriveassistent eller et gratis anbudsvarsel-produkt.
+
+Procynia skal posisjoneres som: **"Styringssystemet for virksomheter som lever av anbud."**
+
+**Konkurrentbildet:** Cobrief er tydelig posisjonert rundt AI for anbud, gratis anbudsvarsling, rask oppstart og tidsbesparelse. Procynia skal ikke kopiere dette budskapet direkte.
+
+**Procynias differensiering** — Procynia eier hele den operative tilbudsprosessen:
+fra mulighet → vurdering → ansvar → kravarbeid → dokumentasjon → kvalitetssikring → levert tilbud → sporbarhet og gjenbruk.
+
+**Hovedbudskap:** Anbudsarbeid feiler ikke bare fordi man mangler tekst. Det feiler fordi ansvar, krav, dokumentasjon, beslutninger, frister og eierskap ligger spredt.
+
+**Procynia vektlegger:** kontroll, ansvar, struktur, sporbarhet, beslutningsstøtte, kravstyring, dokumentasjonskontroll, teamarbeid, enterprise/sikkerhet/compliance, og trygg bruk av AI som støtte — ikke erstatning for faglig vurdering.
+
+**Unngå:**
+- Generisk "spar tid med AI"
+- "Superkrefter" / "AI skriver tilbudet for deg"
+- For mye teknisk språk
+- Å fremstå som et enkelt søke-/varslingsverktøy
+- Å kopiere Cobrief sin posisjon
+
+**Bruk heller formuleringer som:**
+- bedre kontroll på neste anbud
+- fra kunngjøring til levert tilbud
+- samle krav, ansvar og dokumentasjon
+- prioriter riktige muligheter
+- reduser risiko før tilbudet sendes
+- styr hele tilbudsarbeidet på ett sted
+- AI-støtte med struktur, kilder og menneskelig kontroll
+
+Alle nye sider, tekster og funksjoner vurderes mot denne posisjoneringen før implementering.
+
 ## What is Procynia
 
 Procynia is a Norwegian public procurement (Doffin) bid management system. It pulls tender notices from the Doffin API, routes them to customer departments via watch profiles, and provides an AI-supported bid execution layer — extracting requirements from tender documents, matching them against a customer knowledge base, and generating grounded answer drafts.

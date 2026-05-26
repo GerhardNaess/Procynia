@@ -7,10 +7,11 @@ use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
-    public function test_the_application_redirects_guests_to_login(): void
+    public function test_the_application_shows_the_login_page_for_guests(): void
     {
-        $response = $this->get('/');
+        $response = $this->get('/login');
 
-        $response->assertRedirect(route('login'));
+        $response->assertOk();
+        $response->assertViewHas('page', fn (array $page): bool => data_get($page, 'component') === 'Auth/Login');
     }
 }
