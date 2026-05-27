@@ -145,11 +145,17 @@ class DoffinBatchImportService
 
             return $result;
         } catch (Throwable $throwable) {
-            Log::error('Doffin batch import failed before completion.', [
+            $isTransientTransportFailure = $this->client->isTransientTransportException($throwable);
+
+            Log::log($isTransientTransportFailure ? 'warning' : 'error', $isTransientTransportFailure
+                ? 'Doffin batch import failed before completion due to a transient transport error.'
+                : 'Doffin batch import failed before completion.', [
                 'requested_limit' => $limit,
                 'trigger' => $trigger,
                 'found_notice_ids' => $foundNoticeIds,
                 'processed_notice_ids' => $processedNoticeIds,
+                'transient_transport_failure' => $isTransientTransportFailure,
+                'exception_class' => $throwable::class,
                 'error' => $throwable->getMessage(),
             ]);
 

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\Doffin\DoffinBatchImportService;
+use App\Services\Doffin\DoffinClient;
 use Illuminate\Console\Command;
 use RuntimeException;
 use Throwable;
@@ -13,7 +14,7 @@ class ImportDoffinBatch extends Command
 
     protected $description = 'Import and process a batch of Doffin notices.';
 
-    public function handle(DoffinBatchImportService $batchImportService): int
+    public function handle(DoffinBatchImportService $batchImportService, DoffinClient $doffinClient): int
     {
         $limit = $this->resolveLimit();
         $trigger = $this->resolveTrigger();
@@ -50,6 +51,13 @@ class ImportDoffinBatch extends Command
 
             return $result['success_count'] > 0 ? self::SUCCESS : self::FAILURE;
         } catch (Throwable $throwable) {
+            if ($doffinClient->isTransientTransportException($throwable)) {
+                $this->warn('Doffin batch import failed due to a transient transport error.');
+                $this->line($throwable->getMessage());
+
+                return self::FAILURE;
+            }
+
             report($throwable);
 
             $this->error('Doffin batch import failed.');

@@ -15,7 +15,11 @@ return [
     'api_key' => env('DOFFIN_API_KEY'),
     'user_agent' => env('DOFFIN_USER_AGENT', 'Procynia/1.0'),
     'timeout' => (int) env('DOFFIN_TIMEOUT', 30),
+    'connect_timeout' => (int) env('DOFFIN_CONNECT_TIMEOUT', 10),
     'batch_limit' => (int) env('DOFFIN_BATCH_LIMIT', 10),
+    'batch_search' => [
+        'retry_backoff_ms' => [2000, 5000],
+    ],
     'public_client' => [
         'per_page' => (int) env('DOFFIN_PUBLIC_CLIENT_PER_PAGE', 50),
         'retry_times' => (int) env('DOFFIN_PUBLIC_CLIENT_RETRY_TIMES', 3),
