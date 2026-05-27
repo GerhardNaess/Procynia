@@ -20,6 +20,7 @@ class ProcessRequirementExtractionRun implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 1;
+    public int $timeout = 300;
 
     public function __construct(public readonly int $runId)
     {
