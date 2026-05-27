@@ -177,7 +177,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         if (activeMainArea === 'procurements') {
             return [
                 { key: 'live', label: navigation.live_search, href: '/app/notices' },
-                { key: 'saved-searches', label: translations.frontend.saved_searches_nav, href: `${buildHref('/app/notices', { tab: 'saved-searches' })}#saved-searches`, isAnchor: true },
                 { key: 'alerts', label: translations.frontend.alerts_nav, href: buildHref('/app/notices', { tab: 'alerts' }) },
             ];
         }
@@ -233,10 +232,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'procurements') {
-            if (noticeTab === 'saved-searches') {
-                return 'saved-searches';
-            }
-
             if (noticeTab === 'alerts') {
                 return 'alerts';
             }

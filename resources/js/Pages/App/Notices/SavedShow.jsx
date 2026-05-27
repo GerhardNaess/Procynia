@@ -332,7 +332,7 @@ function ActionAccordionSection({ title, summary, hint = null, isOpen, onToggle,
                         {summary}
                     </div>
                     {hint ? (
-                        <div className="text-xs leading-5 text-slate-500">
+                        <div className="text-sm leading-6 text-slate-500">
                             {hint}
                         </div>
                     ) : null}
@@ -941,61 +941,10 @@ export default function SavedNoticeShow({ notice }) {
                                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                                         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.current_status}</div>
                                         <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_status_label}</div>
-                                        <div className="mt-2 text-sm font-medium text-slate-900">{guidance.phaseTitle}</div>
                                         <p className="mt-1 text-sm leading-6 text-slate-600">{guidance.description}</p>
-                                        <div className="mt-3 text-xs leading-5 text-slate-500">{guidance.closureRule}</div>
+                                        <div className="mt-3 text-sm leading-6 text-slate-500">{guidance.closureRule}</div>
                                     </div>
 
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.responsible}</div>
-                                        <div className="mt-3 space-y-3">
-                                            <div>
-                                                <div className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                                                    {tsn.bid_manager_label}
-                                                    <InfoHint size="sm" label="Vis forklaring for Bid-manager" text={tsn.hint_bid_manager} />
-                                                </div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.bid_manager?.name || tsn.not_set}</div>
-                                                {notice.bid_manager?.bid_role ? (
-                                                    <div className="mt-1 text-xs text-slate-500">
-                                                        {tsn.global_bid_role}: {bidRoleLabel(notice.bid_manager.bid_role, tsn)}
-                                                    </div>
-                                                ) : null}
-                                            </div>
-
-                                            <div>
-                                                <div className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-slate-500">
-                                                    {tsn.opportunity_owner_label}
-                                                    <InfoHint size="sm" label="Vis forklaring for Kommersiell eier" text={tsn.hint_opportunity_owner} />
-                                                </div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{notice.opportunity_owner?.name || tsn.not_set}</div>
-                                                {notice.opportunity_owner?.bid_role ? (
-                                                    <div className="mt-1 text-xs text-slate-500">
-                                                        {tsn.global_bid_role}: {bidRoleLabel(notice.opportunity_owner.bid_role, tsn)}
-                                                    </div>
-                                                ) : null}
-                                            </div>
-
-                                            <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.your_global_bid_role}</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{currentUserBidRoleLabel}</div>
-                                                <div className="mt-1 text-xs text-slate-500">{tsn.role_applies_to_account}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                                        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{tsn.key_dates}</div>
-                                        <div className="mt-3 space-y-3">
-                                            <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.submitted_date}</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_submitted_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
-                                            </div>
-                                            <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{tsn.closed_date}</div>
-                                                <div className="mt-1 text-sm font-semibold text-slate-950">{formatDate(notice.bid_closed_at, locale, { hour: '2-digit', minute: '2-digit' })}</div>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </section>

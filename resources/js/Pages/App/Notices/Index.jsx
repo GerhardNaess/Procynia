@@ -735,13 +735,6 @@ export default function NoticeIndex({
         { value: 'CANCELLED', label: tf.notice_status_cancelled },
     ];
 
-    const relevanceOptions = [
-        { value: '', label: tf.relevance_all },
-        { value: 'high', label: tf.relevance_high },
-        { value: 'medium', label: tf.relevance_medium },
-        { value: 'low', label: tf.relevance_low },
-    ];
-
     const historyProcurementTypeOptions = [
         { value: 'one_time', label: noticesText.procurementTypeOneTime },
         { value: 'recurring', label: noticesText.procurementTypeRecurring },
@@ -780,7 +773,6 @@ export default function NoticeIndex({
     const [status, setStatus] = useState(filters.status ?? '');
     const [bidStatusFilter, setBidStatusFilter] = useState(filters.bid_status ?? '');
     const [historyTypeFilter, setHistoryTypeFilter] = useState(filters.history_type ?? '');
-    const [relevance, setRelevance] = useState(filters.relevance ?? '');
     const [expandedSavedNoticeIds, setExpandedSavedNoticeIds] = useState({});
     const [expandedNoticeSummaryIds, setExpandedNoticeSummaryIds] = useState({});
     const [editingSavedNoticeId, setEditingSavedNoticeId] = useState(null);
@@ -886,7 +878,6 @@ export default function NoticeIndex({
         setStatus(filters.status ?? '');
         setBidStatusFilter(filters.bid_status ?? '');
         setHistoryTypeFilter(filters.history_type ?? '');
-        setRelevance(filters.relevance ?? '');
     }, [
         filters.bid_status,
         filters.history_type,
@@ -1189,7 +1180,6 @@ export default function NoticeIndex({
         setStatus('');
         setBidStatusFilter('');
         setHistoryTypeFilter('');
-        setRelevance('');
 
         router.get(
             '/app/notices',
@@ -1223,7 +1213,6 @@ export default function NoticeIndex({
                 publication_date_from: filters.publication_date_from,
                 publication_date_to: filters.publication_date_to,
                 status: filters.status,
-                relevance: filters.relevance,
                 bid_status: isHistoryMode ? '' : nextFilter,
                 history_type: isHistoryMode ? nextFilter : '',
                 cockpit_scope: filters.cockpit_scope,
@@ -1317,9 +1306,6 @@ export default function NoticeIndex({
             setStatus(prefill.status);
         }
 
-        if (typeof prefill.relevance === 'string') {
-            setRelevance(prefill.relevance);
-        }
     };
 
     const pageTitle = isLiveMode
@@ -1579,22 +1565,6 @@ export default function NoticeIndex({
                                                 </option>
                                             ))}
                                         </select>
-                                    </label>
-                                    <label className="space-y-2">
-                                        <span className="text-sm font-medium text-slate-700">{tf.relevance}</span>
-                                        <select
-                                            value={relevance}
-                                            onChange={(event) => setRelevance(event.target.value)}
-                                            disabled
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-400 outline-none transition disabled:cursor-not-allowed"
-                                        >
-                                            {relevanceOptions.map((option) => (
-                                                <option key={option.value || 'empty'} value={option.value}>
-                                                    {option.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <p className="text-xs text-slate-400">{noticesText.relevanceDisabledHelp}</p>
                                     </label>
                                 </div>
                             </div>

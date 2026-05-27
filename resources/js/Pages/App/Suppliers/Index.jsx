@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 /**
  * Purpose:
@@ -127,7 +128,24 @@ export default function SuppliersIndex({ suppliers, filters = {} }) {
         <CustomerAppLayout title="Konkurrenter" showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Konkurrenter</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Konkurrenter</h1>
+                        <PageHelpButton
+                            buttonLabel={ts.page_help_button ?? 'Hjelp'}
+                            title={ts.page_help_title ?? 'Konkurrenter'}
+                            intro={ts.page_help_intro}
+                            sections={[
+                                {
+                                    title: ts.page_help_section_about ?? 'Hva vises her?',
+                                    items: [
+                                        { title: ts.page_help_item_harvested_title ?? 'Høstede konkurrenter', text: ts.page_help_item_harvested_text ?? 'Listen viser leverandører registrert som vinnere eller deltakere i kunngjøringer fra Doffin.' },
+                                        { title: ts.page_help_item_notices_title ?? 'Tilknyttede kunngjøringer', text: ts.page_help_item_notices_text ?? 'Klikk på en konkurrent for å se hvilke kunngjøringer de er koblet til.' },
+                                        { title: ts.page_help_item_search_title ?? 'Søk og filtrering', text: ts.page_help_item_search_text ?? 'Søk på leverandørnavn eller organisasjonsnummer for å finne spesifikke konkurrenter raskt.' },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         {ts.page_subtitle ?? 'Oversikt over høstede Doffin-konkurrenter og tilknyttede kunngjøringer.'}
                     </p>

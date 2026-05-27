@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -179,7 +180,8 @@ function InfoCenterViewTab({ option, activeView, openHelpKey, setOpenHelpKey }) 
 }
 
 export default function InfoCenterIndex({ infoCenter = null }) {
-    const { locale = 'nb-NO' } = usePage().props;
+    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const ic = translations?.info_center_page ?? {};
     const activeView = infoCenter?.active_view ?? 'my_tasks';
     const roleContext = infoCenter?.role_context ?? {};
     const viewOptions = infoCenter?.view_options ?? [];
@@ -214,7 +216,32 @@ export default function InfoCenterIndex({ infoCenter = null }) {
                                 {roleContext.label ?? 'Infosenter'}
                             </div>
                             <div className="space-y-2">
-                                <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Infosenter</h1>
+                                <div className="flex items-center gap-3">
+                                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Infosenter</h1>
+                                    <PageHelpButton
+                                        buttonLabel={ic.page_help_button ?? 'Hjelp'}
+                                        title={ic.page_help_title ?? 'Infosenter'}
+                                        intro={ic.page_help_intro}
+                                        sections={[
+                                            {
+                                                title: ic.page_help_section_views ?? 'Fanene i Infosenteret',
+                                                items: [
+                                                    { title: ic.page_help_item_my_tasks_title ?? 'Mine oppgaver', text: ic.page_help_item_my_tasks_text ?? 'Viser åpne oppgaver og oppfølginger som er tildelt deg.' },
+                                                    { title: ic.page_help_item_awaiting_title ?? 'Venter på svar', text: ic.page_help_item_awaiting_text ?? 'Viser oppfølginger du har sendt ut, men som fortsatt venter på respons.' },
+                                                    { title: ic.page_help_item_outbound_title ?? 'Opprettet av meg', text: ic.page_help_item_outbound_text ?? 'Viser oppgaver og oppfølginger du selv har opprettet.' },
+                                                    { title: ic.page_help_item_inbound_title ?? 'Innkommende', text: ic.page_help_item_inbound_text ?? 'Viser oppfølginger eller forespørsler som kommer inn til deg.' },
+                                                    { title: ic.page_help_item_deadline_title ?? 'Frister innen 7 dager', text: ic.page_help_item_deadline_text ?? 'Viser åpne punkter med nær frist.' },
+                                                ],
+                                            },
+                                            {
+                                                title: ic.page_help_section_practical ?? 'Praktisk bruk',
+                                                items: [
+                                                    { title: ic.page_help_item_practical_title ?? 'Daglig oppfølging', text: ic.page_help_item_practical_text ?? 'Bruk Infosenteret som din daglige personlige oppfølgingsliste. Bruk Arbeidsliste og sakssider til selve anbudssakene.' },
+                                                ],
+                                            },
+                                        ]}
+                                    />
+                                </div>
                                 <p className="max-w-3xl text-[15px] leading-7 text-slate-600">
                                     {roleContext.headline ?? 'Opprett og følg opp aksjoner, avklaringer og beslutninger på tvers av saker du har tilgang til.'}
                                 </p>

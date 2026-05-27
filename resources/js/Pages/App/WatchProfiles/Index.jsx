@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale) {
     if (!value) {
@@ -25,7 +26,8 @@ function buildFilterQuery(filters) {
 }
 
 export default function WatchProfilesIndex({ watchProfiles, filters, filterOptions }) {
-    const { locale } = usePage().props;
+    const { locale, translations = {} } = usePage().props;
+    const wp = translations?.watch_profile_page ?? {};
     const [togglingId, setTogglingId] = useState(null);
     const [deletingId, setDeletingId] = useState(null);
 
@@ -67,7 +69,24 @@ export default function WatchProfilesIndex({ watchProfiles, filters, filterOptio
         <CustomerAppLayout title="Watch Profiles" showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-1.5">
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Watch Profiles</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">Watch Profiles</h1>
+                        <PageHelpButton
+                            buttonLabel={wp.page_help_button ?? 'Hjelp'}
+                            title={wp.page_help_title ?? 'Watch Profiles'}
+                            intro={wp.page_help_intro}
+                            sections={[
+                                {
+                                    title: wp.page_help_section_about ?? 'Hva er en Watch Profile?',
+                                    items: [
+                                        { title: wp.page_help_item_profile_title ?? 'Søkeprofil mot Doffin', text: wp.page_help_item_profile_text ?? 'En Watch Profile er et sett med CPV-koder og nøkkelord som brukes til automatisk matching mot nye kunngjøringer i Doffin live search.' },
+                                        { title: wp.page_help_item_scope_title ?? 'Personlig vs. avdelingsbasert', text: wp.page_help_item_scope_text ?? 'Personlige profiler gjelder kun deg. Avdelingsbaserte profiler gjelder alle brukere i avdelingen.' },
+                                        { title: wp.page_help_item_status_title ?? 'Aktiv / deaktivert', text: wp.page_help_item_status_text ?? 'En aktiv profil kjører løpende mot nye kunngjøringer. Deaktivering stopper matching uten å slette reglene.' },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         Administrer dine personlige og avdelingsscopede watch profiles som brukes direkte mot Doffin live search.
                     </p>
