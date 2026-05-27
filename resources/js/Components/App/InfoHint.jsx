@@ -63,8 +63,8 @@ export default function InfoHint({
     }
 
     const buttonSizeClass = size === 'sm'
-        ? 'h-4 w-4 text-[9px]'
-        : 'h-6 w-6 text-[10px]';
+        ? 'h-5 w-5 text-[10px]'
+        : 'h-7 w-7 text-[11px]';
 
     const tooltipWidthClass = size === 'sm' ? 'w-64' : 'w-72';
 
