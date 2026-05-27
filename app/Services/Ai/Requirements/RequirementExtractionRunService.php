@@ -17,6 +17,14 @@ use Throwable;
 
 class RequirementExtractionRunService
 {
+    private const STALE_ACTIVE_RUN_THRESHOLD_MINUTES = 15;
+
+    private const STALE_ACTIVE_RUN_FAILURE_STAGE = 'stale_active_run';
+
+    private const STALE_ACTIVE_RUN_ERROR_TYPE = 'stale_run';
+
+    private const STALE_ACTIVE_RUN_ERROR_MESSAGE = 'Requirement extraction run was marked as failed because it was stuck in processing without completing.';
+
     public function __construct(
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly RequirementEditorService $requirementEditorService,
@@ -50,6 +58,43 @@ class RequirementExtractionRunService
                 ->orderByDesc('id')
                 ->lockForUpdate()
                 ->first();
+
+            if ($activeRun instanceof RequirementExtractionRun) {
+                if ($this->shouldRecoverStaleActiveRun($activeRun, $lockedDocument)) {
+                    $this->markRunFailed(
+                        $activeRun,
+                        $lockedDocument,
+                        self::STALE_ACTIVE_RUN_FAILURE_STAGE,
+                        self::STALE_ACTIVE_RUN_ERROR_TYPE,
+                        self::STALE_ACTIVE_RUN_ERROR_MESSAGE,
+                        [
+                            'candidate_count' => (int) $activeRun->candidate_count,
+                            'persisted_requirement_count' => (int) $activeRun->persisted_requirement_count,
+                            'openai_call_count' => (int) $activeRun->openai_call_count,
+                            'input_tokens_total' => (int) $activeRun->input_tokens_total,
+                            'output_tokens_total' => (int) $activeRun->output_tokens_total,
+                            'total_tokens_total' => (int) $activeRun->total_tokens_total,
+                        ],
+                    );
+
+                    Log::warning('[Procynia][AI Requirements] Recovered stale active extraction run before requeueing the document.', [
+                        'run_id' => $activeRun->uuid,
+                        'run_db_id' => $activeRun->id,
+                        'document_id' => $lockedDocument->id,
+                        'saved_notice_ai_document_id' => $lockedDocument->id,
+                        'saved_notice_id' => $lockedDocument->saved_notice_id,
+                        'status' => $activeRun->status,
+                        'started_at' => optional($activeRun->started_at)?->toIso8601String(),
+                        'last_heartbeat_at' => optional($activeRun->last_heartbeat_at)?->toIso8601String(),
+                        'updated_at' => optional($activeRun->updated_at)?->toIso8601String(),
+                        'processing_started_at' => optional($lockedDocument->processing_started_at)?->toIso8601String(),
+                        'processing_finished_at' => optional($lockedDocument->processing_finished_at)?->toIso8601String(),
+                        'stale_threshold_minutes' => self::STALE_ACTIVE_RUN_THRESHOLD_MINUTES,
+                    ]);
+
+                    $activeRun = null;
+                }
+            }
 
             if ($activeRun instanceof RequirementExtractionRun) {
                 $activeRun->forceFill([
@@ -149,6 +194,69 @@ class RequirementExtractionRunService
         }
 
         return $run;
+    }
+
+    /**
+     * Purpose: Decide whether an active extraction run should be recovered and replaced.
+     * Inputs: The active extraction run and its source document mirror.
+     * Returns: True when the active run looks stuck long enough to be marked failed and replaced.
+     * Side effects: None.
+     */
+    private function shouldRecoverStaleActiveRun(
+        RequirementExtractionRun $run,
+        SavedNoticeAiDocument $document,
+    ): bool {
+        if (! in_array($run->status, [
+            RequirementExtractionRun::STATUS_PROCESSING,
+            RequirementExtractionRun::STATUS_MERGING,
+        ], true)) {
+            return false;
+        }
+
+        if ($run->finished_at !== null) {
+            return false;
+        }
+
+        if ($document->processing_finished_at !== null) {
+            return false;
+        }
+
+        $timestamps = array_filter([
+            $this->normalizeStaleTimestamp($run->last_heartbeat_at),
+            $this->normalizeStaleTimestamp($run->started_at),
+            $this->normalizeStaleTimestamp($run->updated_at),
+            $this->normalizeStaleTimestamp($document->processing_started_at),
+            $this->normalizeStaleTimestamp($document->updated_at),
+        ]);
+
+        if ($timestamps === []) {
+            return false;
+        }
+
+        $lastActivityAt = max($timestamps);
+
+        return $lastActivityAt <= now()->subMinutes(self::STALE_ACTIVE_RUN_THRESHOLD_MINUTES)->timestamp;
+    }
+
+    /**
+     * Purpose: Normalize a timestamp-like value for stale-run comparison.
+     * Inputs: A Carbon instance, DateTime, timestamp string, or null.
+     * Returns: A UNIX timestamp or null when the value cannot be interpreted.
+     * Side effects: None.
+     */
+    private function normalizeStaleTimestamp(mixed $value): ?int
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value->getTimestamp();
+        }
+
+        if (is_string($value) && trim($value) !== '') {
+            $parsed = strtotime($value);
+
+            return $parsed === false ? null : $parsed;
+        }
+
+        return null;
     }
 
     /**
