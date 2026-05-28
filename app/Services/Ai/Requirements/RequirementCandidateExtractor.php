@@ -300,6 +300,28 @@ class RequirementCandidateExtractor
                 $windowSummary['filtered_candidate_count'] = $windowFilteredCandidateCount;
                 $windowSummary['filtered_out_count'] = $windowFilteredOutCount;
                 $windowSummary['mapped_candidate_count'] = count($windowCandidates);
+            } catch (JsonException $exception) {
+                $outputTokens = is_numeric($requestResult['output_tokens'] ?? null) ? (int) $requestResult['output_tokens'] : null;
+                $errorType = $this->phaseOneJsonParseErrorType($outputTokens, FullDocumentRequirementExtractionPrompt::maxOutputTokens());
+                $errorMessage = $this->phaseOneJsonParseErrorMessage($errorType, $exception->getMessage());
+
+                $this->logPhaseOneJsonParseFailure(
+                    $requestResult,
+                    $exception,
+                    $errorType,
+                    $outputTokens,
+                    FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+                );
+
+                $windowFailures[] = [
+                    'window_index' => $windowMeta['window_index'],
+                    'stage' => $errorType,
+                    'type' => $errorType,
+                    'message' => $errorMessage,
+                ];
+                $windowSummary['ok'] = false;
+                $windowSummary['error_type'] = $errorType;
+                $windowSummary['error_message'] = $errorMessage;
             } catch (Throwable $exception) {
                 $windowFailures[] = [
                     'window_index' => $windowMeta['window_index'],
@@ -1472,6 +1494,44 @@ class RequirementCandidateExtractor
             'row_count' => count($normalizedRows),
             'rows' => $normalizedRows,
         ];
+    }
+
+    private function phaseOneJsonParseErrorType(?int $outputTokens, int $maxOutputTokens): string
+    {
+        if ($outputTokens !== null && $outputTokens >= $maxOutputTokens) {
+            return 'truncated_response';
+        }
+
+        return 'invalid_json_response';
+    }
+
+    private function phaseOneJsonParseErrorMessage(string $errorType, string $jsonErrorMessage): string
+    {
+        return $errorType === 'truncated_response'
+            ? 'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.'
+            : $jsonErrorMessage;
+    }
+
+    private function logPhaseOneJsonParseFailure(
+        array $requestResult,
+        JsonException $exception,
+        string $errorType,
+        ?int $outputTokens,
+        int $maxOutputTokens,
+    ): void {
+        $rawOutput = (string) data_get($requestResult, 'raw_output', '');
+        $sanitizedPreview = $this->previewText($this->sanitizeJsonTextForDecoding($rawOutput), 500);
+
+        Log::warning('[PROCYNIA][REQ_PIPELINE] Phase 1 extraction response parsing failed.', [
+            'error_type' => $errorType,
+            'json_error_message' => $exception->getMessage(),
+            'output_tokens' => $outputTokens,
+            'max_output_tokens' => $maxOutputTokens,
+            'request_id' => data_get($requestResult, 'request_id'),
+            'response_id' => data_get($requestResult, 'response_id'),
+            'output_length' => mb_strlen($rawOutput, 'UTF-8'),
+            'output_preview' => $sanitizedPreview,
+        ]);
     }
 
     private function validatePhaseOneCandidateRow(array $row, int $index): void

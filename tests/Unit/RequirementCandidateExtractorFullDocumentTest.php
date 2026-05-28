@@ -224,11 +224,10 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $text = FullDocumentRequirementExtractionPrompt::text();
 
         $this->assertSame(8000, FullDocumentRequirementExtractionPrompt::maxOutputTokens());
-        $this->assertStringContainsString('Et enkelt dokumentavsnitt kan inneholde flere kravfamilier samtidig, og alle må tas med hvis de har egen requirement_identifier.', $text);
-        $this->assertStringContainsString('Ikke stopp etter den første kravfamilien eller den første kravtypen i et avsnitt; hver rad med egen requirement_identifier skal vurderes separat.', $text);
-        $this->assertStringContainsString('Hvis et langt avsnitt eller en lang chunk senere introduserer en ny kravtabell eller en ny kravtype, skal du fortsette å trekke ut også disse radene.', $text);
-        $this->assertStringContainsString('Når et dokumentavsnitt har flere påfølgende kravblokker, for eksempel først skal-krav og deretter bør-krav, skal begge familiene ekstrakteres fullstendig.', $text);
-        $this->assertStringContainsString('En kravblokk som er formulert som et evalueringsspørsmål eller en bør-kravsbetingelse er fortsatt et formelt krav når den har egen requirement_identifier.', $text);
+        $this->assertStringContainsString('Flere kravfamilier i samme dokument skal håndteres fullstendig, for eksempel først skal-krav og deretter bør-krav.', $text);
+        $this->assertStringContainsString('Ikke stopp etter første kravfamilie, første kravtype eller første kravtabell.', $text);
+        $this->assertStringContainsString('Hver separate kravrad, kravlistepost eller kravblokk skal vurderes for seg.', $text);
+        $this->assertStringContainsString('Hvis dokumentet bruker bør-krav eller E-krav som egne nummererte kravblokker, skal disse tas med som egne formelle krav.', $text);
     }
 
     /**
@@ -278,6 +277,56 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
     }
 
     /**
+     * Purpose: Ensure truncated Phase 1 output is classified separately from generic invalid JSON.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Fakes the OpenAI HTTP response and inspects the failure payload.
+     */
+    public function test_it_classifies_truncated_full_document_output_as_a_truncated_response(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 209,
+            'saved_notice_id' => 410,
+            'original_filename' => 'full-document-truncated-test.docx',
+            'extracted_text' => "Første krav: Leverandøren skal levere dokumentasjon innen 10 dager.\n\nAndre krav: Leverandøren skal beskrive løsning og bemanning.",
+        ]);
+
+        $rawOutput = '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren skal levere dokumentasjon innen 10 dager."';
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_full_document_truncated_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => $rawOutput,
+                'usage' => [
+                    'input_tokens' => 150,
+                    'output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+                    'total_tokens' => 8150,
+                ],
+            ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-truncated-test');
+
+        $this->assertFalse($result->ok);
+        $this->assertSame('truncated_response', $result->failureStage);
+        $this->assertSame('truncated_response', $result->failureType);
+        $this->assertSame('truncated_response', $result->errorType);
+        $this->assertSame(
+            'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.',
+            $result->errorMessage,
+        );
+        $this->assertSame('failed', $result->metadata['parse_strategy']);
+        $this->assertGreaterThan(0, $result->metadata['raw_output_length']);
+
+        Http::assertSentCount(1);
+    }
+
+    /**
      * Purpose: Ensure byte-wise JSON sanitization survives raw output that contains both control bytes and invalid UTF-8.
      * Inputs: None.
      * Returns: None.
@@ -298,6 +347,59 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $this->assertSame('1.1', $parsed['rows'][0]['requirement_identifier']);
         $this->assertStringContainsString('Leverandøren', $parsed['rows'][0]['original_text']);
         $this->assertStringContainsString('skal levere dokumentasjon innen 10 dager.', $parsed['rows'][0]['original_text']);
+    }
+
+    /**
+     * Purpose: Ensure valid fenced Phase 1 JSON still parses after fence cleanup.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Fakes the OpenAI HTTP response and inspects the parsed candidate result.
+     */
+    public function test_it_parses_valid_fenced_full_document_json_output(): void
+    {
+        config()->set('services.openai.api_key', 'test-key');
+
+        $document = new SavedNoticeAiDocument();
+        $document->forceFill([
+            'id' => 210,
+            'saved_notice_id' => 411,
+            'original_filename' => 'full-document-fenced-test.docx',
+            'extracted_text' => "Første krav: Leverandøren skal levere dokumentasjon innen 10 dager.\n\nAndre krav: Leverandøren skal beskrive løsning og bemanning.",
+        ]);
+
+        $rawOutput = "```json\n" . json_encode([
+            'candidates' => [[
+                'requirement_identifier' => '1.1',
+                'parent_reference' => null,
+                'original_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+                'source_reference_text' => 'Bilag 1 punkt 2.7',
+                'is_requirement' => true,
+                'confidence' => 0.93,
+            ]],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n```";
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_full_document_fenced_test',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => $rawOutput,
+                'usage' => [
+                    'input_tokens' => 150,
+                    'output_tokens' => 54,
+                    'total_tokens' => 204,
+                ],
+            ], 200),
+        ]);
+
+        $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-fenced-test');
+
+        $this->assertTrue($result->ok);
+        $this->assertCount(1, $result->candidates);
+        $this->assertSame('1.1', $result->candidates[0]->requirementIdentifier);
+        $this->assertSame('json_schema', $result->metadata['parse_strategy']);
+
+        Http::assertSentCount(1);
     }
 
     /**
@@ -501,9 +603,9 @@ class RequirementCandidateExtractorFullDocumentTest extends TestCase
         $result = app(RequirementCandidateExtractor::class)->extractFullDocument($document, 'run-full-document-invalid-json-test');
 
         $this->assertFalse($result->ok);
-        $this->assertSame('unexpected_response', $result->failureStage);
-        $this->assertSame('unexpected_response', $result->failureType);
-        $this->assertSame('unexpected_response', $result->errorType);
+        $this->assertSame('invalid_json_response', $result->failureStage);
+        $this->assertSame('invalid_json_response', $result->failureType);
+        $this->assertSame('invalid_json_response', $result->errorType);
         $this->assertNotSame('', $result->errorMessage);
         $this->assertSame('failed', $result->metadata['parse_strategy']);
         $this->assertGreaterThan(0, $result->metadata['raw_output_length']);
