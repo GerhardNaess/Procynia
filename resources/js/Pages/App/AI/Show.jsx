@@ -1514,6 +1514,42 @@ function hasActiveDocumentProcessing(documents) {
     return documents.some((document) => DOCUMENT_PROCESSING_ACTIVE_STATUSES.has(document?.processing_status));
 }
 
+function getRequirementExtractionBannerData(documents) {
+    if (!Array.isArray(documents) || documents.length === 0) {
+        return null;
+    }
+
+    const failedDocument = documents.find((document) => document?.processing_status === 'failed');
+
+    if (failedDocument) {
+        return {
+            state: 'failed',
+            document: failedDocument,
+            count: 1,
+            message: String(
+                failedDocument?.processing_failure_message
+                ?? failedDocument?.processing_error_message
+                ?? failedDocument?.processing_failure_type
+                ?? failedDocument?.processing_error_type
+                ?? '',
+            ).trim(),
+        };
+    }
+
+    const activeDocuments = documents.filter((document) => DOCUMENT_PROCESSING_ACTIVE_STATUSES.has(document?.processing_status));
+
+    if (activeDocuments.length > 0) {
+        return {
+            state: 'processing',
+            document: activeDocuments[0],
+            count: activeDocuments.length,
+            message: null,
+        };
+    }
+
+    return null;
+}
+
 /**
  * Purpose: Render the AI case control surface for a single saved notice.
  * Inputs: pageTitle, case, and ai_status props from the AI controller.
@@ -1887,6 +1923,7 @@ export default function AiShow({
     const assignableUsers = Array.isArray(assignableUsersProp) ? assignableUsersProp : [];
     const documentRows = Array.isArray(documents) ? documents : [];
     const answerBasisItems = Array.isArray(answerBasisItemsProp) ? answerBasisItemsProp : [];
+    const requirementExtractionBanner = getRequirementExtractionBannerData(documentRows);
     const extractedRequirementRows = requirementRows.filter(
         (requirement) => String(requirement?.source_type ?? '').trim() !== 'manual',
     );
@@ -1906,6 +1943,19 @@ export default function AiShow({
         ? documentUploadForm.data.documents.map((document) => document.name).join(', ')
         : tai.no_files_selected;
     const requirementCountLabel = Number(requirementsCount ?? requirementRows.length);
+    const activeRequirementExtractionDocumentTitle = requirementExtractionBanner?.document?.original_filename
+        ?? requirementExtractionBanner?.document?.processing_status_label
+        ?? null;
+    const activeRequirementExtractionDocumentStatus = requirementExtractionBanner?.document?.processing_status ?? null;
+    const activeRequirementExtractionStatusMeta = activeRequirementExtractionDocumentStatus !== null
+        ? DOCUMENT_STATUS_META[activeRequirementExtractionDocumentStatus] ?? null
+        : null;
+    const requirementExtractionBannerTitle = requirementExtractionBanner?.state === 'failed'
+        ? tai.requirement_extraction_failed_title
+        : tai.requirement_extraction_background_title;
+    const requirementExtractionBannerDescription = requirementExtractionBanner?.state === 'failed'
+        ? tai.requirement_extraction_failed_description
+        : tai.requirement_extraction_background_description;
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
         || refreshingAssessments
@@ -2874,6 +2924,88 @@ export default function AiShow({
 
                 {!canUseAiOffer ? (
                     <AiAccessNotice aiText={tai} billingHref={billingHref} />
+                ) : null}
+
+                {requirementExtractionBanner ? (
+                    <section
+                        role={requirementExtractionBanner.state === 'failed' ? 'alert' : 'status'}
+                        aria-live={requirementExtractionBanner.state === 'failed' ? 'assertive' : 'polite'}
+                        className={
+                            requirementExtractionBanner.state === 'failed'
+                                ? 'mb-5 rounded-[22px] border border-rose-200 bg-rose-50 p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]'
+                                : 'mb-5 rounded-[22px] border border-violet-200 bg-violet-50 p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]'
+                        }
+                    >
+                        <div className="flex items-start gap-4">
+                            <div
+                                className={
+                                    requirementExtractionBanner.state === 'failed'
+                                        ? 'mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-200 bg-white text-rose-600'
+                                        : 'mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-200 bg-white text-violet-600'
+                                }
+                            >
+                                {requirementExtractionBanner.state === 'failed' ? (
+                                    <svg
+                                        viewBox="0 0 20 20"
+                                        fill="none"
+                                        aria-hidden="true"
+                                        className="h-5 w-5"
+                                    >
+                                        <path
+                                            d="M10 6.5v4.25"
+                                            stroke="currentColor"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth="1.8"
+                                        />
+                                        <path
+                                            d="M10 13.75h.01"
+                                            stroke="currentColor"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth="2.2"
+                                        />
+                                        <path
+                                            d="M8.83 3.95a1.4 1.4 0 0 1 2.34 0l5.23 8.6a1.4 1.4 0 0 1-1.17 2.15H4.77a1.4 1.4 0 0 1-1.17-2.15l5.23-8.6Z"
+                                            stroke="currentColor"
+                                            strokeLinejoin="round"
+                                            strokeWidth="1.5"
+                                        />
+                                    </svg>
+                                ) : (
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-200 border-t-violet-600" />
+                                )}
+                            </div>
+
+                            <div className="min-w-0 flex-1 space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h2 className="text-base font-semibold tracking-tight text-slate-950">
+                                        {requirementExtractionBannerTitle}
+                                    </h2>
+                                    {activeRequirementExtractionStatusMeta ? (
+                                        <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${activeRequirementExtractionStatusMeta.className}`}>
+                                            {activeRequirementExtractionStatusMeta.label}
+                                        </span>
+                                    ) : null}
+                                </div>
+                                <p className="text-sm leading-6 text-slate-600">
+                                    {requirementExtractionBannerDescription}
+                                </p>
+                                {activeRequirementExtractionDocumentTitle ? (
+                                    <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                                        {tai.requirement_extraction_document_prefix} {activeRequirementExtractionDocumentTitle}
+                                    </p>
+                                ) : null}
+                                {requirementExtractionBanner.state === 'failed' ? (
+                                    <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm leading-6 text-rose-700">
+                                        {requirementExtractionBanner.message !== ''
+                                            ? requirementExtractionBanner.message
+                                            : tai.requirement_extraction_failed_fallback}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
+                    </section>
                 ) : null}
 
                 <section className="mb-5 rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">

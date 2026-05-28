@@ -166,7 +166,7 @@ services:
             LOG_CHANNEL: stack
             LOG_STACK: single
             TZ: Europe/Oslo
-            REDIS_QUEUE_RETRY_AFTER: 420
+            REDIS_QUEUE_RETRY_AFTER: 2100
         volumes:
             - ./:/var/www/html
             - ./storage:/var/www/html/storage
@@ -180,8 +180,8 @@ services:
             - /bin/sh
             - -lc
             - |
-                printf '%s\n' '[Procynia][Queue] Starting queue worker connection=redis queues=ai-requirements tries=1 timeout=360 retry_after=420'
-                exec php artisan queue:work redis --queue=ai-requirements --tries=1 --timeout=360 --sleep=3
+                printf '%s\n' '[Procynia][Queue] Starting queue worker connection=redis queues=ai-requirements tries=1 timeout=1860 retry_after=2100'
+                exec php artisan queue:work redis --queue=ai-requirements --tries=1 --timeout=1860 --sleep=3
         restart: unless-stopped
 
     scheduler:

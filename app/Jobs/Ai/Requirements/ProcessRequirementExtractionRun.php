@@ -22,7 +22,11 @@ class ProcessRequirementExtractionRun implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 1;
-    public int $timeout = 300;
+    /**
+     * This job runs many sequential OpenAI calls for large documents, so it needs a larger
+     * total execution budget than a single request timeout.
+     */
+    public int $timeout = 1800;
     public bool $failOnTimeout = true;
 
     public function __construct(public readonly int $runId)
