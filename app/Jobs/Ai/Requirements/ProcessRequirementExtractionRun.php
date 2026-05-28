@@ -23,8 +23,8 @@ class ProcessRequirementExtractionRun implements ShouldQueue
 
     public int $tries = 1;
     /**
-     * This job runs many sequential OpenAI calls for large documents, so it needs a larger
-     * total execution budget than a single request timeout.
+     * This job now only orchestrates chunk fan-out for large documents, but the higher execution
+     * budget remains temporarily while the split workflow is still being completed.
      */
     public int $timeout = 1800;
     public bool $failOnTimeout = true;
@@ -43,7 +43,7 @@ class ProcessRequirementExtractionRun implements ShouldQueue
         }
 
         try {
-            $service->processRun($run);
+            $service->orchestrateRunChunks($run);
         } catch (Throwable $throwable) {
             $this->markFailureFromThrowable($throwable, $service);
 

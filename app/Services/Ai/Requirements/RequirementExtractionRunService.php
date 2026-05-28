@@ -4,6 +4,8 @@ namespace App\Services\Ai\Requirements;
 
 use App\Data\Ai\Requirements\RequirementExtractionCandidateData;
 use App\Data\Ai\Requirements\RequirementExtractionResultData;
+use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
+use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
@@ -194,6 +196,295 @@ class RequirementExtractionRunService
         }
 
         return $run;
+    }
+
+    /**
+     * Purpose: Orchestrate a queued extraction run into per-chunk jobs without running extraction itself.
+     * Inputs: The extraction run row.
+     * Returns: None.
+     * Side effects: Marks the run/document as processing, ensures document chunks exist, creates missing call rows, and dispatches chunk jobs.
+     */
+    public function orchestrateRunChunks(RequirementExtractionRun $run): void
+    {
+        $run = RequirementExtractionRun::query()->find($run->id);
+
+        if (! $run instanceof RequirementExtractionRun || $run->isTerminal()) {
+            return;
+        }
+
+        $document = SavedNoticeAiDocument::query()->find($run->saved_notice_ai_document_id);
+
+        if (! $document instanceof SavedNoticeAiDocument) {
+            return;
+        }
+
+        $this->markRunProcessing($run, $document);
+
+        $chunks = SavedNoticeAiDocumentChunk::query()
+            ->where('saved_notice_ai_document_id', $document->id)
+            ->orderBy('chunk_index')
+            ->get();
+
+        if ($chunks->isEmpty()) {
+            $splitResult = app(DocumentSplitPlanner::class)->plan($document, $run->uuid);
+
+            if (! ($splitResult['ok'] ?? false)) {
+                $this->markRunFailed(
+                    $run,
+                    $document,
+                    'document_split',
+                    (string) ($splitResult['error_type'] ?? 'document_split_failed'),
+                    (string) ($splitResult['error_message'] ?? 'Document split planning failed.'),
+                    [
+                        'candidate_count' => 0,
+                        'persisted_requirement_count' => 0,
+                        'openai_call_count' => 0,
+                        'input_tokens_total' => 0,
+                        'output_tokens_total' => 0,
+                        'total_tokens_total' => 0,
+                    ],
+                );
+
+                return;
+            }
+
+            $chunkBuildResult = $this->persistDocumentSplitChunks($document, $run, $splitResult);
+
+            if (! $chunkBuildResult['ok']) {
+                $this->markRunFailed(
+                    $run,
+                    $document,
+                    'document_split_persist',
+                    (string) ($chunkBuildResult['error_type'] ?? 'document_split_persist_failed'),
+                    (string) ($chunkBuildResult['error_message'] ?? 'Document split chunk persistence failed.'),
+                    [
+                        'candidate_count' => 0,
+                        'persisted_requirement_count' => (int) ($chunkBuildResult['chunk_count'] ?? 0),
+                        'openai_call_count' => 0,
+                        'input_tokens_total' => 0,
+                        'output_tokens_total' => 0,
+                        'total_tokens_total' => 0,
+                    ],
+                );
+
+                return;
+            }
+
+            $chunks = SavedNoticeAiDocumentChunk::query()
+                ->where('saved_notice_ai_document_id', $document->id)
+                ->orderBy('chunk_index')
+                ->get();
+        }
+
+        if ($chunks->isEmpty()) {
+            $this->markRunFailed(
+                $run,
+                $document,
+                'chunk_load',
+                'invalid_state',
+                'No persisted document chunks were available for extraction.',
+                [
+                    'candidate_count' => 0,
+                    'persisted_requirement_count' => 0,
+                    'openai_call_count' => 0,
+                    'input_tokens_total' => 0,
+                    'output_tokens_total' => 0,
+                    'total_tokens_total' => 0,
+                ],
+            );
+
+            return;
+        }
+
+        $callIds = DB::transaction(function () use ($run, $document, $chunks): array {
+            $lockedRun = RequirementExtractionRun::query()
+                ->whereKey($run->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedRun instanceof RequirementExtractionRun || $lockedRun->isTerminal()) {
+                return [];
+            }
+
+            $lockedDocument = SavedNoticeAiDocument::query()
+                ->whereKey($document->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedDocument instanceof SavedNoticeAiDocument) {
+                return [];
+            }
+
+            $callIds = [];
+
+            foreach ($chunks as $chunk) {
+                $call = RequirementExtractionCall::query()
+                    ->where('requirement_extraction_run_id', $lockedRun->id)
+                    ->where('saved_notice_ai_document_chunk_id', $chunk->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (! $call instanceof RequirementExtractionCall) {
+                    $call = RequirementExtractionCall::query()->create([
+                        'requirement_extraction_run_id' => $lockedRun->id,
+                        'saved_notice_id' => $lockedDocument->saved_notice_id,
+                        'saved_notice_ai_document_id' => $lockedDocument->id,
+                        'saved_notice_ai_document_chunk_id' => $chunk->id,
+                        'status' => RequirementExtractionCall::STATUS_QUEUED,
+                        'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+                        'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                        'model' => FullDocumentRequirementExtractionPrompt::model(),
+                        'request_id' => null,
+                        'response_id' => null,
+                        'status_code' => null,
+                        'input_tokens' => null,
+                        'output_tokens' => null,
+                        'total_tokens' => null,
+                        'elapsed_ms' => null,
+                        'error_type' => null,
+                        'error_message' => null,
+                        'started_at' => null,
+                        'finished_at' => null,
+                    ]);
+                }
+
+                $callIds[] = $call->id;
+            }
+
+            return $callIds;
+        });
+
+        foreach ($callIds as $callId) {
+            ProcessRequirementExtractionChunk::dispatch($callId, $run->id)->onQueue($this->queueName());
+        }
+    }
+
+    /**
+     * Purpose: Process one queued chunk extraction call end to end.
+     * Inputs: The requirement extraction call id.
+     * Returns: None.
+     * Side effects: Marks the call as running/completed/failed, stages chunk-scoped requirements, and dispatches finalization when the call reaches a terminal state.
+     */
+    public function processRunCall(int $callId): void
+    {
+        $finalizeRunId = null;
+
+        DB::transaction(function () use ($callId, &$finalizeRunId): void {
+            $call = RequirementExtractionCall::query()
+                ->whereKey($callId)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $call instanceof RequirementExtractionCall) {
+                return;
+            }
+
+            $run = RequirementExtractionRun::query()
+                ->whereKey($call->requirement_extraction_run_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $run instanceof RequirementExtractionRun) {
+                return;
+            }
+
+            $document = SavedNoticeAiDocument::query()
+                ->whereKey($call->saved_notice_ai_document_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $document instanceof SavedNoticeAiDocument) {
+                return;
+            }
+
+            $chunk = SavedNoticeAiDocumentChunk::query()
+                ->whereKey($call->saved_notice_ai_document_chunk_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $chunk instanceof SavedNoticeAiDocumentChunk) {
+                return;
+            }
+
+            if ($call->status === RequirementExtractionCall::STATUS_COMPLETED && $call->finished_at !== null) {
+                $finalizeRunId = $run->id;
+
+                return;
+            }
+
+            if ($call->status === RequirementExtractionCall::STATUS_FAILED && $call->finished_at !== null) {
+                $finalizeRunId = $run->id;
+
+                return;
+            }
+
+            if ($call->status === RequirementExtractionCall::STATUS_RUNNING && $call->finished_at === null) {
+                return;
+            }
+
+            $this->clearStagedRequirementsForChunk($run, $chunk->id);
+
+            $runningCall = $this->startCall($run, $document, $chunk->id, $call);
+            $chunkDocument = clone $document;
+            $chunkDocument->extracted_text = (string) $chunk->content;
+
+            try {
+                $result = $this->candidateExtractor->extractFullDocument(
+                    $chunkDocument,
+                    $run->uuid . '-chunk-' . $chunk->chunk_index,
+                );
+            } catch (Throwable $throwable) {
+                $this->failCall($runningCall, $document, 'unexpected_error', $throwable->getMessage());
+                $finalizeRunId = $run->id;
+
+                return;
+            }
+
+            if (! $result->ok) {
+                $this->failCallFromResult($runningCall, $document, $result);
+                $finalizeRunId = $run->id;
+
+                return;
+            }
+
+            $stageableCandidates = array_values(array_filter(
+                $result->candidates,
+                static fn (mixed $candidate): bool => $candidate instanceof RequirementExtractionCandidateData && $candidate->isRequirement,
+            ));
+            $stageableCandidateCount = count($stageableCandidates);
+            $inputTokensTotal = (int) data_get($result->metadata, 'input_tokens_total', 0);
+            $outputTokensTotal = (int) data_get($result->metadata, 'output_tokens_total', 0);
+            $totalTokensTotal = (int) data_get($result->metadata, 'total_tokens_total', 0);
+
+            try {
+                $this->stageChunkCandidates(
+                    $run,
+                    $document,
+                    $stageableCandidates,
+                    $result->model,
+                    (int) ($result->openAiCallCount ?? 1),
+                    $inputTokensTotal,
+                    $outputTokensTotal,
+                    $totalTokensTotal,
+                    $chunk,
+                    $runningCall,
+                    $result,
+                    $stageableCandidateCount,
+                    $stageableCandidateCount,
+                );
+            } catch (Throwable $throwable) {
+                $this->failCall($runningCall, $document, 'persistence_error', $throwable->getMessage());
+                $finalizeRunId = $run->id;
+
+                return;
+            }
+
+            $finalizeRunId = $run->id;
+        });
+
+        if ($finalizeRunId !== null) {
+            FinalizeRequirementExtractionRun::dispatch($finalizeRunId)->onQueue($this->queueName());
+        }
     }
 
     /**
@@ -1026,6 +1317,11 @@ class RequirementExtractionRunService
         int $inputTokensTotal,
         int $outputTokensTotal,
         int $totalTokensTotal,
+        ?SavedNoticeAiDocumentChunk $chunk = null,
+        ?RequirementExtractionCall $call = null,
+        ?RequirementExtractionResultData $result = null,
+        ?int $candidateCountOverride = null,
+        ?int $persistedRequirementCountOverride = null,
     ): int {
         return DB::transaction(function () use (
             $run,
@@ -1036,8 +1332,33 @@ class RequirementExtractionRunService
             $inputTokensTotal,
             $outputTokensTotal,
             $totalTokensTotal,
+            $chunk,
+            $call,
+            $result,
+            $candidateCountOverride,
+            $persistedRequirementCountOverride,
         ): int {
+            $lockedRun = RequirementExtractionRun::query()
+                ->whereKey($run->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedRun instanceof RequirementExtractionRun) {
+                return 0;
+            }
+
+            $lockedDocument = SavedNoticeAiDocument::query()
+                ->whereKey($document->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $lockedDocument instanceof SavedNoticeAiDocument) {
+                return 0;
+            }
+
             $stagedRequirementCount = 0;
+            $candidateCount = $candidateCountOverride ?? count($candidates);
+            $persistedRequirementCount = $persistedRequirementCountOverride;
 
             foreach ($candidates as $candidate) {
                 if (! $candidate instanceof RequirementExtractionCandidateData || ! $candidate->isRequirement) {
@@ -1045,28 +1366,30 @@ class RequirementExtractionRunService
                 }
 
                 $extractionMetadata = array_merge($candidate->jsonSerialize(), [
-                    'run_id' => $run->uuid,
-                    'document_title' => $document->original_filename,
-                    'document_filename' => $document->original_filename,
+                    'run_id' => $lockedRun->uuid,
+                    'document_title' => $lockedDocument->original_filename,
+                    'document_filename' => $lockedDocument->original_filename,
                     'phase_1_requirement_extraction' => true,
-                    'chunk_based_extraction' => true,
+                    'chunk_based_extraction' => $chunk !== null,
+                    'saved_notice_ai_document_chunk_id' => $chunk?->id,
+                    'chunk_index' => $chunk?->chunk_index,
                     'extraction_prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
                     'extraction_model' => $model,
                 ]);
 
                 $persistenceData = $candidate->toPersistenceData(
-                    $document,
-                    null,
+                    $lockedDocument,
+                    $chunk,
                     $extractionMetadata,
                 );
 
                 $this->requirementEditorService->createAiCandidate(
-                    $document,
-                    null,
+                    $lockedDocument,
+                    $chunk,
                     $persistenceData,
                     null,
                     [
-                        'extraction_run_id' => $run->id,
+                        'extraction_run_id' => $lockedRun->id,
                         'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED,
                         'published_at' => null,
                         'superseded_at' => null,
@@ -1076,9 +1399,32 @@ class RequirementExtractionRunService
                 $stagedRequirementCount++;
             }
 
-            $run->forceFill([
-                'candidate_count' => count($candidates),
-                'persisted_requirement_count' => $stagedRequirementCount,
+            $candidateCount = $chunk !== null
+                ? (int) $lockedRun->candidate_count + ($candidateCountOverride ?? count($candidates))
+                : ($candidateCountOverride ?? count($candidates));
+            $persistedRequirementCount = $chunk !== null
+                ? (int) $lockedRun->persisted_requirement_count + ($persistedRequirementCountOverride ?? $stagedRequirementCount)
+                : ($persistedRequirementCountOverride ?? $stagedRequirementCount);
+            $openAiCallCount = $chunk !== null
+                ? (int) $lockedRun->openai_call_count + $openAiCallCount
+                : $openAiCallCount;
+            $inputTokensTotal = $chunk !== null
+                ? (int) $lockedRun->input_tokens_total + $inputTokensTotal
+                : $inputTokensTotal;
+            $outputTokensTotal = $chunk !== null
+                ? (int) $lockedRun->output_tokens_total + $outputTokensTotal
+                : $outputTokensTotal;
+            $totalTokensTotal = $chunk !== null
+                ? (int) $lockedRun->total_tokens_total + $totalTokensTotal
+                : $totalTokensTotal;
+
+            if ($call instanceof RequirementExtractionCall && $result instanceof RequirementExtractionResultData) {
+                $this->finishCall($call, $lockedDocument, $result);
+            }
+
+            $lockedRun->forceFill([
+                'candidate_count' => $candidateCount,
+                'persisted_requirement_count' => $persistedRequirementCount,
                 'openai_call_count' => $openAiCallCount,
                 'input_tokens_total' => $inputTokensTotal,
                 'output_tokens_total' => $outputTokensTotal,
@@ -1233,7 +1579,7 @@ class RequirementExtractionRunService
      * Returns: None.
      * Side effects: Persists the merging status mirror on both records.
      */
-    private function markRunMerging(RequirementExtractionRun $run, SavedNoticeAiDocument $document): void
+    public function markRunMerging(RequirementExtractionRun $run, SavedNoticeAiDocument $document): void
     {
         $heartbeatAt = now();
 
@@ -1355,7 +1701,35 @@ class RequirementExtractionRunService
         RequirementExtractionRun $run,
         SavedNoticeAiDocument $document,
         ?int $savedNoticeAiDocumentChunkId = null,
+        ?RequirementExtractionCall $call = null,
     ): RequirementExtractionCall {
+        if ($call instanceof RequirementExtractionCall) {
+            $startedAt = now();
+
+            $call->forceFill([
+                'saved_notice_id' => $document->saved_notice_id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_ai_document_chunk_id' => $savedNoticeAiDocumentChunkId ?? $call->saved_notice_ai_document_chunk_id,
+                'status' => RequirementExtractionCall::STATUS_RUNNING,
+                'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+                'prompt_version' => FullDocumentRequirementExtractionPrompt::promptVersion(),
+                'model' => FullDocumentRequirementExtractionPrompt::model(),
+                'request_id' => null,
+                'response_id' => null,
+                'status_code' => null,
+                'input_tokens' => null,
+                'output_tokens' => null,
+                'total_tokens' => null,
+                'elapsed_ms' => null,
+                'error_type' => null,
+                'error_message' => null,
+                'started_at' => $call->started_at ?? $startedAt,
+                'finished_at' => null,
+            ])->save();
+
+            return $call->refresh();
+        }
+
         return RequirementExtractionCall::query()->create([
             'requirement_extraction_run_id' => $run->id,
             'saved_notice_id' => $document->saved_notice_id,
@@ -1377,6 +1751,21 @@ class RequirementExtractionRunService
             'started_at' => now(),
             'finished_at' => null,
         ]);
+    }
+
+    /**
+     * Purpose: Clear staged requirement rows for one extraction run and chunk before a replayed chunk job reprocesses it.
+     * Inputs: The extraction run and the persisted chunk id.
+     * Returns: None.
+     * Side effects: Deletes staged requirement rows for the matching run/chunk pair only.
+     */
+    private function clearStagedRequirementsForChunk(RequirementExtractionRun $run, int $chunkId): void
+    {
+        SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('saved_notice_ai_document_chunk_id', $chunkId)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->delete();
     }
 
     /**

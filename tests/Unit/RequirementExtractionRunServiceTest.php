@@ -17,9 +17,11 @@ use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
 use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
+use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementLoader;
+use Closure;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Queue\TimeoutExceededException;
@@ -270,6 +272,7 @@ class RequirementExtractionRunServiceTest extends TestCase
 
     public function test_it_fails_without_openai_when_extracted_text_is_missing_and_preserves_published_rows(): void
     {
+        Queue::fake();
         Http::fake();
 
         $context = $this->customerContext();
@@ -519,9 +522,13 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertSame('ai-requirements', $jobFromCallOnly->queue);
         $this->assertSame(456, $jobFromCallOnly->callId);
         $this->assertNull($jobFromCallOnly->runId);
+        $this->assertSame(600, $jobFromCallOnly->timeout);
+        $this->assertTrue($jobFromCallOnly->failOnTimeout);
         $this->assertSame('ai-requirements', $jobFromRunAndCall->queue);
         $this->assertSame(456, $jobFromRunAndCall->callId);
         $this->assertSame(123, $jobFromRunAndCall->runId);
+        $this->assertSame(600, $jobFromRunAndCall->timeout);
+        $this->assertTrue($jobFromRunAndCall->failOnTimeout);
     }
 
     public function test_finalize_requirement_extraction_run_uses_the_expected_queue_contract(): void
@@ -690,6 +697,533 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $document->processing_status);
         $this->assertNotNull($run->finished_at);
         $this->assertNotNull($document->processing_finished_at);
+
+        $publishedRequirementsBeforeReplay = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->count();
+
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $this->assertSame($publishedRequirementsBeforeReplay, SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->count());
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->refresh()->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $document->refresh()->processing_status);
+    }
+
+    public function test_finalize_requirement_extraction_run_marks_merging_before_publishing_and_completes_the_run(): void
+    {
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2003A', 'Finalize merging target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 11:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'finalize-merging.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/finalize-merging.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-07 11:31:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 11:32:00',
+            'processing_started_at' => '2026-04-07 11:32:00',
+            'processing_finished_at' => null,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 11:32:00',
+            'started_at' => '2026-04-07 11:32:00',
+            'last_heartbeat_at' => '2026-04-07 11:33:00',
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+            'started_at' => '2026-04-07 11:33:15',
+            'finished_at' => '2026-04-07 11:33:45',
+        ]);
+        $this->createAiRequirementRow($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED,
+            'extraction_run_id' => $run->id,
+            'published_at' => null,
+        ]);
+
+        $realService = new RequirementExtractionRunService(
+            app(RequirementCandidateExtractor::class),
+            app(RequirementEditorService::class),
+        );
+
+        $spyService = new class(
+            app(RequirementCandidateExtractor::class),
+            app(RequirementEditorService::class),
+            $realService,
+            $this,
+        ) extends RequirementExtractionRunService {
+            /**
+             * @var Closure|null
+             */
+            public ?Closure $promoteAssertion = null;
+
+            public function __construct(
+                RequirementCandidateExtractor $candidateExtractor,
+                RequirementEditorService $requirementEditorService,
+                private readonly RequirementExtractionRunService $realService,
+                private readonly RequirementExtractionRunServiceTest $testCase,
+            ) {
+                parent::__construct($candidateExtractor, $requirementEditorService);
+            }
+
+            public function promoteRun(RequirementExtractionRun $run, SavedNoticeAiDocument $document): int
+            {
+                if ($this->promoteAssertion instanceof Closure) {
+                    ($this->promoteAssertion)($run, $document);
+                }
+
+                return $this->realService->promoteRun($run, $document);
+            }
+        };
+
+        $spyService->promoteAssertion = function (RequirementExtractionRun $run, SavedNoticeAiDocument $document) use ($realService): void {
+            $freshRun = RequirementExtractionRun::query()->findOrFail($run->id);
+            $freshDocument = SavedNoticeAiDocument::query()->findOrFail($document->id);
+
+            $this->assertSame(RequirementExtractionRun::STATUS_MERGING, $freshRun->status);
+            $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_MERGING, $freshDocument->processing_status);
+            $this->assertNull($freshRun->finished_at);
+            $this->assertNull($freshDocument->processing_finished_at);
+        };
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle($spyService);
+
+        $run->refresh();
+        $document->refresh();
+
+        $publishedRequirements = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->get();
+
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $document->processing_status);
+        $this->assertCount(1, $publishedRequirements);
+        $this->assertSame($chunk->id, $publishedRequirements[0]->saved_notice_ai_document_chunk_id);
+        $this->assertNotNull($run->finished_at);
+        $this->assertNotNull($document->processing_finished_at);
+    }
+
+    public function test_process_requirement_extraction_chunk_processes_one_call_and_stages_requirements_with_the_chunk_id(): void
+    {
+        Queue::fake();
+        $this->fakeOpenAiFullDocumentResponse([
+            $this->buildFullDocumentCandidate('Leverandøren skal levere dokumentasjon innen 10 dager.', [
+                'requirement_identifier' => '1.1',
+                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                'obligation_type' => 'must',
+                'interpretation_risk' => 'low',
+                'source_reference_text' => 'Bilag 1 punkt 2.7',
+            ]),
+        ]);
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004A', 'Chunk processing target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 12:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'chunk-processing.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/chunk-processing.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-07 12:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'processing_started_at' => '2026-04-07 12:02:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:02:00',
+            'started_at' => '2026-04-07 12:02:00',
+            'last_heartbeat_at' => '2026-04-07 12:02:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_QUEUED,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $call->refresh();
+        $run->refresh();
+        $document->refresh();
+
+        $stagedRequirements = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->get();
+
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $call->status);
+        $this->assertNotNull($call->finished_at);
+        $this->assertSame(1, $run->candidate_count);
+        $this->assertSame(1, $run->persisted_requirement_count);
+        $this->assertSame(1, $run->openai_call_count);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->processing_status);
+        $this->assertCount(1, $stagedRequirements);
+        $this->assertSame($chunk->id, $stagedRequirements[0]->saved_notice_ai_document_chunk_id);
+        $this->assertSame($run->id, $stagedRequirements[0]->extraction_run_id);
+        Queue::assertPushed(FinalizeRequirementExtractionRun::class, 1);
+        Http::assertSentCount(1);
+    }
+
+    public function test_process_requirement_extraction_chunk_is_idempotent_when_the_call_is_already_completed(): void
+    {
+        Queue::fake();
+        Http::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004B', 'Chunk replay target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 12:30:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'chunk-replay.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/chunk-replay.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal beskrive løsning og bemanning.',
+            'text_extracted_at' => '2026-04-07 12:31:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:32:00',
+            'processing_started_at' => '2026-04-07 12:32:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsning og bemanning.', 0);
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 12:32:00',
+            'started_at' => '2026-04-07 12:32:00',
+            'last_heartbeat_at' => '2026-04-07 12:32:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+            'request_id' => 'req-chunk-replay',
+            'response_id' => 'resp-chunk-replay',
+            'status_code' => 200,
+            'input_tokens' => 50,
+            'output_tokens' => 20,
+            'total_tokens' => 70,
+            'elapsed_ms' => 150,
+            'started_at' => '2026-04-07 12:32:15',
+            'finished_at' => '2026-04-07 12:32:45',
+        ]);
+        $this->createAiRequirementRow($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsning og bemanning.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'publication_status' => SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED,
+            'extraction_run_id' => $run->id,
+            'published_at' => null,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $this->assertSame(1, SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->count());
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $call->refresh()->status);
+        Http::assertNothingSent();
+        Queue::assertPushed(FinalizeRequirementExtractionRun::class, 1);
+    }
+
+    public function test_process_requirement_extraction_chunk_failed_call_triggers_finalize_failure_flow(): void
+    {
+        Queue::fake();
+        $this->fakeOpenAiFullDocumentResponse([], 503, 120, 42);
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004C', 'Chunk failure target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 13:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'chunk-failure.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/chunk-failure.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-04-07 13:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 13:02:00',
+            'processing_started_at' => '2026-04-07 13:02:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-04-07 13:02:00',
+            'started_at' => '2026-04-07 13:02:00',
+            'last_heartbeat_at' => '2026-04-07 13:02:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_QUEUED,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $call->refresh();
+        $run->refresh();
+        $document->refresh();
+
+        $this->assertSame(RequirementExtractionCall::STATUS_FAILED, $call->status);
+        $this->assertSame(503, $call->status_code);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->processing_status);
+        $this->assertSame(RequirementExtractionRun::STATUS_PROCESSING, $run->status);
+        Queue::assertPushed(FinalizeRequirementExtractionRun::class, 1);
+
+        $finalize = new FinalizeRequirementExtractionRun($run->id);
+        $finalize->handle($service);
+
+        $this->assertSame(RequirementExtractionRun::STATUS_FAILED, $run->refresh()->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_FAILED, $document->refresh()->processing_status);
+        $this->assertSame('chunk_extraction', $run->refresh()->failure_stage);
+        $this->assertSame('upstream_error', $run->refresh()->error_type);
+    }
+
+    public function test_orchestrator_chunk_and_finalize_happy_path_completes_run(): void
+    {
+        Queue::fake();
+        Http::fake(function (Request $request) {
+            $payload = json_decode((string) $request->body(), true);
+            $inputText = (string) data_get($payload, 'input.1.content.0.text', '');
+
+            if (str_contains($inputText, 'dokumentasjon')) {
+                return Http::response([
+                    'id' => 'resp_chunk_a',
+                    'object' => 'response',
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'candidates' => [
+                            $this->buildFullDocumentCandidate('Leverandøren skal levere dokumentasjon innen 10 dager.', [
+                                'requirement_identifier' => '1.1',
+                                'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                                'obligation_type' => 'must',
+                                'interpretation_risk' => 'low',
+                                'source_reference_text' => 'Bilag 1 punkt 2.7',
+                            ]),
+                        ],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'usage' => [
+                        'input_tokens' => 120,
+                        'output_tokens' => 42,
+                        'total_tokens' => 162,
+                    ],
+                ], 200, ['x-request-id' => 'req_chunk_a']);
+            }
+
+            return Http::response([
+                'id' => 'resp_chunk_b',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode([
+                    'candidates' => [
+                        $this->buildFullDocumentCandidate('Leverandøren skal beskrive løsning og bemanning.', [
+                            'requirement_identifier' => '1.2',
+                            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+                            'obligation_type' => 'must',
+                            'interpretation_risk' => 'low',
+                            'source_reference_text' => 'Bilag 1 punkt 2.8',
+                        ]),
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => [
+                    'input_tokens' => 120,
+                    'output_tokens' => 42,
+                    'total_tokens' => 162,
+                ],
+            ], 200, ['x-request-id' => 'req_chunk_b']);
+        });
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004D', 'Happy path target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 14:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'happy-path.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/happy-path.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager. Leverandøren skal beskrive løsning og bemanning.',
+            'text_extracted_at' => '2026-04-07 14:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsning og bemanning.', 1);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_QUEUED,
+            'queued_at' => '2026-04-07 14:02:00',
+            'started_at' => null,
+            'last_heartbeat_at' => '2026-04-07 14:02:00',
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->orchestrateRunChunks($run);
+
+        $calls = RequirementExtractionCall::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->orderBy('saved_notice_ai_document_chunk_id')
+            ->get();
+
+        $this->assertCount(2, $calls);
+        $this->assertSame(RequirementExtractionCall::STATUS_QUEUED, $calls[0]->status);
+        $this->assertSame(RequirementExtractionCall::STATUS_QUEUED, $calls[1]->status);
+        Queue::assertPushed(ProcessRequirementExtractionChunk::class, 2);
+
+        $service->processRunCall($calls[0]->id);
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $calls[0]->refresh()->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->refresh()->processing_status);
+
+        $service->processRunCall($calls[1]->id);
+        $this->assertSame(RequirementExtractionCall::STATUS_COMPLETED, $calls[1]->refresh()->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->refresh()->processing_status);
+
+        Queue::assertPushed(FinalizeRequirementExtractionRun::class, 2);
+
+        $finalize = new FinalizeRequirementExtractionRun($run->id);
+        $finalize->handle($service);
+
+        $run->refresh();
+        $document->refresh();
+
+        $publishedRequirements = SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $document->processing_status);
+        $this->assertCount(2, $publishedRequirements);
+        $this->assertSame($calls[0]->saved_notice_ai_document_chunk_id, $publishedRequirements[0]->saved_notice_ai_document_chunk_id);
+        $this->assertSame($calls[1]->saved_notice_ai_document_chunk_id, $publishedRequirements[1]->saved_notice_ai_document_chunk_id);
+        $this->assertSame(0, SavedNoticeAiRequirement::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->count());
+    }
+
+    public function test_process_requirement_extraction_run_orchestrates_chunks_without_openai_and_dispatches_chunk_jobs(): void
+    {
+        Queue::fake();
+        Http::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2004', 'Orchestration target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 12:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'orchestration-target.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/orchestration-target.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager. Leverandøren skal beskrive løsning.',
+            'text_extracted_at' => '2026-04-07 12:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsning.', 1);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_QUEUED,
+            'queued_at' => '2026-04-07 12:02:00',
+            'started_at' => null,
+            'last_heartbeat_at' => '2026-04-07 12:02:00',
+        ]);
+
+        $job = new ProcessRequirementExtractionRun($run->id);
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $run->refresh();
+        $document->refresh();
+
+        $calls = RequirementExtractionCall::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->orderBy('saved_notice_ai_document_chunk_id')
+            ->get();
+
+        $this->assertSame(RequirementExtractionRun::STATUS_PROCESSING, $run->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->processing_status);
+        $this->assertNotSame(RequirementExtractionRun::STATUS_COMPLETED, $run->status);
+        $this->assertCount(2, $calls);
+        $this->assertSame(RequirementExtractionCall::STATUS_QUEUED, $calls[0]->status);
+        $this->assertSame(RequirementExtractionCall::STATUS_QUEUED, $calls[1]->status);
+        Queue::assertPushed(ProcessRequirementExtractionChunk::class, 2);
+        Http::assertNothingSent();
+    }
+
+    public function test_orchestrating_the_same_run_twice_does_not_duplicate_call_rows(): void
+    {
+        Queue::fake();
+        Http::fake();
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2005', 'Replay orchestration target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 13:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'replay-orchestration.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/replay-orchestration.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager. Leverandøren skal beskrive løsning.',
+            'text_extracted_at' => '2026-04-07 13:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsning.', 1);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_QUEUED,
+            'queued_at' => '2026-04-07 13:02:00',
+            'started_at' => null,
+            'last_heartbeat_at' => '2026-04-07 13:02:00',
+        ]);
+
+        $job = new ProcessRequirementExtractionRun($run->id);
+        $service = app(RequirementExtractionRunService::class);
+        $job->handle($service);
+        $job->handle($service);
+
+        $this->assertSame(2, RequirementExtractionCall::query()->where('requirement_extraction_run_id', $run->id)->count());
+        $this->assertSame(2, SavedNoticeAiDocumentChunk::query()->where('saved_notice_ai_document_id', $document->id)->count());
+        $this->assertSame(RequirementExtractionRun::STATUS_PROCESSING, $run->refresh()->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->refresh()->processing_status);
+        Http::assertNothingSent();
     }
 
     public function test_it_marks_an_active_run_failed_when_the_job_failed_hook_receives_a_timeout_exception(): void
