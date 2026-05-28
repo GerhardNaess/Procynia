@@ -78,6 +78,15 @@ php artisan queue:work --queue=supplier-harvests,default
 composer setup
 ```
 
+### Vite hot mode and `public/hot`
+
+- `public/hot` is a local Vite dev artifact created when `npm run dev` or `composer dev` starts the Vite dev server.
+- When `public/hot` exists, Laravel uses the Vite dev server instead of `public/build/manifest.json`.
+- If `public/hot` points to a dead or wrong dev server, `/login` and `/app` can render as a white page.
+- If you want to use built assets, `public/hot` should not exist.
+- If `/login` or `/app` is white, check `public/hot` first. If `public/build/manifest.json` exists and Vite dev is not running, it is safe to remove `public/hot`.
+- Do not commit `public/hot`; it is ignored by git and should remain local.
+
 ## Architecture
 
 ### Two-panel structure
