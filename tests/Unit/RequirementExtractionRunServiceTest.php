@@ -1562,6 +1562,100 @@ class RequirementExtractionRunServiceTest extends TestCase
         );
     }
 
+    public function test_finalize_deduplicates_cross_chunk_duplicates_before_promotion(): void
+    {
+        Queue::fake();
+
+        $sameCandidate = $this->buildFullDocumentCandidate('Leverandøren skal levere dokumentasjon innen 10 dager.', [
+            'requirement_identifier' => '1.1',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'obligation_type' => 'must',
+            'interpretation_risk' => 'low',
+        ]);
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_dedup',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => json_encode(['candidates' => [$sameCandidate]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'usage' => [
+                    'input_tokens' => 120,
+                    'output_tokens' => 42,
+                    'total_tokens' => 162,
+                ],
+            ], 200, ['x-request-id' => 'req_dedup']),
+        ]);
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-DEDUP-1', 'Cross-chunk dedup target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-05-28 11:00:00');
+
+        $documentText = 'Leverandøren skal levere dokumentasjon innen 10 dager. Leverandøren skal levere dokumentasjon innen 10 dager.';
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'cross-chunk-dedup.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/cross-chunk-dedup.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => $documentText,
+            'text_extracted_at' => '2026-05-28 11:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        ]);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 1);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_QUEUED,
+            'queued_at' => '2026-05-28 11:02:00',
+            'started_at' => null,
+            'last_heartbeat_at' => '2026-05-28 11:02:00',
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->orchestrateRunChunks($run);
+
+        $calls = RequirementExtractionCall::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $calls);
+
+        $service->processRunCall($calls[0]->id);
+        $service->processRunCall($calls[1]->id);
+
+        $stagedBeforeFinalize = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->count();
+
+        $this->assertSame(2, $stagedBeforeFinalize, 'Both chunks must have staged one row each before finalization');
+
+        $finalize = new FinalizeRequirementExtractionRun($run->id);
+        $finalize->handle($service);
+
+        $run->refresh();
+        $document->refresh();
+
+        $publishedRequirements = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_PUBLISHED)
+            ->get();
+
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED, $document->processing_status);
+        $this->assertCount(1, $publishedRequirements, 'Dedup must collapse the two identical staged candidates into one published requirement');
+        $this->assertSame(1, $run->candidate_count);
+        $this->assertSame(1, $run->persisted_requirement_count);
+        $this->assertSame(0, SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->count());
+    }
+
     private function customerContext(string $customerName = 'Procynia AS'): array
     {
         $customer = $this->createCustomer($customerName);

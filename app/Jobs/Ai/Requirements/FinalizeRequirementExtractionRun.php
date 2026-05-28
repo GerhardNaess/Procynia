@@ -97,6 +97,7 @@ class FinalizeRequirementExtractionRun implements ShouldQueue
                 return;
             }
 
+            $service->deduplicateStagedRequirementsForRun($run);
             $service->markRunMerging($run, $document);
             $service->promoteRun($run, $document);
         });

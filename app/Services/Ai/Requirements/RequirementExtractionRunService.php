@@ -1436,6 +1436,73 @@ class RequirementExtractionRunService
         });
     }
     /**
+     * Purpose: Deduplicate staged requirement rows across chunks before promotion, mirroring documentDedupeCandidates().
+     * Inputs: The extraction run (already locked by the caller's transaction).
+     * Returns: The number of duplicate staged rows removed.
+     * Side effects: Deletes duplicate staged rows and updates the run candidate count.
+     */
+    public function deduplicateStagedRequirementsForRun(RequirementExtractionRun $run): int
+    {
+        $staged = SavedNoticeAiRequirement::query()
+            ->where('extraction_run_id', $run->id)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->orderBy('id')
+            ->get(['id', 'requirement_identifier', 'requirement_type', 'extraction_metadata']);
+
+        if ($staged->isEmpty()) {
+            return 0;
+        }
+
+        $seen = [];
+        $duplicateIds = [];
+
+        foreach ($staged as $row) {
+            $metadata = is_array($row->extraction_metadata) ? $row->extraction_metadata : [];
+            $fingerprint = implode('|', [
+                $this->normalizeFingerprintValue($row->requirement_identifier),
+                $this->normalizeFingerprintValue($metadata['parent_reference'] ?? null),
+                $this->normalizeFingerprintValue($row->requirement_type),
+                $this->normalizeFingerprintValue($metadata['obligation_type'] ?? null),
+                $this->normalizeFingerprintValue($metadata['original_text'] ?? null),
+                $this->normalizeFingerprintValue($metadata['normalized_text'] ?? null),
+            ]);
+
+            if (array_key_exists($fingerprint, $seen)) {
+                $duplicateIds[] = $row->id;
+            } else {
+                $seen[$fingerprint] = $row->id;
+            }
+        }
+
+        Log::info('[PROCYNIA][REQ_PIPELINE] Document-level staged requirement dedupe completed.', [
+            'run_id' => $run->uuid,
+            'document_id' => $run->saved_notice_ai_document_id,
+            'raw_staged_count' => $staged->count(),
+            'duplicate_count' => count($duplicateIds),
+            'remaining_count' => $staged->count() - count($duplicateIds),
+            'phase_1_requirement_extraction' => true,
+        ]);
+
+        if ($duplicateIds === []) {
+            return 0;
+        }
+
+        SavedNoticeAiRequirement::query()
+            ->whereIn('id', $duplicateIds)
+            ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
+            ->delete();
+
+        $remainingCount = $staged->count() - count($duplicateIds);
+
+        $run->forceFill([
+            'candidate_count' => $remainingCount,
+            'last_heartbeat_at' => now(),
+        ])->save();
+
+        return count($duplicateIds);
+    }
+
+    /**
      * Purpose: Mark a run and its document mirror as failed without touching already published AI requirements.
      * Inputs: The extraction run, the source document, and the failure details.
      * Returns: The updated run row.
