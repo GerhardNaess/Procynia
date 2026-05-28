@@ -323,15 +323,21 @@ class RequirementCandidateExtractor
                 $windowSummary['error_type'] = $errorType;
                 $windowSummary['error_message'] = $errorMessage;
             } catch (Throwable $exception) {
+                $outputTokens = is_numeric($requestResult['output_tokens'] ?? null) ? (int) $requestResult['output_tokens'] : null;
+                $errorType = $this->phaseOneJsonParseErrorType($outputTokens, FullDocumentRequirementExtractionPrompt::maxOutputTokens());
+                $errorType = $errorType === 'truncated_response' ? 'truncated_response' : 'unexpected_response';
+                $errorMessage = $errorType === 'truncated_response'
+                    ? 'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.'
+                    : $exception->getMessage();
                 $windowFailures[] = [
                     'window_index' => $windowMeta['window_index'],
-                    'stage' => 'unexpected_response',
-                    'type' => 'unexpected_response',
-                    'message' => $exception->getMessage(),
+                    'stage' => $errorType,
+                    'type' => $errorType,
+                    'message' => $errorMessage,
                 ];
                 $windowSummary['ok'] = false;
-                $windowSummary['error_type'] = 'unexpected_response';
-                $windowSummary['error_message'] = $exception->getMessage();
+                $windowSummary['error_type'] = $errorType;
+                $windowSummary['error_message'] = $errorMessage;
             }
 
             $windowSummaries[] = $windowSummary;

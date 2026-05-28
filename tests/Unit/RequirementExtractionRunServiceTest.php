@@ -1470,6 +1470,98 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertFalse($approved->contains(fn (SavedNoticeAiRequirement $requirement): bool => $requirement->id === $supersededRequirement->id));
     }
 
+    public function test_process_run_call_stores_truncated_response_on_call_run_and_document_when_output_hits_token_limit(): void
+    {
+        Queue::fake();
+
+        $truncatedJson = '{"candidates":[{"requirement_identifier":"1.1","parent_reference":null,"original_text":"Leverandøren skal levere dokumentasjon innen 10 dager."';
+
+        Http::fake([
+            '*' => Http::response([
+                'id' => 'resp_truncated_propagation',
+                'object' => 'response',
+                'status' => 'completed',
+                'output_text' => $truncatedJson,
+                'usage' => [
+                    'input_tokens' => 150,
+                    'output_tokens' => FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+                    'total_tokens' => 150 + FullDocumentRequirementExtractionPrompt::maxOutputTokens(),
+                ],
+            ], 200, [
+                'x-request-id' => 'req_truncated_propagation',
+            ]),
+        ]);
+
+        $context = $this->customerContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-RUN-2005', 'Truncated propagation target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-05-28 10:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'truncated-propagation.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/truncated-propagation.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Leverandøren skal levere dokumentasjon innen 10 dager.',
+            'text_extracted_at' => '2026-05-28 10:01:00',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+            'queued_at' => '2026-05-28 10:02:00',
+            'processing_started_at' => '2026-05-28 10:02:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon innen 10 dager.', 0);
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'queued_at' => '2026-05-28 10:02:00',
+            'started_at' => '2026-05-28 10:02:00',
+            'last_heartbeat_at' => '2026-05-28 10:02:30',
+        ]);
+        $call = $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_QUEUED,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        $service->processRunCall($call->id);
+
+        $call->refresh();
+        $run->refresh();
+        $document->refresh();
+
+        $this->assertSame(RequirementExtractionCall::STATUS_FAILED, $call->status);
+        $this->assertSame('truncated_response', $call->error_type);
+        $this->assertSame(
+            'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.',
+            $call->error_message,
+        );
+        $this->assertSame(200, $call->status_code);
+        $this->assertSame(FullDocumentRequirementExtractionPrompt::maxOutputTokens(), $call->output_tokens);
+        $this->assertSame(RequirementExtractionRun::STATUS_PROCESSING, $run->status);
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING, $document->processing_status);
+
+        Queue::assertPushed(FinalizeRequirementExtractionRun::class, 1);
+
+        $finalize = new FinalizeRequirementExtractionRun($run->id);
+        $finalize->handle($service);
+
+        $run->refresh();
+        $document->refresh();
+
+        $this->assertSame(RequirementExtractionRun::STATUS_FAILED, $run->status);
+        $this->assertSame('chunk_extraction', $run->failure_stage);
+        $this->assertSame('truncated_response', $run->error_type);
+        $this->assertSame(
+            'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.',
+            $run->error_message,
+        );
+        $this->assertSame(SavedNoticeAiDocument::PROCESSING_STATUS_FAILED, $document->processing_status);
+        $this->assertSame('truncated_response', $document->processing_error_type);
+        $this->assertSame(
+            'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.',
+            $document->processing_error_message,
+        );
+    }
+
     private function customerContext(string $customerName = 'Procynia AS'): array
     {
         $customer = $this->createCustomer($customerName);
