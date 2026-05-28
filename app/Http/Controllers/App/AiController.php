@@ -1424,6 +1424,7 @@ class AiController extends Controller
     private function aiDocumentsPayload(SavedNotice $notice): array
     {
         return $notice->aiDocuments
+            ->unique('original_filename')
             ->map(fn (SavedNoticeAiDocument $document): array => $this->aiDocumentPayload($document))
             ->values()
             ->all();

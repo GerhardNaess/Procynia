@@ -220,61 +220,63 @@ class RequirementExtractionRunService
 
         $this->markRunProcessing($run, $document);
 
+        $activeCallCount = RequirementExtractionCall::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->whereIn('status', [RequirementExtractionCall::STATUS_QUEUED, RequirementExtractionCall::STATUS_RUNNING])
+            ->count();
+
+        if ($activeCallCount > 0) {
+            return;
+        }
+
+        $splitResult = app(DocumentSplitPlanner::class)->plan($document, $run->uuid);
+
+        if (! ($splitResult['ok'] ?? false)) {
+            $this->markRunFailed(
+                $run,
+                $document,
+                'document_split',
+                (string) ($splitResult['error_type'] ?? 'document_split_failed'),
+                (string) ($splitResult['error_message'] ?? 'Document split planning failed.'),
+                [
+                    'candidate_count' => 0,
+                    'persisted_requirement_count' => 0,
+                    'openai_call_count' => 0,
+                    'input_tokens_total' => 0,
+                    'output_tokens_total' => 0,
+                    'total_tokens_total' => 0,
+                ],
+            );
+
+            return;
+        }
+
+        $chunkBuildResult = $this->persistDocumentSplitChunks($document, $run, $splitResult);
+
+        if (! $chunkBuildResult['ok']) {
+            $this->markRunFailed(
+                $run,
+                $document,
+                'document_split_persist',
+                (string) ($chunkBuildResult['error_type'] ?? 'document_split_persist_failed'),
+                (string) ($chunkBuildResult['error_message'] ?? 'Document split chunk persistence failed.'),
+                [
+                    'candidate_count' => 0,
+                    'persisted_requirement_count' => (int) ($chunkBuildResult['chunk_count'] ?? 0),
+                    'openai_call_count' => 0,
+                    'input_tokens_total' => 0,
+                    'output_tokens_total' => 0,
+                    'total_tokens_total' => 0,
+                ],
+            );
+
+            return;
+        }
+
         $chunks = SavedNoticeAiDocumentChunk::query()
             ->where('saved_notice_ai_document_id', $document->id)
             ->orderBy('chunk_index')
             ->get();
-
-        if ($chunks->isEmpty()) {
-            $splitResult = app(DocumentSplitPlanner::class)->plan($document, $run->uuid);
-
-            if (! ($splitResult['ok'] ?? false)) {
-                $this->markRunFailed(
-                    $run,
-                    $document,
-                    'document_split',
-                    (string) ($splitResult['error_type'] ?? 'document_split_failed'),
-                    (string) ($splitResult['error_message'] ?? 'Document split planning failed.'),
-                    [
-                        'candidate_count' => 0,
-                        'persisted_requirement_count' => 0,
-                        'openai_call_count' => 0,
-                        'input_tokens_total' => 0,
-                        'output_tokens_total' => 0,
-                        'total_tokens_total' => 0,
-                    ],
-                );
-
-                return;
-            }
-
-            $chunkBuildResult = $this->persistDocumentSplitChunks($document, $run, $splitResult);
-
-            if (! $chunkBuildResult['ok']) {
-                $this->markRunFailed(
-                    $run,
-                    $document,
-                    'document_split_persist',
-                    (string) ($chunkBuildResult['error_type'] ?? 'document_split_persist_failed'),
-                    (string) ($chunkBuildResult['error_message'] ?? 'Document split chunk persistence failed.'),
-                    [
-                        'candidate_count' => 0,
-                        'persisted_requirement_count' => (int) ($chunkBuildResult['chunk_count'] ?? 0),
-                        'openai_call_count' => 0,
-                        'input_tokens_total' => 0,
-                        'output_tokens_total' => 0,
-                        'total_tokens_total' => 0,
-                    ],
-                );
-
-                return;
-            }
-
-            $chunks = SavedNoticeAiDocumentChunk::query()
-                ->where('saved_notice_ai_document_id', $document->id)
-                ->orderBy('chunk_index')
-                ->get();
-        }
 
         if ($chunks->isEmpty()) {
             $this->markRunFailed(

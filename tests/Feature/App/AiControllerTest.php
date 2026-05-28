@@ -7374,6 +7374,89 @@ class AiControllerTest extends TestCase
         ]);
     }
 
+    public function test_documents_payload_returns_only_newest_document_per_filename_when_completed_supersedes_failed(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-DEDUP-001', 'Dedup target', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        Storage::fake('local');
+
+        $olderFailed = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_FAILED,
+            'processing_error_type' => 'truncated_response',
+            'processing_error_message' => 'AI response appears to have been truncated at the configured output token limit before valid JSON could be parsed.',
+        ]);
+
+        $newerCompleted = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $documents = collect(data_get($page, 'props.documents', []));
+        $documentIds = $documents->pluck('id');
+
+        $this->assertCount(1, $documents, 'Only the newest document per filename should be in the payload.');
+        $this->assertTrue($documentIds->contains($newerCompleted->id), 'Payload must include the newer completed document.');
+        $this->assertFalse($documentIds->contains($olderFailed->id), 'Payload must not include the older failed document.');
+        $this->assertSame(
+            SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+            $documents->first()['processing_status'],
+            'The document in the payload must have processing_status = completed.',
+        );
+    }
+
+    public function test_documents_payload_still_returns_latest_failed_document_when_no_completed_exists_for_filename(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-DEDUP-002', 'Dedup failed target', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        Storage::fake('local');
+
+        $olderFailed = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_FAILED,
+            'processing_error_type' => 'timeout',
+        ]);
+
+        $newerFailed = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_FAILED,
+            'processing_error_type' => 'truncated_response',
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $documents = collect(data_get($page, 'props.documents', []));
+        $documentIds = $documents->pluck('id');
+
+        $this->assertCount(1, $documents, 'Only the newest document per filename should be in the payload.');
+        $this->assertTrue($documentIds->contains($newerFailed->id), 'Payload must include the newer failed document.');
+        $this->assertFalse($documentIds->contains($olderFailed->id), 'Payload must not include the older failed document.');
+        $this->assertSame(
+            SavedNoticeAiDocument::PROCESSING_STATUS_FAILED,
+            $documents->first()['processing_status'],
+            'The document in the payload must still reflect the real failed status.',
+        );
+        $this->assertSame(
+            'truncated_response',
+            $documents->first()['processing_error_type'],
+            'The newest failed document error type must be visible in the payload.',
+        );
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([
