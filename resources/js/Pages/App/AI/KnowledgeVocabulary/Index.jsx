@@ -513,6 +513,19 @@ export default function KnowledgeVocabularyIndex({
                                         },
                                     ],
                                 },
+                                {
+                                    title: tai.vocabulary_page_help_section_analysis ?? 'Hva skjer når du trykker Start analyse?',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_analysis_title ?? 'Analyse og forslag til gjennomgang',
+                                            text: tai.vocabulary_page_help_item_analysis_text ?? 'Procynia sender de valgte kunnskapsdokumentene som grunnlag for en vokabularanalyse. AI leser tekst og sammendrag fra dokumentene og forsøker å finne relevante begreper, synonymer, temaer, undertemaer, nøkkelord og metadata-verdier. Forslagene sammenlignes med eksisterende godkjent selskapsvokabular. Nye funn lagres som forslag til gjennomgang — de blir ikke automatisk godkjent og brukes ikke som autoritativt vokabular før en bruker har godkjent, redigert og godkjent, avvist eller slått dem sammen med et eksisterende begrep.',
+                                        },
+                                        {
+                                            title: null,
+                                            text: tai.vocabulary_page_help_item_analysis_summary ?? 'AI foreslår. Du godkjenner. Først etter godkjenning blir begrepet en del av kundens autoritative selskapsvokabular.',
+                                        },
+                                    ],
+                                },
                             ]}
                         />
                     </div>
