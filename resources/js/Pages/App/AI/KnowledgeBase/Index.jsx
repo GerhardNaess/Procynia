@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import { KNOWLEDGE_DOCUMENT_TYPE_OPTIONS } from './KnowledgeItemForm';
 
 const DOCUMENT_STATUS_CLASS = {
@@ -366,9 +367,81 @@ export default function KnowledgeBaseIndex({
                             <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                 {tk.title}
                             </div>
-                            <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                                {tk.title}
-                            </h1>
+                            <div className="flex items-center gap-3">
+                                <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                                    {tk.title}
+                                </h1>
+                                <PageHelpButton
+                                    buttonLabel={tk.page_help_button ?? 'Hjelp'}
+                                    title={tk.page_help_title ?? 'Kunnskapsdokumenter'}
+                                    intro={tk.page_help_intro}
+                                    sections={[
+                                        {
+                                            title: tk.page_help_section_what ?? 'Hva er kunnskapsdokumenter?',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_what_title ?? 'Kildemateriale for anbudsarbeid',
+                                                    text: tk.page_help_item_what_body ?? 'Kunnskapsdokumenter er dokumenter Procynia bruker som kunnskapsgrunnlag i anbudsarbeid.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_usage ?? 'Hvordan bruker AI-en dokumentene?',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_usage_title ?? 'Splitting, analyse og metadata',
+                                                    text: tk.page_help_item_usage_body ?? 'Når et dokument lastes opp, deles det opp i tekstbiter, analyseres og berikes med metadata.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_statuses ?? 'Hva betyr statusene?',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_statuses_title ?? 'Fire statuser',
+                                                    text: tk.page_help_item_statuses_body ?? 'Trenger review: inaktiv. Godkjent: aktivt og klart. Feilet: tekstuttrekk mislyktes.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_chunks ?? 'Hva betyr chunks?',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_chunks_title ?? 'Tekstbiter for presis søking',
+                                                    text: tk.page_help_item_chunks_body ?? 'Chunks er tekstbiter dokumentet er delt opp i. Det gjør det mulig for AI å finne presise avsnitt.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_upload ?? 'Hva bør jeg laste opp?',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_upload_title ?? 'Relevante og oppdaterte dokumenter',
+                                                    text: tk.page_help_item_upload_body ?? 'Last opp dokumenter som gir AI-en et godt grunnlag. Unngå utdaterte dokumenter, dubletter og sensitive personopplysninger.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_vocabulary ?? 'Sammenheng med Standardvokabular',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_vocabulary_title ?? 'Kildemateriale vs. begrepslag',
+                                                    text: tk.page_help_item_vocabulary_body ?? 'Kunnskapsdokumenter er kildematerialet. Standardvokabular er det godkjente begrepslaget Procynia bygger på toppen.',
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            title: tk.page_help_section_recommendation ?? 'Praktisk anbefaling',
+                                            items: [
+                                                {
+                                                    title: tk.page_help_item_recommendation_title ?? 'Start med de beste dokumentene',
+                                                    text: tk.page_help_item_recommendation_body ?? 'Start med noen få representative dokumenter av høy kvalitet.',
+                                                },
+                                            ],
+                                        },
+                                    ]}
+                                />
+                            </div>
                             <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                                 {tk.subtitle}
                             </p>
