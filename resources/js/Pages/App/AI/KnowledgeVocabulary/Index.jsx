@@ -280,7 +280,7 @@ function ApprovedTermEditModal({ term, typeOptions, form, onClose, onSubmit }) {
 }
 
 export default function KnowledgeVocabularyIndex({
-    pageTitle = 'Selskapsvokabular',
+    pageTitle = 'Standardvokabular',
     approvedVocabularyGroups = [],
     suggestions = [],
     recentBatches = [],
@@ -448,23 +448,23 @@ export default function KnowledgeVocabularyIndex({
             <div className="space-y-7">
                 <section className="space-y-2">
                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                        Selskapsvokabular
+                        Standardvokabular
                     </div>
                     <div className="flex items-center gap-3">
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                            Selskapsvokabular
+                            Standardvokabular
                         </h1>
                         <PageHelpButton
                             buttonLabel={tai.vocabulary_page_help_button ?? 'Hjelp'}
-                            title={tai.vocabulary_page_help_title ?? 'Selskapsvokabular'}
+                            title={tai.vocabulary_page_help_title ?? 'Standardvokabular'}
                             intro={tai.vocabulary_page_help_intro}
                             sections={[
                                 {
-                                    title: tai.vocabulary_page_help_section_what ?? 'Hva er selskapsvokabular?',
+                                    title: tai.vocabulary_page_help_section_what ?? 'Hva er standardvokabular?',
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_what_title ?? 'Godkjente begreper og synonymer',
-                                            text: tai.vocabulary_page_help_item_what_text ?? 'Selskapsvokabular brukes til å bygge og vedlikeholde godkjente begreper, synonymer og metadata for kunden. Bare godkjente begreper regnes som autoritativt vokabular.',
+                                            text: tai.vocabulary_page_help_item_what_text ?? 'Standardvokabular brukes til å bygge og vedlikeholde godkjente begreper, synonymer og metadata for kunden. Bare godkjente begreper regnes som autoritativt vokabular.',
                                         },
                                     ],
                                 },
@@ -473,7 +473,7 @@ export default function KnowledgeVocabularyIndex({
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_how_title ?? 'Metadata-normalisering',
-                                            text: tai.vocabulary_page_help_item_how_text ?? 'Godkjent selskapsvokabular brukes først og fremst når Procynia normaliserer metadata for kunnskapsdokumenter.',
+                                            text: tai.vocabulary_page_help_item_how_text ?? 'Godkjent standardvokabular brukes først og fremst når Procynia normaliserer metadata for kunnskapsdokumenter.',
                                         },
                                     ],
                                 },
@@ -482,7 +482,7 @@ export default function KnowledgeVocabularyIndex({
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_example_title ?? 'Synonymer på tvers av dokumenter',
-                                            text: tai.vocabulary_page_help_item_example_text ?? 'Hvis dokumentene bruker både "SLA", "tjenestenivåavtale" og "driftsavtale", kan selskapsvokabular hjelpe Procynia å forstå at disse begrepene er relaterte.',
+                                            text: tai.vocabulary_page_help_item_example_text ?? 'Hvis dokumentene bruker både "SLA", "tjenestenivåavtale" og "driftsavtale", kan standardvokabular hjelpe Procynia å forstå at disse begrepene er relaterte.',
                                         },
                                     ],
                                 },
@@ -491,7 +491,7 @@ export default function KnowledgeVocabularyIndex({
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_ai_diff_title ?? 'Stil vs. begreper',
-                                            text: tai.vocabulary_page_help_item_ai_diff_text ?? 'AI-instrukser beskriver tone, språk og skrivestil. Selskapsvokabular er strukturert begrepsdata for synonymer, kategorier og metadata.',
+                                            text: tai.vocabulary_page_help_item_ai_diff_text ?? 'AI-instrukser beskriver tone, språk og skrivestil. Standardvokabular er strukturert begrepsdata for synonymer, kategorier og metadata.',
                                         },
                                     ],
                                 },
@@ -500,7 +500,7 @@ export default function KnowledgeVocabularyIndex({
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_knowledge_diff_title ?? 'Kildemateriale vs. begrepslag',
-                                            text: tai.vocabulary_page_help_item_knowledge_diff_text ?? 'Kunnskapsdokumenter er kildematerialet. Selskapsvokabular er et strukturert begrepslag Procynia bygger på toppen av dokumentene.',
+                                            text: tai.vocabulary_page_help_item_knowledge_diff_text ?? 'Kunnskapsdokumenter er kildematerialet. Standardvokabular er et strukturert begrepslag Procynia bygger på toppen av dokumentene.',
                                         },
                                     ],
                                 },
@@ -518,11 +518,11 @@ export default function KnowledgeVocabularyIndex({
                                     items: [
                                         {
                                             title: tai.vocabulary_page_help_item_analysis_title ?? 'Analyse og forslag til gjennomgang',
-                                            text: tai.vocabulary_page_help_item_analysis_text ?? 'Procynia sender de valgte kunnskapsdokumentene som grunnlag for en vokabularanalyse. AI leser tekst og sammendrag fra dokumentene og forsøker å finne relevante begreper, synonymer, temaer, undertemaer, nøkkelord og metadata-verdier. Forslagene sammenlignes med eksisterende godkjent selskapsvokabular. Nye funn lagres som forslag til gjennomgang — de blir ikke automatisk godkjent og brukes ikke som autoritativt vokabular før en bruker har godkjent, redigert og godkjent, avvist eller slått dem sammen med et eksisterende begrep.',
+                                            text: tai.vocabulary_page_help_item_analysis_text ?? 'Procynia sender de valgte kunnskapsdokumentene som grunnlag for en vokabularanalyse. AI leser tekst og sammendrag fra dokumentene og forsøker å finne relevante begreper, synonymer, temaer, undertemaer, nøkkelord og metadata-verdier. Forslagene sammenlignes med eksisterende godkjent standardvokabular. Nye funn lagres som forslag til gjennomgang — de blir ikke automatisk godkjent og brukes ikke som autoritativt vokabular før en bruker har godkjent, redigert og godkjent, avvist eller slått dem sammen med et eksisterende begrep.',
                                         },
                                         {
                                             title: null,
-                                            text: tai.vocabulary_page_help_item_analysis_summary ?? 'AI foreslår. Du godkjenner. Først etter godkjenning blir begrepet en del av kundens autoritative selskapsvokabular.',
+                                            text: tai.vocabulary_page_help_item_analysis_summary ?? 'AI foreslår. Du godkjenner. Først etter godkjenning blir begrepet en del av kundens autoritative standardvokabular.',
                                         },
                                     ],
                                 },
@@ -555,7 +555,7 @@ export default function KnowledgeVocabularyIndex({
                                 Start analyse av representative dokumenter
                             </h2>
                             <p className="text-sm leading-6 text-slate-500 whitespace-nowrap">
-                                Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt selskapsvokabular. Dokumentet forsvinner dersom kunnskapsdokumentet slettes.
+                                Velg dokumenter som skal brukes som grunnlag når AI foreslår nytt standardvokabular. Dokumentet forsvinner dersom kunnskapsdokumentet slettes.
                             </p>
                         </div>
 

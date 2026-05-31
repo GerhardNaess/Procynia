@@ -49,7 +49,7 @@ class KnowledgeVocabularyController extends Controller
         $this->syncReviewedBatches($customerId);
 
         return Inertia::render('App/AI/KnowledgeVocabulary/Index', [
-            'pageTitle' => 'Selskapsvokabular',
+            'pageTitle' => 'Standardvokabular',
             'approvedVocabularyGroups' => $this->approvedVocabularyGroups($customerId),
             'suggestions' => $this->pendingSuggestionPayload($customerId),
             'recentBatches' => $this->recentBatchPayload($customerId),
