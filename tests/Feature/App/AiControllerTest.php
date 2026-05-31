@@ -7578,6 +7578,56 @@ class AiControllerTest extends TestCase
         );
     }
 
+    public function test_ai_index_returns_200_when_archived_notices_exist(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $this->createSavedNotice($context['customer']->id, 'AI-ARCH-IDX-001', 'Archived notice in index', [
+            'bid_status' => SavedNotice::BID_STATUS_DISCOVERED,
+            'archived_at' => '2026-05-31 17:20:54',
+            'history_type' => 'closed',
+        ]);
+
+        $this->createSavedNotice($context['customer']->id, 'AI-ACTIVE-IDX-001', 'Active notice in index', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.index'))
+            ->assertOk();
+    }
+
+    public function test_ai_index_returns_200_and_omits_archived_notices_from_analysis_cases(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $archivedNotice = $this->createSavedNotice($context['customer']->id, 'AI-ARCH-IDX-002', 'Archived ex-case', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+            'archived_at' => '2026-05-31 17:20:54',
+            'history_type' => 'closed',
+        ]);
+
+        $activeNotice = $this->createSavedNotice($context['customer']->id, 'AI-ACTIVE-IDX-002', 'Active case', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.index'));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $caseIds = collect(data_get($page, 'props.analysisCases', []))->pluck('id');
+
+        $this->assertFalse(
+            $caseIds->contains($archivedNotice->id),
+            'Archived notice must not appear in analysisCases — the frontend rememberedAiCaseId validation relies on this.',
+        );
+        $this->assertTrue(
+            $caseIds->contains($activeNotice->id),
+            'Active notice must appear in analysisCases.',
+        );
+    }
+
     public function test_archived_saved_notice_returns_404_on_ai_show(): void
     {
         $context = $this->customerAdminContext();

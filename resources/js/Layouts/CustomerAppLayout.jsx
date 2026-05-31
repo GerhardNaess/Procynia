@@ -80,9 +80,15 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const firstAvailableAiCaseId = page.props.analysisCases?.[0]?.id
         ? String(page.props.analysisCases[0].id)
         : null;
+    const lastStoredAiCaseId = readLastAiCaseId();
+    const lastStoredIdIsVisible = lastStoredAiCaseId !== null
+        && Array.isArray(page.props.analysisCases)
+        && page.props.analysisCases.some((c) => String(c.id) === lastStoredAiCaseId);
     const rememberedAiCaseId = currentAiCaseId !== null && currentAiCaseId !== undefined
         ? String(currentAiCaseId)
-        : (readLastAiCaseId() ?? firstAvailableAiCaseId);
+        : lastStoredIdIsVisible
+            ? lastStoredAiCaseId
+            : (firstAvailableAiCaseId ?? lastStoredAiCaseId);
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.is_system_owner ? '/app/billing' : null;
