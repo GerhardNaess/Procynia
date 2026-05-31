@@ -303,7 +303,7 @@ return [
         'infosenter_nav' => 'Infosenter',
         'go_no_go_templates_nav' => 'Vurderingsmaler',
         'customer_area' => 'Kundeområde',
-        'customer_footer' => 'Procynia AS · Kundeområde',
+        'customer_footer' => 'Procynia · Kundeområde',
         'customer_access_required' => 'Denne brukeren har ikke tilgang til kundeområdet.',
         'customer_safe_reasoning' => 'Denne forklaringen er begrenset til egne avdelinger og følgeprofiler.',
         'cpv' => 'CPV-koder',

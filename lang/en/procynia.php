@@ -303,7 +303,7 @@ return [
         'infosenter_nav' => 'Info center',
         'go_no_go_templates_nav' => 'Assessment templates',
         'customer_area' => 'Customer area',
-        'customer_footer' => 'Procynia AS · Customer area',
+        'customer_footer' => 'Procynia · Customer area',
         'customer_access_required' => 'This user does not have access to the customer area.',
         'customer_safe_reasoning' => 'This explanation is limited to your own departments and watch profiles.',
         'cpv' => 'CPV codes',
