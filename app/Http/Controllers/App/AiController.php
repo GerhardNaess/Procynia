@@ -9,6 +9,7 @@ use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\RequirementExtractionCall;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiRequirementAssessment;
@@ -1510,6 +1511,7 @@ class AiController extends Controller
             'processing_failure_stage' => $document->latestExtractionRun?->failure_stage,
             'processing_failure_type' => $document->latestExtractionRun?->error_type,
             'processing_failure_message' => $document->latestExtractionRun?->error_message,
+            'requirement_extraction_progress' => $this->extractionProgressPayload($document),
             'has_extracted_text' => filled($document->extracted_text),
             'chunk_count' => $document->chunks->count(),
             'preview_mode' => $previewMode,
@@ -1529,6 +1531,49 @@ class AiController extends Controller
                 'savedNotice' => $document->saved_notice_id,
                 'document' => $document->id,
             ]),
+        ];
+    }
+
+    /**
+     * Purpose: Build a call-count summary for the latest extraction run of one AI document.
+     * Inputs: A document model with latestExtractionRun already loaded.
+     * Returns: Progress array or null when no run exists.
+     * Side effects: One aggregate query per document against requirement_extraction_calls.
+     */
+    private function extractionProgressPayload(SavedNoticeAiDocument $document): ?array
+    {
+        $run = $document->latestExtractionRun;
+
+        if ($run === null) {
+            return null;
+        }
+
+        $counts = DB::table('requirement_extraction_calls')
+            ->where('requirement_extraction_run_id', $run->id)
+            ->selectRaw(
+                'COUNT(*) as total_calls,' .
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as completed_calls,' .
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as running_calls,' .
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as queued_calls,' .
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed_calls',
+                [
+                    RequirementExtractionCall::STATUS_COMPLETED,
+                    RequirementExtractionCall::STATUS_RUNNING,
+                    RequirementExtractionCall::STATUS_QUEUED,
+                    RequirementExtractionCall::STATUS_FAILED,
+                ]
+            )
+            ->first();
+
+        return [
+            'status' => $run->status,
+            'total_calls' => (int) ($counts->total_calls ?? 0),
+            'completed_calls' => (int) ($counts->completed_calls ?? 0),
+            'running_calls' => (int) ($counts->running_calls ?? 0),
+            'queued_calls' => (int) ($counts->queued_calls ?? 0),
+            'failed_calls' => (int) ($counts->failed_calls ?? 0),
+            'candidate_count' => (int) ($run->candidate_count ?? 0),
+            'persisted_requirement_count' => (int) ($run->persisted_requirement_count ?? 0),
         ];
     }
 

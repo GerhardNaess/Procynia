@@ -1953,9 +1953,30 @@ export default function AiShow({
     const requirementExtractionBannerTitle = requirementExtractionBanner?.state === 'failed'
         ? tai.requirement_extraction_failed_title
         : tai.requirement_extraction_background_title;
-    const requirementExtractionBannerDescription = requirementExtractionBanner?.state === 'failed'
-        ? tai.requirement_extraction_failed_description
-        : tai.requirement_extraction_background_description;
+    const requirementExtractionProgress = requirementExtractionBanner?.document?.requirement_extraction_progress ?? null;
+    const requirementExtractionBannerDescription = (() => {
+        if (requirementExtractionBanner?.state === 'failed') {
+            return tai.requirement_extraction_failed_description;
+        }
+        if (activeRequirementExtractionDocumentStatus === 'merging') {
+            return tai.requirement_extraction_progress_merging ?? tai.requirement_extraction_background_description;
+        }
+        const totalCalls = Number(requirementExtractionProgress?.total_calls ?? 0);
+        if (totalCalls > 0) {
+            return formatLocalizedTemplate(tai.requirement_extraction_progress_processing ?? '', {
+                completed: requirementExtractionProgress?.completed_calls ?? 0,
+                total: totalCalls,
+            });
+        }
+        return tai.requirement_extraction_progress_started ?? tai.requirement_extraction_background_description;
+    })();
+    const requirementExtractionCandidateText = (() => {
+        if (requirementExtractionBanner === null || requirementExtractionBanner?.state === 'failed') {
+            return null;
+        }
+        const count = Number(requirementExtractionProgress?.candidate_count ?? 0);
+        return formatLocalizedTemplate(tai.requirement_extraction_progress_candidates ?? '', { count });
+    })();
     const requirementUpdatesLocked = reviewingRequirementId !== null
         || workingRequirementId !== null
         || refreshingAssessments
@@ -2991,6 +3012,11 @@ export default function AiShow({
                                 <p className="text-sm leading-6 text-slate-600">
                                     {requirementExtractionBannerDescription}
                                 </p>
+                                {requirementExtractionCandidateText ? (
+                                    <p className="text-sm font-medium text-slate-700">
+                                        {requirementExtractionCandidateText}
+                                    </p>
+                                ) : null}
                                 {activeRequirementExtractionDocumentTitle ? (
                                     <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
                                         {tai.requirement_extraction_document_prefix} {activeRequirementExtractionDocumentTitle}

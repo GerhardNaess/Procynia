@@ -7457,6 +7457,127 @@ class AiControllerTest extends TestCase
         );
     }
 
+    public function test_documents_payload_includes_requirement_extraction_progress_with_call_counts(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-PROGRESS-001', 'Progress target', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        Storage::fake('local');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+
+        $run = RequirementExtractionRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+            'prompt_version' => 1,
+            'model' => 'gpt-4.1-mini',
+            'candidate_count' => 143,
+            'persisted_requirement_count' => 0,
+            'openai_call_count' => 0,
+            'input_tokens_total' => 0,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 0,
+        ]);
+
+        $callBase = [
+            'requirement_extraction_run_id' => $run->id,
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+            'prompt_version' => 1,
+            'model' => 'gpt-4.1-mini',
+        ];
+
+        for ($i = 0; $i < 12; $i++) {
+            RequirementExtractionCall::query()->create(array_merge($callBase, [
+                'status' => RequirementExtractionCall::STATUS_COMPLETED,
+            ]));
+        }
+
+        RequirementExtractionCall::query()->create(array_merge($callBase, [
+            'status' => RequirementExtractionCall::STATUS_RUNNING,
+        ]));
+
+        for ($i = 0; $i < 27; $i++) {
+            RequirementExtractionCall::query()->create(array_merge($callBase, [
+                'status' => RequirementExtractionCall::STATUS_QUEUED,
+            ]));
+        }
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $documentRow = collect(data_get($page, 'props.documents', []))->firstWhere('id', $document->id);
+        $progress = $documentRow['requirement_extraction_progress'] ?? null;
+
+        $this->assertNotNull($progress, 'requirement_extraction_progress must be present for a document with an active run.');
+        $this->assertSame(40, $progress['total_calls']);
+        $this->assertSame(12, $progress['completed_calls']);
+        $this->assertSame(1, $progress['running_calls']);
+        $this->assertSame(27, $progress['queued_calls']);
+        $this->assertSame(0, $progress['failed_calls']);
+        $this->assertSame(143, $progress['candidate_count']);
+    }
+
+    public function test_documents_payload_includes_requirement_extraction_progress_for_completed_document(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-PROGRESS-002', 'Progress completed target', [
+            'bid_status' => SavedNotice::BID_STATUS_IN_PROGRESS,
+        ]);
+
+        Storage::fake('local');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+        ]);
+
+        RequirementExtractionRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'status' => RequirementExtractionRun::STATUS_COMPLETED,
+            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+            'prompt_version' => 1,
+            'model' => 'gpt-4.1-mini',
+            'candidate_count' => 55,
+            'persisted_requirement_count' => 55,
+            'openai_call_count' => 3,
+            'input_tokens_total' => 0,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 0,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $documentRow = collect(data_get($page, 'props.documents', []))->firstWhere('id', $document->id);
+
+        $this->assertSame(
+            SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+            $documentRow['processing_status'],
+            'Completed document must still report processing_status = completed.',
+        );
+        $this->assertSame(
+            55,
+            $documentRow['requirement_extraction_progress']['candidate_count'] ?? null,
+            'requirement_extraction_progress.candidate_count must reflect the completed run.',
+        );
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([
