@@ -96,6 +96,7 @@ class HandleInertiaRequests extends Middleware
                 'billing' => __('procynia.billing'),
                 'user' => __('procynia.user'),
                 'suppliers' => __('procynia.suppliers'),
+                'customer_env' => __('procynia.customer_env'),
                 'info_center_page' => __('procynia.info_center_page'),
                 'watch_profile_page' => __('procynia.watch_profile_page'),
                 'common' => [
