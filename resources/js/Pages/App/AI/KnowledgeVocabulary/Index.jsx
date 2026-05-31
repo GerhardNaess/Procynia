@@ -1,6 +1,7 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../../Components/App/PageHelpButton';
 
 function classNames(...values) {
     return values.filter(Boolean).join(' ');
@@ -287,7 +288,8 @@ export default function KnowledgeVocabularyIndex({
     typeOptions = [],
     storeBatchUrl = '',
 }) {
-    const { locale = 'nb-NO' } = usePage().props;
+    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const tai = translations?.ai ?? {};
     const batchForm = useForm({
         source_document_ids: [],
     });
@@ -448,15 +450,86 @@ export default function KnowledgeVocabularyIndex({
                     <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                         Selskapsvokabular
                     </div>
-                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                        Selskapsvokabular
-                    </h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                            Selskapsvokabular
+                        </h1>
+                        <PageHelpButton
+                            buttonLabel={tai.vocabulary_page_help_button ?? 'Hjelp'}
+                            title={tai.vocabulary_page_help_title ?? 'Selskapsvokabular'}
+                            intro={tai.vocabulary_page_help_intro}
+                            sections={[
+                                {
+                                    title: tai.vocabulary_page_help_section_what ?? 'Hva er selskapsvokabular?',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_what_title ?? 'Godkjente begreper og synonymer',
+                                            text: tai.vocabulary_page_help_item_what_text ?? 'Selskapsvokabular brukes til å bygge og vedlikeholde godkjente begreper, synonymer og metadata for kunden. Bare godkjente begreper regnes som autoritativt vokabular.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.vocabulary_page_help_section_how ?? 'Hvordan brukes det i dag?',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_how_title ?? 'Metadata-normalisering',
+                                            text: tai.vocabulary_page_help_item_how_text ?? 'Godkjent selskapsvokabular brukes først og fremst når Procynia normaliserer metadata for kunnskapsdokumenter.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.vocabulary_page_help_section_example ?? 'Eksempel',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_example_title ?? 'Synonymer på tvers av dokumenter',
+                                            text: tai.vocabulary_page_help_item_example_text ?? 'Hvis dokumentene bruker både "SLA", "tjenestenivåavtale" og "driftsavtale", kan selskapsvokabular hjelpe Procynia å forstå at disse begrepene er relaterte.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.vocabulary_page_help_section_ai_diff ?? 'Forskjell på AI-instrukser',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_ai_diff_title ?? 'Stil vs. begreper',
+                                            text: tai.vocabulary_page_help_item_ai_diff_text ?? 'AI-instrukser beskriver tone, språk og skrivestil. Selskapsvokabular er strukturert begrepsdata for synonymer, kategorier og metadata.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.vocabulary_page_help_section_knowledge_diff ?? 'Forskjell på kunnskapsdokumenter',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_knowledge_diff_title ?? 'Kildemateriale vs. begrepslag',
+                                            text: tai.vocabulary_page_help_item_knowledge_diff_text ?? 'Kunnskapsdokumenter er kildematerialet. Selskapsvokabular er et strukturert begrepslag Procynia bygger på toppen av dokumentene.',
+                                        },
+                                    ],
+                                },
+                                {
+                                    title: tai.vocabulary_page_help_section_limitation ?? 'Viktig begrensning',
+                                    items: [
+                                        {
+                                            title: tai.vocabulary_page_help_item_limitation_title ?? 'Påvirker ikke gamle chunks automatisk',
+                                            text: tai.vocabulary_page_help_item_limitation_text ?? 'Godkjent vokabular omskriver ikke automatisk gamle chunks, eksisterende krav eller tidligere genererte svar. For at eldre dokumenter skal få full effekt, må metadata eventuelt genereres på nytt.',
+                                        },
+                                    ],
+                                },
+                            ]}
+                        />
+                    </div>
                     <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                         Bygg og vedlikehold kundens godkjente vokabular for metadata, synonymer og begreper.
                     </p>
                     <p className="max-w-3xl text-sm leading-6 text-slate-600">
                         AI foreslår. Du godkjenner. Bare godkjente verdier brukes som autoritativt vokabular.
                     </p>
+                    <div className="mt-1 max-w-3xl rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-1">
+                        <p className="text-sm leading-6 text-slate-700">
+                            {tai.vocabulary_metadata_notice ?? 'Godkjent vokabular brukes når Procynia normaliserer metadata for kunnskapsdokumenter. Det hjelper AI-en å finne riktig kunnskap selv om dokumentene bruker ulike ord for samme begrep.'}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                            {tai.vocabulary_metadata_notice_note ?? 'Merk: Nytt vokabular påvirker først og fremst nye eller reanalyserte kunnskapsdokumenter.'}
+                        </p>
+                    </div>
                 </section>
 
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
