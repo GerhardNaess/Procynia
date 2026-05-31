@@ -2940,6 +2940,7 @@ class AiController extends Controller
 
         return $this->savedNoticeAccess->visibleQueryFor($user)
             ->where('customer_id', $customerId)
+            ->whereNull('archived_at')
             ->whereKey($savedNotice->id)
             ->firstOrFail();
     }

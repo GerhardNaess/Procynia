@@ -7578,6 +7578,32 @@ class AiControllerTest extends TestCase
         );
     }
 
+    public function test_archived_saved_notice_returns_404_on_ai_show(): void
+    {
+        $context = $this->customerAdminContext();
+        $archivedNotice = $this->createSavedNotice($context['customer']->id, 'AI-ARCHIVED-001', 'Archived test case', [
+            'bid_status' => SavedNotice::BID_STATUS_DISCOVERED,
+            'archived_at' => '2026-05-31 17:20:54',
+            'history_type' => 'closed',
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $archivedNotice->id]))
+            ->assertNotFound();
+    }
+
+    public function test_non_archived_saved_notice_is_accessible_on_ai_show(): void
+    {
+        $context = $this->customerAdminContext();
+        $activeNotice = $this->createSavedNotice($context['customer']->id, 'AI-ACTIVE-001', 'Active test case', [
+            'bid_status' => SavedNotice::BID_STATUS_DISCOVERED,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $activeNotice->id]))
+            ->assertOk();
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([
