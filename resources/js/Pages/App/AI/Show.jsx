@@ -3549,6 +3549,16 @@ export default function AiShow({
                                                             className="mt-3 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             placeholder={tai.example_prompt_placeholder}
                                                         />
+                                                        <div className="mt-3 flex justify-end">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => { void requestAnswerDraftGeneration(requirement); }}
+                                                                disabled={requirementUpdatesLocked}
+                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            >
+                                                                {tai.create_answer}
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 ) : null}
 

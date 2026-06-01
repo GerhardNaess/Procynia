@@ -896,7 +896,7 @@ return [
         'answer_draft_description' => 'Click a requirement to open the answer draft. Press Create answer to generate a new one.',
         'no_active_answer_draft_title' => 'No active answer draft yet.',
         'no_active_answer_draft_description' => 'Click a requirement card to open the answer draft here.',
-        'prompt_instruction_hint' => 'This instruction is appended to Procynia\'s default prompt when you press Create answer.',
+        'prompt_instruction_hint' => 'Write the instruction and press Create answer below. The instruction is not saved separately — it is only used in this generation.',
         'prompt_button' => 'Prompt',
         'instructions_page_help_button' => 'Help',
         'instructions_page_help_title' => 'AI instructions',

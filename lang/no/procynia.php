@@ -896,7 +896,7 @@ return [
         'answer_draft_description' => 'Klikk et krav for å åpne svarutkastet. Trykk Lag svar for å generere et nytt.',
         'no_active_answer_draft_title' => 'Ingen aktivt svarutkast ennå.',
         'no_active_answer_draft_description' => 'Klikk på et kravkort for å åpne svarutkastet her.',
-        'prompt_instruction_hint' => 'Denne instruksen legges til Procynias standardprompt når du trykker Lag svar.',
+        'prompt_instruction_hint' => 'Skriv instruksen og trykk Lag svar nedenfor. Instruksen lagres ikke separat — den brukes bare i denne genereringen.',
         'prompt_button' => 'Prompt',
         'instructions_page_help_button' => 'Hjelp',
         'instructions_page_help_title' => 'AI instrukser',
