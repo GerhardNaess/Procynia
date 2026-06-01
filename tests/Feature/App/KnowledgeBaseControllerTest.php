@@ -3,8 +3,10 @@
 namespace Tests\Feature\App;
 
 use App\Http\Controllers\App\KnowledgeBaseController;
+use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
+use App\Services\Ai\AiUsageGuard;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeMetadataTerm;
@@ -23,6 +25,7 @@ use App\Services\OpenAi\EmbeddingService;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Mockery;
@@ -2509,6 +2512,111 @@ class KnowledgeBaseControllerTest extends TestCase
             'customer_id' => $context['customer']->id,
             'original_filename' => 'invalid-type.docx',
         ]);
+    }
+
+    public function test_knowledge_document_show_skips_lazy_summary_when_monthly_ai_quota_is_exhausted(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $context = $this->customerContext('Quota Exhausted Summary AS');
+        $context['customer']->forceFill(['included_ai_credits' => 3])->save();
+
+        $operationKey = AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD;
+        RateLimiter::clear(sprintf('ai:user:%d:%s', $context['user']->id, $operationKey));
+        RateLimiter::clear(sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey));
+
+        for ($i = 0; $i < 3; $i++) {
+            AiUsageEvent::query()->create([
+                'customer_id' => $context['customer']->id,
+                'user_id' => $context['user']->id,
+                'operation_key' => $operationKey,
+                'status' => AiUsageEvent::STATUS_ALLOWED,
+                'limit_type' => null,
+                'operation_count' => 1,
+            ]);
+        }
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'quota-test.pdf',
+            'content' => 'Dokumentinnhold for test.',
+            'original_filename' => 'quota-test.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/quota-test.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'extracted_text' => 'Dokumentinnhold for test.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $response->assertOk();
+
+        $refreshed = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $this->assertNull($refreshed->summary,
+            'Summary must not be generated when monthly AI quota is exhausted — no unguarded AI call should happen.');
+
+        $blockedEvent = AiUsageEvent::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('status', AiUsageEvent::STATUS_BLOCKED)
+            ->where('limit_type', AiUsageEvent::LIMIT_TYPE_MONTHLY_BUDGET)
+            ->first();
+        $this->assertNotNull($blockedEvent,
+            'A blocked usage event with limit_type = monthly_budget must be recorded when the quota guard fires.');
+    }
+
+    public function test_knowledge_document_show_records_allowed_usage_event_when_generating_lazy_summary(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $context = $this->customerContext('Quota Available Summary AS');
+        $context['customer']->forceFill(['included_ai_credits' => 3])->save();
+
+        $operationKey = AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD;
+        RateLimiter::clear(sprintf('ai:user:%d:%s', $context['user']->id, $operationKey));
+        RateLimiter::clear(sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey));
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'available-quota.pdf',
+            'content' => 'Første avsnitt handler om koordinering. Andre avsnitt handler om risiko og oppfølging.',
+            'original_filename' => 'available-quota.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/available-quota.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'extracted_text' => 'Første avsnitt handler om koordinering. Andre avsnitt handler om risiko og oppfølging.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $response->assertOk();
+
+        $allowedEvent = AiUsageEvent::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('status', AiUsageEvent::STATUS_ALLOWED)
+            ->where('operation_key', $operationKey)
+            ->first();
+        $this->assertNotNull($allowedEvent,
+            'An allowed usage event must be recorded when lazy summary generation is permitted by the guard.');
     }
 
     private function customerContext(string $customerName): array

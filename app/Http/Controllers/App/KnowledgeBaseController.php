@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\App;
 
+use App\Exceptions\AiUsageLimitExceededException;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
@@ -111,7 +112,7 @@ class KnowledgeBaseController extends Controller
             ->whereKey($knowledgeItem->id)
             ->firstOrFail();
 
-        $this->ensureDocumentSummary($record);
+        $this->ensureDocumentSummaryWithGuard($record, $user);
 
         return Inertia::render('App/AI/KnowledgeBase/Show', [
             'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
@@ -452,6 +453,48 @@ class KnowledgeBaseController extends Controller
      * Returns: The persisted summary string when one is available, otherwise null.
      * Side effects: May call OpenAI and updates the document summary column.
      */
+    /**
+     * Purpose: Generate a lazy document summary only when one is missing and the monthly AI quota allows it.
+     * Inputs: The knowledge document and the currently authenticated user.
+     * Returns: The summary string or null when generation is skipped or fails.
+     * Side effects: May call the AI summary service and update the document row; silently skips when quota is exhausted.
+     */
+    private function ensureDocumentSummaryWithGuard(KnowledgeItem $knowledgeDocument, User $user): ?string
+    {
+        $existingSummary = trim((string) $knowledgeDocument->summary);
+
+        if ($existingSummary !== '') {
+            return $existingSummary;
+        }
+
+        if ($knowledgeDocument->extraction_status !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
+            return null;
+        }
+
+        $customer = Customer::query()->find($knowledgeDocument->customer_id);
+
+        if (! $customer instanceof Customer || ! app(BillingEntitlementService::class)->canUseAiOffer($customer)) {
+            return null;
+        }
+
+        try {
+            $this->aiUsageGuard->assertCanStartAiOperation(
+                $customer,
+                $user,
+                AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
+            );
+        } catch (AiUsageLimitExceededException) {
+            Log::info('[PROCYNIA][KNOWLEDGE_SUMMARY] Lazy summary generation skipped because AI monthly quota is exhausted.', [
+                'knowledge_item_id' => $knowledgeDocument->id,
+                'customer_id' => $knowledgeDocument->customer_id,
+            ]);
+
+            return null;
+        }
+
+        return $this->ensureDocumentSummary($knowledgeDocument);
+    }
+
     private function ensureDocumentSummary(KnowledgeItem $knowledgeDocument): ?string
     {
         $existingSummary = trim((string) $knowledgeDocument->summary);
