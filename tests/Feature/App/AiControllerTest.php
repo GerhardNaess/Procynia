@@ -21,8 +21,10 @@ use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementRevision;
+use App\Models\AiTokenEvent;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
+use App\Services\Ai\AiTokenLogger;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\OpenAi\EmbeddingService;
@@ -626,6 +628,136 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive løsningen og dokumentere metoden.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    public function test_answer_draft_generation_records_ai_token_event_with_correct_fields(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-EVENT-001', 'Token event target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'token-test.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/token-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Leverandøren skal beskrive kapasitet.',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive kapasitet.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '2.1',
+            'requirement_text' => 'Leverandøren skal beskrive kapasitet.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'embed-req-id',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(fn () => Http::response(
+            $this->openAiStructuredResponse(['answer_draft_text' => 'Leverandøren har tilstrekkelig kapasitet.'], 120, 45),
+            200,
+            ['x-request-id' => 'req_token_event_test'],
+        ));
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+
+        $tokenEvent = AiTokenEvent::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('operation_key', 'saved_notice_requirement_answer_draft')
+            ->first();
+
+        $this->assertNotNull($tokenEvent, 'An ai_token_events row must be created after answer draft generation.');
+        $this->assertSame($context['customer']->id, $tokenEvent->customer_id);
+        $this->assertSame($context['user']->id, $tokenEvent->user_id);
+        $this->assertSame('saved_notice_requirement_answer_draft', $tokenEvent->operation_key);
+        $this->assertNotEmpty($tokenEvent->model);
+        $this->assertSame(120, $tokenEvent->input_tokens);
+        $this->assertSame(45, $tokenEvent->output_tokens);
+        $this->assertSame(165, $tokenEvent->total_tokens);
+        $this->assertSame($savedNotice->id, $tokenEvent->saved_notice_id);
+    }
+
+    public function test_answer_draft_generation_succeeds_even_if_token_logging_fails(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-FAIL-001', 'Token fail target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'fail-test.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/fail-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Leverandøren skal beskrive sikkerhet.',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive sikkerhet.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '3.1',
+            'requirement_text' => 'Leverandøren skal beskrive sikkerhet.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        $failingLogger = Mockery::mock(AiTokenLogger::class);
+        $failingLogger->shouldReceive('record')->andThrow(new RuntimeException('Simulated token logger failure'));
+        $this->app->instance(AiTokenLogger::class, $failingLogger);
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'embed-fail-test',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(fn () => Http::response(
+            $this->openAiStructuredResponse(['answer_draft_text' => 'Leverandøren oppfyller sikkerhetskravene.'], 80, 30),
+            200,
+            ['x-request-id' => 'req_fail_test'],
+        ));
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $requirement->refresh();
+        $this->assertSame('Leverandøren oppfyller sikkerhetskravene.', $requirement->answer_draft_text,
+            'Answer draft generation must succeed even when the token logger throws.');
     }
 
     public function test_ai_requirement_answer_draft_generation_is_blocked_without_ai_entitlement(): void

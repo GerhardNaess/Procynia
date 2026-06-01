@@ -6,6 +6,8 @@ use App\Models\KnowledgeItem;
 use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\AiTokenLogger;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +30,7 @@ class RequirementAnswerDraftService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
     ) {
     }
 
@@ -46,6 +49,8 @@ class RequirementAnswerDraftService
         ?Collection $retrievedKnowledgeChunks = null,
         ?array $groundingJudge = null,
         string $languageCode = 'no',
+        ?int $customerId = null,
+        ?int $userId = null,
     ): SavedNoticeAiRequirement
     {
         $requirement->loadMissing([
@@ -65,6 +70,8 @@ class RequirementAnswerDraftService
             $retrievedKnowledgeRows,
             $groundingJudge,
             $languageCode,
+            $customerId,
+            $userId,
         );
 
         return DB::transaction(function () use ($requirement, $answerDraftText): SavedNoticeAiRequirement {
@@ -116,6 +123,8 @@ class RequirementAnswerDraftService
         Collection $retrievedKnowledgeRows,
         ?array $groundingJudge,
         string $languageCode = 'no',
+        ?int $customerId = null,
+        ?int $userId = null,
     ): string
     {
         $answerLengthGuidance = $this->extractAnswerLengthGuidance(implode("\n", array_filter([
@@ -134,6 +143,8 @@ class RequirementAnswerDraftService
                 $groundingJudge,
                 $answerLengthGuidance,
                 $languageCode,
+                $customerId,
+                $userId,
             );
         }
 
@@ -153,6 +164,8 @@ class RequirementAnswerDraftService
             ),
             300,
         );
+
+        $this->logTokenUsage($response, $requirement, $customerId, $userId);
 
         try {
             $answerDraftText = $this->validateAnswerDraftPayload(
@@ -183,6 +196,8 @@ class RequirementAnswerDraftService
                     ),
                     300,
                 );
+
+                $this->logTokenUsage($retryResponse, $requirement, $customerId, $userId);
 
                 return $this->validateAnswerDraftPayload(
                     $this->decodeAnswerDraftPayload($retryResponse),
@@ -219,6 +234,8 @@ class RequirementAnswerDraftService
         ?array $groundingJudge,
         array $answerLengthGuidance,
         string $languageCode = 'no',
+        ?int $customerId = null,
+        ?int $userId = null,
     ): string
     {
         $draftSections = [];
@@ -236,6 +253,8 @@ class RequirementAnswerDraftService
                 $section,
                 false,
                 $languageCode,
+                $customerId,
+                $userId,
             );
         }
 
@@ -278,6 +297,8 @@ class RequirementAnswerDraftService
                 $supplementalSection,
                 true,
                 $languageCode,
+                $customerId,
+                $userId,
             );
 
             $answerDraftText = $this->normalizeDraftText(implode("\n\n", array_filter(
@@ -317,6 +338,8 @@ class RequirementAnswerDraftService
         array $section,
         bool $isLengthRetry,
         string $languageCode = 'no',
+        ?int $customerId = null,
+        ?int $userId = null,
     ): string
     {
         $response = $this->openAiClient->createResponse(
@@ -334,6 +357,8 @@ class RequirementAnswerDraftService
                 $languageCode,
             ),
         );
+
+        $this->logTokenUsage($response, $requirement, $customerId, $userId);
 
         try {
             $sectionText = $this->validateAnswerDraftPayload(
@@ -362,6 +387,8 @@ class RequirementAnswerDraftService
                     $section,
                     true,
                     $languageCode,
+                    $customerId,
+                    $userId,
                 );
             }
 
@@ -1378,6 +1405,31 @@ class RequirementAnswerDraftService
      * Returns: The configured model name.
      * Side effects: None.
      */
+    /**
+     * Purpose: Record token usage for one AI call without blocking the answer draft generation on failure.
+     * Inputs: The raw OpenAI response, the requirement that triggered the call, and optional customer/user context.
+     * Returns: None.
+     * Side effects: Delegates to AiTokenLogger which swallows all persistence failures safely.
+     */
+    private function logTokenUsage(array $response, SavedNoticeAiRequirement $requirement, ?int $customerId, ?int $userId): void
+    {
+        try {
+            $this->tokenLogger->record([
+                'customer_id'    => $customerId,
+                'user_id'        => $userId,
+                'operation_key'  => AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+                'model'          => $this->openAiModel(),
+                'input_tokens'   => data_get($response, 'usage.input_tokens', 0),
+                'output_tokens'  => data_get($response, 'usage.output_tokens', 0),
+                'total_tokens'   => data_get($response, 'usage.total_tokens', 0),
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'request_id'     => data_get($response, '_meta.request_id'),
+            ]);
+        } catch (Throwable) {
+            // Token logging failures must never block answer draft generation.
+        }
+    }
+
     private function openAiModel(): string
     {
         $model = trim((string) config(

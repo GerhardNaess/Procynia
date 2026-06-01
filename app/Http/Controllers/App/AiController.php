@@ -1011,6 +1011,8 @@ class AiController extends Controller
             $retrievedKnowledgeChunks,
             $groundingJudge,
             $languageCode,
+            (int) $record->customer_id,
+            (int) ($request->user()?->id ?? 0),
         );
 
         DB::table('saved_notice_ai_requirements')
