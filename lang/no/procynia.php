@@ -299,7 +299,7 @@ return [
         'procurements_nav' => 'Kunngjøringer',
         'saved_searches_nav' => 'Lagrede søk',
         'alerts_nav' => 'Varsler',
-        'worklist_nav' => 'Arbeidsliste',
+        'worklist_nav' => 'Saksliste',
         'infosenter_nav' => 'Infosenter',
         'go_no_go_templates_nav' => 'Vurderingsmaler',
         'customer_area' => 'Kundeområde',

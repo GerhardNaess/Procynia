@@ -299,7 +299,7 @@ return [
         'procurements_nav' => 'Procurements',
         'saved_searches_nav' => 'Saved searches',
         'alerts_nav' => 'Alerts',
-        'worklist_nav' => 'Worklist',
+        'worklist_nav' => 'Case list',
         'infosenter_nav' => 'Info center',
         'go_no_go_templates_nav' => 'Assessment templates',
         'customer_area' => 'Customer area',
