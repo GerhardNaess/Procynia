@@ -777,6 +777,7 @@ return [
             'retry_short' => 'Du kan prøve igjen om kort tid.',
             'retry_minutes' => 'Du kan prøve igjen om ca. :minutes minutter.',
             'retry_hours' => 'Du kan prøve igjen om ca. :hours timer.',
+            'monthly_budget_blocked' => 'Den inkluderte månedlige AI-kvoten for dette kundemiljøet er brukt opp. Kvoten fornyes ved starten av neste måned. Kontakt administrator for å vurdere oppgradering av abonnementet.',
         ],
         'generating' => 'Genererer...',
         'regenerate' => 'Generer på nytt',

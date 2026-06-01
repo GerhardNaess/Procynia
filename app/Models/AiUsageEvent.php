@@ -21,6 +21,8 @@ class AiUsageEvent extends Model
 
     public const LIMIT_TYPE_CUSTOMER = 'customer';
 
+    public const LIMIT_TYPE_MONTHLY_BUDGET = 'monthly_budget';
+
     protected $fillable = [
         'customer_id',
         'user_id',

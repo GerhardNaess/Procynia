@@ -22,6 +22,8 @@ class AiUsageGuard
 
     public const LIMIT_TYPE_CUSTOMER = AiUsageEvent::LIMIT_TYPE_CUSTOMER;
 
+    public const LIMIT_TYPE_MONTHLY_BUDGET = AiUsageEvent::LIMIT_TYPE_MONTHLY_BUDGET;
+
     public const OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD = 'saved_notice_documents_upload';
 
     public const OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT = 'saved_notice_requirement_answer_draft';
@@ -46,6 +48,27 @@ class AiUsageGuard
     {
         $operationKey = $this->normalizeOperationKey($operationKey);
         $operationCount = max(1, $operationCount);
+
+        $monthlyQuota = $this->resolvedMonthlyAiQuota($customer);
+
+        if ($monthlyQuota !== null) {
+            $monthlyUsed = $this->monthlyAllowedCount((int) $customer->id);
+
+            if (($monthlyUsed + $operationCount) > $monthlyQuota) {
+                $this->recordBlockedUsageEvent($customer, $user, $operationKey, self::LIMIT_TYPE_MONTHLY_BUDGET, $operationCount);
+                $this->logBlockedUsage($customer, $user, $operationKey, self::LIMIT_TYPE_MONTHLY_BUDGET, $operationCount);
+
+                throw new AiUsageLimitExceededException(
+                    self::LIMIT_TYPE_MONTHLY_BUDGET,
+                    (int) now()->startOfMonth()->addMonthNoOverflow()->diffInSeconds(now()),
+                    $operationKey,
+                    $operationCount,
+                    (int) $customer->id,
+                    (int) $user->id,
+                    __('procynia.ai.usage_guard.monthly_budget_blocked'),
+                );
+            }
+        }
 
         $userLimitPerMinute = max(0, (int) config('procynia.ai.usage_guard.user_per_minute', 5));
         $customerLimitPerHour = max(0, (int) config('procynia.ai.usage_guard.customer_per_hour', 50));
@@ -270,6 +293,38 @@ class AiUsageGuard
             'limit_type' => $limitType,
             'operation_count' => max(1, $operationCount),
         ]);
+    }
+
+    /**
+     * Purpose: Resolve the monthly AI operation quota for one customer.
+     * Inputs: The customer whose plan configuration and explicit override should be read.
+     * Returns: The monthly operation cap as an integer, or null when the customer has unlimited AI access.
+     * Side effects: None.
+     */
+    private function resolvedMonthlyAiQuota(Customer $customer): ?int
+    {
+        $credits = (int) $customer->included_ai_credits;
+
+        if ($credits > 0) {
+            return $credits;
+        }
+
+        return null;
+    }
+
+    /**
+     * Purpose: Count the allowed AI operations consumed by one customer in the current calendar month.
+     * Inputs: The customer id whose ai_usage_events should be aggregated.
+     * Returns: The total allowed operation count for the current month (sum of operation_count).
+     * Side effects: Runs one aggregate database query.
+     */
+    private function monthlyAllowedCount(int $customerId): int
+    {
+        return (int) AiUsageEvent::query()
+            ->where('customer_id', $customerId)
+            ->where('status', AiUsageEvent::STATUS_ALLOWED)
+            ->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()])
+            ->sum('operation_count');
     }
 
     /**

@@ -146,6 +146,181 @@ class AiUsageGuardTest extends TestCase
         $this->assertSame(AiUsageEvent::LIMIT_TYPE_CUSTOMER, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->firstOrFail()->limit_type);
     }
 
+    public function test_monthly_budget_allows_operation_when_under_quota(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customer = $this->createCustomer('Pro Customer');
+        $customer->forceFill(['included_ai_credits' => 3])->save();
+        $user = $this->createUser($customer);
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 2);
+
+        $guard->assertCanStartAiOperation($customer, $user, $operationKey);
+
+        $this->assertSame(AiUsageEvent::STATUS_ALLOWED, AiUsageEvent::query()->latest('id')->firstOrFail()->status);
+    }
+
+    public function test_monthly_budget_blocks_operation_when_quota_exhausted(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customer = $this->createCustomer('Pro Customer');
+        $customer->forceFill(['included_ai_credits' => 3])->save();
+        $user = $this->createUser($customer);
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 3);
+
+        try {
+            $guard->assertCanStartAiOperation($customer, $user, $operationKey);
+            $this->fail('Operation should have been blocked by monthly budget.');
+        } catch (AiUsageLimitExceededException $exception) {
+            $this->assertSame(AiUsageGuard::LIMIT_TYPE_MONTHLY_BUDGET, $exception->limitType());
+            $this->assertStringContainsString(
+                __('procynia.ai.usage_guard.monthly_budget_blocked'),
+                $exception->userMessage(),
+            );
+        }
+
+        $blockedEvent = AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->firstOrFail();
+        $this->assertSame(AiUsageEvent::LIMIT_TYPE_MONTHLY_BUDGET, $blockedEvent->limit_type);
+    }
+
+    public function test_monthly_budget_resets_at_new_calendar_month(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customer = $this->createCustomer('Pro Customer Monthly Reset');
+        $customer->forceFill(['included_ai_credits' => 3])->save();
+        $user = $this->createUser($customer);
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customer, $user, $operationKey);
+
+        $lastMonthAt = now()->subMonthNoOverflow()->startOfMonth();
+        $event = new AiUsageEvent([
+            'customer_id' => $customer->id,
+            'user_id' => $user->id,
+            'operation_key' => $operationKey,
+            'status' => AiUsageEvent::STATUS_ALLOWED,
+            'limit_type' => null,
+            'operation_count' => 3,
+        ]);
+        $event->created_at = $lastMonthAt;
+        $event->updated_at = $lastMonthAt;
+        $event->save();
+
+        $guard->assertCanStartAiOperation($customer, $user, $operationKey);
+
+        $this->assertSame(AiUsageEvent::STATUS_ALLOWED, AiUsageEvent::query()->latest('id')->firstOrFail()->status);
+    }
+
+    public function test_monthly_budget_is_isolated_per_customer(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customerA = $this->createCustomer('Customer A');
+        $customerA->forceFill(['included_ai_credits' => 3])->save();
+        $userA = $this->createUser($customerA, 'User A');
+
+        $customerB = $this->createCustomer('Customer B');
+        $customerB->forceFill(['included_ai_credits' => 3])->save();
+        $userB = $this->createUser($customerB, 'User B');
+
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customerA, $userA, $operationKey);
+        $this->clearRateLimits($customerB, $userB, $operationKey);
+
+        $this->seedMonthlyAllowedEvents($customerA, $userA, $operationKey, 3);
+
+        try {
+            $guard->assertCanStartAiOperation($customerA, $userA, $operationKey);
+            $this->fail('Customer A should have been blocked.');
+        } catch (AiUsageLimitExceededException $exception) {
+            $this->assertSame(AiUsageGuard::LIMIT_TYPE_MONTHLY_BUDGET, $exception->limitType());
+        }
+
+        $guard->assertCanStartAiOperation($customerB, $userB, $operationKey);
+
+        $this->assertSame(
+            AiUsageEvent::STATUS_ALLOWED,
+            AiUsageEvent::query()->where('customer_id', $customerB->id)->latest('id')->firstOrFail()->status,
+        );
+    }
+
+    public function test_monthly_budget_does_not_apply_to_enterprise_customer_with_zero_credits(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customer = $this->createCustomer('Enterprise Customer');
+        $customer->forceFill([
+            'subscription_plan' => Customer::PLAN_ENTERPRISE,
+        ])->save();
+
+        $this->assertSame(0, (int) $customer->fresh()->included_ai_credits,
+            'Enterprise customers have included_ai_credits = 0 (DB default), meaning no monthly cap via the quota mechanism.');
+
+        $user = $this->createUser($customer);
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 1000);
+
+        $guard->assertCanStartAiOperation($customer, $user, $operationKey);
+
+        $this->assertSame(AiUsageEvent::STATUS_ALLOWED, AiUsageEvent::query()->latest('id')->firstOrFail()->status);
+    }
+
+    public function test_monthly_budget_does_not_apply_to_customer_with_zero_credits_unlimited_override(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $customer = $this->createCustomer('Custom Unlimited Customer');
+        $customer->forceFill([
+            'subscription_plan' => Customer::PLAN_PRO,
+            'included_ai_credits' => 0,
+        ])->save();
+
+        $user = $this->createUser($customer);
+        $guard = app(AiUsageGuard::class);
+        $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
+
+        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 100);
+
+        $guard->assertCanStartAiOperation($customer, $user, $operationKey);
+
+        $this->assertSame(AiUsageEvent::STATUS_ALLOWED, AiUsageEvent::query()->latest('id')->firstOrFail()->status);
+    }
+
     /**
      * Purpose: Create a deterministic customer fixture for AI usage guard tests.
      * Inputs: An optional customer name.
@@ -190,6 +365,26 @@ class AiUsageGuardTest extends TestCase
             'customer_id' => $customer->id,
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * Purpose: Seed a fixed count of allowed AI usage events for the current calendar month.
+     * Inputs: The customer, user, operation key and event count to seed.
+     * Returns: None.
+     * Side effects: Writes ai_usage_events rows with created_at inside the current month.
+     */
+    private function seedMonthlyAllowedEvents(Customer $customer, User $user, string $operationKey, int $count): void
+    {
+        for ($i = 0; $i < $count; $i++) {
+            AiUsageEvent::query()->create([
+                'customer_id' => $customer->id,
+                'user_id' => $user->id,
+                'operation_key' => $operationKey,
+                'status' => AiUsageEvent::STATUS_ALLOWED,
+                'limit_type' => null,
+                'operation_count' => 1,
+            ]);
+        }
     }
 
     /**

@@ -777,6 +777,7 @@ return [
             'retry_short' => 'You can try again shortly.',
             'retry_minutes' => 'You can try again in about :minutes minutes.',
             'retry_hours' => 'You can try again in about :hours hours.',
+            'monthly_budget_blocked' => 'The included monthly AI quota for this customer environment has been used up. The quota resets at the start of next month. Contact an administrator to consider upgrading the subscription.',
         ],
         'generating' => 'Generating...',
         'regenerate' => 'Regenerate',
