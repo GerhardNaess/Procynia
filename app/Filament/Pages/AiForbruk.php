@@ -645,7 +645,7 @@ class AiForbruk extends Page
         }
 
         if ($count <= $maxCount) {
-            return $labels;
+            return array_map(fn (string $l): string => $this->shortenChartLabel($l), $labels);
         }
 
         $step   = (int) ceil($count / $maxCount);
@@ -653,13 +653,39 @@ class AiForbruk extends Page
 
         foreach ($labels as $i => $label) {
             if ($i % $step === 0 || $i === $count - 1) {
-                $result[] = strlen($label) > 10 ? substr($label, 5) : $label;
+                $result[] = $this->shortenChartLabel($label);
             } else {
                 $result[] = '';
             }
         }
 
         return $result;
+    }
+
+    private function shortenChartLabel(string $label): string
+    {
+        if ($this->trendGrouping === 'day'
+            && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $label, $m)) {
+            return $m[3].'.'.$m[2];
+        }
+
+        if ($this->trendGrouping === 'week'
+            && preg_match('/^(\d{4})-(\d{1,2})$/', $label, $m)) {
+            return 'U'.(int) $m[2];
+        }
+
+        if ($this->trendGrouping === 'month'
+            && preg_match('/^(\d{4})-(\d{2})$/', $label, $m)) {
+            $months = [
+                '01' => 'jan', '02' => 'feb', '03' => 'mar', '04' => 'apr',
+                '05' => 'mai', '06' => 'jun', '07' => 'jul', '08' => 'aug',
+                '09' => 'sep', '10' => 'okt', '11' => 'nov', '12' => 'des',
+            ];
+
+            return ($months[$m[2]] ?? $m[2])." '".substr($m[1], 2);
+        }
+
+        return $label;
     }
 
     // -------------------------------------------------------------------------

@@ -178,7 +178,7 @@
                             <svg viewBox="-44 -4 610 168" class="w-full" aria-hidden="true">
                                 {{-- Y-axis label (rotated) --}}
                                 <text x="-36" y="65" transform="rotate(-90,-36,65)" text-anchor="middle"
-                                      font-size="9" fill="#94a3b8" font-family="inherit" font-weight="600" letter-spacing="0.06em">
+                                      font-size="11" fill="#94a3b8" font-family="inherit" font-weight="600" letter-spacing="0.06em">
                                     ANTALL OPERASJONER
                                 </text>
 
@@ -190,8 +190,8 @@
                                         $label = $val >= 1000 ? round($val / 1000, 1).'k' : $val;
                                     @endphp
                                     <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" stroke-width="1"/>
-                                    <text x="-5" y="{{ $gy + 3.5 }}" text-anchor="end"
-                                          font-size="10" fill="#94a3b8" font-family="inherit">{{ $label }}</text>
+                                    <text x="-5" y="{{ $gy + 4 }}" text-anchor="end"
+                                          font-size="12" fill="#94a3b8" font-family="inherit">{{ $label }}</text>
                                 @endforeach
 
                                 {{-- Allowed line --}}
@@ -213,9 +213,9 @@
                                                 $lx     = round($i * $xStep, 1);
                                                 $anchor = $i === 0 ? 'start' : ($i === $labelCount - 1 ? 'end' : 'middle');
                                             @endphp
-                                            <text x="{{ $lx }}" y="135"
+                                            <text x="{{ $lx }}" y="136"
                                                   text-anchor="{{ $anchor }}"
-                                                  font-size="10" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
+                                                  font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
                                         @endif
                                     @endforeach
                                 @endif
