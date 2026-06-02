@@ -7,11 +7,15 @@ use App\Data\Ai\Requirements\RequirementExtractionResultData;
 use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
+use App\Models\AiTokenEvent;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\AiTokenLogger;
+use App\Services\Ai\AiUsageGuard;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -30,6 +34,7 @@ class RequirementExtractionRunService
     public function __construct(
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly RequirementEditorService $requirementEditorService,
+        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
     ) {
     }
 
@@ -1553,7 +1558,7 @@ class RequirementExtractionRunService
      */
     public function promoteRun(RequirementExtractionRun $run, SavedNoticeAiDocument $document): int
     {
-        return DB::transaction(function () use ($run, $document): int {
+        $publishedRequirementCount = DB::transaction(function () use ($run, $document): int {
             $now = now();
             $stagedRows = SavedNoticeAiRequirement::query()
                 ->where('saved_notice_ai_document_id', $document->id)
@@ -1615,6 +1620,52 @@ class RequirementExtractionRunService
 
             return $publishedRequirementCount;
         });
+
+        $this->logCompletedRunTokenEvent($run, $document);
+
+        return $publishedRequirementCount;
+    }
+
+    /**
+     * Purpose: Log one aggregated token event for a successfully completed extraction run.
+     * Inputs: The completed run with final token totals and the source document.
+     * Returns: None.
+     * Side effects: Inserts one ai_token_events row via AiTokenLogger; skips if already logged or total_tokens is zero.
+     */
+    private function logCompletedRunTokenEvent(RequirementExtractionRun $run, SavedNoticeAiDocument $document): void
+    {
+        $totalTokens = (int) $run->total_tokens_total;
+
+        if ($totalTokens <= 0) {
+            return;
+        }
+
+        if (AiTokenEvent::query()->where('requirement_extraction_run_id', $run->id)->exists()) {
+            return;
+        }
+
+        $customerId = SavedNotice::query()
+            ->where('id', $run->saved_notice_id)
+            ->value('customer_id');
+
+        $model = RequirementExtractionCall::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->whereNotNull('model')
+            ->where('model', '!=', '')
+            ->value('model');
+
+        $this->tokenLogger->record([
+            'customer_id'                  => (int) ($customerId ?? 0),
+            'user_id'                      => null,
+            'operation_key'                => AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+            'model'                        => $model ?? '',
+            'input_tokens'                 => (int) $run->input_tokens_total,
+            'output_tokens'                => (int) $run->output_tokens_total,
+            'total_tokens'                 => $totalTokens,
+            'saved_notice_id'              => $run->saved_notice_id,
+            'saved_notice_ai_document_id'  => $document->id,
+            'requirement_extraction_run_id' => $run->id,
+        ]);
     }
 
     /**

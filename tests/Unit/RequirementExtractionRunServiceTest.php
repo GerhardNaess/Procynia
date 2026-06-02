@@ -17,6 +17,8 @@ use App\Jobs\Ai\Requirements\FinalizeRequirementExtractionRun;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionChunk;
 use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
 use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
+use App\Models\AiTokenEvent;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Requirements\RequirementCandidateExtractor;
 use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
@@ -1950,6 +1952,208 @@ class RequirementExtractionRunServiceTest extends TestCase
             ->where('extraction_run_id', $run->id)
             ->where('publication_status', SavedNoticeAiRequirement::PUBLICATION_STATUS_STAGED)
             ->count());
+    }
+
+    public function test_completed_run_creates_one_ai_token_event_with_correct_fields(): void
+    {
+        $context = $this->customerContext('Token Event Extraction AS');
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-RUN-001', 'Token event target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 1200,
+            'output_tokens_total' => 450,
+            'total_tokens_total' => 1650,
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+            'model' => 'gpt-4.1-mini',
+        ]);
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $run->refresh();
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->status);
+
+        $event = AiTokenEvent::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->first();
+
+        $this->assertNotNull($event, 'One ai_token_events row must be created for a completed run with tokens.');
+        $this->assertSame($context['customer']->id, $event->customer_id);
+        $this->assertNull($event->user_id, 'user_id must be null since async job has no user context.');
+        $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD, $event->operation_key);
+        $this->assertSame(1200, $event->input_tokens);
+        $this->assertSame(450, $event->output_tokens);
+        $this->assertSame(1650, $event->total_tokens);
+        $this->assertSame($savedNotice->id, $event->saved_notice_id);
+        $this->assertSame($document->id, $event->saved_notice_ai_document_id);
+        $this->assertSame($run->id, $event->requirement_extraction_run_id);
+        $this->assertSame('gpt-4.1-mini', $event->model);
+    }
+
+    public function test_failed_run_does_not_create_ai_token_event(): void
+    {
+        $context = $this->customerContext('Token Fail Extraction AS');
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-RUN-002', 'Token fail target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 800,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 800,
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_FAILED,
+            'error_type' => 'truncated_response',
+            'error_message' => 'OpenAI response was truncated.',
+        ]);
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $this->assertSame(RequirementExtractionRun::STATUS_FAILED, $run->refresh()->status);
+
+        $eventCount = AiTokenEvent::query()
+            ->where('requirement_extraction_run_id', $run->id)
+            ->count();
+
+        $this->assertSame(0, $eventCount, 'No ai_token_events must be created when the run fails.');
+    }
+
+    public function test_completed_run_with_zero_tokens_does_not_create_token_event(): void
+    {
+        $context = $this->customerContext('Zero Token Extraction AS');
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-RUN-003', 'Zero token target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 0,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 0,
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+        ]);
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $this->assertSame(RequirementExtractionRun::STATUS_COMPLETED, $run->refresh()->status);
+        $this->assertSame(0, AiTokenEvent::query()->where('requirement_extraction_run_id', $run->id)->count(),
+            'No token event must be created when total_tokens_total is zero.');
+    }
+
+    public function test_completed_run_does_not_create_duplicate_token_event_on_second_finalize(): void
+    {
+        $context = $this->customerContext('Dedup Token Extraction AS');
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-TOKEN-RUN-004', 'Dedup token target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 500,
+            'output_tokens_total' => 200,
+            'total_tokens_total' => 700,
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle($service);
+
+        $this->assertSame(1, AiTokenEvent::query()->where('requirement_extraction_run_id', $run->id)->count(),
+            'One token event after first finalize.');
+
+        $service->promoteRun($run->fresh(), $document->fresh());
+
+        $this->assertSame(1, AiTokenEvent::query()->where('requirement_extraction_run_id', $run->id)->count(),
+            'Still one token event after second promote — no duplicate.');
+    }
+
+    public function test_token_event_has_correct_customer_id_and_saved_notice_id(): void
+    {
+        $contextA = $this->customerContext('Customer A Token');
+        $noticeA = $this->createSavedNotice($contextA['customer']->id, 'AI-TOKEN-RUN-005A', 'Customer A notice', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $documentA = $this->createAiDocument($noticeA, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunkA = $this->createAiDocumentChunk($documentA, 'Leverandøren skal levere.', 0);
+        $runA = $this->createRequirementExtractionRun($documentA, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 300,
+            'output_tokens_total' => 100,
+            'total_tokens_total' => 400,
+        ]);
+        $this->createRequirementExtractionCall($runA, $documentA, $chunkA, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+        ]);
+
+        $contextB = $this->customerContext('Customer B Token');
+        $noticeB = $this->createSavedNotice($contextB['customer']->id, 'AI-TOKEN-RUN-005B', 'Customer B notice', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $documentB = $this->createAiDocument($noticeB, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunkB = $this->createAiDocumentChunk($documentB, 'Leverandøren skal beskrive.', 0);
+        $runB = $this->createRequirementExtractionRun($documentB, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 600,
+            'output_tokens_total' => 200,
+            'total_tokens_total' => 800,
+        ]);
+        $this->createRequirementExtractionCall($runB, $documentB, $chunkB, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+        ]);
+
+        $service = app(RequirementExtractionRunService::class);
+        (new FinalizeRequirementExtractionRun($runA->id))->handle($service);
+        (new FinalizeRequirementExtractionRun($runB->id))->handle($service);
+
+        $eventA = AiTokenEvent::query()->where('requirement_extraction_run_id', $runA->id)->first();
+        $eventB = AiTokenEvent::query()->where('requirement_extraction_run_id', $runB->id)->first();
+
+        $this->assertSame($contextA['customer']->id, $eventA->customer_id);
+        $this->assertSame($noticeA->id, $eventA->saved_notice_id);
+        $this->assertSame(400, $eventA->total_tokens);
+
+        $this->assertSame($contextB['customer']->id, $eventB->customer_id);
+        $this->assertSame($noticeB->id, $eventB->saved_notice_id);
+        $this->assertSame(800, $eventB->total_tokens);
     }
 
     private function customerContext(string $customerName = 'Procynia AS'): array
