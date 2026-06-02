@@ -75,6 +75,7 @@ class AiForbruk extends Page
 
     // --- Chart axis helpers ---
     public int $operationsChartMax = 0;
+    public int $tokensChartMax = 0;
 
     /** @var array<int, string> */
     public array $operationsChartLabels = [];
@@ -599,8 +600,10 @@ class AiForbruk extends Page
         $this->operationsChartPoints = $this->svgPoints($operationsValues, $maxOps);
         $this->blockedChartPoints    = $this->svgPoints($blockedValues, $maxOps);
         $hasRealTokenData            = array_sum($tokensValues) > 0;
+        $maxTokens                   = max(array_merge([1], $tokensValues));
+        $this->tokensChartMax        = $hasRealTokenData ? $maxTokens : 0;
         $this->tokensChartPoints     = $hasRealTokenData
-            ? $this->svgPoints($tokensValues, max(array_merge([1], $tokensValues)))
+            ? $this->svgPoints($tokensValues, $maxTokens)
             : '';
         $this->operationsChartLabels = $this->svgLabels($labels);
     }

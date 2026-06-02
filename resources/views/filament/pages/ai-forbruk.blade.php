@@ -263,12 +263,54 @@
                     <p class="mt-0.5 text-sm text-gray-500">Basert på <code class="font-mono text-xs">ai_token_events</code> — foreløpig kun svarutkast-generering.</p>
                 </div>
                 @if ($tokensChartPoints !== '')
-                    <div class="px-5 pt-4 pb-2">
-                        <svg viewBox="0 0 560 150" class="w-full" aria-hidden="true">
-                            @foreach ([0, 0.25, 0.5, 0.75, 1] as $pct)
-                                <line x1="0" y1="{{ $pct * 110 + 10 }}" x2="560" y2="{{ $pct * 110 + 10 }}" stroke="#f1f5f9" stroke-width="1"/>
+                    @php
+                        $tYMax       = $tokensChartMax;
+                        $tYSteps     = [1, 0.75, 0.5, 0.25, 0];
+                        $tLabels     = $operationsChartLabels;
+                        $tLabelCount = count($tLabels);
+                        $tXStep      = $tLabelCount > 1 ? 560 / ($tLabelCount - 1) : 560;
+                    @endphp
+                    <div class="px-3 pt-4 pb-0">
+                        <svg viewBox="-44 -4 610 168" class="w-full" aria-hidden="true">
+                            {{-- Y-axis label (rotated) --}}
+                            <text x="-36" y="65" transform="rotate(-90,-36,65)" text-anchor="middle"
+                                  font-size="11" fill="#94a3b8" font-family="inherit" font-weight="600" letter-spacing="0.06em">
+                                TOKENS
+                            </text>
+
+                            {{-- Grid lines + Y-axis tick values --}}
+                            @foreach ($tYSteps as $pct)
+                                @php
+                                    $gy  = $pct * 110 + 10;
+                                    $val = $pct === 0 ? 0 : (int) round($tYMax * (1 - $pct));
+                                    $lbl = $val >= 1000000
+                                        ? round($val / 1000000, 1).'M'
+                                        : ($val >= 1000 ? round($val / 1000, 1).'k' : $val);
+                                @endphp
+                                <line x1="0" y1="{{ $gy }}" x2="560" y2="{{ $gy }}" stroke="#f1f5f9" stroke-width="1"/>
+                                <text x="-5" y="{{ $gy + 4 }}" text-anchor="end"
+                                      font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
                             @endforeach
+
+                            {{-- Token line --}}
                             <polyline points="{{ $tokensChartPoints }}" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+
+                            {{-- X-axis baseline --}}
+                            <line x1="0" y1="120" x2="560" y2="120" stroke="#e2e8f0" stroke-width="1"/>
+
+                            {{-- X-axis period labels --}}
+                            @if ($tLabelCount > 0)
+                                @foreach ($tLabels as $i => $lbl)
+                                    @if ($lbl !== '')
+                                        @php
+                                            $lx     = round($i * $tXStep, 1);
+                                            $anchor = $i === 0 ? 'start' : ($i === $tLabelCount - 1 ? 'end' : 'middle');
+                                        @endphp
+                                        <text x="{{ $lx }}" y="136" text-anchor="{{ $anchor }}"
+                                              font-size="12" fill="#94a3b8" font-family="inherit">{{ $lbl }}</text>
+                                    @endif
+                                @endforeach
+                            @endif
                         </svg>
                     </div>
                     <div class="px-5 pb-4 text-xs font-semibold text-gray-500">
