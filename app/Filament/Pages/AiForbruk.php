@@ -349,19 +349,23 @@ class AiForbruk extends Page
             ->keyBy('customer_id');
 
         return $customers->map(function (Customer $customer) use ($casesByCustomer): array {
-            $cases    = (int) ($casesByCustomer->get($customer->id)?->case_count ?? 0);
-            $limit    = (int) $customer->included_ai_credits;
-            $pct      = $limit > 0 ? min(100, (int) round($cases / $limit * 100)) : 0;
-            $status   = $pct >= 100 ? 'over' : ($pct >= 80 ? 'warning' : 'ok');
+            $cases           = (int) ($casesByCustomer->get($customer->id)?->case_count ?? 0);
+            $limit           = (int) $customer->included_ai_credits;
+            $limitDefined    = $limit > 0;
+            $pct             = $limitDefined ? min(100, (int) round($cases / $limit * 100)) : null;
+            $status          = $limitDefined
+                ? ($pct >= 100 ? 'over' : ($pct >= 80 ? 'warning' : 'ok'))
+                : 'undefined';
 
             return [
-                'customer_id'   => $customer->id,
-                'customer_name' => $customer->name,
-                'plan'          => $customer->planName(),
-                'activated'     => $cases,
-                'limit'         => $limit,
-                'pct'           => $pct,
-                'status'        => $status,
+                'customer_id'    => $customer->id,
+                'customer_name'  => $customer->name,
+                'plan'           => $customer->planName(),
+                'activated'      => $cases,
+                'limit'          => $limit,
+                'limit_defined'  => $limitDefined,
+                'pct'            => $pct,
+                'status'         => $status,
             ];
         })->values()->all();
     }
@@ -594,8 +598,12 @@ class AiForbruk extends Page
      */
     private function svgPoints(array $values, int $max, int $w = 560, int $h = 140, int $padT = 10, int $padB = 30): string
     {
-        if (count($values) < 2) {
+        if (count($values) === 0) {
             return '';
+        }
+
+        if (count($values) === 1) {
+            $values = [$values[0], $values[0]];
         }
 
         $max     = max($max, 1);
@@ -685,14 +693,18 @@ class AiForbruk extends Page
     public function operationLabel(string $key): string
     {
         return match ($key) {
-            'saved_notice_requirement_answer_draft' => 'Svarutkast',
-            'saved_notice_documents_upload'          => 'Krav-ekstraksjon',
-            'saved_notice_evidence_refresh'          => 'Bevisgrunnlag',
-            'saved_notice_assessment_refresh'        => 'Vurdering',
-            'knowledge_document_upload'              => 'Kunnskapsbase-opplasting',
-            'knowledge_chunk_metadata_update'        => 'Chunk-metadata',
-            'knowledge_vocabulary_analysis_batch'    => 'Standardvokabular',
-            default                                  => $key,
+            'saved_notice_requirement_answer_draft'  => 'Svarutkast',
+            'saved_notice_documents_upload'           => 'Krav-ekstraksjon',
+            'saved_notice_evidence_refresh'           => 'Bevisgrunnlag',
+            'saved_notice_assessment_refresh'         => 'Vurdering',
+            'saved_notice_individual_prompt'          => 'Individuell prompt',
+            'individual_prompt'                       => 'Individuell prompt',
+            'answer_regeneration', 'requirement_regeneration' => 'Regenerering',
+            'document_summary'                        => 'Dokumentsammendrag',
+            'knowledge_document_upload'               => 'Kunnskapsbase-opplasting',
+            'knowledge_chunk_metadata_update'         => 'Chunk-metadata',
+            'knowledge_vocabulary_analysis_batch'     => 'Standardvokabular',
+            default                                   => ucwords(str_replace(['saved_notice_', 'knowledge_', '_'], ['', '', ' '], $key)),
         };
     }
 
@@ -713,18 +725,20 @@ class AiForbruk extends Page
     public function capacityStatusClass(string $status): string
     {
         return match ($status) {
-            'over'    => 'text-red-700 bg-red-50 border-red-200',
-            'warning' => 'text-amber-700 bg-amber-50 border-amber-200',
-            default   => 'text-emerald-700 bg-emerald-50 border-emerald-200',
+            'over'      => 'text-red-700 bg-red-50 border-red-200',
+            'warning'   => 'text-amber-700 bg-amber-50 border-amber-200',
+            'undefined' => 'text-gray-500 bg-gray-50 border-gray-200',
+            default     => 'text-emerald-700 bg-emerald-50 border-emerald-200',
         };
     }
 
     public function capacityStatusLabel(string $status): string
     {
         return match ($status) {
-            'over'    => 'Over grense',
-            'warning' => 'Nær grense',
-            default   => 'Normal',
+            'over'      => 'Over grense',
+            'warning'   => 'Nær grense',
+            'undefined' => 'Ikke definert',
+            default     => 'Normal',
         };
     }
 }

@@ -96,10 +96,10 @@
             {{-- Datakildemark --}}
             <div class="border-t border-amber-100 bg-amber-50 px-5 py-3">
                 <p class="text-xs leading-relaxed text-amber-700">
-                    <strong>Delvis datagrunnlag.</strong>
-                    AI-operasjoner fra <code class="font-mono">ai_usage_events</code>.
-                    Tokens fra <code class="font-mono">ai_token_events</code> (kun svarutkast per nå).
-                    Kravekstraksjon ikke samlet her.
+                    <strong>Delvis datagrunnlag:</strong>
+                    AI-operasjoner hentes fra <code class="font-mono">ai_usage_events</code>.
+                    Tokenforbruk hentes fra <code class="font-mono">ai_token_events</code> og dekker foreløpig bare instrumenterte AI-kall.
+                    Kravekstraksjon er ikke fullt samlet i tokenstatistikken ennå.
                 </p>
             </div>
         </aside>
@@ -214,7 +214,7 @@
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4">
                     <h3 class="font-bold text-gray-900">Trend: tokenforbruk</h3>
-                    <p class="mt-0.5 text-sm text-gray-500">Basert på ai_token_events (foreløpig kun svarutkast-generering).</p>
+                    <p class="mt-0.5 text-sm text-gray-500">Basert på <code class="font-mono text-xs">ai_token_events</code> — foreløpig kun svarutkast-generering.</p>
                 </div>
                 @if ($tokensChartPoints !== '')
                     <div class="px-5 pt-4 pb-2">
@@ -229,7 +229,12 @@
                         <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens</span>
                     </div>
                 @else
-                    <p class="px-5 py-8 text-center text-sm text-gray-400">Ingen token-data registrert. Tokens logges foreløpig kun for svarutkast-generering.</p>
+                    <div class="px-5 py-6 text-center text-sm text-gray-400 space-y-1">
+                        <p>Ingen tokenforbruk registrert i valgt periode.</p>
+                        @if (($kpi['operations'] ?? 0) > 0)
+                            <p class="text-xs">Tokenforbruk er foreløpig bare registrert for instrumenterte AI-kall. AI-operasjoner kan derfor finnes uten tilhørende tokenverdi.</p>
+                        @endif
+                    </div>
                 @endif
             </article>
 
@@ -239,14 +244,13 @@
                 <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4">
                         <h3 class="font-bold text-gray-900">Bruk per AI-funksjon</h3>
-                        <p class="mt-0.5 text-sm text-gray-500">Operasjoner og tokenforbruk fra ai_usage_events / ai_token_events.</p>
+                        <p class="mt-0.5 text-sm text-gray-500">AI-operasjoner fra <code class="font-mono text-xs">ai_usage_events</code>. Tokens fra <code class="font-mono text-xs">ai_token_events</code> (delvis).</p>
                     </div>
                     @forelse ($functionRows as $row)
                         <div class="border-b border-gray-50 px-5 py-3">
                             <div class="flex items-center justify-between gap-4">
                                 <div class="min-w-0">
                                     <div class="font-semibold text-sm text-gray-900 truncate">{{ $row['label'] }}</div>
-                                    <div class="mt-0.5 text-xs text-gray-400 font-mono">{{ $row['operation_key'] }}</div>
                                 </div>
                                 <div class="text-right shrink-0">
                                     <div class="font-extrabold text-sm text-gray-950">{{ number_format($row['operations'], 0, ',', ' ') }}</div>
@@ -269,7 +273,7 @@
                 <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4">
                         <h3 class="font-bold text-gray-900">Kapasitet per kunde</h3>
-                        <p class="mt-0.5 text-sm text-gray-500">AI-aktiverte anbud mot included_ai_credits. Obs: counts basert på ai_token_events.saved_notice_id (delvis).</p>
+                        <p class="mt-0.5 text-sm text-gray-500">Foreløpig intern visning av AI-aktiverte saker mot registrert kapasitetsverdi. Datagrunnlaget er delvis og må kvalitetssikres før dette brukes som kommersiell fasit.</p>
                     </div>
                     @forelse ($customerCapacityRows as $row)
                         <div class="border-b border-gray-50 px-5 py-3">
@@ -282,14 +286,14 @@
                                     {{ $this->capacityStatusLabel($row['status']) }}
                                 </span>
                             </div>
-                            <div class="mt-2 flex items-center gap-3 text-sm">
-                                <span class="font-bold text-gray-950">{{ $row['activated'] }}</span>
-                                <span class="text-gray-400">av</span>
-                                <span class="font-semibold text-gray-700">{{ $row['limit'] > 0 ? $row['limit'] : '∞' }}</span>
-                                <span class="text-gray-400 text-xs">anbud</span>
-                                <span class="ml-auto text-xs text-gray-500">{{ $row['pct'] }}%</span>
-                            </div>
-                            @if ($row['limit'] > 0)
+                            @if ($row['limit_defined'])
+                                <div class="mt-2 flex items-center gap-3 text-sm">
+                                    <span class="font-bold text-gray-950">{{ $row['activated'] }}</span>
+                                    <span class="text-gray-400">av</span>
+                                    <span class="font-semibold text-gray-700">{{ $row['limit'] }}</span>
+                                    <span class="text-gray-400 text-xs">AI-saker</span>
+                                    <span class="ml-auto text-xs text-gray-500">{{ $row['pct'] }}%</span>
+                                </div>
                                 <div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100">
                                     @php
                                         $fillCls = match($row['status']) {
@@ -299,6 +303,11 @@
                                         };
                                     @endphp
                                     <div class="h-full rounded-full transition-all {{ $fillCls }}" style="width: {{ min(100, $row['pct']) }}%"></div>
+                                </div>
+                            @else
+                                <div class="mt-2 text-sm text-gray-500">
+                                    <span class="font-semibold text-gray-900">{{ $row['activated'] }}</span> AI-saker registrert ·
+                                    <span class="text-xs text-gray-400">Ingen grense registrert</span>
                                 </div>
                             @endif
                         </div>
