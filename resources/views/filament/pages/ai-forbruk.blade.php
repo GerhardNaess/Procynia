@@ -1,8 +1,8 @@
 <x-filament-panels::page>
-    <div class="flex flex-col gap-6 lg:flex-row lg:items-start">
+    <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
 
         {{-- ── SIDEBAR ── --}}
-        <aside class="w-full shrink-0 space-y-0 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-6 lg:w-72 xl:w-80">
+        <aside class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-6">
 
             <div class="border-b border-gray-100 px-5 py-4">
                 <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Procynia intern</p>
@@ -92,7 +92,7 @@
         </aside>
 
         {{-- ── MAIN ── --}}
-        <section class="min-w-0 flex-1 space-y-5">
+        <section class="min-w-0 space-y-5">
 
             {{-- Header --}}
             <div class="flex flex-wrap items-start justify-between gap-4">
