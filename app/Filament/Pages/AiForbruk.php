@@ -73,7 +73,9 @@ class AiForbruk extends Page
     public string $blockedChartPoints = '';
     public string $tokensChartPoints = '';
 
-    // --- Chart max labels ---
+    // --- Chart axis helpers ---
+    public int $operationsChartMax = 0;
+
     /** @var array<int, string> */
     public array $operationsChartLabels = [];
 
@@ -592,6 +594,7 @@ class AiForbruk extends Page
         $labels           = array_column($this->trendRows, 'period');
 
         $maxOps = max(array_merge([1], $operationsValues, $blockedValues));
+        $this->operationsChartMax    = $maxOps;
 
         $this->operationsChartPoints = $this->svgPoints($operationsValues, $maxOps);
         $this->blockedChartPoints    = $this->svgPoints($blockedValues, $maxOps);
