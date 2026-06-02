@@ -130,7 +130,7 @@
                         ['label' => 'AI-operasjoner', 'value' => number_format($kpi['operations'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_operations'] ?? 0, 'inverseGood' => false],
                         ['label' => 'Tokenforbruk', 'value' => number_format($kpi['tokens'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_tokens'] ?? 0, 'inverseGood' => false],
                         ['label' => 'Tokens / operasjon', 'value' => number_format($kpi['avg_tokens'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_avg'] ?? 0, 'inverseGood' => true],
-                        ['label' => 'AI-aktiverte anbud', 'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0), 'pct' => $kpi['capacity_pct'] ?? 0, 'suffix' => '% kapasitet', 'inverseGood' => false],
+                        ['label' => 'Foreløpig AI-kapasitet', 'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0), 'pct' => $kpi['capacity_pct'] ?? 0, 'suffix' => '% — foreløpig beregning', 'inverseGood' => false],
                         ['label' => 'Blokkerte forsøk', 'value' => number_format($kpi['blocked'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_blocked'] ?? 0, 'inverseGood' => true],
                     ];
                 @endphp
@@ -226,14 +226,12 @@
                         </svg>
                     </div>
                     <div class="px-5 pb-4 text-xs font-semibold text-gray-500">
-                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens</span>
+                        <span class="flex items-center gap-1.5"><span class="inline-block h-3 w-3 rounded-sm bg-blue-600"></span>Total tokens · Kun instrumenterte AI-kall</span>
                     </div>
                 @else
                     <div class="px-5 py-6 text-center text-sm text-gray-400 space-y-1">
-                        <p>Ingen tokenforbruk registrert i valgt periode.</p>
-                        @if (($kpi['operations'] ?? 0) > 0)
-                            <p class="text-xs">Tokenforbruk er foreløpig bare registrert for instrumenterte AI-kall. AI-operasjoner kan derfor finnes uten tilhørende tokenverdi.</p>
-                        @endif
+                        <p>Det finnes ingen registrerte tokenhendelser i valgt periode.</p>
+                        <p class="text-xs">Tokenforbruk vises bare for instrumenterte AI-kall. AI-operasjoner kan finnes uten tilhørende tokenverdi.</p>
                     </div>
                 @endif
             </article>
@@ -257,9 +255,13 @@
                                     <div class="text-xs text-gray-400">{{ $row['pct'] }}%</div>
                                 </div>
                             </div>
-                            <div class="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-500">
-                                <span>{{ number_format($row['tokens'], 0, ',', ' ') }} tok</span>
-                                <span>{{ $row['blocked'] }} blokkert</span>
+                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                                @if ($row['tokens'] > 0)
+                                    <span>{{ number_format($row['tokens'], 0, ',', ' ') }} tokens</span>
+                                @endif
+                                @if ($row['blocked'] > 0)
+                                    <span class="text-red-500">{{ $row['blocked'] }} blokkert</span>
+                                @endif
                             </div>
                             <div class="mt-2 h-1.5 w-full rounded-full bg-gray-100">
                                 <div class="h-full rounded-full bg-gray-900 transition-all" style="width: {{ $row['pct'] }}%"></div>
@@ -294,6 +296,7 @@
                                     <span class="text-gray-400 text-xs">AI-saker</span>
                                     <span class="ml-auto text-xs text-gray-500">{{ $row['pct'] }}%</span>
                                 </div>
+                                <p class="mt-1 text-xs text-gray-400">Foreløpig beregning — ikke endelig kommersiell fasit.</p>
                                 <div class="mt-1.5 h-1.5 w-full rounded-full bg-gray-100">
                                     @php
                                         $fillCls = match($row['status']) {

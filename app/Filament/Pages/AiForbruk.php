@@ -589,7 +589,10 @@ class AiForbruk extends Page
 
         $this->operationsChartPoints = $this->svgPoints($operationsValues, $maxOps);
         $this->blockedChartPoints    = $this->svgPoints($blockedValues, $maxOps);
-        $this->tokensChartPoints     = $this->svgPoints($tokensValues, max(array_merge([1], $tokensValues)));
+        $hasRealTokenData            = array_sum($tokensValues) > 0;
+        $this->tokensChartPoints     = $hasRealTokenData
+            ? $this->svgPoints($tokensValues, max(array_merge([1], $tokensValues)))
+            : '';
         $this->operationsChartLabels = $this->svgLabels($labels);
     }
 
