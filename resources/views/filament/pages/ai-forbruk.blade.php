@@ -137,8 +137,8 @@
 
                 @foreach ($kpiCards as $card)
                     <article class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                        <div class="text-xs font-bold uppercase tracking-wider text-gray-500">{{ $card['label'] }}</div>
-                        <div class="mt-2 text-2xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                        <div class="flex h-8 items-start text-xs font-bold uppercase tracking-wider text-gray-500 leading-tight">{{ $card['label'] }}</div>
+                        <div class="text-2xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
                         @if (isset($card['suffix']))
                             <div class="mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">
                                 {{ $card['pct'] }}{{ $card['suffix'] }}
