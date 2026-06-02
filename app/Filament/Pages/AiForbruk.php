@@ -309,15 +309,18 @@ class AiForbruk extends Page
         $totalOps = $usageRows->sum('event_count') ?: 1;
 
         return $usageRows->map(function (object $row) use ($tokenRows, $totalOps): array {
-            $tokens = (int) ($tokenRows->get($row->operation_key)?->total_tokens ?? 0);
+            $tokenRow     = $tokenRows->get($row->operation_key);
+            $hasTokenData = $tokenRow !== null;
+            $tokens       = $hasTokenData ? (int) $tokenRow->total_tokens : 0;
 
             return [
-                'operation_key' => $row->operation_key,
-                'label'         => $this->operationLabel($row->operation_key),
-                'operations'    => (int) $row->event_count,
-                'blocked'       => (int) $row->blocked_count,
-                'tokens'        => $tokens,
-                'pct'           => (int) round($row->event_count / $totalOps * 100),
+                'operation_key'  => $row->operation_key,
+                'label'          => $this->operationLabel($row->operation_key),
+                'operations'     => (int) $row->event_count,
+                'blocked'        => (int) $row->blocked_count,
+                'tokens'         => $tokens,
+                'pct'            => (int) round($row->event_count / $totalOps * 100),
+                'has_token_data' => $hasTokenData,
             ];
         })->values()->all();
     }
@@ -416,20 +419,23 @@ class AiForbruk extends Page
             ->keyBy('user_id');
 
         return $usageRows->map(function (object $row) use ($users, $customers, $tokenRows): array {
-            $tokens  = (int) ($tokenRows->get($row->user_id)?->total_tokens ?? 0);
-            $ops     = (int) $row->operations;
-            $avgTok  = $ops > 0 ? (int) round($tokens / $ops) : 0;
-            $user    = $users->get($row->user_id);
-            $customer = $customers->get($row->customer_id);
+            $tokenRow      = $tokenRows->get($row->user_id);
+            $hasTokenData  = $tokenRow !== null;
+            $tokens        = $hasTokenData ? (int) $tokenRow->total_tokens : 0;
+            $ops           = (int) $row->operations;
+            $avgTok        = ($hasTokenData && $ops > 0) ? (int) round($tokens / $ops) : 0;
+            $user          = $users->get($row->user_id);
+            $customer      = $customers->get($row->customer_id);
 
             return [
-                'user_name'     => $user?->name ?? '(ukjent)',
-                'customer_name' => $customer?->name ?? '(ukjent)',
-                'role'          => $user?->bid_role ?? '—',
-                'operations'    => $ops,
-                'tokens'        => $tokens,
-                'avg_tokens'    => $avgTok,
-                'blocked'       => (int) $row->blocked,
+                'user_name'      => $user?->name ?? '(ukjent)',
+                'customer_name'  => $customer?->name ?? '(ukjent)',
+                'role'           => $user?->bid_role ?? '—',
+                'operations'     => $ops,
+                'tokens'         => $tokens,
+                'avg_tokens'     => $avgTok,
+                'blocked'        => (int) $row->blocked,
+                'has_token_data' => $hasTokenData,
             ];
         })->values()->all();
     }

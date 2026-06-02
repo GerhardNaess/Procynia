@@ -256,8 +256,10 @@
                                 </div>
                             </div>
                             <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                                @if ($row['tokens'] > 0)
+                                @if ($row['has_token_data'] && $row['tokens'] > 0)
                                     <span>{{ number_format($row['tokens'], 0, ',', ' ') }} tokens</span>
+                                @elseif (! $row['has_token_data'])
+                                    <span class="italic text-gray-400">Tokenforbruk ikke registrert for denne funksjonen</span>
                                 @endif
                                 @if ($row['blocked'] > 0)
                                     <span class="text-red-500">{{ $row['blocked'] }} blokkert</span>
@@ -347,8 +349,13 @@
                                         <td class="px-4 py-3 text-gray-600">{{ $row['customer_name'] }}</td>
                                         <td class="px-4 py-3 text-gray-500 text-xs">{{ $row['role'] }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums font-semibold">{{ number_format($row['operations'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-gray-700">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
-                                        <td class="px-4 py-3 text-right tabular-nums text-gray-500">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
+                                        @if ($row['has_token_data'])
+                                            <td class="px-4 py-3 text-right tabular-nums text-gray-700">{{ number_format($row['tokens'], 0, ',', ' ') }}</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-gray-500">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
+                                        @else
+                                            <td class="px-4 py-3 text-right text-xs text-gray-400 italic">Ikke registrert</td>
+                                            <td class="px-4 py-3 text-right text-xs text-gray-400 italic">Ikke registrert</td>
+                                        @endif
                                         <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-600' : 'text-gray-400' }}">{{ $row['blocked'] }}</td>
                                     </tr>
                                 @endforeach
