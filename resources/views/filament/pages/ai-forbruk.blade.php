@@ -1,5 +1,18 @@
 <x-filament-panels::page>
-    <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <style>
+        .ai-forbruk-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        @media (min-width: 1024px) {
+            .ai-forbruk-layout {
+                grid-template-columns: 340px minmax(0, 1fr);
+            }
+        }
+    </style>
+    <div class="ai-forbruk-layout">
 
         {{-- ── SIDEBAR ── --}}
         <aside class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:sticky lg:top-6">
