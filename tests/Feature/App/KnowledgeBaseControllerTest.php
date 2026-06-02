@@ -3,6 +3,7 @@
 namespace Tests\Feature\App;
 
 use App\Http\Controllers\App\KnowledgeBaseController;
+use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
@@ -23,8 +24,10 @@ use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
 use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -2617,6 +2620,162 @@ class KnowledgeBaseControllerTest extends TestCase
             ->first();
         $this->assertNotNull($allowedEvent,
             'An allowed usage event must be recorded when lazy summary generation is permitted by the guard.');
+    }
+
+    public function test_summary_service_calls_token_logger_with_correct_data_on_successful_generation(): void
+    {
+        $context = $this->customerContext('Token Logger Service AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'service-token-test.pdf',
+            'content' => 'Koordinering og samhandling.',
+            'original_filename' => 'service-token-test.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/service-token-test.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 512,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'extracted_text' => 'Koordinering og samhandling.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'is_active' => true,
+        ]);
+
+        $fakeResponse = [
+            'id'          => 'fake-summary-id',
+            'output_text' => json_encode(['summary' => 'AI-oppsummering: Koordinering og samhandling.']),
+            'usage'       => ['input_tokens' => 120, 'output_tokens' => 45, 'total_tokens' => 165],
+            '_meta'       => ['request_id' => 'req_service_test'],
+        ];
+
+        $client = Mockery::mock(\App\Services\OpenAi\OpenAiClient::class);
+        $client->shouldReceive('createResponse')->once()->andReturn($fakeResponse);
+
+        $recorded = [];
+        $logger = Mockery::mock(\App\Services\Ai\AiTokenLogger::class);
+        $logger->shouldReceive('record')
+            ->once()
+            ->andReturnUsing(function (array $data) use (&$recorded): void {
+                $recorded = $data;
+            });
+
+        $service = new \App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService($client, $logger);
+        $result  = $service->generateForDocument($document, (int) $context['user']->id);
+
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $result);
+        $this->assertSame((int) $document->customer_id, $recorded['customer_id']);
+        $this->assertSame((int) $context['user']->id, $recorded['user_id']);
+        $this->assertSame('knowledge_document_upload', $recorded['operation_key']);
+        $this->assertSame(120, $recorded['input_tokens']);
+        $this->assertSame(45, $recorded['output_tokens']);
+        $this->assertSame(165, $recorded['total_tokens']);
+        $this->assertSame($document->id, $recorded['knowledge_item_id']);
+        $this->assertSame('req_service_test', $recorded['request_id']);
+    }
+
+    public function test_summary_service_does_not_call_token_logger_when_generation_fails(): void
+    {
+        $context = $this->customerContext('Token Logger Fail AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'fail-token-test.pdf',
+            'content' => 'Innhold.',
+            'original_filename' => 'fail-token-test.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/fail-token-test.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 256,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'extracted_text' => 'Innhold.',
+            'summary' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'is_active' => true,
+        ]);
+
+        $client = Mockery::mock(\App\Services\OpenAi\OpenAiClient::class);
+        $client->shouldReceive('createResponse')->once()->andThrow(new \RuntimeException('OpenAI unreachable'));
+
+        $logger = Mockery::mock(\App\Services\Ai\AiTokenLogger::class);
+        $logger->shouldNotReceive('record');
+
+        $service = new \App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService($client, $logger);
+        $result  = $service->generateForDocument($document, (int) $context['user']->id);
+
+        $this->assertNull($result, 'generateForDocument must return null when OpenAI call fails.');
+    }
+
+    public function test_knowledge_document_show_does_not_create_token_event_when_summary_already_exists(): void
+    {
+        config([
+            'procynia.ai.usage_guard.user_per_minute' => 50,
+            'procynia.ai.usage_guard.customer_per_hour' => 200,
+        ]);
+
+        $context = $this->customerContext('No Duplicate Token AS');
+
+        $document = KnowledgeItem::query()->create([
+            'customer_id' => $context['customer']->id,
+            'uploaded_by_user_id' => $context['user']->id,
+            'title' => 'has-summary.pdf',
+            'content' => 'Innhold som allerede har sammendrag.',
+            'original_filename' => 'has-summary.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/has-summary.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 512,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'extracted_text' => 'Innhold som allerede har sammendrag.',
+            'summary' => 'Eksisterende sammendrag som ikke skal regenereres.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $tokenCount = AiTokenEvent::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('operation_key', 'knowledge_document_upload')
+            ->count();
+
+        $this->assertSame(0, $tokenCount,
+            'No ai_token_events must be created when an existing summary is reused without a new AI call.');
+    }
+
+    /**
+     * Purpose: Build a deterministic fake OpenAI Responses-API payload for document summary tests.
+     * Inputs: The summary text to return, input token count and output token count.
+     * Returns: An array matching what OpenAiClient::createResponse() would return.
+     * Side effects: None.
+     */
+    private function fakeSummaryOpenAiResponse(string $summaryText, int $inputTokens, int $outputTokens): array
+    {
+        $json = json_encode(['summary' => $summaryText], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return [
+            'id'          => 'fake-summary-id',
+            'object'      => 'response',
+            'status'      => 'completed',
+            'output_text' => $json,
+            'output'      => [
+                [
+                    'id'      => 'fake-msg-id',
+                    'type'    => 'message',
+                    'role'    => 'assistant',
+                    'status'  => 'completed',
+                    'content' => [['type' => 'output_text', 'text' => $json]],
+                ],
+            ],
+            'usage' => [
+                'input_tokens'  => $inputTokens,
+                'output_tokens' => $outputTokens,
+                'total_tokens'  => $inputTokens + $outputTokens,
+            ],
+        ];
     }
 
     private function customerContext(string $customerName): array

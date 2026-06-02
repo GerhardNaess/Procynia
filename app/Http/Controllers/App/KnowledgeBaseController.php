@@ -324,7 +324,7 @@ class KnowledgeBaseController extends Controller
             });
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
-            $this->ensureDocumentSummary($result['knowledge_document']);
+            $this->ensureDocumentSummary($result['knowledge_document'], (int) $user->id);
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
@@ -492,10 +492,10 @@ class KnowledgeBaseController extends Controller
             return null;
         }
 
-        return $this->ensureDocumentSummary($knowledgeDocument);
+        return $this->ensureDocumentSummary($knowledgeDocument, (int) $user->id);
     }
 
-    private function ensureDocumentSummary(KnowledgeItem $knowledgeDocument): ?string
+    private function ensureDocumentSummary(KnowledgeItem $knowledgeDocument, ?int $userId = null): ?string
     {
         $existingSummary = trim((string) $knowledgeDocument->summary);
 
@@ -513,7 +513,7 @@ class KnowledgeBaseController extends Controller
             return null;
         }
 
-        $summary = $this->knowledgeDocumentSummaryGenerationService->generateForDocument($knowledgeDocument);
+        $summary = $this->knowledgeDocumentSummaryGenerationService->generateForDocument($knowledgeDocument, $userId);
         $summary = $this->cleanNullableString($summary, 20000);
 
         if ($summary === null) {

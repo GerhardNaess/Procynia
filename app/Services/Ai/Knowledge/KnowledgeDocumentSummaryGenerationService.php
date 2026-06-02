@@ -4,6 +4,8 @@ namespace App\Services\Ai\Knowledge;
 
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Services\Ai\AiTokenLogger;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -19,6 +21,7 @@ class KnowledgeDocumentSummaryGenerationService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
     ) {
     }
 
@@ -28,7 +31,7 @@ class KnowledgeDocumentSummaryGenerationService
      * Returns: A document-level summary string or null when no safe summary could be produced.
      * Side effects: May call OpenAI and emits observability logs.
      */
-    public function generateForDocument(KnowledgeItem $document): ?string
+    public function generateForDocument(KnowledgeItem $document, ?int $userId = null): ?string
     {
         $document->loadMissing([
             'customer.language',
@@ -80,6 +83,18 @@ class KnowledgeDocumentSummaryGenerationService
                 'language_code' => $languageCode,
                 'model' => $model,
                 'summary_length' => mb_strlen($summary, 'UTF-8'),
+            ]);
+
+            $this->tokenLogger->record([
+                'customer_id'      => (int) $document->customer_id,
+                'user_id'          => $userId,
+                'operation_key'    => AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
+                'model'            => $model,
+                'input_tokens'     => data_get($response, 'usage.input_tokens', 0),
+                'output_tokens'    => data_get($response, 'usage.output_tokens', 0),
+                'total_tokens'     => data_get($response, 'usage.total_tokens', 0),
+                'knowledge_item_id' => $document->id,
+                'request_id'       => data_get($response, '_meta.request_id'),
             ]);
 
             return $summary;
