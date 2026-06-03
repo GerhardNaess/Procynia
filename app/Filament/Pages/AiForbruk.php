@@ -959,6 +959,21 @@ class AiForbruk extends Page
             : 'text-red-700 bg-red-50';
     }
 
+    /**
+     * Purpose: Return a text-only colour class for the KPI footer line (no background pill).
+     */
+    public function trendTextClass(int $pct, bool $inverseGood = false): string
+    {
+        if ($pct === 0) {
+            return 'text-gray-400';
+        }
+
+        $positive = $pct > 0;
+        $good     = $inverseGood ? ! $positive : $positive;
+
+        return $good ? 'text-emerald-600' : 'text-red-500';
+    }
+
     public function capacityStatusClass(string $status): string
     {
         return match ($status) {
