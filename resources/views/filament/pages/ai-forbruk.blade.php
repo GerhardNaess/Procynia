@@ -163,35 +163,38 @@
                 @endphp
 
                 @foreach ($kpiCards as $card)
-                    <article class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                        <div class="truncate text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ $card['label'] }}</div>
-                        <div class="mt-1 text-xl font-extrabold leading-tight tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                    <article class="flex flex-col rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                        {{-- Label: fast høyde = 2 linjer tekst --}}
+                        <div class="flex h-9 items-start text-[10px] font-bold uppercase leading-tight tracking-wider text-gray-400">{{ $card['label'] }}</div>
+                        {{-- Verdi: fast høyde --}}
+                        <div class="flex h-8 items-center text-xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                        {{-- Badge/status --}}
                         @if (isset($card['badge']))
-                            <div class="mt-1.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }} inline-flex rounded-full px-2 py-0.5">{{ $card['badge'] }}</div>
+                            <div class="mt-1 inline-flex self-start rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">{{ $card['badge'] }}</div>
                             @if (isset($card['note']))
-                                <div class="mt-0.5 text-[10px] text-gray-400">{{ $card['note'] }}</div>
+                                <div class="mt-0.5 text-[10px] leading-tight text-gray-400">{{ $card['note'] }}</div>
                             @endif
                         @else
-                            <div class="mt-1.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }} inline-flex rounded-full px-2 py-0.5">{{ $card['pct'] > 0 ? '+' : '' }}{{ $card['pct'] }}%</div>
+                            <div class="mt-1 inline-flex self-start rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">{{ $card['pct'] > 0 ? '+' : '' }}{{ $card['pct'] }}%</div>
                         @endif
                     </article>
                 @endforeach
 
                 {{-- Kort 6: Estimert intern kostnad --}}
-                <article class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                    <div class="truncate text-[10px] font-bold uppercase tracking-wider text-violet-500">Est. intern kostnad</div>
+                <article class="flex flex-col rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                    <div class="flex h-9 items-start text-[10px] font-bold uppercase leading-tight tracking-wider text-violet-500">Est. intern<br>kostnad</div>
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
-                        <div class="mt-1 text-xl font-extrabold leading-tight tracking-tight text-gray-950">
+                        <div class="flex h-8 items-center text-xl font-extrabold tracking-tight text-gray-950">
                             ≈ {{ number_format(($totalCostUsd ?? 0) * 10.5, 0, ',', ' ') }} kr
                         </div>
-                        <div class="mt-1.5 text-[10px] {{ $totalCostStatus === 'partial' ? 'text-amber-500' : 'text-gray-400' }}">
+                        <div class="mt-1 text-[10px] {{ $totalCostStatus === 'partial' ? 'text-amber-500' : 'text-gray-400' }}">
                             {{ $totalCostStatus === 'partial' ? 'Delvis dekning' : 'Basert på reg. tokens' }}
                         </div>
                     @elseif ($totalCostStatus === 'price_missing')
-                        <div class="mt-1 text-sm font-semibold text-gray-400">Pris ikke registrert</div>
+                        <div class="flex h-8 items-center text-sm font-semibold text-gray-400">Ikke registrert</div>
                         <div class="mt-1 text-[10px] text-gray-400">Mangler modellpris</div>
                     @else
-                        <div class="mt-1 text-sm font-semibold text-gray-400">Ingen tokenforbruk</div>
+                        <div class="flex h-8 items-center text-sm font-semibold text-gray-400">Ingen tokens</div>
                         <div class="mt-1 text-[10px] text-gray-400">Ingen token-events</div>
                     @endif
                 </article>
