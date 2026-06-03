@@ -1415,15 +1415,18 @@ class RequirementAnswerDraftService
     {
         try {
             $this->tokenLogger->record([
-                'customer_id'    => $customerId,
-                'user_id'        => $userId,
-                'operation_key'  => AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
-                'model'          => $this->openAiModel(),
-                'input_tokens'   => data_get($response, 'usage.input_tokens', 0),
-                'output_tokens'  => data_get($response, 'usage.output_tokens', 0),
-                'total_tokens'   => data_get($response, 'usage.total_tokens', 0),
+                'customer_id'     => $customerId,
+                'user_id'         => $userId,
+                'operation_key'   => AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+                'model'           => $this->openAiModel(),
+                'provider'        => data_get($response, '_meta.provider'),
+                'deployment_name' => data_get($response, '_meta.deployment_name'),
+                'provider_region' => data_get($response, '_meta.provider_region'),
+                'input_tokens'    => data_get($response, 'usage.input_tokens', 0),
+                'output_tokens'   => data_get($response, 'usage.output_tokens', 0),
+                'total_tokens'    => data_get($response, 'usage.total_tokens', 0),
                 'saved_notice_id' => $requirement->saved_notice_id,
-                'request_id'     => data_get($response, '_meta.request_id'),
+                'request_id'      => data_get($response, '_meta.request_id'),
             ]);
         } catch (Throwable) {
             // Token logging failures must never block answer draft generation.

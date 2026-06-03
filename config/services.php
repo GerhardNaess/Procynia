@@ -59,6 +59,9 @@ return [
             'gpt-5',
         ),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
+        'provider_key' => env('OPENAI_PROVIDER_KEY', 'openai'),
+        'deployment_name' => env('OPENAI_DEPLOYMENT_NAME'),
+        'provider_region' => env('OPENAI_PROVIDER_REGION'),
     ],
 
     'ses' => [

@@ -1666,6 +1666,8 @@ class RequirementExtractionRunService
             'saved_notice_ai_document_id'  => $document->id,
             'requirement_extraction_run_id' => $run->id,
         ]);
+        // provider, deployment_name and provider_region are resolved automatically
+        // by AiTokenLogger::resolveProvider() via the OpenAiClient config fallback.
     }
 
     /**

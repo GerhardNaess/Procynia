@@ -72,13 +72,51 @@ class OpenAiClient
             ));
         }
 
-        if ($requestId !== null) {
-            $decoded['_meta'] = [
-                'request_id' => $requestId,
-            ];
-        }
+        $decoded['_meta'] = [
+            'request_id'      => $requestId,
+            'provider'        => $this->providerKey(),
+            'deployment_name' => $this->deploymentName(),
+            'provider_region' => $this->providerRegion(),
+        ];
 
         return $decoded;
+    }
+
+    /**
+     * Purpose: Return the canonical provider key for the configured AI endpoint.
+     * Inputs: None.
+     * Returns: A stable provider identifier read from config — never guessed from model name.
+     * Side effects: None.
+     */
+    public function providerKey(): string
+    {
+        return trim((string) config('services.openai.provider_key', 'openai')) ?: 'openai';
+    }
+
+    /**
+     * Purpose: Return the deployment name for providers that require it (Azure, Advania LLM, etc.).
+     * Inputs: None.
+     * Returns: The deployment name from config, or null when not applicable.
+     * Side effects: None.
+     */
+    public function deploymentName(): ?string
+    {
+        $value = trim((string) (config('services.openai.deployment_name') ?? ''));
+
+        return $value !== '' ? $value : null;
+    }
+
+    /**
+     * Purpose: Return the provider region for region-aware pricing or routing.
+     * Inputs: None.
+     * Returns: The provider region from config, or null when not configured.
+     * Side effects: None.
+     */
+    public function providerRegion(): ?string
+    {
+        $value = trim((string) (config('services.openai.provider_region') ?? ''));
+
+        return $value !== '' ? $value : null;
     }
 
     private function failureMessageFromResponse(string $endpoint, Response $response): string
