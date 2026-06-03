@@ -102,6 +102,32 @@
                     Kravekstraksjon er ikke fullt samlet i tokenstatistikken ennå.
                 </p>
             </div>
+
+            {{-- Kontrollsignaler --}}
+            <div class="border-t border-gray-100">
+                <div class="px-5 pt-4 pb-2">
+                    <div class="text-xs font-bold uppercase tracking-wider text-gray-500">Kontrollsignaler</div>
+                    <p class="mt-0.5 text-xs text-gray-400">Kunder eller mønstre som bør følges opp.</p>
+                </div>
+                <div class="divide-y divide-gray-50 px-4 pb-3">
+                    @forelse ($alerts as $alert)
+                        @php
+                            $alertColors = [
+                                'red'   => 'bg-red-50 border-red-200 text-red-800',
+                                'amber' => 'bg-amber-50 border-amber-200 text-amber-800',
+                                'blue'  => 'bg-blue-50 border-blue-200 text-blue-800',
+                            ];
+                            $cls = $alertColors[$alert['type']] ?? $alertColors['blue'];
+                        @endphp
+                        <div class="my-2 rounded-xl border px-3 py-2.5 text-sm {{ $cls }}">
+                            <strong class="block font-bold text-xs">{{ $alert['title'] }}</strong>
+                            <span class="mt-0.5 text-xs">{{ $alert['message'] }}</span>
+                        </div>
+                    @empty
+                        <p class="py-4 text-center text-xs text-gray-400">Ingen signaler i valgt periode.</p>
+                    @endforelse
+                </div>
+            </div>
         </aside>
 
         {{-- ── MAIN ── --}}
@@ -175,10 +201,8 @@
 
             </div>
 
-            {{-- Trend chart + Alerts --}}
-            <div class="grid gap-5 lg:grid-cols-3">
-
-                <article class="col-span-2 rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            {{-- Trend: AI-operasjoner --}}
+            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                     <div class="border-b border-gray-100 px-5 py-4">
                         <h3 class="font-bold text-gray-900">Trend: AI-operasjoner og blokkerte forsøk</h3>
                         <p class="mt-0.5 text-sm text-gray-500">Utvikling basert på ai_usage_events i valgt periode.</p>
@@ -251,33 +275,7 @@
                     @else
                         <p class="px-5 py-10 text-center text-sm text-gray-400">Ingen data i valgt periode.</p>
                     @endif
-                </article>
-
-                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-100 px-5 py-4">
-                        <h3 class="font-bold text-gray-900">Kontrollsignaler</h3>
-                        <p class="mt-0.5 text-sm text-gray-500">Kunder eller mønstre som bør følges opp.</p>
-                    </div>
-                    <div class="divide-y divide-gray-50 px-4 py-2">
-                        @forelse ($alerts as $alert)
-                            @php
-                                $alertColors = [
-                                    'red'   => 'bg-red-50 border-red-200 text-red-800',
-                                    'amber' => 'bg-amber-50 border-amber-200 text-amber-800',
-                                    'blue'  => 'bg-blue-50 border-blue-200 text-blue-800',
-                                ];
-                                $cls = $alertColors[$alert['type']] ?? $alertColors['blue'];
-                            @endphp
-                            <div class="my-2 rounded-xl border px-3 py-2.5 text-sm {{ $cls }}">
-                                <strong class="block font-bold">{{ $alert['title'] }}</strong>
-                                <span class="mt-0.5 text-xs">{{ $alert['message'] }}</span>
-                            </div>
-                        @empty
-                            <p class="py-6 text-center text-sm text-gray-400">Ingen kontrollsignaler i valgt periode.</p>
-                        @endforelse
-                    </div>
-                </article>
-            </div>
+            </article>
 
             {{-- Token chart --}}
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
