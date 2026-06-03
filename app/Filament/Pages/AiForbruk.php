@@ -2,10 +2,12 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\RequirementExtractionRun;
+use App\Services\Ai\Pricing\AiTokenCostEstimator;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -67,6 +69,10 @@ class AiForbruk extends Page
 
     /** @var array<int, array<string, mixed>> */
     public array $alerts = [];
+
+    // --- Cost summary ---
+    public ?float $totalCostUsd = null;
+    public string $totalCostStatus = AiTokenCostEstimator::RESULT_MISSING;
 
     // --- Chart SVG point strings ---
     public string $operationsChartPoints = '';
@@ -154,11 +160,15 @@ class AiForbruk extends Page
         $prevTo     = $from->copy()->subDay();
 
         $this->kpi = $this->buildKpi($from, $to, $prevFrom, $prevTo);
-        $this->functionRows = $this->buildFunctionRows($from, $to);
+
+        $rateMap = $this->buildPriceRateMap($from, $to);
+
+        $this->functionRows = $this->buildFunctionRows($from, $to, $rateMap);
         $this->customerCapacityRows = $this->buildCustomerCapacityRows($from, $to);
-        $this->userRows = $this->buildUserRows($from, $to);
-        $this->trendRows = $this->buildTrendRows($from, $to);
+        $this->userRows = $this->buildUserRows($from, $to, $rateMap);
+        $this->trendRows = $this->buildTrendRows($from, $to, $rateMap);
         $this->alerts = $this->buildAlerts($from, $to);
+        $this->buildTotalCost($from, $to);
         $this->buildCharts($from, $to);
     }
 
@@ -274,7 +284,7 @@ class AiForbruk extends Page
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildFunctionRows(Carbon $from, Carbon $to): array
+    private function buildFunctionRows(Carbon $from, Carbon $to, array $rateMap = []): array
     {
         $usageQ = AiUsageEvent::query()
             ->whereBetween('created_at', [$from, $to])
@@ -311,10 +321,16 @@ class AiForbruk extends Page
 
         $totalOps = $usageRows->sum('event_count') ?: 1;
 
-        return $usageRows->map(function (object $row) use ($tokenRows, $totalOps): array {
+        return $usageRows->map(function (object $row) use ($tokenRows, $totalOps, $rateMap): array {
             $tokenRow     = $tokenRows->get($row->operation_key);
             $hasTokenData = $tokenRow !== null;
-            $tokens       = $hasTokenData ? (int) $tokenRow->total_tokens : 0;
+            $inputTokens  = $hasTokenData ? (int) $tokenRow->input_tokens  : 0;
+            $outputTokens = $hasTokenData ? (int) $tokenRow->output_tokens : 0;
+            $tokens       = $hasTokenData ? (int) $tokenRow->total_tokens   : 0;
+
+            $costData = $hasTokenData
+                ? $this->computeRowCost($rateMap, $inputTokens, $outputTokens, $tokens)
+                : ['status' => AiTokenCostEstimator::RESULT_NO_TOKENS, 'cost_usd' => null];
 
             return [
                 'operation_key'  => $row->operation_key,
@@ -324,6 +340,8 @@ class AiForbruk extends Page
                 'tokens'         => $tokens,
                 'pct'            => (int) round($row->event_count / $totalOps * 100),
                 'has_token_data' => $hasTokenData,
+                'cost_usd'       => $costData['cost_usd'],
+                'cost_status'    => $costData['status'],
             ];
         })->values()->all();
     }
@@ -383,7 +401,7 @@ class AiForbruk extends Page
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildUserRows(Carbon $from, Carbon $to): array
+    private function buildUserRows(Carbon $from, Carbon $to, array $rateMap = []): array
     {
         $usageQ = AiUsageEvent::query()
             ->whereBetween('created_at', [$from, $to])
@@ -414,21 +432,31 @@ class AiForbruk extends Page
 
         $tokenRows = AiTokenEvent::query()
             ->whereBetween('created_at', [$from, $to])
-            ->select(['user_id', DB::raw('SUM(total_tokens) as total_tokens')])
+            ->select(['user_id',
+                DB::raw('SUM(input_tokens) as input_tokens'),
+                DB::raw('SUM(output_tokens) as output_tokens'),
+                DB::raw('SUM(total_tokens) as total_tokens'),
+            ])
             ->when($this->selectedCustomerId !== '', fn ($q) => $q->where('customer_id', (int) $this->selectedCustomerId))
             ->when($this->functionFilter !== '', fn ($q) => $q->where('operation_key', $this->functionFilter))
             ->groupBy('user_id')
             ->get()
             ->keyBy('user_id');
 
-        return $usageRows->map(function (object $row) use ($users, $customers, $tokenRows): array {
+        return $usageRows->map(function (object $row) use ($users, $customers, $tokenRows, $rateMap): array {
             $tokenRow      = $tokenRows->get($row->user_id);
             $hasTokenData  = $tokenRow !== null;
-            $tokens        = $hasTokenData ? (int) $tokenRow->total_tokens : 0;
+            $inputTokens   = $hasTokenData ? (int) $tokenRow->input_tokens  : 0;
+            $outputTokens  = $hasTokenData ? (int) $tokenRow->output_tokens : 0;
+            $tokens        = $hasTokenData ? (int) $tokenRow->total_tokens   : 0;
             $ops           = (int) $row->operations;
             $avgTok        = ($hasTokenData && $ops > 0) ? (int) round($tokens / $ops) : 0;
             $user          = $users->get($row->user_id);
             $customer      = $customers->get($row->customer_id);
+
+            $costData = $hasTokenData
+                ? $this->computeRowCost($rateMap, $inputTokens, $outputTokens, $tokens)
+                : ['status' => AiTokenCostEstimator::RESULT_NO_TOKENS, 'cost_usd' => null];
 
             return [
                 'user_name'      => $user?->name ?? '(ukjent)',
@@ -439,6 +467,8 @@ class AiForbruk extends Page
                 'avg_tokens'     => $avgTok,
                 'blocked'        => (int) $row->blocked,
                 'has_token_data' => $hasTokenData,
+                'cost_usd'       => $costData['cost_usd'],
+                'cost_status'    => $costData['status'],
             ];
         })->values()->all();
     }
@@ -450,7 +480,7 @@ class AiForbruk extends Page
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildTrendRows(Carbon $from, Carbon $to): array
+    private function buildTrendRows(Carbon $from, Carbon $to, array $rateMap = []): array
     {
         $groupFormat = match ($this->trendGrouping) {
             'week'  => "TO_CHAR(created_at, 'IYYY-IW')",
@@ -479,6 +509,8 @@ class AiForbruk extends Page
             ->whereBetween('created_at', [$from, $to])
             ->selectRaw(
                 "$groupFormat as period_key,
+                 SUM(input_tokens) as input_tokens,
+                 SUM(output_tokens) as output_tokens,
                  SUM(total_tokens) as total_tokens"
             )
             ->groupByRaw($groupFormat)
@@ -490,19 +522,27 @@ class AiForbruk extends Page
 
         $allKeys = $usageRows->keys()->merge($tokenRows->keys())->unique()->sort()->values();
 
-        return $allKeys->map(function (string $key) use ($usageRows, $tokenRows): array {
-            $usage   = $usageRows->get($key);
-            $tRow    = $tokenRows->get($key);
-            $ops     = (int) ($usage?->operations ?? 0);
-            $tokens  = (int) ($tRow?->total_tokens ?? 0);
-            $avgTok  = $ops > 0 ? (int) round($tokens / $ops) : 0;
+        return $allKeys->map(function (string $key) use ($usageRows, $tokenRows, $rateMap): array {
+            $usage        = $usageRows->get($key);
+            $tRow         = $tokenRows->get($key);
+            $ops          = (int) ($usage?->operations ?? 0);
+            $inputTokens  = (int) ($tRow?->input_tokens  ?? 0);
+            $outputTokens = (int) ($tRow?->output_tokens ?? 0);
+            $tokens       = (int) ($tRow?->total_tokens  ?? 0);
+            $avgTok       = $ops > 0 ? (int) round($tokens / $ops) : 0;
+
+            $costData = $tRow !== null
+                ? $this->computeRowCost($rateMap, $inputTokens, $outputTokens, $tokens)
+                : ['status' => AiTokenCostEstimator::RESULT_NO_TOKENS, 'cost_usd' => null];
 
             return [
-                'period'     => $key,
-                'operations' => $ops,
-                'tokens'     => $tokens,
-                'avg_tokens' => $avgTok,
-                'blocked'    => (int) ($usage?->blocked ?? 0),
+                'period'      => $key,
+                'operations'  => $ops,
+                'tokens'      => $tokens,
+                'avg_tokens'  => $avgTok,
+                'blocked'     => (int) ($usage?->blocked ?? 0),
+                'cost_usd'    => $costData['cost_usd'],
+                'cost_status' => $costData['status'],
             ];
         })->values()->all();
     }
@@ -715,6 +755,162 @@ class AiForbruk extends Page
         }
 
         return (int) round(($current - $previous) / $previous * 100);
+    }
+
+    // -------------------------------------------------------------------------
+    // Cost helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Purpose: Compute total estimated cost using PostgreSQL LATERAL join for temporal price accuracy.
+     * Inputs: Filtered period boundaries.
+     * Returns: None — sets $totalCostUsd and $totalCostStatus.
+     * Side effects: Runs one aggregate SQL query.
+     */
+    private function buildTotalCost(Carbon $from, Carbon $to): void
+    {
+        $customerClause  = $this->selectedCustomerId !== ''
+            ? 'AND e.customer_id = ' . (int) $this->selectedCustomerId
+            : '';
+        $functionClause  = $this->functionFilter !== ''
+            ? "AND e.operation_key = '" . addslashes($this->functionFilter) . "'"
+            : '';
+
+        $result = DB::selectOne("
+            SELECT
+                SUM(
+                    e.input_tokens::float  / 1000000.0 * p.input_price_per_1m_tokens::float +
+                    e.output_tokens::float / 1000000.0 * p.output_price_per_1m_tokens::float
+                ) AS total_cost_usd,
+                COUNT(CASE WHEN p.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS unpriced_count,
+                COUNT(CASE WHEN e.total_tokens > 0 THEN 1 END) AS has_tokens_count
+            FROM ai_token_events e
+            LEFT JOIN LATERAL (
+                SELECT id, input_price_per_1m_tokens, output_price_per_1m_tokens
+                FROM ai_model_prices
+                WHERE provider = e.provider
+                  AND model = e.model
+                  AND (deployment_name IS NOT DISTINCT FROM e.deployment_name)
+                  AND (provider_region  IS NOT DISTINCT FROM e.provider_region)
+                  AND valid_from <= e.created_at::date
+                  AND (valid_to IS NULL OR valid_to >= e.created_at::date)
+                ORDER BY valid_from DESC
+                LIMIT 1
+            ) p ON TRUE
+            WHERE e.created_at BETWEEN ? AND ?
+            {$customerClause}
+            {$functionClause}
+        ", [$from, $to]);
+
+        $hasTokensCount = (int) ($result->has_tokens_count ?? 0);
+        $unpricedCount  = (int) ($result->unpriced_count  ?? 0);
+
+        if ($hasTokensCount === 0) {
+            $this->totalCostUsd    = null;
+            $this->totalCostStatus = AiTokenCostEstimator::RESULT_NO_TOKENS;
+            return;
+        }
+
+        if ($unpricedCount === $hasTokensCount) {
+            $this->totalCostUsd    = null;
+            $this->totalCostStatus = AiTokenCostEstimator::RESULT_MISSING;
+            return;
+        }
+
+        $this->totalCostUsd    = $result->total_cost_usd !== null ? round((float) $result->total_cost_usd, 4) : null;
+        $this->totalCostStatus = $unpricedCount > 0
+            ? 'partial'
+            : AiTokenCostEstimator::RESULT_OK;
+    }
+
+    /**
+     * Purpose: Build a (provider|model|deployment|region) → AiModelPrice map for the period.
+     * Inputs: Period boundaries.
+     * Returns: Array keyed by combo string, value is AiModelPrice or null.
+     * Side effects: Runs one DB query per unique model combination.
+     *
+     * @return array<string, AiModelPrice|null>
+     */
+    private function buildPriceRateMap(Carbon $from, Carbon $to): array
+    {
+        $combos = AiTokenEvent::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->whereNotNull('provider')
+            ->select(['provider', 'model', 'deployment_name', 'provider_region'])
+            ->when($this->selectedCustomerId !== '', fn ($q) => $q->where('customer_id', (int) $this->selectedCustomerId))
+            ->distinct()
+            ->get();
+
+        $map       = [];
+        $periodEnd = $to->toDateTime();
+
+        foreach ($combos as $combo) {
+            $key       = $this->comboKey($combo->provider, $combo->model, $combo->deployment_name, $combo->provider_region);
+            $map[$key] = AiModelPrice::findForEvent(
+                $combo->provider,
+                $combo->model,
+                $combo->deployment_name,
+                $combo->provider_region,
+                $periodEnd,
+            );
+        }
+
+        return $map;
+    }
+
+    /**
+     * Purpose: Compute estimated cost for one aggregated row using the pre-built price rate map.
+     * Inputs: Rate map, input/output/total token counts.
+     * Returns: Array with 'status' (ok|price_missing|no_tokens) and 'cost_usd' (float|null).
+     *
+     * @param array<string, AiModelPrice|null> $rateMap
+     * @return array{status: string, cost_usd: float|null}
+     */
+    private function computeRowCost(array $rateMap, int $inputTokens, int $outputTokens, int $totalTokens): array
+    {
+        if ($totalTokens <= 0) {
+            return ['status' => AiTokenCostEstimator::RESULT_NO_TOKENS, 'cost_usd' => null];
+        }
+
+        if ($rateMap === []) {
+            return ['status' => AiTokenCostEstimator::RESULT_MISSING, 'cost_usd' => null];
+        }
+
+        $totalCost    = 0.0;
+        $priceFound   = false;
+
+        foreach ($rateMap as $price) {
+            if ($price === null) {
+                continue;
+            }
+            $priceFound = true;
+        }
+
+        if (! $priceFound) {
+            return ['status' => AiTokenCostEstimator::RESULT_MISSING, 'cost_usd' => null];
+        }
+
+        // Use the first available price to estimate (accurate when there is one model/provider)
+        $firstPrice = array_values(array_filter(array_values($rateMap)))[0] ?? null;
+
+        if ($firstPrice === null) {
+            return ['status' => AiTokenCostEstimator::RESULT_MISSING, 'cost_usd' => null];
+        }
+
+        $cost = $inputTokens  / 1_000_000 * (float) $firstPrice->input_price_per_1m_tokens
+              + $outputTokens / 1_000_000 * (float) $firstPrice->output_price_per_1m_tokens;
+
+        return ['status' => AiTokenCostEstimator::RESULT_OK, 'cost_usd' => round($cost, 4)];
+    }
+
+    private function comboKey(?string $provider, ?string $model, ?string $deploymentName, ?string $providerRegion): string
+    {
+        return implode('|', [
+            $provider       ?? '',
+            $model          ?? '',
+            $deploymentName ?? '',
+            $providerRegion ?? '',
+        ]);
     }
 
     /**
