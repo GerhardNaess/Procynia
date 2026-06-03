@@ -18,6 +18,27 @@ Do not use host `php artisan serve`, host queue workers, or host scheduler proce
 - `postgres` on `127.0.0.1:5433`
 - `redis` on `127.0.0.1:6380`
 
+### Viktig databaseadvarsel
+
+Procynia lokal utvikling skal bruke Docker PostgreSQL, ikke en lokal PostgreSQL-instans på `localhost:5432`.
+
+- Fra hosten bruker du `127.0.0.1:5433`
+- Inne i Docker bruker appen `postgres:5432`
+- Ikke bruk `localhost:5432` for Procynia
+
+Hvis du bruker pgAdmin, skal du åpne serveren med navnet `Procynia Docker`.
+
+Hvis du også har en lokal pgAdmin-server som heter `Lokal PostgreSQL`, bør den omdøpes til `IKKE BRUK - Lokal PostgreSQL` for å unngå at Procynia åpnes mot feil database.
+
+#### Verifisering
+
+Kjør denne SQL-en i pgAdmin for å bekrefte at du står på riktig database:
+
+```sql
+select current_database(), current_user, inet_server_addr(), inet_server_port();
+select to_regclass('public.exchange_rates');
+```
+
 ## Start
 
 ```bash
