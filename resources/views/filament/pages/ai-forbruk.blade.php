@@ -149,54 +149,51 @@
             </div>
 
             {{-- KPI cards --}}
-            <div class="grid grid-cols-2 gap-4 xl:grid-cols-6">
+            <div class="grid grid-cols-3 gap-3 xl:grid-cols-6">
 
+                {{-- Kort 1–5: standard KPI --}}
                 @php
                     $kpiCards = [
-                        ['label' => 'AI-operasjoner', 'value' => number_format($kpi['operations'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_operations'] ?? 0, 'inverseGood' => false],
-                        ['label' => 'Tokenforbruk', 'value' => number_format($kpi['tokens'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_tokens'] ?? 0, 'inverseGood' => false],
-                        ['label' => 'Tokens / operasjon', 'value' => number_format($kpi['avg_tokens'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_avg'] ?? 0, 'inverseGood' => true],
-                        ['label' => 'Foreløpig AI-kapasitet', 'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0), 'pct' => $kpi['capacity_pct'] ?? 0, 'suffix' => '% — foreløpig beregning', 'inverseGood' => false],
-                        ['label' => 'Blokkerte forsøk', 'value' => number_format($kpi['blocked'] ?? 0, 0, ',', ' '), 'pct' => $kpi['trend_blocked'] ?? 0, 'inverseGood' => true],
+                        ['label' => 'AI-operasjoner',     'value' => number_format($kpi['operations'] ?? 0, 0, ',', ' '),  'pct' => $kpi['trend_operations'] ?? 0, 'inverseGood' => false],
+                        ['label' => 'Tokenforbruk',        'value' => number_format($kpi['tokens'] ?? 0, 0, ',', ' '),      'pct' => $kpi['trend_tokens'] ?? 0,     'inverseGood' => false],
+                        ['label' => 'Tokens / op',         'value' => number_format($kpi['avg_tokens'] ?? 0, 0, ',', ' '),  'pct' => $kpi['trend_avg'] ?? 0,        'inverseGood' => true],
+                        ['label' => 'AI-kapasitet',        'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0), 'pct' => $kpi['capacity_pct'] ?? 0, 'badge' => ($kpi['capacity_pct'] ?? 0).'% brukt', 'note' => 'Foreløpig beregning', 'inverseGood' => false],
+                        ['label' => 'Blokkerte forsøk',    'value' => number_format($kpi['blocked'] ?? 0, 0, ',', ' '),     'pct' => $kpi['trend_blocked'] ?? 0,    'inverseGood' => true],
                     ];
                 @endphp
 
                 @foreach ($kpiCards as $card)
-                    <article class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-                        <div class="flex h-8 items-start text-xs font-bold uppercase tracking-wider text-gray-500 leading-tight">{{ $card['label'] }}</div>
-                        <div class="text-2xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
-                        @if (isset($card['suffix']))
-                            <div class="mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">
-                                {{ $card['pct'] }}{{ $card['suffix'] }}
-                            </div>
+                    <article class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                        <div class="truncate text-[10px] font-bold uppercase tracking-wider text-gray-400">{{ $card['label'] }}</div>
+                        <div class="mt-1 text-xl font-extrabold leading-tight tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                        @if (isset($card['badge']))
+                            <div class="mt-1.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }} inline-flex rounded-full px-2 py-0.5">{{ $card['badge'] }}</div>
+                            @if (isset($card['note']))
+                                <div class="mt-0.5 text-[10px] text-gray-400">{{ $card['note'] }}</div>
+                            @endif
                         @else
-                            <div class="mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">
-                                {{ $card['pct'] > 0 ? '+' : '' }}{{ $card['pct'] }}% mot forrige periode
-                            </div>
+                            <div class="mt-1.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }} inline-flex rounded-full px-2 py-0.5">{{ $card['pct'] > 0 ? '+' : '' }}{{ $card['pct'] }}%</div>
                         @endif
                     </article>
                 @endforeach
 
-                {{-- Estimert intern AI-kostnad --}}
-                <article class="rounded-2xl border border-violet-100 bg-violet-50 p-5 shadow-sm">
-                    <div class="flex h-8 items-start text-xs font-bold uppercase tracking-wider text-violet-600 leading-tight">Estimert intern AI-kostnad</div>
+                {{-- Kort 6: Estimert intern kostnad --}}
+                <article class="rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                    <div class="truncate text-[10px] font-bold uppercase tracking-wider text-violet-500">Est. intern kostnad</div>
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
-                        <div class="text-2xl font-extrabold tracking-tight text-gray-950">
-                            {{ number_format(($totalCostUsd ?? 0) * 10.5, 0, ',', ' ') }} kr
+                        <div class="mt-1 text-xl font-extrabold leading-tight tracking-tight text-gray-950">
+                            ≈ {{ number_format(($totalCostUsd ?? 0) * 10.5, 0, ',', ' ') }} kr
                         </div>
-                        @if ($totalCostStatus === 'partial')
-                            <div class="mt-2 text-xs text-amber-600 font-semibold">Delvis — noen token-events mangler pris</div>
-                        @else
-                            <div class="mt-2 text-xs text-gray-400">≈ USD {{ number_format($totalCostUsd ?? 0, 2, ',', ' ') }} · Intern estimat</div>
-                        @endif
+                        <div class="mt-1.5 text-[10px] {{ $totalCostStatus === 'partial' ? 'text-amber-500' : 'text-gray-400' }}">
+                            {{ $totalCostStatus === 'partial' ? 'Delvis dekning' : 'Basert på reg. tokens' }}
+                        </div>
                     @elseif ($totalCostStatus === 'price_missing')
-                        <div class="text-lg font-semibold text-gray-400 mt-1">Pris ikke registrert</div>
-                        <div class="mt-2 text-xs text-gray-400">Mangler modellpris i prisregisteret</div>
+                        <div class="mt-1 text-sm font-semibold text-gray-400">Pris ikke registrert</div>
+                        <div class="mt-1 text-[10px] text-gray-400">Mangler modellpris</div>
                     @else
-                        <div class="text-lg font-semibold text-gray-400 mt-1">Ingen tokenforbruk</div>
-                        <div class="mt-2 text-xs text-gray-400">Ingen token-events i perioden</div>
+                        <div class="mt-1 text-sm font-semibold text-gray-400">Ingen tokenforbruk</div>
+                        <div class="mt-1 text-[10px] text-gray-400">Ingen token-events</div>
                     @endif
-                    <div class="mt-2 text-xs text-violet-400 font-medium">Estimert intern AI-kostnad</div>
                 </article>
 
             </div>
