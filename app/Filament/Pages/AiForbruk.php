@@ -780,15 +780,15 @@ class AiForbruk extends Page
             SELECT
                 SUM(
                     CASE
-                        WHEN p.id IS NOT NULL AND (p.currency = 'NOK' OR fx.id IS NOT NULL) THEN
+                        WHEN p.id IS NOT NULL AND (UPPER(p.currency) = 'NOK' OR fx.id IS NOT NULL) THEN
                             (e.input_tokens::float  / 1000000.0 * p.input_price_per_1m_tokens::float +
                              e.output_tokens::float / 1000000.0 * p.output_price_per_1m_tokens::float)
-                            * CASE WHEN p.currency = 'NOK' THEN 1.0 ELSE fx.rate::float END
+                            * CASE WHEN UPPER(p.currency) = 'NOK' THEN 1.0 ELSE fx.rate::float END
                         ELSE NULL
                     END
                 ) AS total_cost_nok,
                 COUNT(CASE WHEN p.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS unpriced_count,
-                COUNT(CASE WHEN p.id IS NOT NULL AND p.currency != 'NOK' AND fx.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS no_rate_count,
+                COUNT(CASE WHEN p.id IS NOT NULL AND UPPER(p.currency) != 'NOK' AND fx.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS no_rate_count,
                 COUNT(CASE WHEN e.total_tokens > 0 THEN 1 END) AS has_tokens_count
             FROM ai_token_events e
             LEFT JOIN LATERAL (
@@ -806,12 +806,12 @@ class AiForbruk extends Page
             LEFT JOIN LATERAL (
                 SELECT id, rate
                 FROM exchange_rates
-                WHERE base_currency  = p.currency
-                  AND quote_currency = 'NOK'
+                WHERE UPPER(base_currency)  = UPPER(p.currency)
+                  AND UPPER(quote_currency) = 'NOK'
                   AND rate_date <= e.created_at::date
                 ORDER BY rate_date DESC
                 LIMIT 1
-            ) fx ON p.id IS NOT NULL AND p.currency != 'NOK'
+            ) fx ON p.id IS NOT NULL AND UPPER(p.currency) != 'NOK'
             WHERE e.created_at BETWEEN ? AND ?
             {$customerClause}
             {$functionClause}

@@ -3,8 +3,10 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiForbruk;
+use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
+use App\Models\ExchangeRate;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -186,6 +188,74 @@ class AiForbrukPageTest extends TestCase
         $this->assertSame(700, (int) $gpt5Sum);
     }
 
+    public function test_total_cost_uses_uppercase_fx_for_lowercase_usd_prices(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Valuta Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createModelPrice('openai', 'gpt-4.1-mini', 'usd', 0.40, 1.60, '2026-06-01');
+        $this->createExchangeRate('USD', 'NOK', 9.2935, '2026-06-03');
+
+        $this->createTokenEvent(
+            $customer,
+            $user,
+            'saved_notice_documents_upload',
+            'gpt-4.1-mini',
+            100_000,
+            50_000,
+            150_000,
+            ['provider' => 'openai'],
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('≈ 1 kr');
+        $response->assertSee('Intern kostnad');
+    }
+
+    public function test_total_cost_is_partial_when_some_events_have_no_provider(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Delvis Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createModelPrice('openai', 'gpt-4.1-mini', 'usd', 0.40, 1.60, '2026-06-01');
+        $this->createExchangeRate('USD', 'NOK', 9.2935, '2026-06-03');
+
+        $this->createTokenEvent(
+            $customer,
+            $user,
+            'saved_notice_requirement_answer_draft',
+            'gpt-4.1',
+            29_161,
+            0,
+            29_161,
+        );
+
+        $this->createTokenEvent(
+            $customer,
+            $user,
+            'saved_notice_documents_upload',
+            'gpt-4.1-mini',
+            100_000,
+            50_000,
+            150_000,
+            ['provider' => 'openai'],
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('≈ 1 kr');
+        $response->assertSee('Delvis dekning');
+    }
+
     public function test_page_handles_empty_data_cleanly(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
@@ -292,9 +362,17 @@ class AiForbrukPageTest extends TestCase
         ]);
     }
 
-    private function createTokenEvent(Customer $customer, User $user, string $operationKey, string $model, int $input, int $output, int $total): void
-    {
-        AiTokenEvent::query()->create([
+    private function createTokenEvent(
+        Customer $customer,
+        User $user,
+        string $operationKey,
+        string $model,
+        int $input,
+        int $output,
+        int $total,
+        array $overrides = [],
+    ): AiTokenEvent {
+        return AiTokenEvent::query()->create(array_merge([
             'customer_id' => $customer->id,
             'user_id' => $user->id,
             'operation_key' => $operationKey,
@@ -302,6 +380,42 @@ class AiForbrukPageTest extends TestCase
             'input_tokens' => $input,
             'output_tokens' => $output,
             'total_tokens' => $total,
+        ], $overrides));
+    }
+
+    private function createModelPrice(
+        string $provider,
+        string $model,
+        string $currency,
+        float $inputPricePer1mTokens,
+        float $outputPricePer1mTokens,
+        string $validFrom,
+    ): AiModelPrice {
+        return AiModelPrice::query()->create([
+            'provider' => $provider,
+            'model' => $model,
+            'currency' => $currency,
+            'input_price_per_1m_tokens' => $inputPricePer1mTokens,
+            'output_price_per_1m_tokens' => $outputPricePer1mTokens,
+            'valid_from' => $validFrom,
+            'valid_to' => null,
+            'is_active' => true,
+        ]);
+    }
+
+    private function createExchangeRate(
+        string $baseCurrency,
+        string $quoteCurrency,
+        float $rate,
+        string $rateDate,
+    ): ExchangeRate {
+        return ExchangeRate::query()->create([
+            'base_currency' => $baseCurrency,
+            'quote_currency' => $quoteCurrency,
+            'rate' => $rate,
+            'rate_date' => $rateDate,
+            'source' => ExchangeRate::SOURCE_NORGES_BANK,
+            'fetched_at' => now(),
         ]);
     }
 }
