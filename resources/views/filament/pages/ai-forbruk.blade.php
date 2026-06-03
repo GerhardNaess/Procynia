@@ -149,54 +149,89 @@
             </div>
 
             {{-- KPI cards --}}
+            {{--
+                Hvert kort bruker grid-template-rows med eksplisitte rader:
+                  Row 1 (2.25rem): tittelzone — alltid 2 linjer plass, overflow-hidden
+                  Row 2 (2.25rem): verdisone — sentrert vertikalt
+                  Row 3 (1.625rem): statuspille — sentrert vertikalt
+                  Row 4 (1rem):    notefelt   — diskret hjelpetekst
+                Dette sikrer at alle tall og piller starter på identisk Y-posisjon.
+            --}}
+            @php
+                $kpiCardStyle = 'grid-template-rows: 2.25rem 2.25rem 1.625rem 1rem';
+            @endphp
             <div class="grid grid-cols-3 gap-3 xl:grid-cols-6">
 
                 {{-- Kort 1–5: standard KPI --}}
                 @php
                     $kpiCards = [
-                        ['label' => 'AI-operasjoner',     'value' => number_format($kpi['operations'] ?? 0, 0, ',', ' '),  'pct' => $kpi['trend_operations'] ?? 0, 'inverseGood' => false],
-                        ['label' => 'Tokenforbruk',        'value' => number_format($kpi['tokens'] ?? 0, 0, ',', ' '),      'pct' => $kpi['trend_tokens'] ?? 0,     'inverseGood' => false],
-                        ['label' => 'Tokens / op',         'value' => number_format($kpi['avg_tokens'] ?? 0, 0, ',', ' '),  'pct' => $kpi['trend_avg'] ?? 0,        'inverseGood' => true],
-                        ['label' => 'AI-kapasitet',        'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0), 'pct' => $kpi['capacity_pct'] ?? 0, 'badge' => ($kpi['capacity_pct'] ?? 0).'% brukt', 'note' => 'Foreløpig beregning', 'inverseGood' => false],
-                        ['label' => 'Blokkerte forsøk',    'value' => number_format($kpi['blocked'] ?? 0, 0, ',', ' '),     'pct' => $kpi['trend_blocked'] ?? 0,    'inverseGood' => true],
+                        ['label' => 'AI-operasjoner', 'value' => number_format($kpi['operations'] ?? 0, 0, ',', ' '),
+                         'pill' => ($kpi['trend_operations'] ?? 0 > 0 ? '+' : '').($kpi['trend_operations'] ?? 0).'%',
+                         'pillClass' => $this->trendClass($kpi['trend_operations'] ?? 0, false), 'note' => 'mot forrige periode'],
+                        ['label' => 'Tokenforbruk', 'value' => number_format($kpi['tokens'] ?? 0, 0, ',', ' '),
+                         'pill' => ($kpi['trend_tokens'] ?? 0 > 0 ? '+' : '').($kpi['trend_tokens'] ?? 0).'%',
+                         'pillClass' => $this->trendClass($kpi['trend_tokens'] ?? 0, false), 'note' => 'mot forrige periode'],
+                        ['label' => 'Tokens / op', 'value' => number_format($kpi['avg_tokens'] ?? 0, 0, ',', ' '),
+                         'pill' => ($kpi['trend_avg'] ?? 0 > 0 ? '+' : '').($kpi['trend_avg'] ?? 0).'%',
+                         'pillClass' => $this->trendClass($kpi['trend_avg'] ?? 0, true), 'note' => 'mot forrige periode'],
+                        ['label' => 'AI-kapasitet', 'value' => ($kpi['activated_cases'] ?? 0).' / '.($kpi['capacity'] ?? 0),
+                         'pill' => ($kpi['capacity_pct'] ?? 0).'% brukt',
+                         'pillClass' => $this->trendClass($kpi['capacity_pct'] ?? 0, false), 'note' => 'Foreløpig beregning'],
+                        ['label' => 'Blokkerte', 'value' => number_format($kpi['blocked'] ?? 0, 0, ',', ' '),
+                         'pill' => ($kpi['trend_blocked'] ?? 0 > 0 ? '+' : '').($kpi['trend_blocked'] ?? 0).'%',
+                         'pillClass' => $this->trendClass($kpi['trend_blocked'] ?? 0, true), 'note' => 'mot forrige periode'],
                     ];
                 @endphp
 
                 @foreach ($kpiCards as $card)
-                    <article class="flex flex-col rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                        {{-- Label: fast høyde = 2 linjer tekst --}}
-                        <div class="flex h-9 items-start text-[10px] font-bold uppercase leading-tight tracking-wider text-gray-400">{{ $card['label'] }}</div>
-                        {{-- Verdi: fast høyde --}}
-                        <div class="flex h-8 items-center text-xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
-                        {{-- Badge/status --}}
-                        @if (isset($card['badge']))
-                            <div class="mt-1 inline-flex self-start rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">{{ $card['badge'] }}</div>
-                            @if (isset($card['note']))
-                                <div class="mt-0.5 text-[10px] leading-tight text-gray-400">{{ $card['note'] }}</div>
-                            @endif
-                        @else
-                            <div class="mt-1 inline-flex self-start rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $this->trendClass($card['pct'], $card['inverseGood']) }}">{{ $card['pct'] > 0 ? '+' : '' }}{{ $card['pct'] }}%</div>
-                        @endif
+                    <article class="grid rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+                             style="{{ $kpiCardStyle }}">
+                        {{-- Rad 1: tittel --}}
+                        <div class="self-start overflow-hidden text-[10px] font-bold uppercase leading-[1.35] tracking-wider text-gray-400">{{ $card['label'] }}</div>
+                        {{-- Rad 2: verdi --}}
+                        <div class="flex items-center text-xl font-extrabold tracking-tight text-gray-950">{{ $card['value'] }}</div>
+                        {{-- Rad 3: statuspille --}}
+                        <div class="flex items-center">
+                            <span class="inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold {{ $card['pillClass'] }}">{{ $card['pill'] }}</span>
+                        </div>
+                        {{-- Rad 4: note --}}
+                        <div class="flex items-center text-[9px] leading-none text-gray-400">{{ $card['note'] }}</div>
                     </article>
                 @endforeach
 
                 {{-- Kort 6: Estimert intern kostnad --}}
-                <article class="flex flex-col rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
-                    <div class="flex h-9 items-start text-[10px] font-bold uppercase leading-tight tracking-wider text-violet-500">Est. intern<br>kostnad</div>
+                <article class="grid rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+                         style="{{ $kpiCardStyle }}">
+                    {{-- Rad 1: tittel --}}
+                    <div class="self-start overflow-hidden text-[10px] font-bold uppercase leading-[1.35] tracking-wider text-violet-500">Est. kostnad</div>
+                    {{-- Rad 2: verdi --}}
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
-                        <div class="flex h-8 items-center text-xl font-extrabold tracking-tight text-gray-950">
+                        <div class="flex items-center text-xl font-extrabold tracking-tight text-gray-950">
                             ≈ {{ number_format(($totalCostUsd ?? 0) * 10.5, 0, ',', ' ') }} kr
                         </div>
-                        <div class="mt-1 text-[10px] {{ $totalCostStatus === 'partial' ? 'text-amber-500' : 'text-gray-400' }}">
-                            {{ $totalCostStatus === 'partial' ? 'Delvis dekning' : 'Basert på reg. tokens' }}
-                        </div>
-                    @elseif ($totalCostStatus === 'price_missing')
-                        <div class="flex h-8 items-center text-sm font-semibold text-gray-400">Ikke registrert</div>
-                        <div class="mt-1 text-[10px] text-gray-400">Mangler modellpris</div>
                     @else
-                        <div class="flex h-8 items-center text-sm font-semibold text-gray-400">Ingen tokens</div>
-                        <div class="mt-1 text-[10px] text-gray-400">Ingen token-events</div>
+                        <div class="flex items-center text-sm font-semibold text-gray-400">Ikke beregnet</div>
                     @endif
+                    {{-- Rad 3: statuspille --}}
+                    <div class="flex items-center">
+                        @if ($totalCostStatus === 'ok')
+                            <span class="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Estimat</span>
+                        @elseif ($totalCostStatus === 'partial')
+                            <span class="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600">Delvis</span>
+                        @elseif ($totalCostStatus === 'price_missing')
+                            <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500">Pris mangler</span>
+                        @else
+                            <span class="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-400">Ingen tokens</span>
+                        @endif
+                    </div>
+                    {{-- Rad 4: note --}}
+                    <div class="flex items-center text-[9px] leading-none text-gray-400">
+                        @if ($totalCostStatus === 'ok') Basert på reg. tokens
+                        @elseif ($totalCostStatus === 'partial') Delvis tokendekning
+                        @elseif ($totalCostStatus === 'price_missing') Mangler modellpris
+                        @else Ingen token-events
+                        @endif
+                    </div>
                 </article>
 
             </div>
