@@ -205,7 +205,7 @@
                     <div class="min-h-[2.5rem] text-[11px] font-bold uppercase leading-snug tracking-wider text-gray-400">Est. kostnad</div>
                     @if ($totalCostStatus === 'ok' || $totalCostStatus === 'partial')
                         <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-950">
-                            ≈ {{ number_format(($totalCostUsd ?? 0) * 10.5, 0, ',', ' ') }} kr
+                            ≈ {{ number_format($totalCostNok ?? 0, 0, ',', ' ') }} kr
                         </div>
                         <div class="mt-auto text-xs font-medium text-gray-400">
                             {{ $totalCostStatus === 'partial' ? 'Delvis dekning' : 'Intern kostnad' }}
@@ -213,7 +213,10 @@
                     @else
                         <div class="text-2xl font-extrabold leading-none tracking-tight text-gray-400">–</div>
                         <div class="mt-auto text-xs font-medium text-gray-400">
-                            {{ $totalCostStatus === 'price_missing' ? 'Pris mangler' : 'Ingen tokens' }}
+                            @if ($totalCostStatus === 'price_missing') Pris mangler
+                            @elseif ($totalCostStatus === 'exchange_rate_missing') Valutakurs mangler
+                            @else Ingen tokens
+                            @endif
                         </div>
                     @endif
                 </article>
@@ -398,9 +401,9 @@
                                     <span class="text-red-500">{{ $row['blocked'] }} blokkert</span>
                                 @endif
                                 @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                    <span class="text-violet-600 font-semibold">≈ {{ number_format($row['cost_usd'] * 10.5, 2, ',', ' ') }} kr</span>
-                                @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                    <span class="italic text-amber-500">Pris ikke registrert</span>
+                                    <span class="text-violet-600 font-semibold">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</span>
+                                @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
+                                    <span class="italic text-amber-500">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</span>
                                 @endif
                             </div>
                             <div class="mt-2 h-1.5 w-full rounded-full bg-gray-100">
@@ -497,9 +500,9 @@
                                         @endif
                                         <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-600' : 'text-gray-400' }}">{{ $row['blocked'] }}</td>
                                         @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'] * 10.5, 2, ',', ' ') }} kr</td>
-                                        @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                            <td class="px-4 py-3 text-right text-xs italic text-amber-500">Pris ikke registrert</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</td>
+                                        @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
+                                            <td class="px-4 py-3 text-right text-xs italic text-amber-500">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</td>
                                         @else
                                             <td class="px-4 py-3 text-right text-xs text-gray-300">—</td>
                                         @endif
@@ -541,9 +544,9 @@
                                         <td class="px-4 py-3 text-right tabular-nums text-gray-500">{{ number_format($row['avg_tokens'], 0, ',', ' ') }}</td>
                                         <td class="px-4 py-3 text-right tabular-nums {{ $row['blocked'] > 0 ? 'font-semibold text-red-600' : 'text-gray-400' }}">{{ $row['blocked'] }}</td>
                                         @if (($row['cost_status'] ?? '') === 'ok' && $row['cost_usd'] !== null)
-                                            <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'] * 10.5, 2, ',', ' ') }} kr</td>
-                                        @elseif (($row['cost_status'] ?? '') === 'price_missing')
-                                            <td class="px-4 py-3 text-right text-xs italic text-amber-500">Pris ikke registrert</td>
+                                            <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold text-violet-700">≈ {{ number_format($row['cost_usd'], 2, ',', ' ') }} kr</td>
+                                        @elseif (in_array($row['cost_status'] ?? '', ['price_missing', 'exchange_rate_missing']))
+                                            <td class="px-4 py-3 text-right text-xs italic text-amber-500">{{ ($row['cost_status'] ?? '') === 'exchange_rate_missing' ? 'Valutakurs mangler' : 'Pris ikke registrert' }}</td>
                                         @else
                                             <td class="px-4 py-3 text-right text-xs text-gray-300">—</td>
                                         @endif

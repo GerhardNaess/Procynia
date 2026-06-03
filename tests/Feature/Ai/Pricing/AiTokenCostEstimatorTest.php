@@ -5,6 +5,7 @@ namespace Tests\Feature\Ai\Pricing;
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\Customer;
+use App\Models\ExchangeRate;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Pricing\AiTokenCostEstimator;
@@ -25,16 +26,19 @@ class AiTokenCostEstimatorTest extends TestCase
         $this->estimator = new AiTokenCostEstimator();
     }
 
-    public function test_correct_cost_is_calculated_for_known_price(): void
+    // -------------------------------------------------------------------------
+    // NOK prices — no exchange rate needed
+    // -------------------------------------------------------------------------
+
+    public function test_nok_price_does_not_require_exchange_rate(): void
     {
         Carbon::setTestNow('2026-06-03 12:00:00');
 
         AiModelPrice::query()->create([
             'provider' => 'openai', 'model' => 'gpt-4.1',
-            'deployment_name' => null, 'provider_region' => null,
-            'currency' => 'usd',
-            'input_price_per_1m_tokens' => 2.00,
-            'output_price_per_1m_tokens' => 8.00,
+            'currency' => 'NOK',
+            'input_price_per_1m_tokens' => 22.00,
+            'output_price_per_1m_tokens' => 88.00,
             'valid_from' => '2026-01-01', 'valid_to' => null, 'is_active' => true,
         ]);
 
@@ -44,15 +48,115 @@ class AiTokenCostEstimatorTest extends TestCase
         $result = $this->estimator->estimate($event);
 
         $this->assertSame(AiTokenCostEstimator::RESULT_OK, $result['status']);
-        $this->assertEqualsWithDelta(2.00, $result['input_cost'], 0.000001);
-        $this->assertEqualsWithDelta(4.00, $result['output_cost'], 0.000001);
-        $this->assertEqualsWithDelta(6.00, $result['total_cost'], 0.000001);
-        $this->assertSame('usd', $result['currency']);
+        $this->assertEqualsWithDelta(22.00, $result['input_cost_nok'],  0.01);
+        $this->assertEqualsWithDelta(44.00, $result['output_cost_nok'], 0.01);
+        $this->assertEqualsWithDelta(66.00, $result['total_cost_nok'],  0.01);
+        $this->assertNull($result['exchange_rate']);
 
         Carbon::setTestNow();
     }
 
-    public function test_missing_price_returns_price_missing_not_zero(): void
+    // -------------------------------------------------------------------------
+    // USD prices — exchange rate required
+    // -------------------------------------------------------------------------
+
+    public function test_usd_price_with_exchange_rate_returns_nok_cost(): void
+    {
+        Carbon::setTestNow('2026-06-03 12:00:00');
+
+        AiModelPrice::query()->create([
+            'provider' => 'openai', 'model' => 'gpt-4.1',
+            'currency' => 'usd',
+            'input_price_per_1m_tokens' => 2.00,
+            'output_price_per_1m_tokens' => 8.00,
+            'valid_from' => '2026-01-01', 'valid_to' => null, 'is_active' => true,
+        ]);
+
+        ExchangeRate::query()->create([
+            'base_currency' => 'USD', 'quote_currency' => 'NOK',
+            'rate' => 10.00, 'rate_date' => '2026-06-03',
+            'source' => 'norges_bank', 'fetched_at' => now(),
+        ]);
+
+        $event = $this->makeEvent(['provider' => 'openai', 'model' => 'gpt-4.1',
+            'input_tokens' => 1_000_000, 'output_tokens' => 500_000, 'total_tokens' => 1_500_000]);
+
+        $result = $this->estimator->estimate($event);
+
+        $this->assertSame(AiTokenCostEstimator::RESULT_OK, $result['status']);
+        $this->assertEqualsWithDelta(20.00, $result['input_cost_nok'],  0.01, '1M input × $2 × 10 NOK/USD = 20 NOK');
+        $this->assertEqualsWithDelta(40.00, $result['output_cost_nok'], 0.01);
+        $this->assertEqualsWithDelta(60.00, $result['total_cost_nok'],  0.01);
+        $this->assertSame(10.0, $result['exchange_rate']);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_usd_price_without_exchange_rate_returns_exchange_rate_missing(): void
+    {
+        Carbon::setTestNow('2026-06-03');
+
+        AiModelPrice::query()->create([
+            'provider' => 'openai', 'model' => 'gpt-4.1',
+            'currency' => 'usd',
+            'input_price_per_1m_tokens' => 2.00,
+            'output_price_per_1m_tokens' => 8.00,
+            'valid_from' => '2026-01-01', 'valid_to' => null, 'is_active' => true,
+        ]);
+
+        $event = $this->makeEvent(['provider' => 'openai', 'model' => 'gpt-4.1',
+            'input_tokens' => 1000, 'output_tokens' => 500, 'total_tokens' => 1500]);
+
+        $result = $this->estimator->estimate($event);
+
+        $this->assertSame(AiTokenCostEstimator::RESULT_NO_RATE, $result['status']);
+        $this->assertNull($result['total_cost_nok'], 'Must not return 0 kr when exchange rate is missing.');
+
+        Carbon::setTestNow();
+    }
+
+    public function test_historical_exchange_rate_is_used_for_old_events(): void
+    {
+        Carbon::setTestNow('2026-06-03');
+
+        AiModelPrice::query()->create([
+            'provider' => 'openai', 'model' => 'gpt-4.1',
+            'currency' => 'usd',
+            'input_price_per_1m_tokens' => 2.00, 'output_price_per_1m_tokens' => 8.00,
+            'valid_from' => '2026-01-01', 'valid_to' => null, 'is_active' => true,
+        ]);
+
+        ExchangeRate::query()->create([
+            'base_currency' => 'USD', 'quote_currency' => 'NOK',
+            'rate' => 10.00, 'rate_date' => '2026-02-01',
+            'source' => 'norges_bank', 'fetched_at' => now(),
+        ]);
+
+        ExchangeRate::query()->create([
+            'base_currency' => 'USD', 'quote_currency' => 'NOK',
+            'rate' => 12.00, 'rate_date' => '2026-05-01',
+            'source' => 'norges_bank', 'fetched_at' => now(),
+        ]);
+
+        $oldEvent = $this->makeEvent([
+            'provider' => 'openai', 'model' => 'gpt-4.1',
+            'input_tokens' => 1_000_000, 'output_tokens' => 0, 'total_tokens' => 1_000_000,
+            'created_at' => '2026-03-01 10:00:00',
+        ]);
+
+        $result = $this->estimator->estimate($oldEvent);
+
+        $this->assertSame(AiTokenCostEstimator::RESULT_OK, $result['status']);
+        $this->assertSame(10.0, $result['exchange_rate'], 'Feb rate (10.0) must be used for March event, not May rate (12.0).');
+
+        Carbon::setTestNow();
+    }
+
+    // -------------------------------------------------------------------------
+    // Generic missing data
+    // -------------------------------------------------------------------------
+
+    public function test_missing_model_price_returns_price_missing_not_zero(): void
     {
         Carbon::setTestNow('2026-06-03');
 
@@ -62,7 +166,7 @@ class AiTokenCostEstimatorTest extends TestCase
         $result = $this->estimator->estimate($event);
 
         $this->assertSame(AiTokenCostEstimator::RESULT_MISSING, $result['status']);
-        $this->assertNull($result['total_cost'], 'Must not return 0.00 when price is missing.');
+        $this->assertNull($result['total_cost_nok'], 'Must not return 0 kr when price is missing.');
 
         Carbon::setTestNow();
     }
@@ -87,37 +191,9 @@ class AiTokenCostEstimatorTest extends TestCase
         $this->assertSame(AiTokenCostEstimator::RESULT_MISSING, $result['status']);
     }
 
-    public function test_historical_price_is_used_for_old_events(): void
-    {
-        Carbon::setTestNow('2026-06-03');
-
-        AiModelPrice::query()->create([
-            'provider' => 'openai', 'model' => 'gpt-4.1',
-            'currency' => 'usd',
-            'input_price_per_1m_tokens' => 2.00, 'output_price_per_1m_tokens' => 8.00,
-            'valid_from' => '2026-01-01', 'valid_to' => '2026-03-31', 'is_active' => false,
-        ]);
-
-        AiModelPrice::query()->create([
-            'provider' => 'openai', 'model' => 'gpt-4.1',
-            'currency' => 'usd',
-            'input_price_per_1m_tokens' => 3.00, 'output_price_per_1m_tokens' => 12.00,
-            'valid_from' => '2026-04-01', 'valid_to' => null, 'is_active' => true,
-        ]);
-
-        $oldEvent = $this->makeEvent([
-            'provider' => 'openai', 'model' => 'gpt-4.1',
-            'input_tokens' => 1_000_000, 'output_tokens' => 0, 'total_tokens' => 1_000_000,
-            'created_at' => '2026-02-15 10:00:00',
-        ]);
-
-        $result = $this->estimator->estimate($oldEvent);
-
-        $this->assertSame(AiTokenCostEstimator::RESULT_OK, $result['status']);
-        $this->assertEqualsWithDelta(2.00, $result['input_cost'], 0.000001, 'Old price (2.00) must be used for Feb event.');
-
-        Carbon::setTestNow();
-    }
+    // -------------------------------------------------------------------------
+    // Fixture helper
+    // -------------------------------------------------------------------------
 
     private function makeEvent(array $overrides): AiTokenEvent
     {

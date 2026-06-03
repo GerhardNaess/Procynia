@@ -71,7 +71,7 @@ class AiForbruk extends Page
     public array $alerts = [];
 
     // --- Cost summary ---
-    public ?float $totalCostUsd = null;
+    public ?float $totalCostNok = null;
     public string $totalCostStatus = AiTokenCostEstimator::RESULT_MISSING;
 
     // --- Chart SVG point strings ---
@@ -779,14 +779,20 @@ class AiForbruk extends Page
         $result = DB::selectOne("
             SELECT
                 SUM(
-                    e.input_tokens::float  / 1000000.0 * p.input_price_per_1m_tokens::float +
-                    e.output_tokens::float / 1000000.0 * p.output_price_per_1m_tokens::float
-                ) AS total_cost_usd,
+                    CASE
+                        WHEN p.id IS NOT NULL AND (p.currency = 'NOK' OR fx.id IS NOT NULL) THEN
+                            (e.input_tokens::float  / 1000000.0 * p.input_price_per_1m_tokens::float +
+                             e.output_tokens::float / 1000000.0 * p.output_price_per_1m_tokens::float)
+                            * CASE WHEN p.currency = 'NOK' THEN 1.0 ELSE fx.rate::float END
+                        ELSE NULL
+                    END
+                ) AS total_cost_nok,
                 COUNT(CASE WHEN p.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS unpriced_count,
+                COUNT(CASE WHEN p.id IS NOT NULL AND p.currency != 'NOK' AND fx.id IS NULL AND e.total_tokens > 0 THEN 1 END) AS no_rate_count,
                 COUNT(CASE WHEN e.total_tokens > 0 THEN 1 END) AS has_tokens_count
             FROM ai_token_events e
             LEFT JOIN LATERAL (
-                SELECT id, input_price_per_1m_tokens, output_price_per_1m_tokens
+                SELECT id, input_price_per_1m_tokens, output_price_per_1m_tokens, currency
                 FROM ai_model_prices
                 WHERE provider = e.provider
                   AND model = e.model
@@ -797,6 +803,15 @@ class AiForbruk extends Page
                 ORDER BY valid_from DESC
                 LIMIT 1
             ) p ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT id, rate
+                FROM exchange_rates
+                WHERE base_currency  = p.currency
+                  AND quote_currency = 'NOK'
+                  AND rate_date <= e.created_at::date
+                ORDER BY rate_date DESC
+                LIMIT 1
+            ) fx ON p.id IS NOT NULL AND p.currency != 'NOK'
             WHERE e.created_at BETWEEN ? AND ?
             {$customerClause}
             {$functionClause}
@@ -804,21 +819,28 @@ class AiForbruk extends Page
 
         $hasTokensCount = (int) ($result->has_tokens_count ?? 0);
         $unpricedCount  = (int) ($result->unpriced_count  ?? 0);
+        $noRateCount    = (int) ($result->no_rate_count   ?? 0);
 
         if ($hasTokensCount === 0) {
-            $this->totalCostUsd    = null;
+            $this->totalCostNok    = null;
             $this->totalCostStatus = AiTokenCostEstimator::RESULT_NO_TOKENS;
             return;
         }
 
         if ($unpricedCount === $hasTokensCount) {
-            $this->totalCostUsd    = null;
+            $this->totalCostNok    = null;
             $this->totalCostStatus = AiTokenCostEstimator::RESULT_MISSING;
             return;
         }
 
-        $this->totalCostUsd    = $result->total_cost_usd !== null ? round((float) $result->total_cost_usd, 4) : null;
-        $this->totalCostStatus = $unpricedCount > 0
+        if ($noRateCount === $hasTokensCount) {
+            $this->totalCostNok    = null;
+            $this->totalCostStatus = AiTokenCostEstimator::RESULT_NO_RATE;
+            return;
+        }
+
+        $this->totalCostNok    = $result->total_cost_nok !== null ? round((float) $result->total_cost_nok, 2) : null;
+        $this->totalCostStatus = ($unpricedCount > 0 || $noRateCount > 0)
             ? 'partial'
             : AiTokenCostEstimator::RESULT_OK;
     }
@@ -890,17 +912,30 @@ class AiForbruk extends Page
             return ['status' => AiTokenCostEstimator::RESULT_MISSING, 'cost_usd' => null];
         }
 
-        // Use the first available price to estimate (accurate when there is one model/provider)
+        // Use the first available price (accurate when there is one model/provider per period).
         $firstPrice = array_values(array_filter(array_values($rateMap)))[0] ?? null;
 
         if ($firstPrice === null) {
             return ['status' => AiTokenCostEstimator::RESULT_MISSING, 'cost_usd' => null];
         }
 
-        $cost = $inputTokens  / 1_000_000 * (float) $firstPrice->input_price_per_1m_tokens
-              + $outputTokens / 1_000_000 * (float) $firstPrice->output_price_per_1m_tokens;
+        $nativeCost = $inputTokens  / 1_000_000 * (float) $firstPrice->input_price_per_1m_tokens
+                    + $outputTokens / 1_000_000 * (float) $firstPrice->output_price_per_1m_tokens;
 
-        return ['status' => AiTokenCostEstimator::RESULT_OK, 'cost_usd' => round($cost, 4)];
+        // Convert to NOK if the price is in a different currency.
+        $priceCurrency = strtoupper((string) $firstPrice->currency);
+
+        if ($priceCurrency === 'NOK') {
+            return ['status' => AiTokenCostEstimator::RESULT_OK, 'cost_usd' => round($nativeCost, 2)];
+        }
+
+        $fxRate = \App\Models\ExchangeRate::findForDate($priceCurrency, 'NOK', now());
+
+        if ($fxRate === null) {
+            return ['status' => AiTokenCostEstimator::RESULT_NO_RATE, 'cost_usd' => null];
+        }
+
+        return ['status' => AiTokenCostEstimator::RESULT_OK, 'cost_usd' => round($nativeCost * (float) $fxRate->rate, 2)];
     }
 
     private function comboKey(?string $provider, ?string $model, ?string $deploymentName, ?string $providerRegion): string

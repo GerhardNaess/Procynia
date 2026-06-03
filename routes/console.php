@@ -27,3 +27,9 @@ Schedule::job(new OpsQueueHeartbeatJob('default'))->everyMinute();
 Schedule::command('ai:sync-model-prices')
     ->dailyAt('03:00')
     ->withoutOverlapping();
+
+// Norges Bank publishes rates ~16:00 CET; 17:00 Europe/Oslo ensures today's rate is available.
+Schedule::command('exchange-rates:sync')
+    ->dailyAt('17:00')
+    ->timezone('Europe/Oslo')
+    ->withoutOverlapping();
