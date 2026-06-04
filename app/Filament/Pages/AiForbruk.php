@@ -69,6 +69,15 @@ class AiForbruk extends Page
     public array $trendRows = [];
 
     /** @var array<int, array<string, mixed>> */
+    public array $customerTokenRows = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $modelTokenRows = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $recentEvents = [];
+
+    /** @var array<int, array<string, mixed>> */
     public array $alerts = [];
 
     // --- Cost summary ---
@@ -168,6 +177,9 @@ class AiForbruk extends Page
         $this->customerCapacityRows = $this->buildCustomerCapacityRows($from, $to);
         $this->userRows = $this->buildUserRows($from, $to, $rateMap);
         $this->trendRows = $this->buildTrendRows($from, $to, $rateMap);
+        $this->customerTokenRows = $this->buildCustomerTokenRows($from, $to);
+        $this->modelTokenRows = $this->buildModelTokenRows($from, $to);
+        $this->recentEvents = $this->buildRecentEvents($from, $to);
         $this->alerts = $this->buildAlerts($from, $to);
         $this->buildTotalCost($from, $to);
         $this->buildCharts($from, $to);
@@ -537,6 +549,124 @@ class AiForbruk extends Page
                 'blocked'     => (int) ($usage?->blocked ?? 0),
                 'cost_usd'    => $costData['cost_usd'],
                 'cost_status' => $costData['status'],
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Purpose: Build the token usage summary per customer for the selected period.
+     * Inputs: Period boundaries.
+     * Returns: Aggregated token data grouped by customer.
+     * Side effects: Runs one grouped token-event query and one customer lookup query.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildCustomerTokenRows(Carbon $from, Carbon $to): array
+    {
+        $customerNames = Customer::query()
+            ->select(['id', 'name'])
+            ->pluck('name', 'id')
+            ->all();
+
+        $customerAgg = AiTokenEvent::query()
+            ->select([
+                'customer_id',
+                DB::raw('COUNT(*) as event_count'),
+                DB::raw('SUM(input_tokens) as total_input_tokens'),
+                DB::raw('SUM(output_tokens) as total_output_tokens'),
+                DB::raw('SUM(total_tokens) as total_tokens_sum'),
+            ])
+            ->whereBetween('created_at', [$from, $to])
+            ->groupBy('customer_id')
+            ->orderByDesc(DB::raw('SUM(total_tokens)'))
+            ->get();
+
+        return $customerAgg->map(function (object $row) use ($customerNames): array {
+            return [
+                'customer_id'         => (int) $row->customer_id,
+                'customer_name'       => $customerNames[$row->customer_id] ?? '(ukjent kunde)',
+                'event_count'         => (int) $row->event_count,
+                'total_input_tokens'  => (int) $row->total_input_tokens,
+                'total_output_tokens' => (int) $row->total_output_tokens,
+                'total_tokens_sum'    => (int) $row->total_tokens_sum,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Purpose: Build the token usage summary per model for the selected period.
+     * Inputs: Period boundaries.
+     * Returns: Aggregated token data grouped by model.
+     * Side effects: Runs one grouped token-event query.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildModelTokenRows(Carbon $from, Carbon $to): array
+    {
+        $modelAgg = AiTokenEvent::query()
+            ->select([
+                'model',
+                DB::raw('COUNT(*) as event_count'),
+                DB::raw('SUM(input_tokens) as total_input_tokens'),
+                DB::raw('SUM(output_tokens) as total_output_tokens'),
+                DB::raw('SUM(total_tokens) as total_tokens_sum'),
+            ])
+            ->whereBetween('created_at', [$from, $to])
+            ->groupBy('model')
+            ->orderByDesc(DB::raw('SUM(total_tokens)'))
+            ->get();
+
+        return $modelAgg->map(static function (object $row): array {
+            return [
+                'model'               => (string) $row->model,
+                'event_count'         => (int) $row->event_count,
+                'total_input_tokens'  => (int) $row->total_input_tokens,
+                'total_output_tokens' => (int) $row->total_output_tokens,
+                'total_tokens_sum'    => (int) $row->total_tokens_sum,
+            ];
+        })->values()->all();
+    }
+
+    /**
+     * Purpose: Build the most recent token events table for the selected period.
+     * Inputs: Period boundaries.
+     * Returns: A list of the latest token events with customer and user names attached.
+     * Side effects: Runs two small lookup queries and one limited token-event query.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildRecentEvents(Carbon $from, Carbon $to): array
+    {
+        $customerNames = Customer::query()
+            ->select(['id', 'name'])
+            ->pluck('name', 'id')
+            ->all();
+
+        $userNames = DB::table('users')
+            ->select(['id', 'name'])
+            ->pluck('name', 'id')
+            ->all();
+
+        $recentEvents = AiTokenEvent::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->when($this->selectedCustomerId !== '', fn ($q) => $q->where('customer_id', (int) $this->selectedCustomerId))
+            ->when($this->functionFilter !== '', fn ($q) => $q->where('operation_key', $this->functionFilter))
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(30)
+            ->get();
+
+        return $recentEvents->map(function (AiTokenEvent $event) use ($customerNames, $userNames): array {
+            return [
+                'id'            => $event->id,
+                'created_at'    => $event->created_at?->format('d.m.Y H:i'),
+                'customer_name' => $customerNames[$event->customer_id] ?? '(ukjent)',
+                'user_name'     => $event->user_id ? ($userNames[$event->user_id] ?? '(ukjent)') : '—',
+                'operation_key' => $event->operation_key,
+                'model'         => $event->model,
+                'input_tokens'  => $event->input_tokens,
+                'output_tokens' => $event->output_tokens,
+                'total_tokens'  => $event->total_tokens,
             ];
         })->values()->all();
     }

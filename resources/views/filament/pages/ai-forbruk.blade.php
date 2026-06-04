@@ -463,6 +463,100 @@
                 </article>
             </div>
 
+            {{-- Token summary tables --}}
+            <div class="grid gap-5 lg:grid-cols-2">
+
+                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 px-5 py-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Tokenforbruk</div>
+                        <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per kunde</h3>
+                        <p class="mt-0.5 text-sm text-gray-500">Basert på <code class="font-mono text-xs">ai_token_events</code> for valgt periode.</p>
+                    </div>
+                    @if (count($customerTokenRows) > 0)
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="border-b border-gray-200 text-gray-500">
+                                    <tr>
+                                        <th class="pb-2 px-5 font-medium">Kunde</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Kall</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Input</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Output</th>
+                                        <th class="pb-2 px-5 text-right font-medium">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 text-gray-900">
+                                    @foreach ($customerTokenRows as $row)
+                                        <tr>
+                                            <td class="py-2 px-5 font-medium">{{ $row['customer_name'] }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['event_count'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-5 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                                <tfoot class="border-t border-gray-200 text-gray-700">
+                                    <tr>
+                                        <td class="pt-2 px-5 font-semibold">Totalt</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'event_count')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($customerTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    @else
+                        <p class="px-5 py-8 text-center text-sm text-gray-400">Ingen token-events registrert for {{ $periodLabel }}.</p>
+                    @endif
+                </article>
+
+                <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-100 px-5 py-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Tokenforbruk</div>
+                        <h3 class="mt-0.5 font-bold text-gray-900">Tokenforbruk per modell</h3>
+                        <p class="mt-0.5 text-sm text-gray-500">Basert på <code class="font-mono text-xs">ai_token_events</code> for valgt periode.</p>
+                    </div>
+                    @if (count($modelTokenRows) > 0)
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm">
+                                <thead class="border-b border-gray-200 text-gray-500">
+                                    <tr>
+                                        <th class="pb-2 px-5 font-medium">Modell</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Kall</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Input</th>
+                                        <th class="pb-2 px-4 text-right font-medium">Output</th>
+                                        <th class="pb-2 px-5 text-right font-medium">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100 text-gray-900">
+                                    @foreach ($modelTokenRows as $row)
+                                        <tr>
+                                            <td class="py-2 px-5 font-mono text-xs text-gray-700">{{ $row['model'] }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['event_count'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_input_tokens'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-4 text-right tabular-nums">{{ number_format($row['total_output_tokens'], 0, ',', ' ') }}</td>
+                                            <td class="py-2 px-5 text-right font-semibold tabular-nums">{{ number_format($row['total_tokens_sum'], 0, ',', ' ') }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                                <tfoot class="border-t border-gray-200 text-gray-700">
+                                    <tr>
+                                        <td class="pt-2 px-5 font-semibold">Totalt</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'event_count')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_input_tokens')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-4 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_output_tokens')), 0, ',', ' ') }}</td>
+                                        <td class="pt-2 px-5 text-right tabular-nums font-semibold">{{ number_format(array_sum(array_column($modelTokenRows, 'total_tokens_sum')), 0, ',', ' ') }}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    @else
+                        <p class="px-5 py-8 text-center text-sm text-gray-400">Ingen token-events registrert for {{ $periodLabel }}.</p>
+                    @endif
+                </article>
+            </div>
+
             {{-- User table --}}
             <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div class="border-b border-gray-100 px-5 py-4">
@@ -557,6 +651,49 @@
                     </div>
                 @else
                     <p class="px-5 py-8 text-center text-sm text-gray-400">Ingen data i valgt periode.</p>
+                @endif
+            </article>
+
+            {{-- Recent events --}}
+            <article class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <div class="border-b border-gray-100 px-5 py-4">
+                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Hendelseslogg</div>
+                    <h3 class="mt-0.5 font-bold text-gray-900">Siste token-events (maks 30)</h3>
+                    <p class="mt-0.5 text-sm text-gray-500">Nyeste registrerte AI-kall i valgt periode, med kunde, bruker, operasjon og tokenfordeling.</p>
+                </div>
+                @if (count($recentEvents) > 0)
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-xs font-bold uppercase tracking-wider text-gray-500">
+                                <tr>
+                                    <th class="px-4 py-3 text-left">Tidspunkt</th>
+                                    <th class="px-4 py-3 text-left">Kunde</th>
+                                    <th class="px-4 py-3 text-left">Bruker</th>
+                                    <th class="px-4 py-3 text-left">Operasjon</th>
+                                    <th class="px-4 py-3 text-left">Modell</th>
+                                    <th class="px-4 py-3 text-right">Input</th>
+                                    <th class="px-4 py-3 text-right">Output</th>
+                                    <th class="px-4 py-3 text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                @foreach ($recentEvents as $event)
+                                    <tr class="hover:bg-gray-50/50">
+                                        <td class="px-4 py-3 text-xs tabular-nums text-gray-500">{{ $event['created_at'] }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-700">{{ $event['customer_name'] }}</td>
+                                        <td class="px-4 py-3 text-xs text-gray-500">{{ $event['user_name'] }}</td>
+                                        <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['operation_key'] }}</td>
+                                        <td class="px-4 py-3 font-mono text-xs text-gray-600">{{ $event['model'] }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['input_tokens'], 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs">{{ number_format($event['output_tokens'], 0, ',', ' ') }}</td>
+                                        <td class="px-4 py-3 text-right tabular-nums text-xs font-semibold">{{ number_format($event['total_tokens'], 0, ',', ' ') }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @else
+                    <p class="px-5 py-8 text-center text-sm text-gray-400">Ingen token-events registrert for {{ $periodLabel }}.</p>
                 @endif
             </article>
 

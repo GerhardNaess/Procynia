@@ -150,6 +150,60 @@ class AiForbrukPageTest extends TestCase
         $this->assertSame(400, (int) $totalTokens);
     }
 
+    public function test_page_shows_recent_token_events(): void
+    {
+        Carbon::setTestNow('2026-06-02 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Hendelses Kunde');
+        $user = $this->createUser($customer);
+
+        $this->createTokenEvent(
+            $customer,
+            $user,
+            'saved_notice_requirement_answer_draft',
+            'gpt-4.1-mini',
+            100,
+            40,
+            140,
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hendelseslogg');
+        $response->assertSee('Siste token-events (maks 30)');
+        $response->assertSee('02.06.2026 12:00');
+        $response->assertSee('Hendelses Kunde');
+    }
+
+    public function test_page_shows_token_usage_per_customer_and_model(): void
+    {
+        Carbon::setTestNow('2026-06-02 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customerA = $this->createCustomer('Kunde Alfa');
+        $customerB = $this->createCustomer('Kunde Beta');
+        $userA = $this->createUser($customerA);
+        $userB = $this->createUser($customerB);
+
+        $this->createTokenEvent($customerA, $userA, 'saved_notice_requirement_answer_draft', 'gpt-4.1-mini', 100, 40, 140);
+        $this->createTokenEvent($customerA, $userA, 'saved_notice_requirement_answer_draft', 'gpt-4.1-mini', 200, 80, 280);
+        $this->createTokenEvent($customerB, $userB, 'saved_notice_requirement_answer_draft', 'gpt-5', 500, 200, 700);
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Tokenforbruk per kunde');
+        $response->assertSee('Tokenforbruk per modell');
+        $response->assertSee('Kunde Alfa');
+        $response->assertSee('Kunde Beta');
+        $response->assertSee('gpt-4.1-mini');
+        $response->assertSee('gpt-5');
+        $response->assertSee('420');
+        $response->assertSee('700');
+    }
+
     public function test_operation_key_grouping_is_isolated(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
