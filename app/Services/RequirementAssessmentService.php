@@ -2,9 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
 use App\Models\SavedNoticeAiRequirementAssessment;
+use App\Models\User;
+use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\OpenAi\OpenAiClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +25,7 @@ class RequirementAssessmentService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
     ) {
     }
 
@@ -37,6 +42,7 @@ class RequirementAssessmentService
     ): SavedNoticeAiRequirementAssessment
     {
         $requirement->loadMissing([
+            'savedNotice',
             'evidence.knowledgeItem',
             'evidence.knowledgeItemChunk',
             'assessment',
@@ -44,6 +50,7 @@ class RequirementAssessmentService
 
         $evidenceRows = $this->assessmentEvidenceRows($requirement);
         $assessmentPayload = $this->requestAssessment($requirement, $evidenceRows, $caseInstructions);
+        $this->recordAiCaseUsageAfterSuccessfulAssessment($requirement, $assessedByUserId);
 
         return DB::transaction(function () use ($requirement, $assessmentPayload, $evidenceRows, $assessedByUserId): SavedNoticeAiRequirementAssessment {
             return SavedNoticeAiRequirementAssessment::query()->updateOrCreate(
@@ -64,6 +71,60 @@ class RequirementAssessmentService
                 ],
             );
         });
+    }
+
+    /**
+     * Purpose: Record the SavedNotice as AI-active after a successful assessment response has been produced.
+     * Inputs: The assessed requirement and optional user id from the triggering request.
+     * Returns: None.
+     * Side effects: Writes one case usage row through the non-blocking recorder.
+     */
+    private function recordAiCaseUsageAfterSuccessfulAssessment(
+        SavedNoticeAiRequirement $requirement,
+        ?int $assessedByUserId,
+    ): void
+    {
+        try {
+            $savedNotice = $requirement->savedNotice;
+
+            if (! $savedNotice instanceof SavedNotice) {
+                return;
+            }
+
+            $this->caseUsageRecorder->record(
+                $savedNotice,
+                AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
+                $this->resolveAssessmentRecorderUser($assessedByUserId),
+            );
+        } catch (Throwable $throwable) {
+            Log::warning('[PROCYNIA][AI_CASE_USAGE] Failed to record AI case usage after assessment refresh.', [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'assessed_by_user_id' => $assessedByUserId,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Purpose: Resolve the user that triggered the assessment refresh, when available.
+     * Inputs: The optional triggering user id.
+     * Returns: The matching User model or null when no safe match is available.
+     * Side effects: None.
+     */
+    private function resolveAssessmentRecorderUser(?int $assessedByUserId): ?User
+    {
+        if ($assessedByUserId === null || $assessedByUserId <= 0) {
+            return null;
+        }
+
+        try {
+            $user = User::query()->find($assessedByUserId);
+
+            return $user instanceof User ? $user : null;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

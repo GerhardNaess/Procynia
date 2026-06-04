@@ -5187,6 +5187,8 @@ class AiControllerTest extends TestCase
 
     public function test_ai_case_view_refreshes_requirement_assessments_for_confirmed_requirements_only_and_prefers_selected_evidence(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-04-06 14:50:00'));
+
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4009', 'Assessment target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
@@ -5423,6 +5425,121 @@ class AiControllerTest extends TestCase
         $this->assertNull(data_get($requirements->get($rejectedRequirement->id), 'assessment'));
         $this->assertCount(4, $requirements);
         $this->assertFalse($requirements->contains(fn (array $requirement): bool => $requirement['id'] === $foreignRequirement->id));
+
+        $caseUsage = CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH)
+            ->first();
+
+        $this->assertNotNull($caseUsage, 'Assessment refresh must record one AI case usage row for the SavedNotice.');
+        $this->assertSame($context['customer']->id, $caseUsage->customer_id);
+        $this->assertSame($savedNotice->id, $caseUsage->saved_notice_id);
+        $this->assertSame($context['user']->id, $caseUsage->activated_by_user_id);
+        $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH, $caseUsage->source_operation_key);
+        $this->assertSame('2026-04-01', $caseUsage->period_start?->toDateString());
+        $this->assertSame('2026-04-30', $caseUsage->period_end?->toDateString());
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertSessionHas('success', 'Krav analysert.');
+
+        $this->assertSame(1, CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH)
+            ->count(), 'Assessment refresh must not duplicate case usage for the same SavedNotice in the same month.');
+    }
+
+    public function test_ai_requirement_assessment_refresh_does_not_duplicate_ai_case_usage_when_processed_more_than_once_for_same_saved_notice_in_same_month(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-07 09:15:00'));
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-4010-CASE-USAGE', 'Assessment case usage target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'ai_instructions' => 'Skriv formelt og bruk Kunde med stor K.',
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-07 09:10:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'assessment-case-usage.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/assessment-case-usage.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+            'extracted_text' => 'Assessment case usage source text.',
+            'text_extracted_at' => '2026-04-07 09:11:00',
+        ]);
+        $chunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'char_start' => 0,
+            'char_end' => 67,
+            'word_count' => 8,
+        ]);
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Assessment case usage knowledge',
+            'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
+            'content' => 'Leverandøren skal dokumentere erfaring fra tilsvarende prosjekter.',
+            'is_active' => true,
+        ]);
+        $this->syncKnowledgeItemChunks($knowledgeItem);
+        $knowledgeChunk = $knowledgeItem->chunks()->firstOrFail();
+
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_chunk_id' => $knowledgeChunk->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 9,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SELECTED,
+            'is_primary' => true,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+
+        Http::fake(function (Request $request) {
+            $requestPayload = json_decode((string) $request->body(), true);
+
+            if (! is_array($requestPayload)) {
+                throw new RuntimeException('Unable to decode the fake OpenAI request payload.');
+            }
+
+            return Http::response($this->openAiAssessmentResponse([
+                'coverage_status' => SavedNoticeAiRequirementAssessment::COVERAGE_STATUS_COVERED,
+                'risk_level' => SavedNoticeAiRequirementAssessment::RISK_LEVEL_LOW,
+                'requirement_summary' => 'Kravet er dekket.',
+                'coverage_rationale' => 'Evidensen dekker kravet tydelig.',
+                'missing_information' => 'Ingen vesentlige mangler.',
+                'recommended_next_step' => 'Behold eksisterende grunnlag.',
+            ]), 200);
+        });
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertSessionHas('success', 'Krav analysert.');
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->assertSessionHas('success', 'Krav analysert.');
+
+        $this->assertSame(1, CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH)
+            ->count(), 'Assessment refresh must not duplicate case usage on repeated processing within the same month.');
     }
 
     public function test_ai_requirement_assessment_refresh_preserves_completed_rows_when_the_service_fails_and_creates_failed_rows_without_previous_state(): void
@@ -5513,6 +5630,10 @@ class AiControllerTest extends TestCase
         $this->assertNull($failedAssessment->requirement_summary);
         $this->assertSame([], $failedAssessment->source_evidence_snapshot);
         $this->assertNull($failedAssessment->assessed_at);
+        $this->assertSame(0, CustomerAiCaseUsage::query()
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH)
+            ->count(), 'Failed assessment refresh must not record AI case usage before an AI result exists.');
     }
 
     public function test_ai_requirement_work_status_can_be_updated_for_confirmed_requirements_and_assignment_is_persisted(): void
