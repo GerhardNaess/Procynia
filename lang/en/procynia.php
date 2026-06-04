@@ -229,10 +229,10 @@ return [
         'resource' => 'Attention Queue',
     ],
     'ai_usage_capacity' => [
-        'navigation_label' => 'AI usage and capacity',
-        'page_title' => 'AI usage and capacity',
-        'page_subtitle' => 'Internal overview of AI usage and included capacity based on safe usage events. This is internal governance, not billing input.',
-        'note' => 'The numbers are based on ai_usage_events and are used for internal governance and capacity review. Sensitive prompt, document, and answer text is not stored or shown.',
+        'navigation_label' => 'AI capacity and blocking',
+        'page_title' => 'AI capacity and blocking',
+        'page_subtitle' => 'Internal overview of capacity limits, blocked AI operations, and customers or users near the limit. This is internal operations control, not finance.',
+        'note' => 'The numbers are based on ai_usage_events and are used for internal operations control and capacity management. We follow limits, blocking, customers near the limit, and users near the limit. Sensitive prompt, document, and answer text is not stored or shown.',
         'empty' => 'No AI usage was found in the selected period.',
         'summary' => [
             'usage_24h' => 'AI operations in the last 24 hours',
@@ -247,9 +247,9 @@ return [
             'hint_blocked_users' => 'Unique users with at least one blocked AI operation in the last 30 days.',
         ],
         'sections' => [
-            'customers' => 'Customer overview',
-            'users' => 'User overview',
-            'operations' => 'AI functions',
+            'customers' => 'Customers near limit',
+            'users' => 'Users near limit',
+            'operations' => 'Blocked AI operations',
         ],
         'columns' => [
             'customer' => 'Customer',

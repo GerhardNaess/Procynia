@@ -16,7 +16,7 @@ class AiUsageCapacity extends Page
 
     protected static ?string $navigationLabel = null;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Fakturering';
+    protected static string|UnitEnum|null $navigationGroup = 'Drift';
 
     protected static ?int $navigationSort = 5;
 

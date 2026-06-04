@@ -104,7 +104,7 @@ class AiForbruk extends Page
 
     public function getSubheading(): ?string
     {
-        return 'Intern Procynia-analyse · Kun Super Admin';
+        return 'Faktisk AI-forbruk, tokenforbruk og estimert intern AI-kost · Kun Super Admin';
     }
 
     public function mount(): void

@@ -35,7 +35,11 @@ class AiUsageCapacityPageTest extends TestCase
         $response = $this->actingAs($admin)->get(AiUsageCapacity::getUrl());
 
         $response->assertOk();
-        $response->assertSee('AI-bruk og kapasitet');
+        $response->assertSee('AI-kapasitet og blokkeringer');
+        $response->assertSeeText('Intern oversikt over kapasitetsgrenser');
+        $response->assertSee('Blokkerte AI-operasjoner');
+        $response->assertSee('Kunder nær grense');
+        $response->assertSee('Brukere nær grense');
         $response->assertSee('Kunde A');
         $response->assertSee('Kunde B');
         $response->assertSee('Bruker A1');
@@ -47,6 +51,11 @@ class AiUsageCapacityPageTest extends TestCase
         $response->assertDontSee('document_text');
         $response->assertDontSee('answer_text');
         $response->assertDontSee('chunk_content');
+    }
+
+    public function test_ai_usage_capacity_page_is_grouped_under_drift(): void
+    {
+        $this->assertSame('Drift', AiUsageCapacity::getNavigationGroup());
     }
 
     public function test_customer_admin_cannot_access_ai_usage_capacity_page(): void

@@ -80,7 +80,7 @@ class AiProfitability extends Page
 
     public function getSubheading(): ?string
     {
-        return 'Intern Procynia-oversikt · Kun Super Admin';
+        return 'Estimert lønnsomhet per kunde og case · Kun Super Admin';
     }
 
     public function mount(AiCaseProfitabilityService $service): void

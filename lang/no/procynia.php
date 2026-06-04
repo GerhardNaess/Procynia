@@ -229,10 +229,10 @@ return [
         'resource' => 'Oppmerksomhetskø',
     ],
     'ai_usage_capacity' => [
-        'navigation_label' => 'AI-bruk og kapasitet',
-        'page_title' => 'AI-bruk og kapasitet',
-        'page_subtitle' => 'Intern oversikt over AI-bruk og inkludert kapasitet basert på trygge usage-events. Dette er intern styring, ikke fakturagrunnlag.',
-        'note' => 'Tallene bygger på ai_usage_events og brukes til intern styring og kapasitetsvurdering. Sensitiv prompt-, dokument- og svartekst lagres eller vises ikke.',
+        'navigation_label' => 'AI-kapasitet og blokkeringer',
+        'page_title' => 'AI-kapasitet og blokkeringer',
+        'page_subtitle' => 'Intern oversikt over kapasitetsgrenser, blokkerte AI-operasjoner og kunder eller brukere nær grensen. Dette er intern drift og kontroll, ikke økonomi.',
+        'note' => 'Tallene bygger på ai_usage_events og brukes til intern drift og kapasitetsstyring. Her følger vi grenser, blokkeringer, kunder nær grense og brukere nær grense. Sensitiv prompt-, dokument- og svartekst lagres eller vises ikke.',
         'empty' => 'Ingen AI-bruk funnet i valgt periode.',
         'summary' => [
             'usage_24h' => 'AI-operasjoner siste 24 timer',
@@ -247,9 +247,9 @@ return [
             'hint_blocked_users' => 'Unike brukere med minst én blokkert AI-operasjon de siste 30 dagene.',
         ],
         'sections' => [
-            'customers' => 'Kundeoversikt',
-            'users' => 'Brukeroversikt',
-            'operations' => 'AI-funksjoner',
+            'customers' => 'Kunder nær grense',
+            'users' => 'Brukere nær grense',
+            'operations' => 'Blokkerte AI-operasjoner',
         ],
         'columns' => [
             'customer' => 'Kunde',

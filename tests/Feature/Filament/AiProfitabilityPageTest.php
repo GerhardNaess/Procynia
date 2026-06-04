@@ -79,7 +79,8 @@ class AiProfitabilityPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSeeText('AI-lønnsomhet');
-        $response->assertSeeText('Intern Procynia-oversikt');
+        $response->assertSeeText('Estimert lønnsomhet per kunde og case');
+        $response->assertSeeText('allokert inntekt, intern AI-kost og dekningsbidrag');
         $response->assertSeeText('Alle kunder samlet');
         $response->assertSeeText('Allokert inntekt');
         $response->assertSeeText('Intern AI-kost');

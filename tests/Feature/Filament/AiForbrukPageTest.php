@@ -38,6 +38,7 @@ class AiForbrukPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('AI-forbruk');
+        $response->assertSeeText('Faktisk AI-forbruk og intern kost');
         $response->assertSee('AI-operasjoner');
         $response->assertSee('Tokenforbruk');
     }

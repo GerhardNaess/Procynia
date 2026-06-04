@@ -19,7 +19,7 @@
             <div class="border-b border-gray-100 px-5 py-4">
                 <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Procynia intern</p>
                 <h2 class="mt-1 text-xl font-extrabold tracking-tight text-gray-950">AI-lønnsomhet</h2>
-                <p class="mt-1 text-sm text-gray-500">Velg kunde og periode. Visningen bygger på AI-case-ledgeren og historisk tokenkost.</p>
+                <p class="mt-1 text-sm text-gray-500">Viser estimert lønnsomhet per kunde og case med allokert inntekt, intern AI-kost og dekningsbidrag.</p>
             </div>
 
             <div class="border-b border-gray-100 px-5 py-4 space-y-3">
@@ -71,7 +71,7 @@
                 <div>
                     <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Intern lønnsomhetsanalyse</p>
                     <h1 class="mt-1 text-3xl font-extrabold tracking-tight text-gray-950">{{ $pageContextTitle }}</h1>
-                    <p class="mt-1 text-sm text-gray-500">Periode {{ $periodLabel }} · AI-case, inntekt og kost fra samme interne analysegrunnlag.</p>
+                    <p class="mt-1 text-sm text-gray-500">Periode {{ $periodLabel }} · allokert inntekt, intern AI-kost og dekningsbidrag per kunde og case.</p>
                 </div>
                 <div class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-500 shadow-sm whitespace-nowrap">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
