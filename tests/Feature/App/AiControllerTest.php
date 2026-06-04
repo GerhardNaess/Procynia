@@ -4,6 +4,7 @@ namespace Tests\Feature\App;
 
 use App\Http\Controllers\App\AiController;
 use App\Models\Customer;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\Language;
 use App\Models\KnowledgeItem;
 use App\Models\SavedNotice;
@@ -38,6 +39,7 @@ use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\RequirementExtractor;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -101,6 +103,8 @@ class AiControllerTest extends TestCase
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
+
         if (DB::transactionLevel() > 0) {
             DB::rollBack();
         }
@@ -533,6 +537,8 @@ class AiControllerTest extends TestCase
 
     public function test_ai_requirement_answer_draft_generation_endpoint_generates_and_persists_a_draft(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-04-06 11:30:00'));
+
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-GENERATE', 'Generate target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
@@ -628,6 +634,20 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Leverandøren skal beskrive løsningen og dokumentere metoden.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+
+        $caseUsage = CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT)
+            ->first();
+
+        $this->assertNotNull($caseUsage, 'An AI case usage row must be recorded after answer draft generation.');
+        $this->assertSame($context['customer']->id, $caseUsage->customer_id);
+        $this->assertSame($savedNotice->id, $caseUsage->saved_notice_id);
+        $this->assertSame($context['user']->id, $caseUsage->activated_by_user_id);
+        $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT, $caseUsage->source_operation_key);
+        $this->assertSame('2026-04-01', $caseUsage->period_start?->toDateString());
+        $this->assertSame('2026-04-30', $caseUsage->period_end?->toDateString());
     }
 
     public function test_answer_draft_generation_records_ai_token_event_with_correct_fields(): void
@@ -804,6 +824,7 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('', (string) $requirement->answer_draft_text);
         $this->assertNull($requirement->answer_draft_generated_at);
+        $this->assertSame(0, CustomerAiCaseUsage::query()->count(), 'Blocked answer draft generation must not record AI case usage.');
     }
 
     public function test_ai_requirement_answer_draft_generation_calls_the_grounding_judge_before_generating_the_answer(): void
@@ -898,6 +919,8 @@ class AiControllerTest extends TestCase
 
     public function test_ai_requirement_answer_draft_generation_endpoint_overwrites_existing_drafts(): void
     {
+        Carbon::setTestNow(Carbon::parse('2026-04-06 11:30:00'));
+
         $context = $this->customerAdminContext();
         $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-REUSE', 'Reuse target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
@@ -982,6 +1005,78 @@ class AiControllerTest extends TestCase
         ]);
         $this->assertSame('Nytt svarutkast som skal erstatte det gamle.', $requirement->refresh()->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+
+        Carbon::setTestNow(Carbon::parse('2026-04-19 14:05:00'));
+
+        $secondResponse = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $secondResponse->assertOk();
+        $this->assertSame(1, CustomerAiCaseUsage::query()->count(), 'The same SavedNotice must only be recorded once in the same calendar month.');
+    }
+
+    public function test_ai_requirement_answer_draft_generation_does_not_record_case_usage_when_generation_fails(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-04-06 11:30:00'));
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-2001-FAIL-CASE-USAGE', 'Fail target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 11:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'requirements.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/requirements.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'answer_draft_text' => '',
+            'answer_draft_generated_at' => null,
+        ]);
+
+        [$retrievalKnowledge, $retrievalChunk] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren skal beskrive løsningen.',
+            'requirements-knowledge.docx',
+        );
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'embed-fail-case-usage',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(fn () => Http::response(['unexpected' => 'payload'], 200, ['x-request-id' => 'req_invalid_answer_draft']));
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertServerError();
+        $this->assertSame(0, CustomerAiCaseUsage::query()->count(), 'Failed answer draft generation must not record AI case usage.');
     }
 
     public function test_ai_requirement_answer_draft_generation_forwards_user_answer_prompt_to_draft_service(): void

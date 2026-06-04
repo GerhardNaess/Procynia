@@ -2,10 +2,13 @@
 
 namespace App\Services\Ai\Requirements;
 
+use App\Models\User;
 use App\Models\KnowledgeItem;
 use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNotice;
+use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\OpenAi\OpenAiClient;
@@ -30,6 +33,7 @@ class RequirementAnswerDraftService
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
         private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
     ) {
     }
@@ -74,6 +78,8 @@ class RequirementAnswerDraftService
             $userId,
         );
 
+        $this->recordAiCaseUsageAfterSuccessfulAnswerDraft($requirement, $userId);
+
         return DB::transaction(function () use ($requirement, $answerDraftText): SavedNoticeAiRequirement {
             $requirement->forceFill([
                 'answer_draft_text' => $answerDraftText,
@@ -106,6 +112,60 @@ class RequirementAnswerDraftService
 
             return $requirement->refresh();
         });
+    }
+
+    /**
+     * Purpose: Record a SavedNotice as AI-active after a successful answer draft generation.
+     * Inputs: The processed requirement and optional user id from the triggering request.
+     * Returns: None.
+     * Side effects: Writes one case usage row through the non-blocking recorder.
+     */
+    private function recordAiCaseUsageAfterSuccessfulAnswerDraft(
+        SavedNoticeAiRequirement $requirement,
+        ?int $userId,
+    ): void
+    {
+        try {
+            $savedNotice = $requirement->savedNotice;
+
+            if (! $savedNotice instanceof SavedNotice) {
+                return;
+            }
+
+            $this->caseUsageRecorder->record(
+                $savedNotice,
+                AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+                $this->resolveRecorderUser($userId),
+            );
+        } catch (Throwable $throwable) {
+            Log::warning('[PROCYNIA][AI_CASE_USAGE] Failed to record AI case usage after answer draft generation.', [
+                'saved_notice_ai_requirement_id' => $requirement->id,
+                'saved_notice_id' => $requirement->saved_notice_id,
+                'user_id' => $userId,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Purpose: Resolve the user that triggered the answer draft generation, when available.
+     * Inputs: The optional triggering user id.
+     * Returns: The matching User model or null when no safe match is available.
+     * Side effects: None.
+     */
+    private function resolveRecorderUser(?int $userId): ?User
+    {
+        if ($userId === null || $userId <= 0) {
+            return null;
+        }
+
+        try {
+            $user = User::query()->find($userId);
+
+            return $user instanceof User ? $user : null;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**
