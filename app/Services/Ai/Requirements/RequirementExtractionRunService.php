@@ -14,6 +14,7 @@ use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
 use App\Models\SavedNoticeAiRequirement;
+use App\Services\Ai\Commercial\CustomerAiCaseUsageRecorder;
 use App\Services\Ai\AiTokenLogger;
 use App\Services\Ai\AiUsageGuard;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,7 @@ class RequirementExtractionRunService
     public function __construct(
         private readonly RequirementCandidateExtractor $candidateExtractor,
         private readonly RequirementEditorService $requirementEditorService,
+        private readonly CustomerAiCaseUsageRecorder $caseUsageRecorder = new CustomerAiCaseUsageRecorder(),
         private readonly AiTokenLogger $tokenLogger = new AiTokenLogger(),
     ) {
     }
@@ -1621,6 +1623,7 @@ class RequirementExtractionRunService
             return $publishedRequirementCount;
         });
 
+        $this->recordAiCaseUsageAfterCompletedExtractionRun($run, $document);
         $this->logCompletedRunTokenEvent($run, $document);
 
         return $publishedRequirementCount;
@@ -1668,6 +1671,42 @@ class RequirementExtractionRunService
         ]);
         // provider, deployment_name and provider_region are resolved automatically
         // by AiTokenLogger::resolveProvider() via the OpenAiClient config fallback.
+    }
+
+    /**
+     * Purpose: Record the first AI-active SavedNotice case after a successful extraction completion.
+     * Inputs: The completed extraction run and its source document.
+     * Returns: None.
+     * Side effects: Writes one customer_ai_case_usages row when persistence succeeds and logs warnings on failure.
+     */
+    private function recordAiCaseUsageAfterCompletedExtractionRun(
+        RequirementExtractionRun $run,
+        SavedNoticeAiDocument $document,
+    ): void
+    {
+        try {
+            $savedNotice = $document->savedNotice;
+
+            if (! $savedNotice instanceof SavedNotice) {
+                return;
+            }
+
+            $this->caseUsageRecorder->record(
+                $savedNotice,
+                AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+                null,
+                null,
+                null,
+                $run->finished_at,
+            );
+        } catch (Throwable $throwable) {
+            Log::warning('[PROCYNIA][AI_CASE_USAGE] Failed to record AI case usage after requirement extraction completion.', [
+                'requirement_extraction_run_id' => $run->id,
+                'saved_notice_ai_document_id' => $document->id,
+                'saved_notice_id' => $run->saved_notice_id,
+                'error' => $throwable->getMessage(),
+            ]);
+        }
     }
 
     /**

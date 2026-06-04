@@ -8,6 +8,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\SavedNotice;
 use App\Models\SavedNoticeAiDocument;
 use App\Models\SavedNoticeAiDocumentChunk;
@@ -24,6 +25,7 @@ use App\Services\Ai\Requirements\RequirementEditorService;
 use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementLoader;
 use Closure;
+use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Queue\TimeoutExceededException;
@@ -46,6 +48,8 @@ class RequirementExtractionRunServiceTest extends TestCase
 
     protected function tearDown(): void
     {
+        Carbon::setTestNow();
+
         if (DB::transactionLevel() > 0) {
             DB::rollBack();
         }
@@ -2000,6 +2004,51 @@ class RequirementExtractionRunServiceTest extends TestCase
         $this->assertSame('gpt-4.1-mini', $event->model);
     }
 
+    public function test_completed_run_records_one_ai_case_usage_with_correct_fields(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-04 10:00:00'));
+
+        $context = $this->customerContext('Case Usage Extraction AS');
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-CASE-USAGE-RUN-001', 'Case usage target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal levere dokumentasjon.', 0);
+
+        $run = $this->createRequirementExtractionRun($document, [
+            'status' => RequirementExtractionRun::STATUS_PROCESSING,
+            'input_tokens_total' => 1200,
+            'output_tokens_total' => 450,
+            'total_tokens_total' => 1650,
+        ]);
+
+        $this->createRequirementExtractionCall($run, $document, $chunk, [
+            'status' => RequirementExtractionCall::STATUS_COMPLETED,
+            'model' => 'gpt-4.1-mini',
+        ]);
+
+        $job = new FinalizeRequirementExtractionRun($run->id);
+        $job->handle(app(RequirementExtractionRunService::class));
+
+        $caseUsage = CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->where('source_operation_key', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD)
+            ->first();
+
+        $this->assertNotNull($caseUsage, 'One customer_ai_case_usages row must be created for a completed extraction run.');
+        $this->assertSame($context['customer']->id, $caseUsage->customer_id);
+        $this->assertSame($savedNotice->id, $caseUsage->saved_notice_id);
+        $this->assertNull($caseUsage->activated_by_user_id, 'Async extraction completion has no safe user context.');
+        $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD, $caseUsage->source_operation_key);
+        $this->assertSame('2026-06-01', $caseUsage->period_start?->toDateString());
+        $this->assertSame('2026-06-30', $caseUsage->period_end?->toDateString());
+        $this->assertNull($caseUsage->source_ai_usage_event_id);
+        $this->assertNull($caseUsage->source_ai_token_event_id);
+    }
+
     public function test_failed_run_does_not_create_ai_token_event(): void
     {
         $context = $this->customerContext('Token Fail Extraction AS');
@@ -2034,6 +2083,7 @@ class RequirementExtractionRunServiceTest extends TestCase
             ->count();
 
         $this->assertSame(0, $eventCount, 'No ai_token_events must be created when the run fails.');
+        $this->assertSame(0, CustomerAiCaseUsage::query()->count(), 'No customer_ai_case_usages row must be created when the run fails.');
     }
 
     public function test_completed_run_with_zero_tokens_does_not_create_token_event(): void
@@ -2100,6 +2150,10 @@ class RequirementExtractionRunServiceTest extends TestCase
 
         $this->assertSame(1, AiTokenEvent::query()->where('requirement_extraction_run_id', $run->id)->count(),
             'Still one token event after second promote — no duplicate.');
+        $this->assertSame(1, CustomerAiCaseUsage::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('saved_notice_id', $savedNotice->id)
+            ->count(), 'Still one case usage row after second promote — no duplicate.');
     }
 
     public function test_token_event_has_correct_customer_id_and_saved_notice_id(): void
