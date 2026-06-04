@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiForbruk;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
@@ -10,7 +11,9 @@ use App\Models\ExchangeRate;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\SavedNotice;
 use App\Models\User;
+use App\Services\Ai\AiUsageGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -256,6 +259,99 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('Delvis dekning');
     }
 
+    public function test_counts_activated_cases_from_customer_ai_case_usages(): void
+    {
+        Carbon::setTestNow('2026-07-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Ledger Kunde');
+        $user = $this->createUser($customer);
+
+        $noticeA = $this->createSavedNotice($customer, 'AI-CASE-USAGE-001', 'Case usage A');
+        $noticeB = $this->createSavedNotice($customer, 'AI-CASE-USAGE-002', 'Case usage B');
+
+        $this->createCaseUsage($customer, $noticeA, '2026-06-20 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT);
+        $this->createCaseUsage($customer, $noticeB, '2026-07-10 14:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('2 / 10');
+        $response->assertSeeText('2 av 10 AI-saker');
+        $response->assertSee('Ledger Kunde');
+    }
+
+    public function test_does_not_count_token_events_as_activated_cases_without_ledger_rows(): void
+    {
+        Carbon::setTestNow('2026-06-30 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Token Only Kunde');
+        $user = $this->createUser($customer);
+        $savedNotice = $this->createSavedNotice($customer, 'AI-TOKEN-ONLY-001', 'Token only target');
+
+        $this->createTokenEvent(
+            $customer,
+            $user,
+            'saved_notice_requirement_answer_draft',
+            'gpt-4.1',
+            12_000,
+            4_000,
+            16_000,
+            ['saved_notice_id' => $savedNotice->id],
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('0 / 10');
+        $response->assertSeeText('0 av 10 AI-saker');
+        $response->assertSee('Token Only Kunde');
+    }
+
+    public function test_filters_ai_case_usages_by_dashboard_period(): void
+    {
+        Carbon::setTestNow('2026-06-30 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Periode Ledger Kunde');
+        $this->createUser($customer);
+
+        $inPeriodNotice = $this->createSavedNotice($customer, 'AI-CASE-PERIOD-IN', 'In period target');
+        $outPeriodNotice = $this->createSavedNotice($customer, 'AI-CASE-PERIOD-OUT', 'Out period target');
+
+        $this->createCaseUsage($customer, $inPeriodNotice, '2026-06-15 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH);
+        $this->createCaseUsage($customer, $outPeriodNotice, '2026-05-31 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('1 / 10');
+        $response->assertSeeText('1 av 10 AI-saker');
+        $response->assertSee('Periode Ledger Kunde');
+    }
+
+    public function test_counts_unique_saved_notices_if_multiple_rows_exist_across_periods(): void
+    {
+        Carbon::setTestNow('2026-07-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Unik Ledger Kunde');
+        $this->createUser($customer);
+
+        $savedNotice = $this->createSavedNotice($customer, 'AI-CASE-UNIQUE-001', 'Unique target');
+
+        $this->createCaseUsage($customer, $savedNotice, '2026-06-20 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT);
+        $this->createCaseUsage($customer, $savedNotice, '2026-07-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH);
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('1 / 10');
+        $response->assertSeeText('1 av 10 AI-saker');
+        $response->assertSee('Unik Ledger Kunde');
+    }
+
     public function test_page_handles_empty_data_cleanly(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
@@ -347,6 +443,50 @@ class AiForbrukPageTest extends TestCase
             'role' => User::ROLE_CUSTOMER_ADMIN,
             'customer_id' => $customer->id,
             'is_active' => true,
+        ]);
+    }
+
+    /**
+     * Purpose: Create a deterministic SavedNotice fixture for AI case usage reporting tests.
+     * Inputs: The owning customer, a unique external id, a title, and optional overrides.
+     * Returns: The persisted SavedNotice model.
+     * Side effects: Writes one saved_notices row to the test database.
+     */
+    private function createSavedNotice(Customer $customer, string $externalId, string $title, array $overrides = []): SavedNotice
+    {
+        return SavedNotice::query()->create(array_merge([
+            'customer_id' => $customer->id,
+            'external_id' => $externalId,
+            'title' => $title,
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+            'source_type' => SavedNotice::SOURCE_TYPE_PUBLIC_NOTICE,
+        ], $overrides));
+    }
+
+    /**
+     * Purpose: Create one AI case usage ledger row for a SavedNotice in a specific month.
+     * Inputs: The customer, SavedNotice, activation timestamp, and optional source operation key.
+     * Returns: The persisted CustomerAiCaseUsage model.
+     * Side effects: Writes one customer_ai_case_usages row to the test database.
+     */
+    private function createCaseUsage(
+        Customer $customer,
+        SavedNotice $savedNotice,
+        string $activatedAt,
+        string $sourceOperationKey,
+    ): CustomerAiCaseUsage {
+        $moment = Carbon::parse($activatedAt);
+
+        return CustomerAiCaseUsage::query()->create([
+            'customer_id' => $customer->id,
+            'saved_notice_id' => $savedNotice->id,
+            'activated_at' => $moment,
+            'activated_by_user_id' => null,
+            'period_start' => $moment->copy()->startOfMonth()->toDateString(),
+            'period_end' => $moment->copy()->endOfMonth()->toDateString(),
+            'source_operation_key' => $sourceOperationKey,
+            'source_ai_usage_event_id' => null,
+            'source_ai_token_event_id' => null,
         ]);
     }
 

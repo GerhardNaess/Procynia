@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\AiModelPrice;
+use App\Models\CustomerAiCaseUsage;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
@@ -19,7 +20,7 @@ use UnitEnum;
 /**
  * Purpose: Comprehensive internal AI usage dashboard for Procynia Super Admin.
  * Inputs: Livewire public properties (customer, period, function, trend grouping).
- * Returns: Aggregated data from ai_usage_events, ai_token_events and customers.
+ * Returns: Aggregated data from ai_usage_events, ai_token_events, customer_ai_case_usages and customers.
  * Side effects: Runs DB aggregate queries on page load and whenever any filter changes.
  * Access: Internal Procynia Super Admin only (customer_id = null, role = super_admin).
  */
@@ -255,15 +256,11 @@ class AiForbruk extends Page
 
     private function countActivatedCases(Carbon $from, Carbon $to): int
     {
-        $q = AiTokenEvent::query()
-            ->whereNotNull('saved_notice_id')
-            ->whereBetween('created_at', [$from, $to]);
+        $row = $this->activatedCaseUsageQuery($from, $to)
+            ->selectRaw('COUNT(DISTINCT saved_notice_id) as activated_cases')
+            ->first();
 
-        if ($this->selectedCustomerId !== '') {
-            $q->where('customer_id', (int) $this->selectedCustomerId);
-        }
-
-        return (int) $q->distinct('saved_notice_id')->count('saved_notice_id');
+        return (int) ($row?->activated_cases ?? 0);
     }
 
     private function totalCapacity(): int
@@ -363,11 +360,8 @@ class AiForbruk extends Page
 
         $customers = $customersQ->get();
 
-        $casesByCustomer = AiTokenEvent::query()
-            ->whereNotNull('saved_notice_id')
-            ->whereBetween('created_at', [$from, $to])
+        $casesByCustomer = $this->activatedCaseUsageQuery($from, $to)
             ->select(['customer_id', DB::raw('COUNT(DISTINCT saved_notice_id) as case_count')])
-            ->when($this->selectedCustomerId !== '', fn ($q) => $q->where('customer_id', (int) $this->selectedCustomerId))
             ->groupBy('customer_id')
             ->get()
             ->keyBy('customer_id');
@@ -621,6 +615,24 @@ class AiForbruk extends Page
         }
 
         return $alerts;
+    }
+
+    /**
+     * Purpose: Build the AI case usage ledger query for the selected customer and dashboard period.
+     * Inputs: The current dashboard period boundaries.
+     * Returns: A query limited to customer_ai_case_usages rows within the selected period.
+     * Side effects: None.
+     */
+    private function activatedCaseUsageQuery(Carbon $from, Carbon $to)
+    {
+        $q = CustomerAiCaseUsage::query()
+            ->whereBetween('activated_at', [$from, $to]);
+
+        if ($this->selectedCustomerId !== '') {
+            $q->where('customer_id', (int) $this->selectedCustomerId);
+        }
+
+        return $q;
     }
 
     // -------------------------------------------------------------------------
