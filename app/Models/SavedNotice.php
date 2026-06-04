@@ -414,6 +414,21 @@ class SavedNotice extends Model
             ->orderBy('id');
     }
 
+    /**
+     * Purpose: Resolve the AI case usage ledger rows for this SavedNotice.
+     * Inputs: None.
+     * Returns: The related AI case usage rows.
+     * Side effects: None.
+     */
+    public function aiCaseUsages(): HasMany
+    {
+        return $this->hasMany(CustomerAiCaseUsage::class)
+            ->orderByDesc('period_start')
+            ->orderByDesc('period_end')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+    }
+
     public function getBidStatusLabelAttribute(): string
     {
         $status = (string) ($this->bid_status ?? '');

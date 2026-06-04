@@ -161,4 +161,15 @@ class Customer extends Model
     {
         return $this->hasMany(KnowledgeItem::class);
     }
+
+    /**
+     * Purpose: Resolve the AI case usage ledger rows for this customer.
+     * Inputs: None.
+     * Returns: The related AI case usage rows.
+     * Side effects: None.
+     */
+    public function aiCaseUsages(): HasMany
+    {
+        return $this->hasMany(CustomerAiCaseUsage::class);
+    }
 }
