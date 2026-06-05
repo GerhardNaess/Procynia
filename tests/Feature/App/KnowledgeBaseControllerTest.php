@@ -2517,11 +2517,10 @@ class KnowledgeBaseControllerTest extends TestCase
         ]);
     }
 
-    public function test_knowledge_document_show_skips_lazy_summary_when_monthly_ai_quota_is_exhausted(): void
+    public function test_knowledge_document_show_generates_lazy_summary_even_when_monthly_ai_quota_is_exhausted(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $context = $this->customerContext('Quota Exhausted Summary AS');
@@ -2529,7 +2528,6 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $operationKey = AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD;
         RateLimiter::clear(sprintf('ai:user:%d:%s', $context['user']->id, $operationKey));
-        RateLimiter::clear(sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey));
 
         for ($i = 0; $i < 3; $i++) {
             AiUsageEvent::query()->create([
@@ -2565,23 +2563,29 @@ class KnowledgeBaseControllerTest extends TestCase
         $response->assertOk();
 
         $refreshed = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
-        $this->assertNull($refreshed->summary,
-            'Summary must not be generated when monthly AI quota is exhausted — no unguarded AI call should happen.');
+        $this->assertNotNull($refreshed->summary);
+        $this->assertStringStartsWith('AI-oppsummering:', (string) $refreshed->summary);
 
-        $blockedEvent = AiUsageEvent::query()
-            ->where('customer_id', $context['customer']->id)
-            ->where('status', AiUsageEvent::STATUS_BLOCKED)
-            ->where('limit_type', AiUsageEvent::LIMIT_TYPE_MONTHLY_BUDGET)
-            ->first();
-        $this->assertNotNull($blockedEvent,
-            'A blocked usage event with limit_type = monthly_budget must be recorded when the quota guard fires.');
+        $this->assertSame(
+            4,
+            AiUsageEvent::query()
+                ->where('customer_id', $context['customer']->id)
+                ->where('status', AiUsageEvent::STATUS_ALLOWED)
+                ->count(),
+        );
+        $this->assertSame(
+            0,
+            AiUsageEvent::query()
+                ->where('customer_id', $context['customer']->id)
+                ->where('status', AiUsageEvent::STATUS_BLOCKED)
+                ->count(),
+        );
     }
 
     public function test_knowledge_document_show_records_allowed_usage_event_when_generating_lazy_summary(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $context = $this->customerContext('Quota Available Summary AS');
@@ -2589,7 +2593,6 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $operationKey = AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD;
         RateLimiter::clear(sprintf('ai:user:%d:%s', $context['user']->id, $operationKey));
-        RateLimiter::clear(sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey));
 
         $document = KnowledgeItem::query()->create([
             'customer_id' => $context['customer']->id,
@@ -2712,7 +2715,6 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $context = $this->customerContext('No Duplicate Token AS');

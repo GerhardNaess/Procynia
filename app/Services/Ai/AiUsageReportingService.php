@@ -47,6 +47,30 @@ class AiUsageReportingService
     }
 
     /**
+     * Purpose: Build the lightweight overview needed for the AI capacity page header.
+     * Inputs: None.
+     * Returns: A stable array with summary cards, generated timestamp, and operation rows.
+     * Side effects: Reads ai_usage_events, customers, and users without mutating data.
+     *
+     * @return array{
+     *     generated_at: string,
+     *     summary_cards: array<int, array{label: string, value: int|string, hint: string, tone: string}>,
+     *     operations: array<int, array<string, mixed>>,
+     * }
+     */
+    public function overview(): array
+    {
+        $now = now();
+        $events = $this->loadEvents($now);
+
+        return [
+            'generated_at' => $now->format('d.m.Y H:i'),
+            'summary_cards' => $this->summaryCards($events, $now),
+            'operations' => $this->operationRows($events, $now),
+        ];
+    }
+
+    /**
      * Purpose: Load the safe AI usage events needed for 30-day operational reporting.
      * Inputs: The current timestamp.
      * Returns: A collection of safe usage events with lightweight relations loaded.
@@ -207,6 +231,7 @@ class AiUsageReportingService
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'customer_id' => $user->customer?->id,
                 'customer_name' => $user->customer?->name ?? __('procynia.common.none'),
                 'periods' => [
                     '24h' => $this->operationCount($events24h),

@@ -320,12 +320,16 @@ class AiController extends Controller
         ]);
 
         $documents = $request->file('documents', []);
-        $this->aiUsageGuard->assertCanStartAiOperation(
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $record->customer()->firstOrFail(),
             $request->user(),
             AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
             count($documents),
         );
+
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
+        }
         $uploadedCount = 0;
         $uploadStartedAt = microtime(true);
         $requestRunId = (string) Str::uuid();
@@ -838,11 +842,15 @@ class AiController extends Controller
         ]);
 
         $userAnswerPrompt = $this->normalizeOptionalPromptText($validated['user_answer_prompt'] ?? null);
-        $this->aiUsageGuard->assertCanStartAiOperation(
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $record->customer()->firstOrFail(),
             $request->user(),
             AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
         );
+
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
+        }
 
         Log::info('[PROCYNIA][REAL_RETRIEVAL_PATH] generateRequirementAnswerDraft entry.', [
             'route_name' => $request->route()?->getName(),
@@ -883,6 +891,7 @@ class AiController extends Controller
             return response()->json(array_merge(
                 [
                     'requirement_id' => $ownedRequirement->id,
+                    'warning' => $usageWarning,
                     'answer_draft' => $this->blockedAnswerDraftPayload($knowledgeGrounding, $missingKnowledge),
                     'answer_basis_item_ids' => $selectedAnswerBasisItems
                         ->pluck('id')
@@ -944,6 +953,7 @@ class AiController extends Controller
             return response()->json(array_merge(
                 [
                     'requirement_id' => $ownedRequirement->id,
+                    'warning' => $usageWarning,
                     'answer_draft' => $this->blockedAnswerDraftPayload($knowledgeGrounding, $missingKnowledge),
                     'answer_basis_item_ids' => $selectedAnswerBasisItems
                         ->pluck('id')
@@ -1041,6 +1051,7 @@ class AiController extends Controller
         return response()->json(array_merge(
             $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement),
             [
+                'warning' => $usageWarning,
                 'answer_basis_item_ids' => $selectedAnswerBasisItems
                     ->pluck('id')
                     ->map(static fn (mixed $value): int => (int) $value)
@@ -1170,12 +1181,16 @@ class AiController extends Controller
 
         $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
         if ($confirmedRequirements->isNotEmpty()) {
-            $this->aiUsageGuard->assertCanStartAiOperation(
+            $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
                 $record->customer()->firstOrFail(),
                 $request->user(),
                 AiUsageGuard::OPERATION_SAVED_NOTICE_EVIDENCE_REFRESH,
                 $confirmedRequirements->count(),
             );
+
+            if ($usageWarning !== null) {
+                session()->flash('warning', $usageWarning);
+            }
         }
 
         $requirementEmbeddings = $confirmedRequirements->mapWithKeys(function (SavedNoticeAiRequirement $requirement): array {
@@ -1211,12 +1226,16 @@ class AiController extends Controller
         $userId = $request->user()?->id;
         $confirmedRequirements = $this->requirementLoader->loadApprovedForCase($record->id);
         if ($confirmedRequirements->isNotEmpty()) {
-            $this->aiUsageGuard->assertCanStartAiOperation(
+            $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
                 $record->customer()->firstOrFail(),
                 $request->user(),
                 AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
                 $confirmedRequirements->count(),
             );
+
+            if ($usageWarning !== null) {
+                session()->flash('warning', $usageWarning);
+            }
         }
 
         $requirementAssessmentService = app(RequirementAssessmentService::class);

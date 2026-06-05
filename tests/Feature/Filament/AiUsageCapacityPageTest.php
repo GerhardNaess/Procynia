@@ -12,6 +12,7 @@ use App\Services\Ai\AiUsageGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class AiUsageCapacityPageTest extends TestCase
@@ -35,22 +36,13 @@ class AiUsageCapacityPageTest extends TestCase
         $response = $this->actingAs($admin)->get(AiUsageCapacity::getUrl());
 
         $response->assertOk();
-        $response->assertSee('AI-kapasitet og blokkeringer');
-        $response->assertSeeText('Intern oversikt over kapasitetsgrenser');
-        $response->assertSee('Blokkerte AI-operasjoner');
-        $response->assertSee('Kunder nær grense');
-        $response->assertSee('Brukere nær grense');
-        $response->assertSee('Kunde A');
-        $response->assertSee('Kunde B');
-        $response->assertSee('Bruker A1');
-        $response->assertSee('Bruker B1');
-        $response->assertSee('Nær kapasitetsgrense');
-        $response->assertSee('Ikke definert');
-        $response->assertSee('saved_notice_requirement_answer_draft');
-        $response->assertSee('knowledge_document_upload');
-        $response->assertDontSee('document_text');
-        $response->assertDontSee('answer_text');
-        $response->assertDontSee('chunk_content');
+        $response->assertSee(__('procynia.ai_usage_capacity.page_title'));
+        $response->assertSeeText(__('procynia.ai_usage_capacity.page_subtitle'));
+        $response->assertSee(__('procynia.ai_usage_capacity.controls.customer_search'));
+        $response->assertSee(__('procynia.ai_usage_capacity.controls.user_search'));
+        $response->assertSee(__('procynia.ai_usage_capacity.sections.customers'));
+        $response->assertSee(__('procynia.ai_usage_capacity.sections.users'));
+        $response->assertSee(__('procynia.ai_usage_capacity.sections.operations'));
     }
 
     public function test_ai_usage_capacity_page_is_grouped_under_drift(): void
@@ -92,6 +84,221 @@ class AiUsageCapacityPageTest extends TestCase
         $this->assertFalse(AiUsageCapacity::canAccess());
     }
 
+    public function test_customer_search_filters_customer_table(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde B')
+            ->assertCount('customerRows', 1)
+            ->assertSet('customerRows.0.name', 'Kunde B');
+    }
+
+    public function test_user_search_filters_user_table_by_name(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('userSearch', 'Bruker B1')
+            ->assertCount('userRows', 1)
+            ->assertSet('userRows.0.name', 'Bruker B1');
+    }
+
+    public function test_user_search_filters_user_table_by_email(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('userSearch', 'bruker.c1@example.test')
+            ->assertCount('userRows', 1)
+            ->assertSet('userRows.0.email', 'bruker.c1@example.test');
+    }
+
+    public function test_customer_sorting_supports_name_and_30d_usage(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde')
+            ->set('customerSortField', 'name')
+            ->set('customerSortDirection', 'asc')
+            ->assertSet('customerRows', function (array $rows): bool {
+                $this->assertSame('Kunde A', $rows[0]['name']);
+                $this->assertSame('Kunde B', $rows[1]['name']);
+                $this->assertSame('Kunde C', $rows[2]['name']);
+
+                return true;
+            });
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde')
+            ->set('customerSortField', 'usage_30d')
+            ->set('customerSortDirection', 'desc')
+            ->assertSet('customerRows', function (array $rows): bool {
+                $this->assertSame('Kunde C', $rows[0]['name']);
+                $this->assertSame('Kunde A', $rows[1]['name']);
+                $this->assertSame('Kunde B', $rows[2]['name']);
+
+                return true;
+            });
+    }
+
+    public function test_user_sorting_supports_name_and_30d_usage(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('userSearch', 'Bruker')
+            ->set('userSortField', 'name')
+            ->set('userSortDirection', 'asc')
+            ->assertSet('userRows', function (array $rows): bool {
+                $this->assertSame('Bruker A1', $rows[0]['name']);
+                $this->assertSame('Bruker B1', $rows[1]['name']);
+                $this->assertSame('Bruker C1', $rows[2]['name']);
+
+                return true;
+            });
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('userSearch', 'Bruker')
+            ->set('userSortField', 'usage_30d')
+            ->set('userSortDirection', 'desc')
+            ->assertSet('userRows', function (array $rows): bool {
+                $this->assertSame('Bruker C1', $rows[0]['name']);
+                $this->assertSame('Bruker A1', $rows[1]['name']);
+                $this->assertSame('Bruker B1', $rows[2]['name']);
+
+                return true;
+            });
+    }
+
+    public function test_customer_pagination_limits_visible_rows(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde')
+            ->set('customerSortField', 'name')
+            ->set('customerSortDirection', 'asc')
+            ->set('customerPerPage', 25)
+            ->assertCount('customerRows', 25)
+            ->assertSet('customerRows.0.name', 'Kunde A')
+            ->call('nextCustomerPage')
+            ->assertCount('customerRows', 5)
+            ->assertSet('customerRows.0.name', 'Kunde Z23')
+            ->call('nextCustomerPage')
+            ->assertCount('customerRows', 5)
+            ->assertSet('customerRows.0.name', 'Kunde Z23');
+    }
+
+    public function test_user_pagination_limits_visible_rows(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('userSearch', 'Bruker')
+            ->set('userSortField', 'name')
+            ->set('userSortDirection', 'asc')
+            ->set('userPerPage', 25)
+            ->assertCount('userRows', 25)
+            ->assertSet('userRows.0.name', 'Bruker A1')
+            ->call('nextUserPage')
+            ->assertCount('userRows', 5)
+            ->assertSet('userRows.0.name', 'Bruker Z23')
+            ->call('nextUserPage')
+            ->assertCount('userRows', 5)
+            ->assertSet('userRows.0.name', 'Bruker Z23');
+    }
+
+    public function test_status_filters_show_near_and_blocked_rows(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde')
+            ->set('customerStatusFilter', 'near')
+            ->set('userStatusFilter', 'near')
+            ->assertCount('customerRows', 1)
+            ->assertSet('customerRows.0.name', 'Kunde C')
+            ->assertCount('userRows', 1)
+            ->assertSet('userRows.0.name', 'Bruker C1');
+
+        Livewire::actingAs($admin);
+        Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Kunde')
+            ->set('customerStatusFilter', 'blocked')
+            ->set('userStatusFilter', 'blocked')
+            ->assertCount('customerRows', 1)
+            ->assertSet('customerRows.0.name', 'Kunde A')
+            ->assertCount('userRows', 1)
+            ->assertSet('userRows.0.name', 'Bruker A1');
+    }
+
+    public function test_empty_states_and_reset_filters_restore_rows(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        Livewire::actingAs($admin);
+        $component = Livewire::test(AiUsageCapacity::class)
+            ->set('customerSearch', 'Ingen treff')
+            ->set('userSearch', 'Ingen treff')
+            ->assertCount('customerRows', 0)
+            ->assertCount('userRows', 0);
+
+        $component
+            ->call('resetCustomerFilters')
+            ->call('resetUserFilters')
+            ->assertCount('customerRows', 25)
+            ->assertCount('userRows', 25)
+            ->assertSet('customerRows', function (array $rows): bool {
+                $this->assertSame('Kunde A', $rows[0]['name']);
+
+                return true;
+            })
+            ->assertSet('userRows', function (array $rows): bool {
+                $this->assertSame('Bruker A1', $rows[0]['name']);
+
+                return true;
+            });
+    }
+
     /**
      * Purpose: Seed a compact AI usage fixture for the Filament page.
      * Inputs: None.
@@ -101,11 +308,12 @@ class AiUsageCapacityPageTest extends TestCase
     private function seedAiUsageData(): void
     {
         $customerA = $this->createCustomer('Kunde A', Customer::PLAN_PRO, 10);
-        $customerB = $this->createCustomer('Kunde B', Customer::PLAN_ENTERPRISE, 0);
+        $customerB = $this->createCustomer('Kunde B', Customer::PLAN_PRO, 10);
+        $customerC = $this->createCustomer('Kunde C', Customer::PLAN_PRO, 10);
 
         $userA1 = $this->createUser($customerA, 'Bruker A1', 'bruker.a1@example.test');
-        $userA2 = $this->createUser($customerA, 'Bruker A2', 'bruker.a2@example.test');
         $userB1 = $this->createUser($customerB, 'Bruker B1', 'bruker.b1@example.test');
+        $userC1 = $this->createUser($customerC, 'Bruker C1', 'bruker.c1@example.test');
 
         $this->createUsageEvent(
             $customerA,
@@ -113,54 +321,144 @@ class AiUsageCapacityPageTest extends TestCase
             AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
             AiUsageEvent::STATUS_ALLOWED,
             null,
-            5,
+            1,
             '2026-05-15 11:00:00',
         );
         $this->createUsageEvent(
             $customerA,
-            $userA2,
-            AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
-            AiUsageEvent::STATUS_ALLOWED,
-            null,
-            3,
-            '2026-05-15 10:00:00',
-        );
-        $this->createUsageEvent(
-            $customerA,
-            $userA2,
+            $userA1,
             AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
             AiUsageEvent::STATUS_ALLOWED,
             null,
             1,
-            '2026-05-07 12:00:00',
+            '2026-05-15 10:30:00',
         );
         $this->createUsageEvent(
-            $customerB,
-            $userB1,
-            AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
-            AiUsageEvent::STATUS_ALLOWED,
-            null,
-            2,
-            '2026-05-15 09:00:00',
-        );
-        $this->createUsageEvent(
-            $customerB,
-            $userB1,
+            $customerA,
+            $userA1,
             AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
             AiUsageEvent::STATUS_BLOCKED,
             AiUsageEvent::LIMIT_TYPE_CUSTOMER,
             1,
-            '2026-05-15 09:30:00',
+            '2026-05-15 10:15:00',
+        );
+
+        $this->createUsageEvent(
+            $customerB,
+            $userB1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 11:10:00',
+        );
+        $this->createUsageEvent(
+            $customerB,
+            $userB1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:40:00',
         );
         $this->createUsageEvent(
             $customerB,
             $userB1,
             AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
-            AiUsageEvent::STATUS_BLOCKED,
-            AiUsageEvent::LIMIT_TYPE_USER,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:20:00',
+        );
+
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 11:20:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 11:00:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:45:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:30:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_KNOWLEDGE_CHUNK_METADATA_UPDATE,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:15:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_KNOWLEDGE_VOCABULARY_ANALYSIS_BATCH,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 10:00:00',
+        );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
             1,
             '2026-05-15 09:45:00',
         );
+        $this->createUsageEvent(
+            $customerC,
+            $userC1,
+            AiUsageGuard::OPERATION_SAVED_NOTICE_ASSESSMENT_REFRESH,
+            AiUsageEvent::STATUS_ALLOWED,
+            null,
+            1,
+            '2026-05-15 09:30:00',
+        );
+
+        for ($i = 1; $i <= 27; $i++) {
+            $suffix = str_pad((string) $i, 2, '0', STR_PAD_LEFT);
+            $customer = $this->createCustomer('Kunde Z'.$suffix, Customer::PLAN_PRO, 10);
+            $user = $this->createUser($customer, 'Bruker Z'.$suffix, 'bruker.z'.$suffix.'@example.test');
+
+            $this->createUsageEvent(
+                $customer,
+                $user,
+                AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT,
+                AiUsageEvent::STATUS_ALLOWED,
+                null,
+                1,
+                sprintf('2026-05-15 09:%02d:00', $i),
+            );
+        }
     }
 
     /**
@@ -172,9 +470,8 @@ class AiUsageCapacityPageTest extends TestCase
     private function createCustomer(
         string $name,
         string $plan = Customer::PLAN_PRO,
-        ?int $includedAiCredits = 3,
-    ): Customer
-    {
+        ?int $includedAiCredits = 10,
+    ): Customer {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],
             ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],

@@ -8,8 +8,8 @@ use Illuminate\Http\Request;
 use RuntimeException;
 
 /**
- * Purpose: Carry a controlled AI usage guard failure back to web and JSON requests.
- * Inputs: The blocked AI operation context and a user-facing message.
+ * Purpose: Legacy AI usage guard exception retained for historical references.
+ * Inputs: The old blocked AI operation context and a user-facing message.
  * Returns: A renderable runtime exception that Laravel can convert into a response.
  * Side effects: None.
  */

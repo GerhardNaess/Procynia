@@ -6150,14 +6150,12 @@ class AiControllerTest extends TestCase
         $this->assertSame(0, SavedNoticeAiDocument::query()->count());
     }
 
-    public function test_ai_requirement_answer_draft_is_blocked_by_usage_guard_before_generation(): void
+    public function test_ai_requirement_answer_draft_returns_warning_when_user_tempo_is_high_but_generation_continues(): void
     {
         app()->setLocale('no');
         config([
             'procynia.ai.usage_guard.user_per_minute' => 1,
-            'procynia.ai.usage_guard.customer_per_hour' => 50,
             'procynia.ai.usage_guard.user_decay_seconds' => 60,
-            'procynia.ai.usage_guard.customer_decay_seconds' => 3600,
         ]);
 
         $context = $this->customerAdminContext();
@@ -6179,10 +6177,8 @@ class AiControllerTest extends TestCase
 
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
         $userKey = sprintf('ai:user:%d:%s', $context['user']->id, $operationKey);
-        $customerKey = sprintf('ai:customer:%d:%s', $context['customer']->id, $operationKey);
 
         RateLimiter::clear($userKey);
-        RateLimiter::clear($customerKey);
         RateLimiter::increment($userKey, 60, 1);
 
         $response = $this->actingAs($context['user'])
@@ -6193,27 +6189,22 @@ class AiControllerTest extends TestCase
                 'answer_basis_item_ids' => [],
             ]);
 
-        $response->assertStatus(429)
-            ->assertJsonPath('status', 'fail');
-
-        $message = (string) $response->json('message');
-        $this->assertStringContainsString(__('procynia.ai.usage_guard.user_blocked_base'), $message);
-        $this->assertStringNotContainsString('rate limit', Str::lower($message));
-        $this->assertStringNotContainsString('throttle', Str::lower($message));
-        $this->assertStringNotContainsString('429', $message);
+        $response->assertOk();
+        $response->assertJsonPath('warning', __('procynia.ai.usage_guard.user_high_tempo_warning', ['limit' => 1]));
+        $response->assertJsonPath('requirement_id', $requirement->id);
 
         $this->assertSame(1, AiUsageEvent::query()->count());
 
         $usageEvent = AiUsageEvent::query()->firstOrFail();
-        $this->assertSame(AiUsageEvent::STATUS_BLOCKED, $usageEvent->status);
-        $this->assertSame(AiUsageEvent::LIMIT_TYPE_USER, $usageEvent->limit_type);
+        $this->assertSame(AiUsageEvent::STATUS_ALLOWED, $usageEvent->status);
+        $this->assertNull($usageEvent->limit_type);
         $this->assertSame(1, $usageEvent->operation_count);
         $this->assertSame($context['customer']->id, $usageEvent->customer_id);
         $this->assertSame($context['user']->id, $usageEvent->user_id);
         $this->assertSame(AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT, $usageEvent->operation_key);
 
         $requirement->refresh();
-        $this->assertNull($requirement->answer_draft_text);
+        $this->assertNotEmpty(trim((string) $requirement->answer_draft_text));
     }
 
     // -------------------------------------------------------------------------

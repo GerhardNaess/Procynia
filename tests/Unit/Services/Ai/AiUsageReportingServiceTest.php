@@ -120,6 +120,7 @@ class AiUsageReportingServiceTest extends TestCase
         $this->assertSame(1, $customerRowB['counts']['blocked_user']);
 
         $userRowB1 = $this->userRow($report, 'Bruker B1');
+        $this->assertSame($customerB->id, $userRowB1['customer_id']);
         $this->assertSame('Kunde B', $userRowB1['customer_name']);
         $this->assertSame(4, $userRowB1['periods']['30d']);
         $this->assertSame(2, $userRowB1['counts']['blocked']);

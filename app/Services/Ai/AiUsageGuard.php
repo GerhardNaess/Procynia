@@ -2,7 +2,6 @@
 
 namespace App\Services\Ai;
 
-use App\Exceptions\AiUsageLimitExceededException;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\User;
@@ -11,10 +10,10 @@ use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 /**
- * Purpose: Enforce technical AI safety limits before any AI call or AI job dispatch starts.
+ * Purpose: Record AI usage and surface unusually high per-user tempo as a warning.
  * Inputs: The current customer, user, logical AI operation key and operation count.
- * Returns: None when the operation may continue.
- * Side effects: Increments Redis/cache rate limit counters, stores safe usage events, and logs blocked usage.
+ * Returns: An optional user-facing warning when the user exceeds the configured tempo threshold.
+ * Side effects: Increments Redis/cache rate limit counters, stores safe usage events, and logs unusual tempo.
  */
 class AiUsageGuard
 {
@@ -39,172 +38,36 @@ class AiUsageGuard
     public const OPERATION_KNOWLEDGE_VOCABULARY_ANALYSIS_BATCH = 'knowledge_vocabulary_analysis_batch';
 
     /**
-     * Purpose: Verify that the current user and customer may start one more AI operation.
+     * Purpose: Record the current AI operation and return an optional high-tempo warning.
      * Inputs: The current customer, the current user, a canonical operation key, and an optional operation count.
-     * Returns: None when the operation is allowed.
-     * Side effects: Records safe usage events and throws a controlled exception when a limit is exceeded.
+     * Returns: A warning message when the user exceeds the configured per-minute tempo threshold, or null otherwise.
+     * Side effects: Increments rate limit counters, stores safe usage events, and logs unusual tempo.
      */
-    public function assertCanStartAiOperation(Customer $customer, User $user, string $operationKey, int $operationCount = 1): void
+    public function assertCanStartAiOperation(Customer $customer, User $user, string $operationKey, int $operationCount = 1): ?string
     {
         $operationKey = $this->normalizeOperationKey($operationKey);
         $operationCount = max(1, $operationCount);
 
-        $monthlyQuota = $this->resolvedMonthlyAiQuota($customer);
-
-        if ($monthlyQuota !== null) {
-            $monthlyUsed = $this->monthlyAllowedCount((int) $customer->id);
-
-            if (($monthlyUsed + $operationCount) > $monthlyQuota) {
-                $this->recordBlockedUsageEvent($customer, $user, $operationKey, self::LIMIT_TYPE_MONTHLY_BUDGET, $operationCount);
-                $this->logBlockedUsage($customer, $user, $operationKey, self::LIMIT_TYPE_MONTHLY_BUDGET, $operationCount);
-
-                throw new AiUsageLimitExceededException(
-                    self::LIMIT_TYPE_MONTHLY_BUDGET,
-                    (int) now()->startOfMonth()->addMonthNoOverflow()->diffInSeconds(now()),
-                    $operationKey,
-                    $operationCount,
-                    (int) $customer->id,
-                    (int) $user->id,
-                    __('procynia.ai.usage_guard.monthly_budget_blocked'),
-                );
-            }
-        }
-
         $userLimitPerMinute = max(0, (int) config('procynia.ai.usage_guard.user_per_minute', 5));
-        $customerLimitPerHour = max(0, (int) config('procynia.ai.usage_guard.customer_per_hour', 50));
         $userDecaySeconds = max(1, (int) config('procynia.ai.usage_guard.user_decay_seconds', 60));
-        $customerDecaySeconds = max(1, (int) config('procynia.ai.usage_guard.customer_decay_seconds', 3600));
-
         $userKey = $this->userKey((int) $user->id, $operationKey);
-        $customerKey = $this->customerKey((int) $customer->id, $operationKey);
 
-        $userLimit = $this->limitExceeded(
-            $userKey,
-            $userLimitPerMinute,
-            $userDecaySeconds,
-            $operationCount,
-            self::LIMIT_TYPE_USER,
-        );
+        $warningMessage = null;
+        $currentUserAttempts = RateLimiter::attempts($userKey);
 
-        if ($userLimit !== null) {
-            $this->recordBlockedUsageEvent($customer, $user, $operationKey, self::LIMIT_TYPE_USER, $operationCount);
-            $this->logBlockedUsage($customer, $user, $operationKey, self::LIMIT_TYPE_USER, $operationCount);
+        if ($userLimitPerMinute > 0 && (($currentUserAttempts + $operationCount) > $userLimitPerMinute)) {
+            $warningMessage = __('procynia.ai.usage_guard.user_high_tempo_warning', [
+                'limit' => $userLimitPerMinute,
+            ]);
 
-            throw new AiUsageLimitExceededException(
-                self::LIMIT_TYPE_USER,
-                $userLimit['retry_after_seconds'],
-                $operationKey,
-                $operationCount,
-                (int) $customer->id,
-                (int) $user->id,
-                $userLimit['message'],
-            );
-        }
-
-        $customerLimit = $this->limitExceeded(
-            $customerKey,
-            $customerLimitPerHour,
-            $customerDecaySeconds,
-            $operationCount,
-            self::LIMIT_TYPE_CUSTOMER,
-        );
-
-        if ($customerLimit !== null) {
-            $this->recordBlockedUsageEvent($customer, $user, $operationKey, self::LIMIT_TYPE_CUSTOMER, $operationCount);
-            $this->logBlockedUsage($customer, $user, $operationKey, self::LIMIT_TYPE_CUSTOMER, $operationCount);
-
-            throw new AiUsageLimitExceededException(
-                self::LIMIT_TYPE_CUSTOMER,
-                $customerLimit['retry_after_seconds'],
-                $operationKey,
-                $operationCount,
-                (int) $customer->id,
-                (int) $user->id,
-                $customerLimit['message'],
-            );
+            $this->logHighTempoUsage($customer, $user, $operationKey, $operationCount, $currentUserAttempts, $userLimitPerMinute);
         }
 
         RateLimiter::increment($userKey, $userDecaySeconds, $operationCount);
-        RateLimiter::increment($customerKey, $customerDecaySeconds, $operationCount);
 
         $this->recordAllowedUsageEvent($customer, $user, $operationKey, $operationCount);
-    }
 
-    /**
-     * Purpose: Determine whether a logical rate limit would be exceeded by one AI operation request.
-     * Inputs: The rate limit bucket key, the maximum allowed count, the decay window, the requested count and limit type.
-     * Returns: A retry payload when the request must be blocked, or null when the request is still allowed.
-     * Side effects: None.
-     *
-     * @return array{retry_after_seconds:int,message:string}|null
-     */
-    private function limitExceeded(
-        string $key,
-        int $limit,
-        int $decaySeconds,
-        int $operationCount,
-        string $limitType,
-    ): ?array {
-        $currentAttempts = RateLimiter::attempts($key);
-
-        if (($currentAttempts + $operationCount) <= $limit) {
-            return null;
-        }
-
-        $retryAfterSeconds = RateLimiter::availableIn($key);
-
-        if ($retryAfterSeconds <= 0) {
-            $retryAfterSeconds = $decaySeconds;
-        }
-
-        return [
-            'retry_after_seconds' => $retryAfterSeconds,
-            'message' => $this->blockedMessage($limitType, $retryAfterSeconds),
-        ];
-    }
-
-    /**
-     * Purpose: Build the user-facing message for a blocked AI operation.
-     * Inputs: The limit type and the suggested retry window in seconds.
-     * Returns: A controlled localized message without technical rate-limit terminology.
-     * Side effects: None.
-     */
-    private function blockedMessage(string $limitType, int $retryAfterSeconds): string
-    {
-        $message = $limitType === self::LIMIT_TYPE_CUSTOMER
-            ? __('procynia.ai.usage_guard.customer_blocked_base')
-            : __('procynia.ai.usage_guard.user_blocked_base');
-
-        $message .= ' '.$this->retryMessage($retryAfterSeconds);
-
-        if ($limitType === self::LIMIT_TYPE_CUSTOMER) {
-            $message .= ' '.__('procynia.ai.usage_guard.customer_blocked_active_bid_hint');
-        }
-
-        return trim($message);
-    }
-
-    /**
-     * Purpose: Build the retry sentence for a blocked AI operation.
-     * Inputs: The retry delay in seconds.
-     * Returns: A localized retry sentence with coarse time guidance.
-     * Side effects: None.
-     */
-    private function retryMessage(int $retryAfterSeconds): string
-    {
-        if ($retryAfterSeconds < 60) {
-            return __('procynia.ai.usage_guard.retry_short');
-        }
-
-        if ($retryAfterSeconds < 3600) {
-            return __('procynia.ai.usage_guard.retry_minutes', [
-                'minutes' => max(1, (int) ceil($retryAfterSeconds / 60)),
-            ]);
-        }
-
-        return __('procynia.ai.usage_guard.retry_hours', [
-            'hours' => max(1, (int) ceil($retryAfterSeconds / 3600)),
-        ]);
+        return $warningMessage;
     }
 
     /**
@@ -221,24 +84,6 @@ class AiUsageGuard
             $operationKey,
             AiUsageEvent::STATUS_ALLOWED,
             null,
-            $operationCount,
-        );
-    }
-
-    /**
-     * Purpose: Persist a safe usage event for a blocked AI operation.
-     * Inputs: The current customer, user, operation key, limit type and logical operation count.
-     * Returns: None.
-     * Side effects: Stores a non-sensitive usage event row when the database is available.
-     */
-    private function recordBlockedUsageEvent(Customer $customer, User $user, string $operationKey, string $limitType, int $operationCount): void
-    {
-        $this->recordUsageEvent(
-            $customer,
-            $user,
-            $operationKey,
-            AiUsageEvent::STATUS_BLOCKED,
-            $limitType,
             $operationCount,
         );
     }
@@ -279,52 +124,28 @@ class AiUsageGuard
     }
 
     /**
-     * Purpose: Write a safe log line when an AI operation is blocked by a technical usage limit.
-     * Inputs: The current customer, user, canonical operation key, limit type and operation count.
+     * Purpose: Write a safe log line when an AI operation shows unusually high tempo.
+     * Inputs: The current customer, user, canonical operation key, operation count, current attempts and configured limit.
      * Returns: None.
      * Side effects: Writes a non-sensitive warning log line.
      */
-    private function logBlockedUsage(Customer $customer, User $user, string $operationKey, string $limitType, int $operationCount): void
+    private function logHighTempoUsage(
+        Customer $customer,
+        User $user,
+        string $operationKey,
+        int $operationCount,
+        int $currentAttempts,
+        int $userLimitPerMinute,
+    ): void
     {
-        Log::warning('[PROCYNIA][AI_USAGE_GUARD] AI operation blocked.', [
+        Log::warning('[PROCYNIA][AI_USAGE_GUARD] AI operation shows unusually high tempo.', [
             'customer_id' => (int) $customer->id,
             'user_id' => (int) $user->id,
             'operation_key' => $operationKey,
-            'limit_type' => $limitType,
             'operation_count' => max(1, $operationCount),
+            'current_attempts' => $currentAttempts,
+            'user_limit_per_minute' => $userLimitPerMinute,
         ]);
-    }
-
-    /**
-     * Purpose: Resolve the monthly AI operation quota for one customer.
-     * Inputs: The customer whose plan configuration and explicit override should be read.
-     * Returns: The monthly operation cap as an integer, or null when the customer has unlimited AI access.
-     * Side effects: None.
-     */
-    private function resolvedMonthlyAiQuota(Customer $customer): ?int
-    {
-        $credits = (int) $customer->included_ai_credits;
-
-        if ($credits > 0) {
-            return $credits;
-        }
-
-        return null;
-    }
-
-    /**
-     * Purpose: Count the allowed AI operations consumed by one customer in the current calendar month.
-     * Inputs: The customer id whose ai_usage_events should be aggregated.
-     * Returns: The total allowed operation count for the current month (sum of operation_count).
-     * Side effects: Runs one aggregate database query.
-     */
-    private function monthlyAllowedCount(int $customerId): int
-    {
-        return (int) AiUsageEvent::query()
-            ->where('customer_id', $customerId)
-            ->where('status', AiUsageEvent::STATUS_ALLOWED)
-            ->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()])
-            ->sum('operation_count');
     }
 
     /**
@@ -351,14 +172,4 @@ class AiUsageGuard
         return sprintf('ai:user:%d:%s', $userId, $operationKey);
     }
 
-    /**
-     * Purpose: Build the Redis/cache key for the per-customer AI usage bucket.
-     * Inputs: The customer id and the canonical operation key.
-     * Returns: The cache key used by Laravel RateLimiter.
-     * Side effects: None.
-     */
-    private function customerKey(int $customerId, string $operationKey): string
-    {
-        return sprintf('ai:customer:%d:%s', $customerId, $operationKey);
-    }
 }

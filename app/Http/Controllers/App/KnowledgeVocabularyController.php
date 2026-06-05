@@ -92,12 +92,16 @@ class KnowledgeVocabularyController extends Controller
 
         $customer = Customer::query()->findOrFail($customerId);
         $this->assertAiAccess($customer);
-        $this->aiUsageGuard->assertCanStartAiOperation(
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $customer,
             $user,
             AiUsageGuard::OPERATION_KNOWLEDGE_VOCABULARY_ANALYSIS_BATCH,
             count($documentIds),
         );
+
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
+        }
 
         $batch = $this->analysisBatchService->createBatch($customerId, $documentIds, (int) $user->id);
         $batch = $this->analysisBatchService->startAnalysis($batch->id);

@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\App;
 
-use App\Exceptions\AiUsageLimitExceededException;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
@@ -188,11 +187,15 @@ class KnowledgeBaseController extends Controller
         if ($this->requestHasManualChunkContentPayload($request)) {
             $customer = Customer::query()->findOrFail($customerId);
             $this->assertAiAccess($customer);
-            $this->aiUsageGuard->assertCanStartAiOperation(
+            $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
                 $customer,
                 $user,
                 AiUsageGuard::OPERATION_KNOWLEDGE_CHUNK_METADATA_UPDATE,
             );
+
+            if ($usageWarning !== null) {
+                session()->flash('warning', $usageWarning);
+            }
         }
 
         $contentChanged = $this->applyManualChunkContentUpdate($request, $record, $chunkRecord, $payload);
@@ -254,11 +257,15 @@ class KnowledgeBaseController extends Controller
         $payload = $this->validatedStorePayload($request);
         $customer = Customer::query()->findOrFail($customerId);
         $this->assertAiAccess($customer);
-        $this->aiUsageGuard->assertCanStartAiOperation(
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
             $customer,
             $user,
             AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
         );
+
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
+        }
         $storedPath = null;
 
         try {
@@ -477,19 +484,14 @@ class KnowledgeBaseController extends Controller
             return null;
         }
 
-        try {
-            $this->aiUsageGuard->assertCanStartAiOperation(
-                $customer,
-                $user,
-                AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
-            );
-        } catch (AiUsageLimitExceededException) {
-            Log::info('[PROCYNIA][KNOWLEDGE_SUMMARY] Lazy summary generation skipped because AI monthly quota is exhausted.', [
-                'knowledge_item_id' => $knowledgeDocument->id,
-                'customer_id' => $knowledgeDocument->customer_id,
-            ]);
+        $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
+            $customer,
+            $user,
+            AiUsageGuard::OPERATION_KNOWLEDGE_DOCUMENT_UPLOAD,
+        );
 
-            return null;
+        if ($usageWarning !== null) {
+            session()->flash('warning', $usageWarning);
         }
 
         return $this->ensureDocumentSummary($knowledgeDocument, (int) $user->id);

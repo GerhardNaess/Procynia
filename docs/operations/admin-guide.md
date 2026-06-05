@@ -19,7 +19,7 @@ Denne guiden beskriver hvordan intern admin bruker og følger opp de sentrale ad
 - Avviksregister
 - Backup og recovery
 - Billing og fakturering
-- AI-bruk og kapasitet
+- AI-bruksmønster og varsler
 - Produksjonskontroll og rutiner
 
 Guiden gir ikke skjermbyskrivelser for hvert felt. Den gir kontekst, arbeidsflyt og administrativ oversikt.
@@ -86,7 +86,7 @@ Adminpanelet (`/admin/`) er organisert i navigasjonsgrupper:
 | Side / ressurs          | Funksjon                                                         |
 |-------------------------|------------------------------------------------------------------|
 | Billing-oversikt        | Oversikt over alle kunder med abonnementsstatus og plan          |
-| AI-bruk og kapasitet    | AI-bruk per kunde og bruker, tillatte og blokkerte operasjoner   |
+| AI-bruksmønster og varsler | AI-bruk per kunde og bruker, høy aktivitet, varsler og historiske blokkeringer |
 | Tjenestekatalog         | Priser på tjenester (BillingPrice)                               |
 | Planer og tjenester     | Produktdefinisjoner (BillingProduct)                             |
 
@@ -219,7 +219,7 @@ For produksjon bør en moden driftsprosess bruke et dedikert backup- og restore-
 **Fakturering**-gruppen i adminpanelet inneholder:
 
 - **Billing-oversikt** – alle kunder, abonnementsstatus, plan og eventuelle prøveperiodeslutt
-- **AI-bruk og kapasitet** – AI-bruk per kunde og bruker (se seksjon 8)
+- **AI-bruksmønster og varsler** – AI-bruk per kunde og bruker, høy aktivitet og historiske varsler (se seksjon 8)
 - **Tjenestekatalog** – prisdefinisjon per tjeneste (BillingPrice)
 - **Planer og tjenester** – produktdefinisjoner (BillingProduct)
 
@@ -247,19 +247,19 @@ Kunden skal ikke eksponeres for Stripe-terminologi eller tekniske detaljer i den
 
 ---
 
-## 8. AI-bruk og kapasitet
+## 8. AI-bruksmønster og varsler
 
 ### Plassering i admin
 
-**Fakturering → AI-bruk og kapasitet**
+**Drift → AI-bruksmønster og varsler**
 
 ### Hva siden viser
 
 - AI-bruk per kunde og per bruker
-- Antall tillatte og blokkerte AI-operasjoner
-- Brukergrense og kundegrense (fra `.env`-konfigurasjonen)
+- Antall AI-operasjoner, høy aktivitet, varsler og historiske blokkeringer
+- Bruker-tempo med varselgrense fra `.env`-konfigurasjonen
 
-Siden bygger på tabellen `ai_usage_events`. Alle hendelser er logget der for intern kapasitetsstyring.
+Siden bygger på tabellen `ai_usage_events`. Alle hendelser er logget der for intern aktivitetsoppfølging og varsler.
 
 ### Hva siden ikke lagrer
 
@@ -272,12 +272,12 @@ Siden lagrer og viser **ikke**:
 
 ### Formål
 
-Siden er et internt kapasitetsverktøy – ikke Stripe usage billing eller kundefakturering. Tallene brukes til:
-- Å oppdage uventede blokkeringer
-- Å vurdere om brukergrenser eller kundegrenser bør justeres
+Siden er et internt aktivitets- og varselverktøy – ikke Stripe usage billing eller kundefakturering. Tallene brukes til:
+- Å oppdage uvanlig høyt tempo
+- Å følge opp historiske blokkeringer
 - Å bygge erfaring om faktisk AI-forbruk over tid
 
-Endringer i grenser gjøres i `.env` via `AI_RATE_LIMIT_USER_PER_MINUTE` og `AI_RATE_LIMIT_CUSTOMER_PER_HOUR`. Se `docs/operations/ai-usage.md` for konfigurasjon og bakgrunn.
+Varselfunksjonen justeres i `.env` via `AI_RATE_LIMIT_USER_PER_MINUTE`. `AI_RATE_LIMIT_CUSTOMER_PER_HOUR` er deprecated og brukes ikke lenger som stoppmekanisme. Se `docs/operations/ai-usage.md` for konfigurasjon og bakgrunn.
 
 ---
 
@@ -295,7 +295,7 @@ Etter deploy bør intern admin gjennomføre følgende kontroller. For fullstendi
 - [ ] Backupstatus er ok: sjekk Backup og recovery i admin
 - [ ] Ingen nye failed jobs: sjekk Systemstatus i admin
 - [ ] Logger har ingen kritiske feil: `docker compose logs app`
-- [ ] AI-bruk har ingen uventede blokkeringer: sjekk AI-bruk og kapasitet
+- [ ] AI-bruk har ingen uventede varselstopper: sjekk AI-bruksmønster og varsler
 - [ ] Billing-side laster uten feil
 
 ---
@@ -308,7 +308,7 @@ En kort daglig sjekkliste for intern admin:
 - [ ] Sjekk backupstatus i Backup og recovery
 - [ ] Sjekk om det finnes failed jobs (vises i Systemstatus)
 - [ ] Sjekk om det er nye kritiske avvik i Avvik og forbedringer
-- [ ] Sjekk AI-bruk og kapasitet ved tegn på uventede blokkeringer
+- [ ] Sjekk AI-bruksmønster og varsler ved tegn på uvanlig høy AI-aktivitet
 - [ ] Sjekk billing ved tegn på betalings- eller abonnementsavvik
 
 ---
@@ -317,7 +317,7 @@ En kort daglig sjekkliste for intern admin:
 
 - Gjennomgå åpne avvik i Avvik og forbedringer. Er de riktig prioritert og oppdatert?
 - Sjekk backuphistorikk og verifiser at planlagte backuper har kjørt.
-- Sjekk AI-bruk og kapasitet per kunde – er det kunder med mange blokkeringer?
+- Sjekk AI-bruksmønster og varsler per kunde – er det kunder med mange historiske blokkeringer eller høy aktivitet?
 - Sjekk billingstatus for aktive kunder.
 - Vurder om eksisterende dokumentasjon fortsatt stemmer med faktisk oppsett.
 
@@ -329,7 +329,7 @@ En kort daglig sjekkliste for intern admin:
 - Gjennomgå åpne produksjonsrisikoer. Er det avvik som bør eskaleres?
 - Gjennomgå hvem som har tilgang til adminpanelet. Er listen korrekt?
 - Gjennomgå underliggende driftsdokumentasjon (`docs/operations/`). Er innholdet oppdatert?
-- Vurder om AI-grenser bør justeres basert på faktisk bruk (bruk data fra AI-bruk og kapasitet).
+- Vurder om varselterskelen for bruker-tempo bør justeres basert på faktisk bruk (bruk data fra AI-bruksmønster og varsler).
 
 ---
 

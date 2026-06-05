@@ -2,7 +2,6 @@
 
 namespace Tests\Unit\Services\Ai;
 
-use App\Exceptions\AiUsageLimitExceededException;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\Language;
@@ -44,9 +43,7 @@ class AiUsageGuardTest extends TestCase
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 5,
-            'procynia.ai.usage_guard.customer_per_hour' => 50,
             'procynia.ai.usage_guard.user_decay_seconds' => 60,
-            'procynia.ai.usage_guard.customer_decay_seconds' => 3600,
         ]);
 
         $customer = $this->createCustomer();
@@ -54,7 +51,7 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
 
         $guard->assertCanStartAiOperation($customer, $user, $operationKey);
 
@@ -73,13 +70,11 @@ class AiUsageGuardTest extends TestCase
         $this->assertFalse(Schema::hasColumn('ai_usage_events', 'chunk_content'));
     }
 
-    public function test_user_limit_blocks_the_same_user_but_allows_another_user_on_the_same_customer(): void
+    public function test_user_high_tempo_returns_warning_and_allows_the_same_user_and_another_user_on_the_same_customer(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 1,
-            'procynia.ai.usage_guard.customer_per_hour' => 50,
             'procynia.ai.usage_guard.user_decay_seconds' => 60,
-            'procynia.ai.usage_guard.customer_decay_seconds' => 3600,
         ]);
 
         $customer = $this->createCustomer('User Limit AS');
@@ -88,36 +83,27 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $firstUser, $operationKey);
-        $this->clearRateLimits($customer, $secondUser, $operationKey);
+        $this->clearRateLimits($firstUser, $operationKey);
+        $this->clearRateLimits($secondUser, $operationKey);
 
-        $guard->assertCanStartAiOperation($customer, $firstUser, $operationKey);
-
-        try {
-            $guard->assertCanStartAiOperation($customer, $firstUser, $operationKey);
-            $this->fail('The second request for the same user should have been blocked.');
-        } catch (AiUsageLimitExceededException $exception) {
-            $this->assertInstanceOf(AiUsageLimitExceededException::class, $exception);
-            $this->assertSame(AiUsageGuard::LIMIT_TYPE_USER, $exception->limitType());
-            $this->assertStringContainsString(__('procynia.ai.usage_guard.user_blocked_base'), $exception->userMessage());
-        }
-
-        $guard->assertCanStartAiOperation($customer, $secondUser, $operationKey);
+        $this->assertNull($guard->assertCanStartAiOperation($customer, $firstUser, $operationKey));
+        $warning = $guard->assertCanStartAiOperation($customer, $firstUser, $operationKey);
+        $this->assertSame(
+            __('procynia.ai.usage_guard.user_high_tempo_warning', ['limit' => 1]),
+            $warning,
+        );
+        $this->assertNull($guard->assertCanStartAiOperation($customer, $secondUser, $operationKey));
 
         $this->assertSame(3, AiUsageEvent::query()->count());
-        $blockedEvent = AiUsageEvent::query()
-            ->where('status', AiUsageEvent::STATUS_BLOCKED)
-            ->firstOrFail();
-        $this->assertSame(AiUsageEvent::LIMIT_TYPE_USER, $blockedEvent->limit_type);
+        $this->assertSame(3, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_ALLOWED)->count());
+        $this->assertSame(0, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->count());
     }
 
-    public function test_customer_limit_blocks_the_second_user_on_the_same_customer(): void
+    public function test_customer_limit_no_longer_blocks_the_second_user_on_the_same_customer(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 1,
             'procynia.ai.usage_guard.user_decay_seconds' => 60,
-            'procynia.ai.usage_guard.customer_decay_seconds' => 3600,
         ]);
 
         $customer = $this->createCustomer('Customer Limit AS');
@@ -126,31 +112,21 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $firstUser, $operationKey);
-        $this->clearRateLimits($customer, $secondUser, $operationKey);
+        $this->clearRateLimits($firstUser, $operationKey);
+        $this->clearRateLimits($secondUser, $operationKey);
 
-        $guard->assertCanStartAiOperation($customer, $firstUser, $operationKey);
-
-        try {
-            $guard->assertCanStartAiOperation($customer, $secondUser, $operationKey);
-            $this->fail('The second request for the same customer should have been blocked.');
-        } catch (AiUsageLimitExceededException $exception) {
-            $this->assertInstanceOf(AiUsageLimitExceededException::class, $exception);
-            $this->assertSame(AiUsageGuard::LIMIT_TYPE_CUSTOMER, $exception->limitType());
-            $this->assertStringContainsString(__('procynia.ai.usage_guard.customer_blocked_base'), $exception->userMessage());
-            $this->assertStringContainsString(__('procynia.ai.usage_guard.customer_blocked_active_bid_hint'), $exception->userMessage());
-        }
+        $this->assertNull($guard->assertCanStartAiOperation($customer, $firstUser, $operationKey));
+        $this->assertNull($guard->assertCanStartAiOperation($customer, $secondUser, $operationKey));
 
         $this->assertSame(2, AiUsageEvent::query()->count());
-        $this->assertSame(1, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->count());
-        $this->assertSame(AiUsageEvent::LIMIT_TYPE_CUSTOMER, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->firstOrFail()->limit_type);
+        $this->assertSame(2, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_ALLOWED)->count());
+        $this->assertSame(0, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->count());
     }
 
     public function test_monthly_budget_allows_operation_when_under_quota(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customer = $this->createCustomer('Pro Customer');
@@ -159,7 +135,7 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
         $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 2);
 
         $guard->assertCanStartAiOperation($customer, $user, $operationKey);
@@ -167,11 +143,10 @@ class AiUsageGuardTest extends TestCase
         $this->assertSame(AiUsageEvent::STATUS_ALLOWED, AiUsageEvent::query()->latest('id')->firstOrFail()->status);
     }
 
-    public function test_monthly_budget_blocks_operation_when_quota_exhausted(): void
+    public function test_monthly_budget_no_longer_blocks_operation_when_quota_is_exhausted(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customer = $this->createCustomer('Pro Customer');
@@ -180,29 +155,19 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
         $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 3);
 
-        try {
-            $guard->assertCanStartAiOperation($customer, $user, $operationKey);
-            $this->fail('Operation should have been blocked by monthly budget.');
-        } catch (AiUsageLimitExceededException $exception) {
-            $this->assertSame(AiUsageGuard::LIMIT_TYPE_MONTHLY_BUDGET, $exception->limitType());
-            $this->assertStringContainsString(
-                __('procynia.ai.usage_guard.monthly_budget_blocked'),
-                $exception->userMessage(),
-            );
-        }
-
-        $blockedEvent = AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->firstOrFail();
-        $this->assertSame(AiUsageEvent::LIMIT_TYPE_MONTHLY_BUDGET, $blockedEvent->limit_type);
+        $this->assertNull($guard->assertCanStartAiOperation($customer, $user, $operationKey));
+        $this->assertSame(4, AiUsageEvent::query()->count());
+        $this->assertSame(4, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_ALLOWED)->count());
+        $this->assertSame(0, AiUsageEvent::query()->where('status', AiUsageEvent::STATUS_BLOCKED)->count());
     }
 
     public function test_monthly_budget_resets_at_new_calendar_month(): void
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customer = $this->createCustomer('Pro Customer Monthly Reset');
@@ -211,7 +176,7 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
 
         $lastMonthAt = now()->subMonthNoOverflow()->startOfMonth();
         $event = new AiUsageEvent([
@@ -235,7 +200,6 @@ class AiUsageGuardTest extends TestCase
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customerA = $this->createCustomer('Customer A');
@@ -249,19 +213,14 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customerA, $userA, $operationKey);
-        $this->clearRateLimits($customerB, $userB, $operationKey);
+        $this->clearRateLimits($userA, $operationKey);
+        $this->clearRateLimits($userB, $operationKey);
 
         $this->seedMonthlyAllowedEvents($customerA, $userA, $operationKey, 3);
 
-        try {
-            $guard->assertCanStartAiOperation($customerA, $userA, $operationKey);
-            $this->fail('Customer A should have been blocked.');
-        } catch (AiUsageLimitExceededException $exception) {
-            $this->assertSame(AiUsageGuard::LIMIT_TYPE_MONTHLY_BUDGET, $exception->limitType());
-        }
+        $this->assertNull($guard->assertCanStartAiOperation($customerA, $userA, $operationKey));
 
-        $guard->assertCanStartAiOperation($customerB, $userB, $operationKey);
+        $this->assertNull($guard->assertCanStartAiOperation($customerB, $userB, $operationKey));
 
         $this->assertSame(
             AiUsageEvent::STATUS_ALLOWED,
@@ -273,7 +232,6 @@ class AiUsageGuardTest extends TestCase
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customer = $this->createCustomer('Enterprise Customer');
@@ -288,7 +246,7 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
         $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 1000);
 
         $guard->assertCanStartAiOperation($customer, $user, $operationKey);
@@ -300,7 +258,6 @@ class AiUsageGuardTest extends TestCase
     {
         config([
             'procynia.ai.usage_guard.user_per_minute' => 50,
-            'procynia.ai.usage_guard.customer_per_hour' => 200,
         ]);
 
         $customer = $this->createCustomer('Custom Unlimited Customer');
@@ -313,7 +270,7 @@ class AiUsageGuardTest extends TestCase
         $guard = app(AiUsageGuard::class);
         $operationKey = AiUsageGuard::OPERATION_SAVED_NOTICE_REQUIREMENT_ANSWER_DRAFT;
 
-        $this->clearRateLimits($customer, $user, $operationKey);
+        $this->clearRateLimits($user, $operationKey);
         $this->seedMonthlyAllowedEvents($customer, $user, $operationKey, 100);
 
         $guard->assertCanStartAiOperation($customer, $user, $operationKey);
@@ -388,15 +345,14 @@ class AiUsageGuardTest extends TestCase
     }
 
     /**
-     * Purpose: Clear the per-user and per-customer rate limit buckets for one operation key.
-     * Inputs: The customer, user and canonical operation key.
+     * Purpose: Clear the per-user rate limit bucket for one operation key.
+     * Inputs: The user and canonical operation key.
      * Returns: None.
      * Side effects: Clears the Laravel RateLimiter buckets for deterministic test setup.
      */
-    private function clearRateLimits(Customer $customer, User $user, string $operationKey): void
+    private function clearRateLimits(User $user, string $operationKey): void
     {
         RateLimiter::clear(sprintf('ai:user:%d:%s', $user->id, $operationKey));
-        RateLimiter::clear(sprintf('ai:customer:%d:%s', $customer->id, $operationKey));
     }
 
     /**

@@ -78,7 +78,7 @@ class KnowledgeVocabularyControllerTest extends TestCase
             $props = data_get($page, 'props', []);
 
             return data_get($page, 'component') === 'App/AI/KnowledgeVocabulary/Index'
-                && data_get($props, 'pageTitle') === 'Selskapsvokabular'
+                && data_get($props, 'pageTitle') === 'Standardvokabular'
                 && count(data_get($props, 'approvedVocabularyGroups', [])) === 1
                 && data_get($props, 'approvedVocabularyGroups.0.terms.0.delete_url') === route('app.ai.knowledge-vocabulary.terms.destroy', ['term' => $term->id])
                 && count(data_get($props, 'suggestions', [])) === 1
@@ -185,6 +185,10 @@ class KnowledgeVocabularyControllerTest extends TestCase
     public function test_it_starts_a_batch_analysis_from_selected_documents_and_creates_pending_suggestions(): void
     {
         $context = $this->customerContext('Vocabulary Batch AS');
+        $context['customer']->forceFill([
+            'subscription_plan' => Customer::PLAN_PRO,
+            'included_ai_credits' => 3,
+        ])->save();
         $document = $this->createKnowledgeItem($context['customer'], [
             'original_filename' => 'analysis-source.docx',
             'summary' => 'Dokumentsammendrag.',
