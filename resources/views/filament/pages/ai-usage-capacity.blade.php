@@ -27,14 +27,107 @@
         </section>
 
         <section class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div class="space-y-1">
-                <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{{ __('procynia.ai_usage_capacity.sections.customers') }}</div>
-                <h3 class="text-lg font-semibold text-gray-900">{{ __('procynia.ai_usage_capacity.sections.customers') }}</h3>
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div class="space-y-1">
+                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.sections.customers') }}
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900">
+                        {{ __('procynia.ai_usage_capacity.sections.customers') }}
+                    </h3>
+                    <p class="text-sm text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.sections.customers_help') }}
+                    </p>
+                </div>
+                <div class="text-xs text-gray-500">
+                    @if ($customerTotal > 0)
+                        {{ __('procynia.ai_usage_capacity.controls.showing', ['from' => $customerShowingFrom, 'to' => $customerShowingTo, 'total' => $customerTotal]) }}
+                    @endif
+                </div>
             </div>
 
-            @if (count($customerRows) > 0)
+            <div class="mt-5 space-y-4">
+                <div class="w-full lg:max-w-2xl">
+                    <label class="block space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.customer_search') }}</span>
+                        <input
+                            type="search"
+                            wire:model.live.debounce.350ms="customerSearch"
+                            placeholder="{{ __('procynia.ai_usage_capacity.controls.customer_search_placeholder') }}"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                    </label>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.status_filter') }}</span>
+                        <select
+                            wire:model.live="customerStatusFilter"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->customerStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.sort_by') }}</span>
+                        <select
+                            wire:model.live="customerSortField"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->customerSortOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.sort_direction') }}</span>
+                        <select
+                            wire:model.live="customerSortDirection"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            <option value="desc">{{ __('procynia.ai_usage_capacity.controls.sort_descending') }}</option>
+                            <option value="asc">{{ __('procynia.ai_usage_capacity.controls.sort_ascending') }}</option>
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.per_page') }}</span>
+                        <select
+                            wire:model.live="customerPerPage"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->perPageOptions() as $value)
+                                <option value="{{ $value }}">{{ $value }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <div class="flex items-end">
+                        <button
+                            type="button"
+                            wire:click="resetCustomerFilters"
+                            class="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 xl:min-w-40"
+                        >
+                            {{ __('procynia.ai_usage_capacity.controls.clear_filters') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            @if ($this->customerFiltersActive())
+                <p class="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-primary-600">
+                    {{ __('procynia.ai_usage_capacity.controls.filtered_results') }}
+                </p>
+            @endif
+
+            @if ($customerTotal > 0)
                 <div class="mt-5 overflow-x-auto">
-                    <table class="w-full text-left text-sm">
+                    <table class="w-full min-w-[1080px] text-left text-sm">
                         <thead class="border-b border-gray-200 text-gray-500">
                             <tr>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.customer') }}</th>
@@ -66,10 +159,10 @@
                                     <td class="py-3 pr-4">
                                         <span @class([
                                             'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                                            'bg-success-100 text-success-800' => $row['capacity']['tone'] === 'success',
-                                            'bg-warning-100 text-warning-800' => $row['capacity']['tone'] === 'warning',
-                                            'bg-danger-100 text-danger-800' => $row['capacity']['tone'] === 'danger',
-                                            'bg-gray-100 text-gray-700' => $row['capacity']['tone'] === 'gray',
+                                            'bg-success-100 text-success-800' => $row['status'] === 'within',
+                                            'bg-warning-100 text-warning-800' => $row['status'] === 'near',
+                                            'bg-danger-100 text-danger-800' => $row['status'] === 'over',
+                                            'bg-gray-100 text-gray-700' => $row['status'] === 'undefined',
                                         ])>
                                             {{ $row['capacity']['status_label'] }}
                                         </span>
@@ -103,25 +196,143 @@
                         </tbody>
                     </table>
                 </div>
+
+                <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="text-xs text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.controls.page_of', ['current' => $customerPage, 'last' => $customerLastPage]) }}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button
+                            type="button"
+                            wire:click="previousCustomerPage"
+                            @disabled($customerPage <= 1)
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {{ __('procynia.common.previous') }}
+                        </button>
+                        <button
+                            type="button"
+                            wire:click="nextCustomerPage"
+                            @disabled($customerPage >= $customerLastPage)
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {{ __('procynia.common.next') }}
+                        </button>
+                    </div>
+                </div>
             @else
-                <p class="mt-4 text-sm text-gray-500">{{ __('procynia.ai_usage_capacity.empty') }}</p>
+                <p class="mt-4 text-sm text-gray-500">{{ __('procynia.ai_usage_capacity.empty_customers') }}</p>
             @endif
         </section>
 
         <section class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div class="space-y-1">
-                <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">{{ __('procynia.ai_usage_capacity.sections.users') }}</div>
-                <h3 class="text-lg font-semibold text-gray-900">{{ __('procynia.ai_usage_capacity.sections.users') }}</h3>
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div class="space-y-1">
+                    <div class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.sections.users') }}
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900">
+                        {{ __('procynia.ai_usage_capacity.sections.users') }}
+                    </h3>
+                    <p class="text-sm text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.sections.users_help') }}
+                    </p>
+                </div>
+                <div class="text-xs text-gray-500">
+                    @if ($userTotal > 0)
+                        {{ __('procynia.ai_usage_capacity.controls.showing', ['from' => $userShowingFrom, 'to' => $userShowingTo, 'total' => $userTotal]) }}
+                    @endif
+                </div>
             </div>
 
-            @if (count($userRows) > 0)
+            <div class="mt-5 space-y-4">
+                <div class="w-full lg:max-w-2xl">
+                    <label class="block space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.user_search') }}</span>
+                        <input
+                            type="search"
+                            wire:model.live.debounce.350ms="userSearch"
+                            placeholder="{{ __('procynia.ai_usage_capacity.controls.user_search_placeholder') }}"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                    </label>
+                </div>
+
+                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.status_filter') }}</span>
+                        <select
+                            wire:model.live="userStatusFilter"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->userStatusOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.sort_by') }}</span>
+                        <select
+                            wire:model.live="userSortField"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->userSortOptions() as $value => $label)
+                                <option value="{{ $value }}">{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.sort_direction') }}</span>
+                        <select
+                            wire:model.live="userSortDirection"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            <option value="desc">{{ __('procynia.ai_usage_capacity.controls.sort_descending') }}</option>
+                            <option value="asc">{{ __('procynia.ai_usage_capacity.controls.sort_ascending') }}</option>
+                        </select>
+                    </label>
+
+                    <label class="space-y-1 text-sm">
+                        <span class="font-medium text-gray-700">{{ __('procynia.ai_usage_capacity.controls.per_page') }}</span>
+                        <select
+                            wire:model.live="userPerPage"
+                            class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-primary-500"
+                        >
+                            @foreach ($this->perPageOptions() as $value)
+                                <option value="{{ $value }}">{{ $value }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+
+                    <div class="flex items-end">
+                        <button
+                            type="button"
+                            wire:click="resetUserFilters"
+                            class="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 xl:min-w-40"
+                        >
+                            {{ __('procynia.ai_usage_capacity.controls.clear_filters') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            @if ($this->userFiltersActive())
+                <p class="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-primary-600">
+                    {{ __('procynia.ai_usage_capacity.controls.filtered_results') }}
+                </p>
+            @endif
+
+            @if ($userTotal > 0)
                 <div class="mt-5 overflow-x-auto">
-                    <table class="w-full text-left text-sm">
+                    <table class="w-full min-w-[1120px] text-left text-sm">
                         <thead class="border-b border-gray-200 text-gray-500">
                             <tr>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.user') }}</th>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.email') }}</th>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.customer') }}</th>
+                                <th class="pb-2 pr-4 font-medium">{{ __('procynia.common.status') }}</th>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.usage_24h') }}</th>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.usage_7d') }}</th>
                                 <th class="pb-2 pr-4 font-medium">{{ __('procynia.ai_usage_capacity.columns.usage_30d') }}</th>
@@ -137,6 +348,16 @@
                                     <td class="py-3 pr-4 font-medium text-gray-900">{{ $row['name'] }}</td>
                                     <td class="py-3 pr-4 text-gray-600">{{ $row['email'] }}</td>
                                     <td class="py-3 pr-4 text-gray-600">{{ $row['customer_name'] }}</td>
+                                    <td class="py-3 pr-4">
+                                        <span @class([
+                                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                                            'bg-danger-100 text-danger-800' => $row['status'] === 'blocked',
+                                            'bg-warning-100 text-warning-800' => $row['status'] === 'near',
+                                            'bg-success-100 text-success-800' => $row['status'] === 'within',
+                                        ])>
+                                            {{ $row['status_label'] }}
+                                        </span>
+                                    </td>
                                     <td class="py-3 pr-4 text-gray-600">{{ number_format((int) $row['periods']['24h'], 0, ',', ' ') }}</td>
                                     <td class="py-3 pr-4 text-gray-600">{{ number_format((int) $row['periods']['7d'], 0, ',', ' ') }}</td>
                                     <td class="py-3 pr-4 text-gray-600">{{ number_format((int) $row['periods']['30d'], 0, ',', ' ') }}</td>
@@ -166,8 +387,32 @@
                         </tbody>
                     </table>
                 </div>
+
+                <div class="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div class="text-xs text-gray-500">
+                        {{ __('procynia.ai_usage_capacity.controls.page_of', ['current' => $userPage, 'last' => $userLastPage]) }}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button
+                            type="button"
+                            wire:click="previousUserPage"
+                            @disabled($userPage <= 1)
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {{ __('procynia.common.previous') }}
+                        </button>
+                        <button
+                            type="button"
+                            wire:click="nextUserPage"
+                            @disabled($userPage >= $userLastPage)
+                            class="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            {{ __('procynia.common.next') }}
+                        </button>
+                    </div>
+                </div>
             @else
-                <p class="mt-4 text-sm text-gray-500">{{ __('procynia.ai_usage_capacity.empty') }}</p>
+                <p class="mt-4 text-sm text-gray-500">{{ __('procynia.ai_usage_capacity.empty_users') }}</p>
             @endif
         </section>
 
