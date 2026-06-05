@@ -38,6 +38,8 @@ class AiUsageCapacityPageTest extends TestCase
         $response->assertOk();
         $response->assertSee(__('procynia.ai_usage_capacity.page_title'));
         $response->assertSeeText(__('procynia.ai_usage_capacity.page_subtitle'));
+        $response->assertSeeText(__('procynia.ai_usage_capacity.note'));
+        $response->assertSeeText(__('procynia.ai_usage_capacity.summary.blocked_7d'));
         $response->assertSee(__('procynia.ai_usage_capacity.controls.customer_search'));
         $response->assertSee(__('procynia.ai_usage_capacity.controls.user_search'));
         $response->assertSee(__('procynia.ai_usage_capacity.sections.customers'));
@@ -240,7 +242,7 @@ class AiUsageCapacityPageTest extends TestCase
             ->assertSet('userRows.0.name', 'Bruker Z23');
     }
 
-    public function test_status_filters_show_near_and_blocked_rows(): void
+    public function test_status_filters_show_near_and_historical_rows(): void
     {
         Carbon::setTestNow('2026-05-15 12:00:00');
 

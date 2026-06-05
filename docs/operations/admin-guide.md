@@ -86,7 +86,7 @@ Adminpanelet (`/admin/`) er organisert i navigasjonsgrupper:
 | Side / ressurs          | Funksjon                                                         |
 |-------------------------|------------------------------------------------------------------|
 | Billing-oversikt        | Oversikt over alle kunder med abonnementsstatus og plan          |
-| AI-bruksmønster og varsler | AI-bruk per kunde og bruker, høy aktivitet, varsler og historiske blokkeringer |
+| AI-bruksmønster og varsler | AI-bruk per kunde og bruker, høy aktivitet, varsler og historiske blokkeringer. Ikke økonomi. |
 | Tjenestekatalog         | Priser på tjenester (BillingPrice)                               |
 | Planer og tjenester     | Produktdefinisjoner (BillingProduct)                             |
 
@@ -256,8 +256,10 @@ Kunden skal ikke eksponeres for Stripe-terminologi eller tekniske detaljer i den
 ### Hva siden viser
 
 - AI-bruk per kunde og per bruker
-- Antall AI-operasjoner, høy aktivitet, varsler og historiske blokkeringer
+- Antall AI-operasjoner, høy aktivitet, varsler og historiske blokkeringer fra eldre data
 - Bruker-tempo med varselgrense fra `.env`-konfigurasjonen
+
+Merknad: operation_count brukes til innsikt og varsler. Det stopper ikke AI-operasjoner og brukes ikke som økonomisk styring.
 
 Siden bygger på tabellen `ai_usage_events`. Alle hendelser er logget der for intern aktivitetsoppfølging og varsler.
 
@@ -274,10 +276,10 @@ Siden lagrer og viser **ikke**:
 
 Siden er et internt aktivitets- og varselverktøy – ikke Stripe usage billing eller kundefakturering. Tallene brukes til:
 - Å oppdage uvanlig høyt tempo
-- Å følge opp historiske blokkeringer
+- Å følge opp historiske blokkeringer fra eldre data
 - Å bygge erfaring om faktisk AI-forbruk over tid
 
-Varselfunksjonen justeres i `.env` via `AI_RATE_LIMIT_USER_PER_MINUTE`. `AI_RATE_LIMIT_CUSTOMER_PER_HOUR` er deprecated og brukes ikke lenger som stoppmekanisme. Se `docs/operations/ai-usage.md` for konfigurasjon og bakgrunn.
+Varselfunksjonen justeres i `.env` via `AI_RATE_LIMIT_USER_PER_MINUTE`. Når en bruker passerer fem AI-operasjoner per minutt, får man varsel, men operasjonen fortsetter. `AI_RATE_LIMIT_CUSTOMER_PER_HOUR` er deprecated og brukes ikke lenger som stoppmekanisme. Se `docs/operations/ai-usage.md` for konfigurasjon og bakgrunn.
 
 ---
 
@@ -295,7 +297,7 @@ Etter deploy bør intern admin gjennomføre følgende kontroller. For fullstendi
 - [ ] Backupstatus er ok: sjekk Backup og recovery i admin
 - [ ] Ingen nye failed jobs: sjekk Systemstatus i admin
 - [ ] Logger har ingen kritiske feil: `docker compose logs app`
-- [ ] AI-bruk har ingen uventede varselstopper: sjekk AI-bruksmønster og varsler
+- [ ] AI-bruksmønster og varsler viser bare forventede varsler eller historiske blokkeringer
 - [ ] Billing-side laster uten feil
 
 ---
