@@ -1451,8 +1451,15 @@ class KnowledgeBaseController extends Controller
         $duplicateRangeCount = 0;
         $overlappingRangeCount = 0;
         $coveredCharacterCount = 0;
+        $looseTextChunkRanges = [];
 
         foreach ($this->groupElementsByPrimaryHeading($elements) as $group) {
+            $groupElements = array_values(array_filter(
+                (array) ($group['elements'] ?? []),
+                static fn ($element): bool => is_array($element),
+            ));
+            $primaryHeading = $this->cleanNullableString($group['primary_heading'] ?? null, 255);
+
             foreach ($this->buildRuleBasedChunkRangesForPrimaryHeadingGroup($group) as $chunkRange) {
                 $startOffset = (int) ($chunkRange['start_offset'] ?? 0);
                 $endOffset = (int) ($chunkRange['end_offset'] ?? 0);
@@ -1519,6 +1526,12 @@ class KnowledgeBaseController extends Controller
 
                 $chunkRanges[] = $chunkRange;
             }
+
+            if ($primaryHeading !== null && $groupElements !== []) {
+                foreach ($this->buildRuleBasedLooseTextChunkRanges($groupElements, $primaryHeading) as $textRange) {
+                    $looseTextChunkRanges[] = $textRange;
+                }
+            }
         }
 
         $chunkRanges = $this->subtractTableRangesFromSemanticRanges($chunkRanges);
@@ -1526,6 +1539,31 @@ class KnowledgeBaseController extends Controller
 
         if ($figureChunkRanges !== []) {
             $chunkRanges = array_merge($chunkRanges, $figureChunkRanges);
+        }
+
+        $imageChunkRanges = array_values(array_filter(
+            $chunkRanges,
+            static fn (array $chunkRange): bool => (string) ($chunkRange['chunk_kind'] ?? '') === 'image',
+        ));
+
+        foreach ($looseTextChunkRanges as $textRange) {
+            $overlapsImageChunk = false;
+
+            foreach ($imageChunkRanges as $imageChunkRange) {
+                $imageStartOffset = (int) ($imageChunkRange['start_offset'] ?? 0);
+                $imageEndOffset = (int) ($imageChunkRange['end_offset'] ?? 0);
+
+                if ((int) ($textRange['start_offset'] ?? 0) < $imageEndOffset && (int) ($textRange['end_offset'] ?? 0) > $imageStartOffset) {
+                    $overlapsImageChunk = true;
+                    break;
+                }
+            }
+
+            if ($overlapsImageChunk) {
+                continue;
+            }
+
+            $chunkRanges[] = $textRange;
         }
 
         if ($chunkRanges !== []) {
@@ -2101,6 +2139,148 @@ class KnowledgeBaseController extends Controller
         }
 
         $flushTextElements();
+
+        return $ranges;
+    }
+
+    /**
+     * Purpose: Convert raw text elements that sit outside generated H2 sections into fallback semantic ranges.
+     * Inputs: The ordered elements in one primary heading group and the resolved primary heading.
+     * Returns: Ordered fallback text ranges for uncovered paragraph and list content outside generated H2 sections.
+     * Side effects: None.
+     *
+     * @param array<int, array<string, mixed>> $groupElements
+     * @return array<int, array{start_offset: int, end_offset: int, heading_path: ?string, section_title: ?string, section_path: ?string, chunk_kind: string}>
+     */
+    private function buildRuleBasedLooseTextChunkRanges(array $groupElements, string $primaryHeading): array
+    {
+        $h2Sections = array_values(array_filter(
+            $groupElements,
+            static fn (array $element): bool => (string) data_get($element, 'type', '') === 'h2_section',
+        ));
+        $preH2Elements = [];
+
+        if ($h2Sections !== []) {
+            $firstH2Start = (int) data_get($h2Sections[0], 'start_offset', 0);
+
+            $preH2Elements = array_values(array_filter(
+                $groupElements,
+                static fn (array $element): bool => (int) data_get($element, 'start_offset', 0) < $firstH2Start,
+            ));
+        }
+
+        $looseTextElements = array_values(array_filter(
+            $groupElements,
+            static function (array $element): bool {
+                return in_array((string) data_get($element, 'type', ''), ['paragraph', 'list'], true);
+            },
+        ));
+
+        if ($h2Sections === [] || $looseTextElements === []) {
+            return [];
+        }
+
+        $reservedRanges = [];
+
+        if ($preH2Elements !== []) {
+            $leadingStart = null;
+            $leadingEnd = null;
+
+            foreach ($preH2Elements as $element) {
+                $elementStart = (int) data_get($element, 'start_offset', 0);
+                $elementEnd = (int) data_get($element, 'end_offset', 0);
+
+                if ($leadingStart === null || $elementStart < $leadingStart) {
+                    $leadingStart = $elementStart;
+                }
+
+                if ($leadingEnd === null || $elementEnd > $leadingEnd) {
+                    $leadingEnd = $elementEnd;
+                }
+            }
+
+            if ($leadingStart !== null && $leadingEnd !== null && $leadingEnd > $leadingStart) {
+                $reservedRanges[] = [
+                    'start_offset' => $leadingStart,
+                    'end_offset' => $leadingEnd,
+                ];
+            }
+        }
+
+        foreach ($h2Sections as $h2Section) {
+            $sectionStart = (int) data_get($h2Section, 'start_offset', 0);
+            $sectionEnd = (int) data_get($h2Section, 'end_offset', 0);
+
+            if ($sectionEnd > $sectionStart) {
+                $reservedRanges[] = [
+                    'start_offset' => $sectionStart,
+                    'end_offset' => $sectionEnd,
+                ];
+            }
+        }
+
+        $ranges = [];
+        $currentStart = null;
+        $currentEnd = null;
+        $currentHeadingPath = $primaryHeading;
+
+        $flushCurrentRange = function () use (&$ranges, &$currentStart, &$currentEnd, $currentHeadingPath): void {
+            if ($currentStart === null || $currentEnd === null || $currentEnd <= $currentStart) {
+                $currentStart = null;
+                $currentEnd = null;
+
+                return;
+            }
+
+            $ranges[] = [
+                'start_offset' => $currentStart,
+                'end_offset' => $currentEnd,
+                'heading_path' => $currentHeadingPath,
+                'section_title' => $currentHeadingPath,
+                'section_path' => $currentHeadingPath,
+                'chunk_kind' => 'h1_section',
+            ];
+
+            $currentStart = null;
+            $currentEnd = null;
+        };
+
+        foreach ($looseTextElements as $element) {
+            $startOffset = (int) data_get($element, 'start_offset', 0);
+            $endOffset = (int) data_get($element, 'end_offset', 0);
+
+            if ($endOffset <= $startOffset) {
+                continue;
+            }
+
+            $isCovered = false;
+
+            foreach ($reservedRanges as $reservedRange) {
+                $reservedStart = (int) data_get($reservedRange, 'start_offset', 0);
+                $reservedEnd = (int) data_get($reservedRange, 'end_offset', 0);
+
+                if ($startOffset >= $reservedStart && $endOffset <= $reservedEnd) {
+                    $isCovered = true;
+                    break;
+                }
+            }
+
+            if ($isCovered) {
+                $flushCurrentRange();
+                continue;
+            }
+
+            if ($currentStart !== null && $currentEnd !== null && $startOffset <= ($currentEnd + 2)) {
+                $currentEnd = max($currentEnd, $endOffset);
+                continue;
+            }
+
+            $flushCurrentRange();
+            $currentStart = $startOffset;
+            $currentEnd = $endOffset;
+        }
+
+        $flushCurrentRange();
 
         return $ranges;
     }
