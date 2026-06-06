@@ -43,12 +43,6 @@ class CustomerBillingBasisService
 
     public const BILLING_READINESS_STATUS_NOT_CALCULABLE = 'not_calculable';
 
-    public const PREVIEW_STATUS_AVAILABLE = 'preview_available';
-
-    public const PREVIEW_STATUS_PARTIAL = 'partial_preview';
-
-    public const PREVIEW_STATUS_NOT_AVAILABLE = 'not_available';
-
     private const BILLING_READINESS_CHECK_OK = 'ok';
 
     private const BILLING_READINESS_CHECK_ATTENTION = 'attention';
@@ -71,7 +65,6 @@ class CustomerBillingBasisService
      *     customer: array<string, mixed>,
      *     summary: array<string, mixed>,
      *     billing_readiness: array<string, mixed>,
-     *     billing_preview: array<string, mixed>,
      *     line_groups: array<string, array<string, mixed>>,
      *     invoices: array<string, mixed>,
      *     reconciliation: array<string, mixed>
@@ -108,7 +101,6 @@ class CustomerBillingBasisService
         $invoices = $this->buildInvoices($customer->invoiceLogs->sortByDesc('invoice_date'), collect($lineRows));
         $reconciliation = $this->buildReconciliation(collect($lineRows), collect($invoices['recent_invoices'] ?? []), $customer->invoiceLogs);
         $billingReadiness = $this->buildBillingReadiness($customer, $activeLineRows, $customer->invoiceLogs, $summary, $invoices, $reconciliation);
-        $billingPreview = $this->buildBillingPreview($customer, $activeLineRows, $historicalLineRows, $invoices, $reconciliation);
 
         return [
             'customer' => [
@@ -124,7 +116,6 @@ class CustomerBillingBasisService
             ],
             'summary' => $summary,
             'billing_readiness' => $billingReadiness,
-            'billing_preview' => $billingPreview,
             'line_groups' => $lineGroups,
             'invoices' => $invoices,
             'reconciliation' => $reconciliation,
@@ -569,7 +560,7 @@ class CustomerBillingBasisService
                 $hasActiveInternalLines
                     ? 'Aktive interne linjer er registrert.'
                     : ($hasActiveStripeSubscription
-                        ? 'Stripe-subscription finnes, men interne linjer mangler.'
+                        ? 'Avtale finnes, men interne linjer mangler.'
                         : 'Ingen aktive interne linjer er registrert.'),
             ),
             $this->buildReadinessCheck(
@@ -586,27 +577,27 @@ class CustomerBillingBasisService
             ),
             $this->buildReadinessCheck(
                 'stripe_customer',
-                'Stripe-kunde',
+                'Fakturakunde',
                 $hasStripeCustomer
                     ? self::BILLING_READINESS_CHECK_OK
                     : self::BILLING_READINESS_CHECK_BLOCKED,
                 $hasStripeCustomer
-                    ? 'Kunden er koblet til Stripe.'
-                    : 'Kunden er ikke koblet til Stripe.',
+                    ? 'Kunden er koblet til fakturasystemet.'
+                    : 'Kunden er ikke koblet til fakturasystemet.',
             ),
             $this->buildReadinessCheck(
                 'stripe_subscription',
-                'Stripe-subscription',
+                'Avtale',
                 ! $hasStripeCustomer
                     ? self::BILLING_READINESS_CHECK_BLOCKED
                     : ($hasActiveStripeSubscription
                         ? self::BILLING_READINESS_CHECK_OK
                         : self::BILLING_READINESS_CHECK_ATTENTION),
                 ! $hasStripeCustomer
-                    ? 'Stripe-kunde mangler, så Stripe-subscription kan ikke brukes.'
+                    ? 'Fakturakunde mangler, så avtalen kan ikke brukes.'
                     : ($hasActiveStripeSubscription
-                        ? 'Aktiv Stripe-subscription finnes.'
-                        : 'Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.'),
+                        ? 'Aktiv avtale finnes.'
+                        : 'Kunden har fakturakunde, men ingen aktiv avtale.'),
             ),
             $this->buildReadinessCheck(
                 'invoice_logs',
@@ -622,17 +613,17 @@ class CustomerBillingBasisService
             ),
             $this->buildReadinessCheck(
                 'reconciliation',
-                'Avstemming',
+                'Fakturakobling',
                 $canReconcile
                     ? self::BILLING_READINESS_CHECK_OK
                     : ($hasInvoiceLogs
                         ? self::BILLING_READINESS_CHECK_ATTENTION
                         : self::BILLING_READINESS_CHECK_NOT_CALCULABLE),
                 $canReconcile
-                    ? 'Interne linjer kan avstemmes mot faktura.'
+                    ? 'Interne linjer kan kobles mot faktura.'
                     : ($hasInvoiceLogs
-                        ? 'Faktura finnes, men interne linjer kan ikke avstemmes direkte.'
-                        : 'Ingen faktura er tilgjengelig for avstemming.'),
+                        ? 'Faktura finnes, men interne linjer kan ikke kobles direkte.'
+                        : 'Ingen faktura er tilgjengelig for kobling.'),
             ),
         ];
 
@@ -650,26 +641,26 @@ class CustomerBillingBasisService
         } elseif (! $hasActiveInternalLines) {
             if ($hasActiveStripeSubscription) {
                 $status = self::BILLING_READINESS_STATUS_ATTENTION;
-                $summaryText = 'Stripe-subscription finnes, men interne linjer mangler.';
+                $summaryText = 'Avtale finnes, men interne linjer mangler.';
             } else {
                 $status = self::BILLING_READINESS_STATUS_NOT_CALCULABLE;
                 $summaryText = 'Ingen aktive interne linjer er registrert.';
             }
         } elseif (! $hasStripeCustomer) {
             $status = self::BILLING_READINESS_STATUS_BLOCKED;
-            $summaryText = 'Interne linjer er beregnbare, men kunden er ikke koblet til Stripe.';
+            $summaryText = 'Interne linjer er beregnbare, men kunden er ikke koblet til fakturasystemet.';
         } elseif (! $hasActiveStripeSubscription) {
             $status = self::BILLING_READINESS_STATUS_ATTENTION;
-            $summaryText = 'Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.';
+            $summaryText = 'Kunden har fakturakunde, men ingen aktiv avtale.';
         } elseif ($hasOneTimeLines && ! $hasInvoiceLogs) {
             $status = self::BILLING_READINESS_STATUS_ATTENTION;
             $summaryText = 'Interne engangslinjer finnes, men ingen faktura er registrert.';
         } elseif ($hasInvoiceLogs && ! $hasInvoiceLineLinks) {
             $status = self::BILLING_READINESS_STATUS_ATTENTION;
-            $summaryText = 'Faktura finnes, men interne linjer kan ikke avstemmes direkte.';
+            $summaryText = 'Faktura finnes, men interne linjer kan ikke kobles direkte.';
         } elseif ($canReconcile) {
             $status = self::BILLING_READINESS_STATUS_READY;
-            $summaryText = 'Interne linjer kan avstemmes mot faktura.';
+            $summaryText = 'Interne linjer kan kobles mot faktura.';
         } else {
             $status = self::BILLING_READINESS_STATUS_ATTENTION;
             $summaryText = 'Interne linjer og Stripe er ikke fullt avklart ennå.';
@@ -686,248 +677,6 @@ class CustomerBillingBasisService
             'summary' => $summaryText,
             'checks' => $checks,
             'follow_up_items' => $followUpItems,
-        ];
-    }
-
-    /**
-     * Purpose: Build a read-only billing preview for the customer.
-     * Inputs: The customer, active and historical line rows, invoice payloads, and reconciliation data.
-     * Returns: Preview status, included and excluded lines, totals, and warnings.
-     * Side effects: None.
-     *
-     * @param Collection<int, array<string, mixed>> $activeLineRows
-     * @param Collection<int, array<string, mixed>> $historicalLineRows
-     * @return array<string, mixed>
-     */
-    private function buildBillingPreview(
-        Customer $customer,
-        Collection $activeLineRows,
-        Collection $historicalLineRows,
-        array $invoices,
-        array $reconciliation,
-    ): array {
-        $includedRows = $activeLineRows
-            ->filter(fn (array $line): bool => ($line['calculation_status'] ?? null) === self::CALCULATION_STATUS_COMPLETE)
-            ->values();
-
-        $excludedActiveRows = $activeLineRows
-            ->reject(fn (array $line): bool => ($line['calculation_status'] ?? null) === self::CALCULATION_STATUS_COMPLETE)
-            ->values();
-
-        $excludedHistoricalRows = $historicalLineRows->values();
-        $allExcludedRows = $excludedActiveRows->merge($excludedHistoricalRows)->values();
-
-        if ($includedRows->isEmpty()) {
-            $status = self::PREVIEW_STATUS_NOT_AVAILABLE;
-            $summary = 'Ingen aktive interne linjer kan inngå i preview.';
-        } elseif ($excludedActiveRows->isNotEmpty()) {
-            $status = self::PREVIEW_STATUS_PARTIAL;
-            $summary = 'Noen aktive interne linjer holdes utenfor previewens totalsum.';
-        } else {
-            $status = self::PREVIEW_STATUS_AVAILABLE;
-            $summary = 'Aktive interne linjer kan beregnes sikkert i preview.';
-        }
-
-        $previewWarnings = [];
-
-        if ($includedRows->isEmpty()) {
-            $previewWarnings[] = 'Ingen aktive interne linjer kan inngå i preview.';
-        }
-
-        if (! filled($customer->stripe_id)) {
-            $previewWarnings[] = 'Kunden mangler Stripe-kunde.';
-        }
-
-        if (! $customer->subscribed('default')) {
-            $previewWarnings[] = 'Kunden mangler aktiv Stripe-subscription.';
-        }
-
-        if (! (bool) data_get($invoices, 'has_invoice_data', false)) {
-            $previewWarnings[] = 'Ingen faktura er registrert i invoice_logs.';
-        }
-
-        if (! (bool) data_get($reconciliation, 'can_reconcile_lines_to_invoice', false)) {
-            $previewWarnings[] = 'Interne linjer kan ikke avstemmes mot faktura.';
-        }
-
-        if ($excludedActiveRows->isNotEmpty()) {
-            $previewWarnings[] = 'Noen linjer holdes utenfor preview.';
-        }
-
-        if ($activeLineRows->contains(fn (array $line): bool => ($line['source'] ?? null) === CustomerBillingLine::SOURCE_CUSTOMER_PRICE)) {
-            $previewWarnings[] = 'Kundespesifikke priser er interne linjer og sendes ikke automatisk til Stripe.';
-        }
-
-        $previewWarnings[] = 'Dette er ikke en faktura.';
-        $previewWarnings[] = 'Previewen oppretter ikke Stripe-faktura.';
-
-        $totals = $this->buildBillingPreviewTotals($includedRows, (float) ($customer->billing_discount_percent ?? 0));
-
-        if (($totals['has_multiple_currencies'] ?? false) === true) {
-            $previewWarnings[] = 'Ikke beregnbar på tvers av valuta.';
-        }
-
-        $includedLines = $includedRows
-            ->map(fn (array $line): array => $this->buildBillingPreviewIncludedLine($line))
-            ->values()
-            ->all();
-
-        $excludedLines = $allExcludedRows
-            ->map(fn (array $line): array => $this->buildBillingPreviewExcludedLine($line))
-            ->values()
-            ->all();
-
-        return [
-            'status' => $status,
-            'status_label' => $this->billingPreviewStatusLabel($status),
-            'summary' => $summary,
-            'warnings' => collect($previewWarnings)
-                ->filter()
-                ->unique()
-                ->values()
-                ->all(),
-            'included_lines' => $includedLines,
-            'excluded_lines' => $excludedLines,
-            'totals' => $totals,
-        ];
-    }
-
-    /**
-     * Purpose: Build totals for the preview section.
-     * Inputs: The included preview line rows and the customer discount percentage.
-     * Returns: Totals broken down by currency and a single overall total when safe.
-     * Side effects: None.
-     *
-     * @param Collection<int, array<string, mixed>> $includedRows
-     * @return array<string, mixed>
-     */
-    private function buildBillingPreviewTotals(Collection $includedRows, float $discountPercent): array
-    {
-        $currencyGroups = $includedRows
-            ->groupBy(fn (array $line): string => (string) ($line['currency'] ?? ''))
-            ->filter(fn (Collection $lines, string $currency): bool => $currency !== '' && $lines->isNotEmpty())
-            ->map(function (Collection $lines, string $currency) use ($discountPercent): array {
-                $beforeDiscount = (int) $lines->sum(fn (array $line): int => (int) ($line['line_total'] ?? 0));
-                $discountAmount = (int) round($beforeDiscount * ($discountPercent / 100));
-                $afterDiscount = max(0, $beforeDiscount - $discountAmount);
-
-                return [
-                    'currency' => strtoupper($currency),
-                    'currency_label' => strtoupper($currency),
-                    'line_count' => $lines->count(),
-                    'before_discount_amount' => $beforeDiscount,
-                    'before_discount_label' => $this->moneyLabel($beforeDiscount, $currency),
-                    'discount_percent' => $discountPercent,
-                    'discount_amount' => $discountAmount,
-                    'discount_amount_label' => $this->moneyLabel($discountAmount, $currency),
-                    'after_discount_amount' => $afterDiscount,
-                    'after_discount_label' => $this->moneyLabel($afterDiscount, $currency),
-                ];
-            })
-            ->values();
-
-        $hasCurrencyGroups = $currencyGroups->isNotEmpty();
-        $hasMultipleCurrencies = $currencyGroups->count() > 1;
-        $singleCurrencyGroup = $currencyGroups->first();
-
-        if (! $hasCurrencyGroups) {
-            return [
-                'currency' => null,
-                'currency_label' => 'Ikke beregnbar',
-                'before_discount_amount' => null,
-                'before_discount_label' => 'Ikke beregnbar',
-                'discount_percent' => $discountPercent,
-                'discount_amount' => null,
-                'discount_amount_label' => 'Ikke beregnbar',
-                'after_discount_amount' => null,
-                'after_discount_label' => 'Ikke beregnbar',
-                'currency_groups' => [],
-                'has_multiple_currencies' => false,
-            ];
-        }
-
-        if ($hasMultipleCurrencies) {
-            return [
-                'currency' => null,
-                'currency_label' => 'Ikke beregnbar på tvers av valuta',
-                'before_discount_amount' => null,
-                'before_discount_label' => 'Ikke beregnbar på tvers av valuta',
-                'discount_percent' => $discountPercent,
-                'discount_amount' => null,
-                'discount_amount_label' => 'Ikke beregnbar på tvers av valuta',
-                'after_discount_amount' => null,
-                'after_discount_label' => 'Ikke beregnbar på tvers av valuta',
-                'currency_groups' => $currencyGroups->all(),
-                'has_multiple_currencies' => true,
-            ];
-        }
-
-        return [
-            'currency' => $singleCurrencyGroup['currency'],
-            'currency_label' => $singleCurrencyGroup['currency_label'],
-            'before_discount_amount' => $singleCurrencyGroup['before_discount_amount'],
-            'before_discount_label' => $singleCurrencyGroup['before_discount_label'],
-            'discount_percent' => $discountPercent,
-            'discount_amount' => $singleCurrencyGroup['discount_amount'],
-            'discount_amount_label' => $singleCurrencyGroup['discount_amount_label'],
-            'after_discount_amount' => $singleCurrencyGroup['after_discount_amount'],
-            'after_discount_label' => $singleCurrencyGroup['after_discount_label'],
-            'currency_groups' => $currencyGroups->all(),
-            'has_multiple_currencies' => false,
-        ];
-    }
-
-    /**
-     * Purpose: Build a read-only preview line row for a secure, included internal line.
-     * Inputs: A normalized billing line row.
-     * Returns: A compact display row for the preview section.
-     * Side effects: None.
-     *
-     * @param array<string, mixed> $line
-     * @return array<string, mixed>
-     */
-    private function buildBillingPreviewIncludedLine(array $line): array
-    {
-        $isCustomerSpecific = ($line['source'] ?? null) === CustomerBillingLine::SOURCE_CUSTOMER_PRICE;
-
-        return [
-            'id' => $line['id'] ?? null,
-            'description' => $line['description'] ?? '—',
-            'type_label' => $line['group_label'] ?? '—',
-            'source_label' => $line['source_label'] ?? '—',
-            'product_name' => $line['billing_product_name'] ?? '—',
-            'price_basis_label' => $isCustomerSpecific
-                ? ($line['custom_amount_label'] ?? 'Ikke beregnbar')
-                : ($line['standard_amount_label'] ?? 'Ikke beregnbar'),
-            'quantity' => $line['quantity'] ?? null,
-            'interval_label' => $this->billingIntervalLabel($line['billing_price_interval'] ?? null),
-            'line_total_label' => $line['line_total_label'] ?? 'Ikke beregnbar',
-            'currency_label' => strtoupper((string) ($line['currency'] ?? '')),
-            'note' => $isCustomerSpecific
-                ? 'Kundespesifikk pris - intern linje, ikke automatisk Stripe-sync.'
-                : 'Beregnbar intern linje som kan inngå i preview.',
-        ];
-    }
-
-    /**
-     * Purpose: Build a read-only preview row for a line that is held outside the preview.
-     * Inputs: A normalized billing line row.
-     * Returns: A compact display row for the excluded line list.
-     * Side effects: None.
-     *
-     * @param array<string, mixed> $line
-     * @return array<string, mixed>
-     */
-    private function buildBillingPreviewExcludedLine(array $line): array
-    {
-        return [
-            'id' => $line['id'] ?? null,
-            'description' => $line['description'] ?? '—',
-            'type_label' => $line['group_label'] ?? '—',
-            'source_label' => $line['source_label'] ?? '—',
-            'product_name' => $line['billing_product_name'] ?? '—',
-            'reason' => $this->billingPreviewExclusionReason($line),
-            'status_label' => $line['status_label'] ?? 'Ukjent',
         ];
     }
 
@@ -1247,22 +996,6 @@ class CustomerBillingBasisService
     }
 
     /**
-     * Purpose: Convert a preview status into a Norwegian label.
-     * Inputs: The raw preview status key.
-     * Returns: A Norwegian label for the preview badge.
-     * Side effects: None.
-     */
-    private function billingPreviewStatusLabel(string $status): string
-    {
-        return match ($status) {
-            self::PREVIEW_STATUS_AVAILABLE => 'Preview tilgjengelig',
-            self::PREVIEW_STATUS_PARTIAL => 'Delvis preview',
-            self::PREVIEW_STATUS_NOT_AVAILABLE => 'Preview ikke tilgjengelig',
-            default => filled($status) ? ucfirst($status) : 'Ukjent',
-        };
-    }
-
-    /**
      * Purpose: Convert a billing readiness status into a severity token.
      * Inputs: The raw readiness status key.
      * Returns: A small severity token used by the view for badge styling.
@@ -1277,61 +1010,6 @@ class CustomerBillingBasisService
             self::BILLING_READINESS_STATUS_NOT_CALCULABLE => 'gray',
             default => 'gray',
         };
-    }
-
-    /**
-     * Purpose: Convert a line row into a readable preview exclusion reason.
-     * Inputs: The normalized billing line row.
-     * Returns: A concise Norwegian reason for holding the line outside the preview.
-     * Side effects: None.
-     *
-     * @param array<string, mixed> $line
-     */
-    private function billingPreviewExclusionReason(array $line): string
-    {
-        $status = (string) ($line['status'] ?? 'draft');
-
-        if (! in_array($status, self::ACTIVE_STATUSES, true)) {
-            return 'Historisk/inaktiv linje';
-        }
-
-        if (($line['source'] ?? null) === CustomerBillingLine::SOURCE_CUSTOMER_PRICE) {
-            $warnings = collect($line['warnings'] ?? [])->filter()->values();
-
-            if ($warnings->contains('Avtalt pris kan ikke beregnes sikkert.')) {
-                return 'Mangler avtalt kundespesifikk pris';
-            }
-
-            if ($warnings->contains('Kundespesifikk pris mangler avtalt beløp.')) {
-                return 'Mangler avtalt kundespesifikk pris';
-            }
-
-            return 'Kundespesifikk pris kan ikke inngå sikkert i preview';
-        }
-
-        $warnings = collect($line['warnings'] ?? [])->filter()->values();
-
-        if ($warnings->contains('Linjen mangler prisgrunnlag.')) {
-            return 'Mangler prisgrunnlag';
-        }
-
-        if ($warnings->contains('Linjen mangler valuta.')) {
-            return 'Mangler valuta';
-        }
-
-        if ($warnings->contains('Linjen mangler gyldig antall.')) {
-            return 'Mangler antall';
-        }
-
-        if (($line['source'] ?? null) === 'manual') {
-            return 'Intern informasjonslinje';
-        }
-
-        if (($line['source'] ?? null) === 'webhook') {
-            return 'Ikke automatisk Stripe-sync';
-        }
-
-        return 'Linjen holdes utenfor preview';
     }
 
     /**

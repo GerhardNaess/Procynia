@@ -50,7 +50,6 @@ class CustomerBillingBasisServiceTest extends TestCase
 
         $report = $this->buildReport($customer);
         $readiness = $report['billing_readiness'];
-        $preview = $report['billing_preview'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_NOT_CALCULABLE, $report['summary']['basis_status']);
         $this->assertFalse($report['summary']['can_calculate_expected_total']);
@@ -59,12 +58,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_NOT_CALCULABLE, $readiness['status']);
         $this->assertSame('Ingen aktive interne linjer er registrert.', $readiness['summary']);
         $this->assertContains('Ingen aktive interne linjer er registrert.', $readiness['follow_up_items']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_NOT_AVAILABLE, $preview['status']);
-        $this->assertSame('Preview ikke tilgjengelig', $preview['status_label']);
-        $this->assertSame('Ingen aktive interne linjer kan inngå i preview.', $preview['summary']);
-        $this->assertSame([], $preview['included_lines']);
-        $this->assertSame([], $preview['excluded_lines']);
-        $this->assertSame('Ikke beregnbar', $preview['totals']['before_discount_label']);
     }
 
     public function test_it_calculates_line_totals_for_active_standard_line(): void
@@ -87,7 +80,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $invoiceLogsBefore = InvoiceLog::query()->count();
         $report = $this->buildReport($customer);
         $line = $report['line_groups']['base_subscription']['lines'][0];
-        $preview = $report['billing_preview'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_COMPLETE, $report['summary']['basis_status']);
         $this->assertTrue($report['summary']['can_calculate_expected_total']);
@@ -96,13 +88,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertSame(199000, $line['amount']);
         $this->assertSame(199000, $line['line_total']);
         $this->assertSame(CustomerBillingBasisService::CALCULATION_STATUS_COMPLETE, $line['calculation_status']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertSame('Preview tilgjengelig', $preview['status_label']);
-        $this->assertSame(1, count($preview['included_lines']));
-        $this->assertSame(0, count($preview['excluded_lines']));
-        $this->assertSame(199000, $preview['totals']['before_discount_amount']);
-        $this->assertSame('NOK', $preview['totals']['currency']);
-        $this->assertSame(199000, $preview['totals']['after_discount_amount']);
         $this->assertSame($billingLinesBefore, CustomerBillingLine::query()->count());
         $this->assertSame($invoiceLogsBefore, InvoiceLog::query()->count());
     }
@@ -146,7 +131,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         ]);
 
         $report = $this->buildReport($customer);
-        $preview = $report['billing_preview'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_COMPLETE, $report['summary']['basis_status']);
         $this->assertSame(397000, $report['summary']['expected_total_amount']);
@@ -154,9 +138,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertCount(1, $report['line_groups']['base_subscription']['lines']);
         $this->assertCount(1, $report['line_groups']['user_based_lines']['lines']);
         $this->assertCount(1, $report['line_groups']['recurring_addons']['lines']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertSame(397000, $preview['totals']['before_discount_amount']);
-        $this->assertSame(397000, $preview['totals']['after_discount_amount']);
     }
 
     public function test_it_calculates_discount_for_complete_basis(): void
@@ -175,16 +156,11 @@ class CustomerBillingBasisServiceTest extends TestCase
         ]);
 
         $report = $this->buildReport($customer);
-        $preview = $report['billing_preview'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_COMPLETE, $report['summary']['basis_status']);
         $this->assertSame(300000, $report['summary']['expected_total_amount']);
         $this->assertSame(30000, $report['summary']['discount_amount']);
         $this->assertSame(270000, $report['summary']['total_after_discount']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertSame(300000, $preview['totals']['before_discount_amount']);
-        $this->assertSame(30000, $preview['totals']['discount_amount']);
-        $this->assertSame(270000, $preview['totals']['after_discount_amount']);
     }
 
     public function test_it_marks_missing_price_as_partial_without_forcing_zero(): void
@@ -219,9 +195,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $missingLine = collect($report['line_groups']['manual_or_other_lines']['lines'] ?? [])
             ->firstWhere('description', 'Manuell linje uten pris');
         $readiness = $report['billing_readiness'];
-        $preview = $report['billing_preview'];
-        $excludedLine = collect($preview['excluded_lines'] ?? [])
-            ->firstWhere('description', 'Manuell linje uten pris');
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_PARTIAL, $report['summary']['basis_status']);
         $this->assertFalse($report['summary']['can_calculate_expected_total']);
@@ -231,12 +204,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertContains('Interne linjer finnes, men hele grunnlaget kan ikke beregnes sikkert.', $readiness['follow_up_items']);
         $this->assertNotNull($missingLine);
         $this->assertContains('Linjen mangler prisgrunnlag.', $missingLine['warnings']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_PARTIAL, $preview['status']);
-        $this->assertSame('Delvis preview', $preview['status_label']);
-        $this->assertSame(1, count($preview['included_lines']));
-        $this->assertSame(1, count($preview['excluded_lines']));
-        $this->assertSame('Mangler prisgrunnlag', $excludedLine['reason']);
-        $this->assertSame(199000, $preview['totals']['before_discount_amount']);
     }
 
     public function test_it_uses_custom_amount_for_customer_specific_price(): void
@@ -272,7 +239,6 @@ class CustomerBillingBasisServiceTest extends TestCase
 
         $report = $this->buildReport($customer);
         $line = $report['line_groups']['customer_specific_prices']['lines'][0];
-        $preview = $report['billing_preview'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_COMPLETE, $report['summary']['basis_status']);
         $this->assertSame(298000, $report['summary']['expected_total_amount']);
@@ -281,10 +247,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertSame(199000, $line['standard_amount']);
         $this->assertSame(50000, $line['difference_amount']);
         $this->assertSame(CustomerBillingBasisService::CALCULATION_STATUS_COMPLETE, $line['calculation_status']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertSame(1, count($preview['included_lines']));
-        $this->assertSame('Kundespesifikk pris - intern linje, ikke automatisk Stripe-sync.', $preview['included_lines'][0]['note']);
-        $this->assertSame(298000, $preview['totals']['before_discount_amount']);
     }
 
     public function test_it_marks_customer_specific_price_without_custom_amount_as_not_calculable(): void
@@ -318,9 +280,6 @@ class CustomerBillingBasisServiceTest extends TestCase
         $report = $this->buildReport($customer);
         $line = $report['line_groups']['customer_specific_prices']['lines'][0];
         $readiness = $report['billing_readiness'];
-        $preview = $report['billing_preview'];
-        $excludedLine = collect($preview['excluded_lines'] ?? [])
-            ->firstWhere('description', $price->name);
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_NOT_CALCULABLE, $report['summary']['basis_status']);
         $this->assertSame(CustomerBillingBasisService::CALCULATION_STATUS_NOT_CALCULABLE, $line['calculation_status']);
@@ -328,13 +287,10 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertNull($line['line_total']);
         $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_NOT_CALCULABLE, $readiness['status']);
         $this->assertSame('Ikke beregnbar', $readiness['status_label']);
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_NOT_AVAILABLE, $preview['status']);
-        $this->assertSame('Preview ikke tilgjengelig', $preview['status_label']);
-        $this->assertSame('Mangler avtalt kundespesifikk pris', $excludedLine['reason']);
-        $this->assertSame([], $preview['included_lines']);
+        $this->assertContains('Kundespesifikk pris mangler avtalt beløp.', $line['warnings']);
     }
 
-    public function test_it_does_not_sum_preview_totals_across_multiple_currencies(): void
+    public function test_it_marks_multi_currency_basis_as_partial(): void
     {
         Carbon::setTestNow('2026-06-15 12:00:00');
 
@@ -361,16 +317,13 @@ class CustomerBillingBasisServiceTest extends TestCase
         ]);
 
         $report = $this->buildReport($customer);
-        $preview = $report['billing_preview'];
 
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertSame('Ikke beregnbar på tvers av valuta', $preview['totals']['before_discount_label']);
-        $this->assertNull($preview['totals']['before_discount_amount']);
-        $this->assertCount(2, $preview['totals']['currency_groups']);
-        $this->assertContains('Ikke beregnbar på tvers av valuta.', $preview['warnings']);
+        $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_PARTIAL, $report['summary']['basis_status']);
+        $this->assertNull($report['summary']['expected_total_amount']);
+        $this->assertContains('Aktive linjer bruker mer enn én valuta eller mangler valuta.', $report['summary']['warnings']);
     }
 
-    public function test_it_warns_about_missing_stripe_subscription_but_keeps_preview_available(): void
+    public function test_it_warns_about_missing_stripe_subscription_but_keeps_basis_calculable(): void
     {
         Carbon::setTestNow('2026-06-15 12:00:00');
 
@@ -386,13 +339,11 @@ class CustomerBillingBasisServiceTest extends TestCase
         ]);
 
         $report = $this->buildReport($customer);
-        $preview = $report['billing_preview'];
+        $readiness = $report['billing_readiness'];
 
-        $this->assertSame(CustomerBillingBasisService::PREVIEW_STATUS_AVAILABLE, $preview['status']);
-        $this->assertContains('Kunden mangler aktiv Stripe-subscription.', $preview['warnings']);
-        $this->assertContains('Ingen faktura er registrert i invoice_logs.', $preview['warnings']);
-        $this->assertContains('Dette er ikke en faktura.', $preview['warnings']);
-        $this->assertContains('Previewen oppretter ikke Stripe-faktura.', $preview['warnings']);
+        $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_COMPLETE, $report['summary']['basis_status']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
+        $this->assertContains('Kunden har fakturakunde, men ingen aktiv avtale.', $readiness['follow_up_items']);
     }
 
     public function test_it_keeps_historical_lines_out_of_active_total_but_returns_them_in_history(): void
@@ -447,7 +398,7 @@ class CustomerBillingBasisServiceTest extends TestCase
 
         $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_BLOCKED, $readiness['status']);
         $this->assertSame('Ikke faktureringsklar', $readiness['status_label']);
-        $this->assertContains('Kunden er ikke koblet til Stripe.', $readiness['follow_up_items']);
+        $this->assertContains('Kunden er ikke koblet til fakturasystemet.', $readiness['follow_up_items']);
         $this->assertSame('Blokkert', collect($readiness['checks'])->firstWhere('key', 'stripe_customer')['status_label']);
     }
 
@@ -471,7 +422,7 @@ class CustomerBillingBasisServiceTest extends TestCase
 
         $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
         $this->assertSame('Må følges opp', $readiness['status_label']);
-        $this->assertContains('Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.', $readiness['follow_up_items']);
+        $this->assertContains('Kunden har fakturakunde, men ingen aktiv avtale.', $readiness['follow_up_items']);
         $this->assertSame('Må følges opp', collect($readiness['checks'])->firstWhere('key', 'stripe_subscription')['status_label']);
     }
 
@@ -560,7 +511,7 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertContains('invoice_logs finnes, men ingen interne linjer kan kobles direkte.', $report['reconciliation']['warnings']);
         $this->assertSame('Ingen linjekobling', $report['invoices']['recent_invoices'][0]['line_link_label']);
         $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
-        $this->assertContains('Faktura finnes, men interne linjer kan ikke avstemmes direkte.', $readiness['follow_up_items']);
+        $this->assertContains('Faktura finnes, men interne linjer kan ikke kobles direkte.', $readiness['follow_up_items']);
         $this->assertSame('Må følges opp', collect($readiness['checks'])->firstWhere('key', 'reconciliation')['status_label']);
     }
 

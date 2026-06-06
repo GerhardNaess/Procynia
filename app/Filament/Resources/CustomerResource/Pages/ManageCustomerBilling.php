@@ -73,12 +73,12 @@ class ManageCustomerBilling extends Page
 
     public function getTitle(): string
     {
-        return 'Abonnement og fakturering — ' . $this->record->name;
+        return 'Kundens avtale og fakturering — ' . $this->record->name;
     }
 
     public function getSubheading(): string
     {
-        return 'Stripe er økonomisk fasit for subscription, fakturaer, betaling, utestående og forfall. Procynia er fasit for kunde, brukere, tilgang og interne billing-linjer.';
+        return 'Se hva kunden har kjøpt, hva som skal faktureres og om kunden er fakturert. Tekniske detaljer ligger lenger ned på siden.';
     }
 
     public function getPageClasses(): array
@@ -98,7 +98,7 @@ class ManageCustomerBilling extends Page
     {
         return [
             Action::make('sync_stripe_customer')
-                ->label('Opprett Stripe-kunde')
+                ->label('Opprett fakturakunde')
                 ->icon('heroicon-o-credit-card')
                 ->action(function (): void {
                     app(BillingService::class)->ensureStripeCustomer($this->record);
@@ -106,7 +106,7 @@ class ManageCustomerBilling extends Page
                     $this->loadStripeData();
 
                     Notification::make()
-                        ->title('Stripe-kunde opprettet')
+                        ->title('Fakturakunde opprettet')
                         ->success()
                         ->send();
                 })
@@ -114,16 +114,16 @@ class ManageCustomerBilling extends Page
 
             ActionGroup::make([
                 Action::make('assign_plan')
-                    ->label('Endre Stripe-subscription')
+                    ->label('Endre avtale')
                     ->icon('heroicon-o-credit-card')
                     ->form([
                         Select::make('plan')
-                            ->label('Stripe-plan')
+                            ->label('Avtale')
                             ->options($this->planOptions())
                             ->required()
                             ->default($this->record->subscription_plan ?? 'free'),
                         Radio::make('interval')
-                            ->label('Stripe-faktureringsintervall')
+                            ->label('Faktureringsintervall')
                             ->options([
                                 'monthly' => 'Månedlig',
                                 'yearly' => 'Årlig (spar 33%)',
@@ -156,19 +156,19 @@ class ManageCustomerBilling extends Page
                             $this->loadStripeData();
 
                             Notification::make()
-                                ->title('Stripe-subscription oppdatert')
+                                ->title('Avtale oppdatert')
                                 ->success()
                                 ->send();
                         } catch (Throwable $e) {
                             Notification::make()
-                                ->title('Feil ved endring av Stripe-subscription')
+                                ->title('Feil ved endring av avtale')
                                 ->body($e->getMessage())
                                 ->danger()
                                 ->send();
                         }
                     }),
             ])
-                ->label('Stripe-subscription')
+                ->label('Avtale')
                 ->icon('heroicon-o-adjustments-horizontal')
                 ->button(),
 
@@ -618,7 +618,7 @@ class ManageCustomerBilling extends Page
                     }),
 
                 Action::make('cancel_subscription')
-                    ->label('Avslutt Stripe-subscription')
+                    ->label('Avslutt avtale')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
                     ->requiresConfirmation()
@@ -628,7 +628,7 @@ class ManageCustomerBilling extends Page
                         $this->loadStripeData();
 
                         Notification::make()
-                            ->title('Stripe-subscription avsluttes ved periodeslutt')
+                            ->title('Avtale avsluttes ved periodeslutt')
                             ->success()
                             ->send();
                     })
@@ -636,7 +636,7 @@ class ManageCustomerBilling extends Page
                         && ! ($this->subscriptionData['cancel_at_period_end'] ?? false)),
 
                 Action::make('resume_subscription')
-                    ->label('Gjenoppta Stripe-subscription')
+                    ->label('Gjenoppta avtale')
                     ->icon('heroicon-o-arrow-path')
                     ->color('success')
                     ->action(function (): void {
@@ -645,7 +645,7 @@ class ManageCustomerBilling extends Page
                         $this->loadStripeData();
 
                         Notification::make()
-                            ->title('Stripe-subscription gjenopptatt')
+                            ->title('Avtale gjenopptatt')
                             ->success()
                             ->send();
                     })
