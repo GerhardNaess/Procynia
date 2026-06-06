@@ -732,7 +732,7 @@ class CustomerBillingBasisService
     private function basisStatusLabel(string $status): string
     {
         return match ($status) {
-            self::BASIS_STATUS_COMPLETE => 'Fullt beregnbar',
+            self::BASIS_STATUS_COMPLETE => 'Beregnbar for interne linjer',
             self::BASIS_STATUS_PARTIAL => 'Delvis beregnbar',
             self::BASIS_STATUS_NOT_CALCULABLE => 'Ikke beregnbar',
             default => filled($status) ? ucfirst($status) : 'Ukjent',

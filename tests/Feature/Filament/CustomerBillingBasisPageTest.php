@@ -54,10 +54,13 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('Faktureringsgrunnlag');
         $response->assertSee('Denne visningen viser Procynias interne operative faktureringsgrunnlag.');
+        $response->assertSee('Beregnbare interne linjer');
+        $response->assertSee('Sum aktive interne linjer');
         $response->assertSee('Ikke beregnbar');
         $response->assertSee('Standard planpris kan ikke brukes som faktisk kundeavtale alene.');
         $response->assertSee('Avstemmingsstatus');
         $response->assertSee('Kan ikke avstemmes');
+        $response->assertSee('Ingen faktura funnet.');
     }
 
     public function test_manage_customer_billing_shows_customer_specific_prices_discount_and_invoice_reconciliation(): void
@@ -108,6 +111,7 @@ class CustomerBillingBasisPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Faktureringsgrunnlag');
+        $response->assertSee('Beregnbar for interne linjer');
         $response->assertSee('Kundespesifikke priser');
         $response->assertSee('Standardpris');
         $response->assertSee('Avtalt pris');
@@ -115,8 +119,9 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('1 490 kr');
         $response->assertSee('500 NOK');
         $response->assertSee('12,50 %');
-        $response->assertSee('Faktura og avstemming');
+        $response->assertSee('Faktisk fakturert og avstemming');
         $response->assertSee('Siste faktura');
+        $response->assertSee('Ingen aktiv Stripe-subscription er tilgjengelig ennå.');
         $response->assertSee('Kan avstemmes');
         $response->assertSee('Direkte kobling');
         $response->assertSee('2 608 NOK');

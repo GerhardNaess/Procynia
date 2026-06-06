@@ -112,14 +112,14 @@
             : 'Ingen rabatt';
         $billingBasisLatestInvoiceLabel = $billingBasisLatestInvoice
             ? trim(($billingBasisLatestInvoice['stripe_invoice_id'] ?? '—') . ' · ' . ($billingBasisLatestInvoice['invoice_date_label'] ?? '—'))
-            : 'Ingen faktura';
+            : 'Ingen faktura funnet';
     @endphp
 
     <div class="space-y-6 text-left">
         <x-filament::section heading="Faktureringsgrunnlag">
             <div class="space-y-5 text-left">
                 <p class="max-w-4xl text-sm text-gray-600 dark:text-gray-400">
-                    Denne visningen viser Procynias interne operative faktureringsgrunnlag. Stripe og fakturaloggen viser hva som faktisk er fakturert og betalt. Der prisgrunnlag mangler, vises Ikke beregnbar i stedet for antatt beløp.
+                    Denne visningen viser Procynias interne operative faktureringsgrunnlag. Stripe-subscription viser abonnement og betalingsstatus, mens fakturalogg viser faktisk fakturert beløp. Der prisgrunnlag mangler, vises Ikke beregnbar i stedet for antatt beløp.
                 </p>
 
                 <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -143,18 +143,18 @@
                     </div>
 
                     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Status for beregning</div>
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Status for interne linjer</div>
                         <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBasisSummary['basis_status_label'] ?? 'Ikke beregnbar' }}</div>
                         <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                            {{ $billingBasisSummary['can_calculate_expected_total'] ? 'Grunnlaget kan beregnes sikkert.' : 'Grunnlaget kan ikke beregnes sikkert.' }}
+                            {{ $billingBasisSummary['can_calculate_expected_total'] ? 'Kun aktive interne linjer kan beregnes sikkert.' : 'Grunnlaget kan ikke beregnes sikkert.' }}
                         </div>
                     </div>
 
                     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
-                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum før rabatt</div>
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum aktive interne linjer</div>
                         <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBasisSummary['expected_total_label'] ?? 'Ikke beregnbar' }}</div>
                         <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                            {{ $billingBasisSummary['can_calculate_expected_total'] ? 'Sikker sum fra aktive linjer.' : 'Ikke beregnbar.' }}
+                            {{ $billingBasisSummary['can_calculate_expected_total'] ? 'Kun beregnbare interne linjer er inkludert her.' : 'Ikke beregnbar.' }}
                         </div>
                     </div>
 
@@ -176,16 +176,14 @@
                         @if ($billingBasisLatestInvoice)
                             <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ $billingBasisLatestInvoice['amount_paid_label'] ?? 'Ikke beregnbar' }}</div>
                         @else
-                            <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Ingen invoice_logs er tilgjengelig.</div>
+                            <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Ingen faktura funnet.</div>
                         @endif
                     </div>
 
                     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
                         <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Avstemmingsstatus</div>
                         <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingBasisReconciliation['reconciliation_status_label'] ?? 'Kan ikke avstemmes' }}</div>
-                        <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                            {{ $billingBasisReconciliation['has_line_to_invoice_links'] ? 'Minst én linje kan kobles direkte til en faktura.' : 'Direkte linjekobling mangler eller er ikke tilgjengelig.' }}
-                        </div>
+                        <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ $billingBasisReconciliation['has_line_to_invoice_links'] ? 'Minst én linje kan kobles direkte til en faktura.' : 'Kan ikke avstemmes.' }}</div>
                     </div>
                 </div>
 
@@ -203,8 +201,8 @@
                 <div class="space-y-3">
                     <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-950 dark:text-white">Fakturerbare linjer</h3>
-                            <p class="text-sm text-gray-600 dark:text-gray-400">Aktive interne billing-linjer som kan inngå i faktureringsgrunnlaget.</p>
+                            <h3 class="text-base font-semibold text-gray-950 dark:text-white">Beregnbare interne linjer</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">Interne linjer som kan beregnes sikkert, inkludert abonnement, tillegg og engangslinjer.</p>
                         </div>
                         <div class="text-sm text-gray-500 dark:text-gray-400">
                             {{ $billingBasisActiveBillableLines->count() }} aktive linjer
@@ -337,8 +335,8 @@
                 <div class="space-y-3">
                     <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                         <div>
-                            <h3 class="text-base font-semibold text-gray-950 dark:text-white">Faktura og avstemming</h3>
-                            <p class="text-sm text-gray-600 dark:text-gray-400">Siste Stripe-fakturaer og status for kobling mot interne billing-linjer.</p>
+                            <h3 class="text-base font-semibold text-gray-950 dark:text-white">Faktisk fakturert og avstemming</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">Stripe-fakturaer og status for kobling mot interne billing-linjer.</p>
                         </div>
                         <div class="text-sm text-gray-500 dark:text-gray-400">
                             {{ data_get($billingBasisInvoices, 'invoice_period_label', 'Siste fakturaer') }}
@@ -504,7 +502,7 @@
                         <div>
                             <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Siste Stripe-faktura</div>
                             <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">
-                                {{ $latestInvoiceLabel ?? 'Ingen Stripe-faktura funnet' }}
+                                {{ $latestInvoiceLabel ?? 'Ingen faktura funnet' }}
                             </div>
                         </div>
                         <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $latestInvoice ? 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100' }}">
@@ -517,7 +515,7 @@
                         @if ($latestInvoice)
                             <div>Stripe-status: {{ $latestInvoice['stripe_status_label'] ?? 'Ikke tilgjengelig fra Stripe' }}</div>
                         @else
-                            <div>Ingen Stripe-fakturaer funnet.</div>
+                            <div>Ingen faktura funnet.</div>
                         @endif
                     </div>
                 </div>
@@ -706,7 +704,7 @@
                 $billingIssues[] = [
                     'type' => 'Informasjon',
                     'tone' => 'gray',
-                    'title' => 'Ingen Stripe-fakturaer funnet.',
+                    'title' => 'Ingen faktura funnet.',
                     'body' => 'Fakturaer, PDF-er, betaling, utestående og forfall hentes fra Stripe når dette finnes.',
                 ];
             }
@@ -814,7 +812,7 @@
                     @if ($hasStripeCustomer)
                         <p>Ingen aktiv Stripe-subscription funnet. Stripe er fasit for aktivt abonnement og betalingsstatus. Kunden har Stripe-kunde registrert, men ingen aktiv subscription. Interne Procynia-linjer vises under og kan brukes som grunnlag for abonnement eller manuell fakturering, men de er ikke økonomisk fasit.</p>
                     @else
-                        <p>Ingen Stripe-kunde er opprettet for denne kunden. Bruk «Opprett Stripe-kunde» i handlingene over før Stripe-subscription eller Stripe-fakturering administreres.</p>
+                        <p>Ingen Stripe-kunde er opprettet for denne kunden. Ingen aktiv Stripe-subscription er tilgjengelig ennå. Bruk «Opprett Stripe-kunde» i handlingene over før Stripe-subscription eller Stripe-fakturering administreres.</p>
                     @endif
                 </div>
             @endif
@@ -1071,7 +1069,7 @@
                 </div>
             @else
                 <div class="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                    <p>Ingen Stripe-fakturaer funnet.</p>
+                    <p>Ingen faktura funnet.</p>
                     <p>Fakturaer, PDF-er, betaling, utestående og forfall hentes fra Stripe når dette finnes.</p>
                 </div>
             @endif
