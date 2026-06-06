@@ -56,15 +56,19 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('Kundens avtale');
         $response->assertSee('Hva skal faktureres');
         $response->assertSee('Faktura og betaling');
+        $response->assertSee('Faktura mangler');
         $response->assertSee('Mangler fakturaoppsett');
         $response->assertSee('Kunden er ikke koblet til fakturasystemet.');
-        $response->assertSee('Ingen faktura funnet.');
+        $response->assertSee('Ingen faktura funnet');
         $response->assertSee('Plan');
         $response->assertSee('Faktureres');
         $response->assertSee('Rabatt');
         $response->assertSee('Inkludert');
-        $response->assertSee('Kundespesifikk pris');
+        $response->assertSee('Ingen kundespesifikke priser registrert.');
         $response->assertSee('Tilleggstjenester');
+        $response->assertDontSee('Kunde:');
+        $this->assertSame(1, substr_count($response->getContent(), 'Ingen faktura funnet'));
+        $response->assertDontSee('Kundespesifikk pris');
         $response->assertDontSee('Faktureringsgrunnlag');
         $response->assertDontSee('Faktureringsklarhet');
         $response->assertDontSee('Faktureringspreview');
@@ -199,7 +203,7 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('En eller flere linjer mangler pris, valuta eller antall.');
         $response->assertSee('Kundespesifikk pris mangler');
         $response->assertSee('Hva skal faktureres');
-        $response->assertSee('Ingen faktura funnet.');
+        $response->assertSee('Ingen faktura funnet');
         $response->assertDontSee('Faktureringspreview');
     }
 
@@ -233,8 +237,10 @@ class CustomerBillingBasisPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Må kontrolleres');
-        $response->assertSee('Kunden har registrerte fakturalinjer i Procynia, men ingen faktura er funnet.');
-        $response->assertSee('Ingen faktura funnet.');
+        $response->assertSee('Kunden har fakturakunde, men ingen aktiv avtale.');
+        $response->assertSee('Faktura mangler');
+        $response->assertSee('Ingen faktura funnet');
+        $this->assertSame(1, substr_count($response->getContent(), 'Ingen faktura funnet'));
         $response->assertDontSee('Faktureringsklarhet');
         $response->assertDontSee('Faktureringspreview');
     }

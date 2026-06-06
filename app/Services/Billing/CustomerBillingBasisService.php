@@ -464,7 +464,7 @@ class CustomerBillingBasisService
                 'has_line_to_invoice_links' => false,
                 'can_reconcile_lines_to_invoice' => false,
                 'reconciliation_status' => self::RECONCILIATION_STATUS_CANNOT,
-                'reconciliation_status_label' => 'Kan ikke avstemmes',
+                'reconciliation_status_label' => 'Kan ikke kobles',
                 'warnings' => ['Ingen invoice_logs er tilgjengelig for denne kunden.'],
             ];
         }
@@ -490,15 +490,15 @@ class CustomerBillingBasisService
 
         if ($matchedInvoiceCount === 0) {
             $status = self::RECONCILIATION_STATUS_CANNOT;
-            $label = 'Kan ikke avstemmes';
+            $label = 'Kan ikke kobles';
             $warnings = ['invoice_logs finnes, men ingen interne linjer kan kobles direkte.'];
         } elseif ($matchedInvoiceCount < $invoiceCount) {
             $status = self::RECONCILIATION_STATUS_PARTIAL;
-            $label = 'Delvis avstemming';
+            $label = 'Delvis kobling';
             $warnings = ['Noen invoice_logs har direkte linjekobling, men ikke alle.'];
         } else {
             $status = self::RECONCILIATION_STATUS_CAN;
-            $label = 'Kan avstemmes';
+            $label = 'Kan kobles';
             $warnings = [];
         }
 
