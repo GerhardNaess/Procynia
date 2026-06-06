@@ -89,6 +89,7 @@
         $billingBasisCustomer = data_get($billingBasis, 'customer', []);
         $billingBasisSummary = data_get($billingBasis, 'summary', []);
         $billingBasisReadiness = data_get($billingBasis, 'billing_readiness', []);
+        $billingBasisPreview = data_get($billingBasis, 'billing_preview', []);
         $billingBasisLineGroups = data_get($billingBasis, 'line_groups', []);
         $billingBasisInvoices = data_get($billingBasis, 'invoices', []);
         $billingBasisReconciliation = data_get($billingBasis, 'reconciliation', []);
@@ -105,11 +106,25 @@
             return match ($status) {
                 'ok' => 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100',
                 'attention' => 'bg-warning-100 text-warning-800 dark:bg-warning-500/20 dark:text-warning-100',
-                'blocked' => 'bg-danger-100 text-danger-800 dark:bg-danger-500/20 dark:text-danger-100',
+            'blocked' => 'bg-danger-100 text-danger-800 dark:bg-danger-500/20 dark:text-danger-100',
                 'not_calculable' => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
                 default => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
             };
         };
+        $billingPreviewStatus = (string) data_get($billingBasisPreview, 'status', 'not_available');
+        $billingPreviewBadgeClass = match ($billingPreviewStatus) {
+            'preview_available' => 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100',
+            'partial_preview' => 'bg-warning-100 text-warning-800 dark:bg-warning-500/20 dark:text-warning-100',
+            default => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+        };
+        $billingPreviewWarnings = collect(data_get($billingBasisPreview, 'warnings', []))
+            ->filter()
+            ->unique()
+            ->values();
+        $billingPreviewIncludedLines = collect(data_get($billingBasisPreview, 'included_lines', []));
+        $billingPreviewExcludedLines = collect(data_get($billingBasisPreview, 'excluded_lines', []));
+        $billingPreviewTotals = data_get($billingBasisPreview, 'totals', []);
+        $billingPreviewCurrencyGroups = collect(data_get($billingPreviewTotals, 'currency_groups', []));
         $billingBasisWarnings = collect(data_get($billingBasisSummary, 'warnings', []))
             ->merge(data_get($billingBasisReconciliation, 'warnings', []))
             ->filter()
@@ -269,6 +284,211 @@
                         </ul>
                     </div>
                 @endif
+
+                <div class="space-y-3">
+                    <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <h3 class="text-base font-semibold text-gray-950 dark:text-white">Faktureringspreview</h3>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">Simulerte interne linjer, beløp og avvik som viser hva som ville inngått i et faktureringsgrunnlag.</p>
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">
+                            {{ $billingPreviewIncludedLines->count() }} inkluderte linjer · {{ $billingPreviewExcludedLines->count() }} holdt utenfor
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
+                        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                            <div class="space-y-2">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Simulert grunnlag</div>
+                                <div class="flex flex-wrap items-center gap-3">
+                                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ $billingPreviewBadgeClass }}">
+                                        {{ $billingPreview['status_label'] ?? 'Preview ikke tilgjengelig' }}
+                                    </span>
+                                    <span class="text-sm text-gray-600 dark:text-gray-400">
+                                        {{ $billingPreview['summary'] ?? 'Ingen preview tilgjengelig.' }}
+                                    </span>
+                                </div>
+                                <p class="max-w-4xl text-sm text-gray-600 dark:text-gray-400">
+                                    Dette er en simulert faktureringspreview. Ingen faktura opprettes, og ingenting sendes til Stripe.
+                                </p>
+                            </div>
+
+                            <div class="text-sm text-gray-500 dark:text-gray-400">
+                                {{ $billingPreviewIncludedLines->count() }} linjer kan inngå i preview
+                            </div>
+                        </div>
+
+                        <div class="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum inkluderte linjer</div>
+                                <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingPreviewTotals['before_discount_label'] ?? 'Ikke beregnbar' }}</div>
+                                <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ $billingPreviewTotals['currency_label'] ?? 'Ikke beregnbar' }}</div>
+                            </div>
+
+                            <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Rabatt i preview</div>
+                                <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ number_format((float) data_get($billingPreviewTotals, 'discount_percent', 0), 2, ',', ' ') }} %</div>
+                                <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Rabatt gjelder bare de linjene som er inkludert i preview.</div>
+                            </div>
+
+                            <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Rabattbeløp i preview</div>
+                                <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingPreviewTotals['discount_amount_label'] ?? 'Ikke beregnbar' }}</div>
+                                <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">Beregnes på inkluderte linjer der det er trygt.</div>
+                            </div>
+
+                            <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Sum etter rabatt i preview</div>
+                                <div class="mt-2 text-base font-semibold text-gray-950 dark:text-white">{{ $billingPreviewTotals['after_discount_label'] ?? 'Ikke beregnbar' }}</div>
+                                <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ $billingPreviewTotals['currency_label'] ?? 'Ikke beregnbar' }}</div>
+                            </div>
+                        </div>
+
+                        @if (($billingPreviewTotals['has_multiple_currencies'] ?? false) === true)
+                            <div class="mt-5 rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-sm text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
+                                <div class="font-semibold">Ikke beregnbar på tvers av valuta</div>
+                                <p class="mt-1">Totalsummen er delt opp per valuta og kan ikke summeres på tvers uten valutakonvertering.</p>
+                            </div>
+                        @endif
+
+                        @if ($billingPreviewCurrencyGroups->isNotEmpty())
+                            <div class="mt-5">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Beløp per valuta</div>
+                                <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                    @foreach ($billingPreviewCurrencyGroups as $currencyGroup)
+                                        <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                            <div class="text-sm font-semibold text-gray-950 dark:text-white">{{ $currencyGroup['currency_label'] ?? '—' }}</div>
+                                            <div class="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                                                <div>Linjer: {{ $currencyGroup['line_count'] ?? 0 }}</div>
+                                                <div>Sum før rabatt: {{ $currencyGroup['before_discount_label'] ?? 'Ikke beregnbar' }}</div>
+                                                <div>Rabatt: {{ $currencyGroup['discount_amount_label'] ?? 'Ikke beregnbar' }}</div>
+                                                <div>Sum etter rabatt: {{ $currencyGroup['after_discount_label'] ?? 'Ikke beregnbar' }}</div>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
+                        @if ($billingPreviewWarnings->isNotEmpty())
+                            <div class="mt-5 rounded-2xl border border-warning-300 bg-warning-50 px-5 py-4 text-sm text-warning-900 shadow-sm dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-100">
+                                <div class="font-semibold">Advarsler</div>
+                                <ul class="mt-2 list-disc space-y-1 pl-5">
+                                    @foreach ($billingPreviewWarnings as $warning)
+                                        <li>{{ $warning }}</li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                    </div>
+
+                    <div class="space-y-3">
+                        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                            <div>
+                                <h3 class="text-base font-semibold text-gray-950 dark:text-white">Inkludert i preview</h3>
+                                <p class="text-sm text-gray-600 dark:text-gray-400">Aktive interne linjer som kan beregnes sikkert og inngår i previewens totalsum.</p>
+                            </div>
+                            <div class="text-sm text-gray-500 dark:text-gray-400">
+                                {{ $billingPreviewIncludedLines->count() }} linjer
+                            </div>
+                        </div>
+
+                        @if ($billingPreviewIncludedLines->isNotEmpty())
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="border-b border-gray-200 dark:border-gray-700">
+                                        <tr>
+                                            <th class="pb-2 font-medium text-gray-500">Beskrivelse</th>
+                                            <th class="pb-2 font-medium text-gray-500">Type/kilde</th>
+                                            <th class="pb-2 font-medium text-gray-500">Produkt</th>
+                                            <th class="pb-2 font-medium text-gray-500">Prisgrunnlag</th>
+                                            <th class="pb-2 font-medium text-gray-500">Antall</th>
+                                            <th class="pb-2 font-medium text-gray-500">Intervall</th>
+                                            <th class="pb-2 font-medium text-gray-500">Linjesum</th>
+                                            <th class="pb-2 font-medium text-gray-500">Merknad</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        @foreach ($billingPreviewIncludedLines as $line)
+                                            @php
+                                                $sourceClass = match ($line['source_label'] ?? null) {
+                                                    'Stripe' => 'bg-info-100 text-info-800 dark:bg-info-500/20 dark:text-info-100',
+                                                    'Kundespesifikk pris' => 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-100',
+                                                    default => 'bg-primary-100 text-primary-800 dark:bg-primary-500/20 dark:text-primary-100',
+                                                };
+                                            @endphp
+                                            <tr>
+                                                <td class="py-2 font-medium">{{ $line['description'] ?? '—' }}</td>
+                                                <td class="py-2">
+                                                    <div class="space-y-1">
+                                                        <div class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ $line['type_label'] ?? '—' }}</div>
+                                                        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $sourceClass }}">
+                                                            {{ $line['source_label'] ?? '—' }}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td class="py-2">{{ $line['product_name'] ?? '—' }}</td>
+                                                <td class="py-2">{{ $line['price_basis_label'] ?? 'Ikke beregnbar' }}</td>
+                                                <td class="py-2">{{ $line['quantity'] ?? '—' }}</td>
+                                                <td class="py-2">{{ $line['interval_label'] ?? '—' }}</td>
+                                                <td class="py-2">{{ $line['line_total_label'] ?? 'Ikke beregnbar' }}</td>
+                                                <td class="py-2">{{ $line['note'] ?? '—' }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        @else
+                            <p class="text-sm text-gray-500">Ingen aktive interne linjer kan inngå i preview.</p>
+                        @endif
+                    </div>
+
+                    <div class="space-y-3">
+                        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                            <div>
+                                <h3 class="text-base font-semibold text-gray-950 dark:text-white">Holdt utenfor preview</h3>
+                                <p class="text-sm text-gray-600 dark:text-gray-400">Linjer som ikke kan inngå trygt i previewen, eller som allerede er historiske.</p>
+                            </div>
+                            <div class="text-sm text-gray-500 dark:text-gray-400">
+                                {{ $billingPreviewExcludedLines->count() }} linjer
+                            </div>
+                        </div>
+
+                        @if ($billingPreviewExcludedLines->isNotEmpty())
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="border-b border-gray-200 dark:border-gray-700">
+                                        <tr>
+                                            <th class="pb-2 font-medium text-gray-500">Beskrivelse</th>
+                                            <th class="pb-2 font-medium text-gray-500">Type/kilde</th>
+                                            <th class="pb-2 font-medium text-gray-500">Produkt</th>
+                                            <th class="pb-2 font-medium text-gray-500">Årsak</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                        @foreach ($billingPreviewExcludedLines as $line)
+                                            <tr>
+                                                <td class="py-2 font-medium">{{ $line['description'] ?? '—' }}</td>
+                                                <td class="py-2">
+                                                    <div class="space-y-1">
+                                                        <div class="text-xs font-medium text-gray-700 dark:text-gray-300">{{ $line['type_label'] ?? '—' }}</div>
+                                                        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100">
+                                                            {{ $line['source_label'] ?? '—' }}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td class="py-2">{{ $line['product_name'] ?? '—' }}</td>
+                                                <td class="py-2">{{ $line['reason'] ?? 'Ikke beregnbar' }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        @else
+                            <p class="text-sm text-gray-500">Ingen linjer holdes utenfor preview.</p>
+                        @endif
+                    </div>
+                </div>
 
                 <div class="space-y-3">
                     <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">

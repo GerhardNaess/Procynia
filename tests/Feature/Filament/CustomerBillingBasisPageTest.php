@@ -57,6 +57,12 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('Faktureringsklarhet');
         $response->assertSee('Ikke beregnbar');
         $response->assertSee('Ingen aktive interne linjer er registrert.');
+        $response->assertSee('Faktureringspreview');
+        $response->assertSee('Dette er en simulert faktureringspreview. Ingen faktura opprettes, og ingenting sendes til Stripe.');
+        $response->assertSee('Preview ikke tilgjengelig');
+        $response->assertSee('Ingen aktive interne linjer kan inngå i preview.');
+        $response->assertDontSee('Fakturer nå');
+        $response->assertDontSee('Send til Stripe');
         $response->assertSee('Interne linjer');
         $response->assertSee('Prisgrunnlag');
         $response->assertSee('Stripe-kunde');
@@ -124,10 +130,10 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('Faktureringsklarhet');
         $response->assertSee('Klar for oppfølging');
         $response->assertSee('Kontroller fakturastatus og betaling i Stripe ved behov.');
-        $response->assertSee('Beregnbar for interne linjer');
-        $response->assertSee('Kundespesifikke priser');
-        $response->assertSee('Standardpris');
-        $response->assertSee('Avtalt pris');
+        $response->assertSee('Faktureringspreview');
+        $response->assertSee('Preview tilgjengelig');
+        $response->assertSee('Dette er en simulert faktureringspreview. Ingen faktura opprettes, og ingenting sendes til Stripe.');
+        $response->assertSee('Kundespesifikk pris - intern linje, ikke automatisk Stripe-sync');
         $response->assertSee('1 990 kr');
         $response->assertSee('1 490 kr');
         $response->assertSee('500 NOK');
@@ -137,6 +143,73 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('Kan avstemmes');
         $response->assertSee('Direkte kobling');
         $response->assertSee('2 608 NOK');
+    }
+
+    public function test_manage_customer_billing_shows_partial_preview_when_a_line_is_excluded(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Delvis Preview AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 5);
+
+        $baseProduct = $this->createProduct('base_plan_preview_partial', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
+        $basePrice = $this->createPrice($baseProduct, 'base_plan_preview_partial_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 200000);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $baseProduct->id,
+            'billing_price_id' => $basePrice->id,
+            'user_id' => null,
+            'description' => 'Beregnbar preview-linje',
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => 'system',
+            'metadata' => [
+                'billing_price_key' => $basePrice->key,
+                'billing_product_key' => $baseProduct->key,
+            ],
+        ]);
+
+        $addonProduct = $this->createProduct('addon_preview_excluded', 'Kundeavtale', BillingProduct::CATEGORY_ADDON);
+        $addonPrice = $this->createPrice($addonProduct, 'addon_preview_excluded_monthly', 'Kundeavtale — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $addonProduct->id,
+            'billing_price_id' => $addonPrice->id,
+            'user_id' => null,
+            'description' => 'Kundespesifikk preview-linje',
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'metadata' => [
+                'pricing_mode' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+                'billing_price_key' => $addonPrice->key,
+                'billing_product_key' => $addonProduct->key,
+                'standard_unit_amount' => 199000,
+                'standard_currency' => 'nok',
+                'standard_interval' => BillingPrice::INTERVAL_MONTHLY,
+            ],
+        ]);
+
+        $response = $this->actingAs($admin)->get(CustomerResource::getUrl('billing', ['record' => $customer]));
+
+        $response->assertOk();
+        $response->assertSee('Faktureringspreview');
+        $response->assertSee('Delvis preview');
+        $response->assertSee('Noen aktive interne linjer holdes utenfor previewens totalsum.');
+        $response->assertSee('Inkludert i preview');
+        $response->assertSee('Holdt utenfor preview');
+        $response->assertSee('Mangler avtalt kundespesifikk pris');
+        $response->assertSee('Kunden mangler Stripe-kunde.');
+        $response->assertSee('Kunden mangler aktiv Stripe-subscription.');
+        $response->assertSee('Ingen faktura er registrert i invoice_logs.');
+        $response->assertSee('Dette er ikke en faktura.');
+        $response->assertSee('Previewen oppretter ikke Stripe-faktura.');
+        $response->assertDontSee('Fakturer nå');
+        $response->assertDontSee('Send til Stripe');
     }
 
     public function test_manage_customer_billing_shows_attention_when_stripe_customer_exists_without_subscription_or_invoice_logs(): void
@@ -254,14 +327,21 @@ class CustomerBillingBasisPageTest extends TestCase
         ]);
     }
 
-    private function createPrice(BillingProduct $product, string $key, string $name, string $interval, int $unitAmount): BillingPrice
+    private function createPrice(
+        BillingProduct $product,
+        string $key,
+        string $name,
+        string $interval,
+        int $unitAmount,
+        string $currency = 'nok',
+    ): BillingPrice
     {
         return BillingPrice::query()->create([
             'billing_product_id' => $product->id,
             'key' => $key,
             'name' => $name,
             'interval' => $interval,
-            'currency' => 'nok',
+            'currency' => $currency,
             'unit_amount' => $unitAmount,
             'stripe_price_id' => 'price_'.Str::lower(Str::random(12)),
             'tier_key' => Str::slug($name),
