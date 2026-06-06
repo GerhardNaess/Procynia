@@ -54,13 +54,22 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertOk();
         $response->assertSee('Faktureringsgrunnlag');
         $response->assertSee('Denne visningen viser Procynias interne operative faktureringsgrunnlag.');
+        $response->assertSee('Faktureringsklarhet');
+        $response->assertSee('Ikke beregnbar');
+        $response->assertSee('Ingen aktive interne linjer er registrert.');
+        $response->assertSee('Interne linjer');
+        $response->assertSee('Prisgrunnlag');
+        $response->assertSee('Stripe-kunde');
+        $response->assertSee('Stripe-subscription');
+        $response->assertSee('Faktura');
+        $response->assertSee('Avstemming');
         $response->assertSee('Beregnbare interne linjer');
         $response->assertSee('Sum aktive interne linjer');
-        $response->assertSee('Ikke beregnbar');
         $response->assertSee('Standard planpris kan ikke brukes som faktisk kundeavtale alene.');
         $response->assertSee('Avstemmingsstatus');
         $response->assertSee('Kan ikke avstemmes');
         $response->assertSee('Ingen faktura funnet.');
+        $response->assertDontSee('Klar for fakturering');
     }
 
     public function test_manage_customer_billing_shows_customer_specific_prices_discount_and_invoice_reconciliation(): void
@@ -68,7 +77,8 @@ class CustomerBillingBasisPageTest extends TestCase
         Carbon::setTestNow('2026-06-15 12:00:00');
 
         $admin = $this->internalAdmin();
-        $customer = $this->createCustomer('Fakturakunde AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 12.5);
+        $customer = $this->createCustomer('Fakturakunde AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 12.5, 'cus_basis_ready');
+        $this->createStripeSubscription($customer);
 
         $product = $this->createProduct('addon_customer_basis', 'Kundeavtale', BillingProduct::CATEGORY_ADDON);
         $price = $this->createPrice($product, 'addon_customer_basis_monthly', 'Kundeavtale — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
@@ -111,6 +121,9 @@ class CustomerBillingBasisPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('Faktureringsgrunnlag');
+        $response->assertSee('Faktureringsklarhet');
+        $response->assertSee('Klar for oppfølging');
+        $response->assertSee('Kontroller fakturastatus og betaling i Stripe ved behov.');
         $response->assertSee('Beregnbar for interne linjer');
         $response->assertSee('Kundespesifikke priser');
         $response->assertSee('Standardpris');
@@ -121,10 +134,45 @@ class CustomerBillingBasisPageTest extends TestCase
         $response->assertSee('12,50 %');
         $response->assertSee('Faktisk fakturert og avstemming');
         $response->assertSee('Siste faktura');
-        $response->assertSee('Ingen aktiv Stripe-subscription er tilgjengelig ennå.');
         $response->assertSee('Kan avstemmes');
         $response->assertSee('Direkte kobling');
         $response->assertSee('2 608 NOK');
+    }
+
+    public function test_manage_customer_billing_shows_attention_when_stripe_customer_exists_without_subscription_or_invoice_logs(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Følg Opp AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0, 'cus_follow_up');
+
+        $product = $this->createProduct('base_plan_follow_up', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
+        $price = $this->createPrice($product, 'base_plan_follow_up_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $product->id,
+            'billing_price_id' => $price->id,
+            'user_id' => null,
+            'description' => 'Beregnbar linje',
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => 'system',
+            'metadata' => [
+                'billing_price_key' => $price->key,
+                'billing_product_key' => $product->key,
+            ],
+        ]);
+
+        $response = $this->actingAs($admin)->get(CustomerResource::getUrl('billing', ['record' => $customer]));
+
+        $response->assertOk();
+        $response->assertSee('Faktureringsklarhet');
+        $response->assertSee('Må følges opp');
+        $response->assertSee('Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.');
+        $response->assertSee('Ingen faktura er registrert for denne kunden.');
+        $response->assertDontSee('Klar for fakturering');
     }
 
     private function internalAdmin(): User
@@ -145,6 +193,7 @@ class CustomerBillingBasisPageTest extends TestCase
         string $billingInterval,
         int $includedAiCredits,
         float $discountPercent,
+        ?string $stripeId = null,
     ): Customer {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],
@@ -162,11 +211,28 @@ class CustomerBillingBasisPageTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
+            'stripe_id' => $stripeId,
             'subscription_plan' => $plan,
             'billing_interval' => $billingInterval,
             'included_users' => 0,
             'included_ai_credits' => $includedAiCredits,
             'billing_discount_percent' => $discountPercent,
+        ]);
+    }
+
+    private function createStripeSubscription(Customer $customer, string $stripeStatus = 'active'): void
+    {
+        DB::table('subscriptions')->insert([
+            'customer_id' => $customer->id,
+            'type' => 'default',
+            'stripe_id' => 'sub_'.Str::lower(Str::random(12)),
+            'stripe_status' => $stripeStatus,
+            'stripe_price' => 'price_'.Str::lower(Str::random(12)),
+            'quantity' => 1,
+            'trial_ends_at' => null,
+            'ends_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 

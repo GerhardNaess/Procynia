@@ -35,6 +35,22 @@ class CustomerBillingBasisService
 
     public const RECONCILIATION_STATUS_CANNOT = 'cannot_reconcile';
 
+    public const BILLING_READINESS_STATUS_READY = 'ready';
+
+    public const BILLING_READINESS_STATUS_ATTENTION = 'attention';
+
+    public const BILLING_READINESS_STATUS_BLOCKED = 'blocked';
+
+    public const BILLING_READINESS_STATUS_NOT_CALCULABLE = 'not_calculable';
+
+    private const BILLING_READINESS_CHECK_OK = 'ok';
+
+    private const BILLING_READINESS_CHECK_ATTENTION = 'attention';
+
+    private const BILLING_READINESS_CHECK_BLOCKED = 'blocked';
+
+    private const BILLING_READINESS_CHECK_NOT_CALCULABLE = 'not_calculable';
+
     private const ACTIVE_STATUSES = ['active', 'pending_cancel'];
 
     private const RECENT_INVOICE_COUNT = 12;
@@ -48,6 +64,7 @@ class CustomerBillingBasisService
      * @return array{
      *     customer: array<string, mixed>,
      *     summary: array<string, mixed>,
+     *     billing_readiness: array<string, mixed>,
      *     line_groups: array<string, array<string, mixed>>,
      *     invoices: array<string, mixed>,
      *     reconciliation: array<string, mixed>
@@ -83,6 +100,7 @@ class CustomerBillingBasisService
         $summary = $this->buildSummary($customer, $activeLineRows);
         $invoices = $this->buildInvoices($customer->invoiceLogs->sortByDesc('invoice_date'), collect($lineRows));
         $reconciliation = $this->buildReconciliation(collect($lineRows), collect($invoices['recent_invoices'] ?? []), $customer->invoiceLogs);
+        $billingReadiness = $this->buildBillingReadiness($customer, $activeLineRows, $customer->invoiceLogs, $summary, $invoices, $reconciliation);
 
         return [
             'customer' => [
@@ -97,6 +115,7 @@ class CustomerBillingBasisService
                 'included_ai_credits' => $customer->included_ai_credits,
             ],
             'summary' => $summary,
+            'billing_readiness' => $billingReadiness,
             'line_groups' => $lineGroups,
             'invoices' => $invoices,
             'reconciliation' => $reconciliation,
@@ -497,6 +516,190 @@ class CustomerBillingBasisService
     }
 
     /**
+     * Purpose: Build a read-only billing readiness status for the customer.
+     * Inputs: The customer, active line rows, invoice logs, and the existing basis analysis payloads.
+     * Returns: Status, summary, checks, and follow-up items that describe what is missing.
+     * Side effects: None.
+     *
+     * @param Collection<int, array<string, mixed>> $activeLineRows
+     * @param Collection<int, InvoiceLog> $invoiceLogs
+     * @param array<string, mixed> $summary
+     * @param array<string, mixed> $invoices
+     * @param array<string, mixed> $reconciliation
+     * @return array<string, mixed>
+     */
+    private function buildBillingReadiness(
+        Customer $customer,
+        Collection $activeLineRows,
+        Collection $invoiceLogs,
+        array $summary,
+        array $invoices,
+        array $reconciliation,
+    ): array {
+        $hasActiveInternalLines = $activeLineRows->isNotEmpty();
+        $basisStatus = (string) data_get($summary, 'basis_status', self::BASIS_STATUS_NOT_CALCULABLE);
+        $hasCalculableInternalLines = $basisStatus === self::BASIS_STATUS_COMPLETE;
+        $hasStripeCustomer = filled($customer->stripe_id);
+        $hasActiveStripeSubscription = $customer->subscribed('default');
+        $hasInvoiceLogs = $invoiceLogs->isNotEmpty();
+        $hasOneTimeLines = $activeLineRows->contains(function (array $line): bool {
+            return ($line['group_key'] ?? null) === 'one_time_charges';
+        });
+        $hasInvoiceLineLinks = (bool) data_get($reconciliation, 'has_line_to_invoice_links', false);
+        $canReconcile = (bool) data_get($reconciliation, 'can_reconcile_lines_to_invoice', false);
+
+        $checks = [
+            $this->buildReadinessCheck(
+                'internal_lines',
+                'Interne linjer',
+                $hasActiveInternalLines
+                    ? self::BILLING_READINESS_CHECK_OK
+                    : ($hasActiveStripeSubscription
+                        ? self::BILLING_READINESS_CHECK_ATTENTION
+                        : self::BILLING_READINESS_CHECK_NOT_CALCULABLE),
+                $hasActiveInternalLines
+                    ? 'Aktive interne linjer er registrert.'
+                    : ($hasActiveStripeSubscription
+                        ? 'Stripe-subscription finnes, men interne linjer mangler.'
+                        : 'Ingen aktive interne linjer er registrert.'),
+            ),
+            $this->buildReadinessCheck(
+                'line_calculation',
+                'Prisgrunnlag',
+                ! $hasActiveInternalLines || ! $hasCalculableInternalLines
+                    ? self::BILLING_READINESS_CHECK_NOT_CALCULABLE
+                    : self::BILLING_READINESS_CHECK_OK,
+                ! $hasActiveInternalLines
+                    ? 'Ingen aktive interne linjer kan beregnes ennå.'
+                    : ($hasCalculableInternalLines
+                        ? 'Interne linjer kan beregnes sikkert.'
+                        : 'Interne linjer finnes, men hele grunnlaget kan ikke beregnes sikkert.'),
+            ),
+            $this->buildReadinessCheck(
+                'stripe_customer',
+                'Stripe-kunde',
+                $hasStripeCustomer
+                    ? self::BILLING_READINESS_CHECK_OK
+                    : self::BILLING_READINESS_CHECK_BLOCKED,
+                $hasStripeCustomer
+                    ? 'Kunden er koblet til Stripe.'
+                    : 'Kunden er ikke koblet til Stripe.',
+            ),
+            $this->buildReadinessCheck(
+                'stripe_subscription',
+                'Stripe-subscription',
+                ! $hasStripeCustomer
+                    ? self::BILLING_READINESS_CHECK_BLOCKED
+                    : ($hasActiveStripeSubscription
+                        ? self::BILLING_READINESS_CHECK_OK
+                        : self::BILLING_READINESS_CHECK_ATTENTION),
+                ! $hasStripeCustomer
+                    ? 'Stripe-kunde mangler, så Stripe-subscription kan ikke brukes.'
+                    : ($hasActiveStripeSubscription
+                        ? 'Aktiv Stripe-subscription finnes.'
+                        : 'Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.'),
+            ),
+            $this->buildReadinessCheck(
+                'invoice_logs',
+                'Faktura',
+                $hasInvoiceLogs
+                    ? self::BILLING_READINESS_CHECK_OK
+                    : self::BILLING_READINESS_CHECK_ATTENTION,
+                $hasInvoiceLogs
+                    ? 'Faktura er registrert i fakturaloggen.'
+                    : ($hasOneTimeLines
+                        ? 'Interne engangslinjer finnes, men ingen faktura er registrert.'
+                        : 'Ingen faktura er registrert for denne kunden.'),
+            ),
+            $this->buildReadinessCheck(
+                'reconciliation',
+                'Avstemming',
+                $canReconcile
+                    ? self::BILLING_READINESS_CHECK_OK
+                    : ($hasInvoiceLogs
+                        ? self::BILLING_READINESS_CHECK_ATTENTION
+                        : self::BILLING_READINESS_CHECK_NOT_CALCULABLE),
+                $canReconcile
+                    ? 'Interne linjer kan avstemmes mot faktura.'
+                    : ($hasInvoiceLogs
+                        ? 'Faktura finnes, men interne linjer kan ikke avstemmes direkte.'
+                        : 'Ingen faktura er tilgjengelig for avstemming.'),
+            ),
+        ];
+
+        $followUpItems = collect($checks)
+            ->filter(fn (array $check): bool => ($check['status'] ?? null) !== self::BILLING_READINESS_CHECK_OK)
+            ->pluck('message')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($hasActiveInternalLines && ! $hasCalculableInternalLines) {
+            $status = self::BILLING_READINESS_STATUS_NOT_CALCULABLE;
+            $summaryText = 'Interne linjer finnes, men hele grunnlaget kan ikke beregnes sikkert.';
+        } elseif (! $hasActiveInternalLines) {
+            if ($hasActiveStripeSubscription) {
+                $status = self::BILLING_READINESS_STATUS_ATTENTION;
+                $summaryText = 'Stripe-subscription finnes, men interne linjer mangler.';
+            } else {
+                $status = self::BILLING_READINESS_STATUS_NOT_CALCULABLE;
+                $summaryText = 'Ingen aktive interne linjer er registrert.';
+            }
+        } elseif (! $hasStripeCustomer) {
+            $status = self::BILLING_READINESS_STATUS_BLOCKED;
+            $summaryText = 'Interne linjer er beregnbare, men kunden er ikke koblet til Stripe.';
+        } elseif (! $hasActiveStripeSubscription) {
+            $status = self::BILLING_READINESS_STATUS_ATTENTION;
+            $summaryText = 'Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.';
+        } elseif ($hasOneTimeLines && ! $hasInvoiceLogs) {
+            $status = self::BILLING_READINESS_STATUS_ATTENTION;
+            $summaryText = 'Interne engangslinjer finnes, men ingen faktura er registrert.';
+        } elseif ($hasInvoiceLogs && ! $hasInvoiceLineLinks) {
+            $status = self::BILLING_READINESS_STATUS_ATTENTION;
+            $summaryText = 'Faktura finnes, men interne linjer kan ikke avstemmes direkte.';
+        } elseif ($canReconcile) {
+            $status = self::BILLING_READINESS_STATUS_READY;
+            $summaryText = 'Interne linjer kan avstemmes mot faktura.';
+        } else {
+            $status = self::BILLING_READINESS_STATUS_ATTENTION;
+            $summaryText = 'Interne linjer og Stripe er ikke fullt avklart ennå.';
+        }
+
+        if ($status === self::BILLING_READINESS_STATUS_READY && $followUpItems === []) {
+            $followUpItems = ['Kontroller fakturastatus og betaling i Stripe ved behov.'];
+        }
+
+        return [
+            'status' => $status,
+            'status_label' => $this->billingReadinessStatusLabel($status),
+            'severity' => $this->billingReadinessSeverity($status),
+            'summary' => $summaryText,
+            'checks' => $checks,
+            'follow_up_items' => $followUpItems,
+        ];
+    }
+
+    /**
+     * Purpose: Build a standardized readiness check payload.
+     * Inputs: The check key, label, status, and message.
+     * Returns: A normalized check array for the view layer.
+     * Side effects: None.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildReadinessCheck(string $key, string $label, string $status, string $message): array
+    {
+        return [
+            'key' => $key,
+            'label' => $label,
+            'status' => $status,
+            'status_label' => $this->billingReadinessCheckStatusLabel($status),
+            'message' => $message,
+        ];
+    }
+
+    /**
      * Purpose: Determine the billing group for a line.
      * Inputs: The line model and related price/product models.
      * Returns: A stable group key and label pair.
@@ -773,6 +976,57 @@ class CustomerBillingBasisService
         }
 
         return $linkedLineCount . ' linjer koblet';
+    }
+
+    /**
+     * Purpose: Convert a billing readiness status into a Norwegian label.
+     * Inputs: The raw readiness status key.
+     * Returns: A Norwegian label for the page badge.
+     * Side effects: None.
+     */
+    private function billingReadinessStatusLabel(string $status): string
+    {
+        return match ($status) {
+            self::BILLING_READINESS_STATUS_READY => 'Klar for oppfølging',
+            self::BILLING_READINESS_STATUS_ATTENTION => 'Må følges opp',
+            self::BILLING_READINESS_STATUS_BLOCKED => 'Ikke faktureringsklar',
+            self::BILLING_READINESS_STATUS_NOT_CALCULABLE => 'Ikke beregnbar',
+            default => filled($status) ? ucfirst($status) : 'Ukjent',
+        };
+    }
+
+    /**
+     * Purpose: Convert a billing readiness status into a severity token.
+     * Inputs: The raw readiness status key.
+     * Returns: A small severity token used by the view for badge styling.
+     * Side effects: None.
+     */
+    private function billingReadinessSeverity(string $status): string
+    {
+        return match ($status) {
+            self::BILLING_READINESS_STATUS_READY => 'success',
+            self::BILLING_READINESS_STATUS_ATTENTION => 'warning',
+            self::BILLING_READINESS_STATUS_BLOCKED => 'danger',
+            self::BILLING_READINESS_STATUS_NOT_CALCULABLE => 'gray',
+            default => 'gray',
+        };
+    }
+
+    /**
+     * Purpose: Convert a readiness check status into a short label.
+     * Inputs: The raw check status key.
+     * Returns: A compact label for check badges.
+     * Side effects: None.
+     */
+    private function billingReadinessCheckStatusLabel(string $status): string
+    {
+        return match ($status) {
+            self::BILLING_READINESS_CHECK_OK => 'OK',
+            self::BILLING_READINESS_CHECK_ATTENTION => 'Må følges opp',
+            self::BILLING_READINESS_CHECK_BLOCKED => 'Blokkert',
+            self::BILLING_READINESS_CHECK_NOT_CALCULABLE => 'Ikke beregnbar',
+            default => filled($status) ? ucfirst($status) : 'Ukjent',
+        };
     }
 
     /**

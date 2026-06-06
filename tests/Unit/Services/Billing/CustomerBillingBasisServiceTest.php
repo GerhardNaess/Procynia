@@ -49,11 +49,15 @@ class CustomerBillingBasisServiceTest extends TestCase
         $customer = $this->createCustomer('Tom Kunde AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0);
 
         $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_NOT_CALCULABLE, $report['summary']['basis_status']);
         $this->assertFalse($report['summary']['can_calculate_expected_total']);
         $this->assertNull($report['summary']['expected_total_amount']);
         $this->assertContains('Standard planpris kan ikke brukes som faktisk kundeavtale alene.', $report['summary']['warnings']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_NOT_CALCULABLE, $readiness['status']);
+        $this->assertSame('Ingen aktive interne linjer er registrert.', $readiness['summary']);
+        $this->assertContains('Ingen aktive interne linjer er registrert.', $readiness['follow_up_items']);
     }
 
     public function test_it_calculates_line_totals_for_active_standard_line(): void
@@ -186,11 +190,14 @@ class CustomerBillingBasisServiceTest extends TestCase
         $report = $this->buildReport($customer);
         $missingLine = collect($report['line_groups']['manual_or_other_lines']['lines'] ?? [])
             ->firstWhere('description', 'Manuell linje uten pris');
+        $readiness = $report['billing_readiness'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_PARTIAL, $report['summary']['basis_status']);
         $this->assertFalse($report['summary']['can_calculate_expected_total']);
         $this->assertNull($report['summary']['expected_total_amount']);
         $this->assertContains('Noen aktive linjer mangler sikkert prisgrunnlag.', $report['summary']['warnings']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_NOT_CALCULABLE, $readiness['status']);
+        $this->assertContains('Interne linjer finnes, men hele grunnlaget kan ikke beregnes sikkert.', $readiness['follow_up_items']);
         $this->assertNotNull($missingLine);
         $this->assertContains('Linjen mangler prisgrunnlag.', $missingLine['warnings']);
     }
@@ -268,11 +275,14 @@ class CustomerBillingBasisServiceTest extends TestCase
 
         $report = $this->buildReport($customer);
         $line = $report['line_groups']['customer_specific_prices']['lines'][0];
+        $readiness = $report['billing_readiness'];
 
         $this->assertSame(CustomerBillingBasisService::BASIS_STATUS_NOT_CALCULABLE, $report['summary']['basis_status']);
         $this->assertSame(CustomerBillingBasisService::CALCULATION_STATUS_NOT_CALCULABLE, $line['calculation_status']);
         $this->assertNull($line['amount']);
         $this->assertNull($line['line_total']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_NOT_CALCULABLE, $readiness['status']);
+        $this->assertSame('Ikke beregnbar', $readiness['status_label']);
     }
 
     public function test_it_keeps_historical_lines_out_of_active_total_but_returns_them_in_history(): void
@@ -307,11 +317,86 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->assertSame('Historisk linje', $report['line_groups']['inactive_or_historical_lines']['lines'][0]['description']);
     }
 
+    public function test_it_marks_customer_with_calculable_internal_lines_but_without_stripe_customer_as_blocked_for_readiness(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Stripe Mangler AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0);
+        $product = $this->createProduct('base_plan_stripe_missing', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
+        $price = $this->createPrice($product, 'base_plan_stripe_missing_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
+
+        $this->createLine($customer, $product, $price, [
+            'description' => 'Beregnbar linje',
+            'quantity' => 1,
+            'status' => 'active',
+            'source' => 'system',
+        ]);
+
+        $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
+
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_BLOCKED, $readiness['status']);
+        $this->assertSame('Ikke faktureringsklar', $readiness['status_label']);
+        $this->assertContains('Kunden er ikke koblet til Stripe.', $readiness['follow_up_items']);
+        $this->assertSame('Blokkert', collect($readiness['checks'])->firstWhere('key', 'stripe_customer')['status_label']);
+    }
+
+    public function test_it_marks_customer_with_stripe_customer_but_without_active_subscription_as_attention_for_readiness(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Subscription Mangler AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0, 'cus_subscription_missing');
+        $product = $this->createProduct('base_plan_attention', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
+        $price = $this->createPrice($product, 'base_plan_attention_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
+
+        $this->createLine($customer, $product, $price, [
+            'description' => 'Beregnbar linje',
+            'quantity' => 1,
+            'status' => 'active',
+            'source' => 'system',
+        ]);
+
+        $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
+
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
+        $this->assertSame('Må følges opp', $readiness['status_label']);
+        $this->assertContains('Kunden har Stripe-kunde, men ingen aktiv Stripe-subscription.', $readiness['follow_up_items']);
+        $this->assertSame('Må følges opp', collect($readiness['checks'])->firstWhere('key', 'stripe_subscription')['status_label']);
+    }
+
+    public function test_it_marks_active_one_time_lines_without_invoice_logs_as_attention_for_readiness(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Engangslinje Mangler Faktura AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0, 'cus_one_time_missing_invoice');
+        $this->createStripeSubscription($customer);
+
+        $product = $this->createProduct('one_time_charge', 'Engangstjeneste', BillingProduct::CATEGORY_ADDON);
+        $price = $this->createPrice($product, 'one_time_charge_once', 'Engangstjeneste — Engang', BillingPrice::INTERVAL_ONE_TIME, 799000);
+
+        $this->createLine($customer, $product, $price, [
+            'description' => 'Engangslinje',
+            'quantity' => 1,
+            'status' => 'active',
+            'source' => 'admin',
+            'starts_at' => now(),
+        ]);
+
+        $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
+
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
+        $this->assertContains('Interne engangslinjer finnes, men ingen faktura er registrert.', $readiness['follow_up_items']);
+        $this->assertSame('Må følges opp', collect($readiness['checks'])->firstWhere('key', 'invoice_logs')['status_label']);
+    }
+
     public function test_it_links_invoice_logs_by_stripe_invoice_id(): void
     {
         Carbon::setTestNow('2026-06-15 12:00:00');
 
-        $customer = $this->createCustomer('Fakturakunde AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0);
+        $customer = $this->createCustomer('Fakturakunde AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0, 'cus_ready_123');
+        $this->createStripeSubscription($customer);
         $product = $this->createProduct('base_plan_invoice', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
         $price = $this->createPrice($product, 'base_plan_invoice_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
 
@@ -326,19 +411,25 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->createInvoiceLog($customer, 'in_test_123', 'paid', 199000, 'nok', '2026-06-14 10:00:00');
 
         $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
 
         $this->assertSame(CustomerBillingBasisService::RECONCILIATION_STATUS_CAN, $report['reconciliation']['reconciliation_status']);
         $this->assertTrue($report['reconciliation']['has_line_to_invoice_links']);
         $this->assertSame(1, $report['reconciliation']['matched_invoice_count']);
         $this->assertSame(199000, $report['invoices']['invoice_total_in_period_if_available']);
         $this->assertSame('Direkte kobling', $report['invoices']['recent_invoices'][0]['line_link_label']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_READY, $readiness['status']);
+        $this->assertSame('Klar for oppfølging', $readiness['status_label']);
+        $this->assertContains('Kontroller fakturastatus og betaling i Stripe ved behov.', $readiness['follow_up_items']);
+        $this->assertSame('OK', collect($readiness['checks'])->firstWhere('key', 'reconciliation')['status_label']);
     }
 
     public function test_it_warns_when_invoice_logs_do_not_have_matching_lines(): void
     {
         Carbon::setTestNow('2026-06-15 12:00:00');
 
-        $customer = $this->createCustomer('Faktura uten linje AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0);
+        $customer = $this->createCustomer('Faktura uten linje AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0, 'cus_invoice_missing_match');
+        $this->createStripeSubscription($customer);
         $product = $this->createProduct('base_plan_invoice_missing', 'Pro', BillingProduct::CATEGORY_BASE_PLAN);
         $price = $this->createPrice($product, 'base_plan_invoice_missing_monthly', 'Pro — Månedlig', BillingPrice::INTERVAL_MONTHLY, 199000);
 
@@ -352,11 +443,15 @@ class CustomerBillingBasisServiceTest extends TestCase
         $this->createInvoiceLog($customer, 'in_test_456', 'open', 199000, 'nok', '2026-06-14 10:00:00');
 
         $report = $this->buildReport($customer);
+        $readiness = $report['billing_readiness'];
 
         $this->assertSame(CustomerBillingBasisService::RECONCILIATION_STATUS_CANNOT, $report['reconciliation']['reconciliation_status']);
         $this->assertFalse($report['reconciliation']['has_line_to_invoice_links']);
         $this->assertContains('invoice_logs finnes, men ingen interne linjer kan kobles direkte.', $report['reconciliation']['warnings']);
         $this->assertSame('Ingen linjekobling', $report['invoices']['recent_invoices'][0]['line_link_label']);
+        $this->assertSame(CustomerBillingBasisService::BILLING_READINESS_STATUS_ATTENTION, $readiness['status']);
+        $this->assertContains('Faktura finnes, men interne linjer kan ikke avstemmes direkte.', $readiness['follow_up_items']);
+        $this->assertSame('Må følges opp', collect($readiness['checks'])->firstWhere('key', 'reconciliation')['status_label']);
     }
 
     private function buildReport(Customer $customer): array
@@ -370,6 +465,7 @@ class CustomerBillingBasisServiceTest extends TestCase
         string $billingInterval,
         int $includedAiCredits,
         float $discountPercent,
+        ?string $stripeId = null,
     ): Customer {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],
@@ -387,11 +483,28 @@ class CustomerBillingBasisServiceTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
+            'stripe_id' => $stripeId,
             'subscription_plan' => $plan,
             'billing_interval' => $billingInterval,
             'included_users' => 0,
             'included_ai_credits' => $includedAiCredits,
             'billing_discount_percent' => $discountPercent,
+        ]);
+    }
+
+    private function createStripeSubscription(Customer $customer, string $stripeStatus = 'active'): void
+    {
+        DB::table('subscriptions')->insert([
+            'customer_id' => $customer->id,
+            'type' => 'default',
+            'stripe_id' => 'sub_'.Str::lower(Str::random(12)),
+            'stripe_status' => $stripeStatus,
+            'stripe_price' => 'price_'.Str::lower(Str::random(12)),
+            'quantity' => 1,
+            'trial_ends_at' => null,
+            'ends_at' => null,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 

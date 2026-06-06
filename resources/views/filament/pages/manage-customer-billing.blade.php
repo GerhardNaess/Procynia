@@ -88,9 +88,28 @@
         $billingBasis = $billingBasis ?? [];
         $billingBasisCustomer = data_get($billingBasis, 'customer', []);
         $billingBasisSummary = data_get($billingBasis, 'summary', []);
+        $billingBasisReadiness = data_get($billingBasis, 'billing_readiness', []);
         $billingBasisLineGroups = data_get($billingBasis, 'line_groups', []);
         $billingBasisInvoices = data_get($billingBasis, 'invoices', []);
         $billingBasisReconciliation = data_get($billingBasis, 'reconciliation', []);
+        $billingBasisReadinessChecks = collect(data_get($billingBasisReadiness, 'checks', []));
+        $billingBasisReadinessFollowUpItems = collect(data_get($billingBasisReadiness, 'follow_up_items', []));
+        $billingBasisReadinessSeverity = (string) data_get($billingBasisReadiness, 'severity', 'gray');
+        $billingBasisReadinessBadgeClass = match ($billingBasisReadinessSeverity) {
+            'success' => 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100',
+            'warning' => 'bg-warning-100 text-warning-800 dark:bg-warning-500/20 dark:text-warning-100',
+            'danger' => 'bg-danger-100 text-danger-800 dark:bg-danger-500/20 dark:text-danger-100',
+            default => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+        };
+        $billingBasisReadinessCheckBadgeClass = static function (string $status): string {
+            return match ($status) {
+                'ok' => 'bg-success-100 text-success-800 dark:bg-success-500/20 dark:text-success-100',
+                'attention' => 'bg-warning-100 text-warning-800 dark:bg-warning-500/20 dark:text-warning-100',
+                'blocked' => 'bg-danger-100 text-danger-800 dark:bg-danger-500/20 dark:text-danger-100',
+                'not_calculable' => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+                default => 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100',
+            };
+        };
         $billingBasisWarnings = collect(data_get($billingBasisSummary, 'warnings', []))
             ->merge(data_get($billingBasisReconciliation, 'warnings', []))
             ->filter()
@@ -121,6 +140,59 @@
                 <p class="max-w-4xl text-sm text-gray-600 dark:text-gray-400">
                     Denne visningen viser Procynias interne operative faktureringsgrunnlag. Stripe-subscription viser abonnement og betalingsstatus, mens fakturalogg viser faktisk fakturert beløp. Der prisgrunnlag mangler, vises Ikke beregnbar i stedet for antatt beløp.
                 </p>
+
+                <div class="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
+                    <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div class="space-y-2">
+                            <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Faktureringsklarhet</div>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold {{ $billingBasisReadinessBadgeClass }}">
+                                    {{ $billingBasisReadiness['status_label'] ?? 'Ikke beregnbar' }}
+                                </span>
+                                <span class="text-sm text-gray-600 dark:text-gray-400">
+                                    {{ $billingBasisReadiness['summary'] ?? 'Ingen vurdering tilgjengelig.' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="text-sm text-gray-500 dark:text-gray-400">
+                            {{ $billingBasisReadinessFollowUpItems->count() }} oppfølgingspunkter
+                        </div>
+                    </div>
+
+                    <div class="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        @foreach ($billingBasisReadinessChecks as $check)
+                            @php
+                                $checkStatus = (string) data_get($check, 'status', 'not_calculable');
+                                $checkBadgeClass = $billingBasisReadinessCheckBadgeClass($checkStatus);
+                            @endphp
+                            <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800/40">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">{{ data_get($check, 'label', '—') }}</div>
+                                        <div class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ data_get($check, 'message', '—') }}</div>
+                                    </div>
+                                    <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $checkBadgeClass }}">
+                                        {{ data_get($check, 'status_label', 'Ukjent') }}
+                                    </span>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+
+                    <div class="mt-5 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-200">
+                        <div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Oppfølgingspunkter</div>
+                        @if ($billingBasisReadinessFollowUpItems->isNotEmpty())
+                            <ul class="mt-2 list-disc space-y-1 pl-5">
+                                @foreach ($billingBasisReadinessFollowUpItems as $followUpItem)
+                                    <li>{{ $followUpItem }}</li>
+                                @endforeach
+                            </ul>
+                        @else
+                            <p class="mt-2">Ingen konkrete oppfølgingspunkter. Faktureringsgrunnlaget er tydelig nok til videre oppfølging.</p>
+                        @endif
+                    </div>
+                </div>
 
                 <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                     <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/40">
