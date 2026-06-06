@@ -8,6 +8,7 @@ use App\Models\BillingProduct;
 use App\Models\CustomerBillingLine;
 use App\Models\Customer;
 use App\Models\User;
+use App\Services\Billing\CustomerBillingBasisService;
 use App\Services\Billing\BillingService;
 use App\Services\SubscriptionService;
 use Filament\Actions\Action;
@@ -41,6 +42,8 @@ class ManageCustomerBilling extends Page
 
     public array $customerSpecificPrices = [];
 
+    public array $billingBasis = [];
+
     public string $invoiceSort = 'month_desc';
 
     public int $activeUsersCount = 0;
@@ -65,6 +68,7 @@ class ManageCustomerBilling extends Page
     {
         $this->record = $record;
         $this->loadStripeData();
+        $this->loadBillingBasisData();
     }
 
     public function getTitle(): string
@@ -549,7 +553,7 @@ class ManageCustomerBilling extends Page
                 ->icon('heroicon-o-tag')
                 ->button(),
 
-            Action::make('edit_discount')
+                Action::make('edit_discount')
                 ->label('Endre kunderabatt')
                 ->icon('heroicon-o-receipt-percent')
                 ->button()
@@ -573,7 +577,7 @@ class ManageCustomerBilling extends Page
                         'billing_discount_percent' => $percent,
                     ])->save();
 
-                    $this->record = $this->record->fresh();
+                    $this->refreshBillingData();
 
                     Notification::make()
                         ->title('Kunderabatt oppdatert')
@@ -830,6 +834,7 @@ class ManageCustomerBilling extends Page
     {
         $this->record = $this->record->fresh();
         $this->loadStripeData();
+        $this->loadBillingBasisData();
     }
 
     private function loadStripeData(): void
@@ -963,6 +968,11 @@ class ManageCustomerBilling extends Page
         $this->oldestOpenStripeInvoiceLabel = $oldestOpenStripeInvoice
             ? trim(($oldestOpenStripeInvoice['number'] ?? $oldestOpenStripeInvoice['id'] ?? '—') . ' · ' . ($oldestOpenStripeInvoice['month'] ?? $oldestOpenStripeInvoice['date'] ?? '—'))
             : null;
+    }
+
+    private function loadBillingBasisData(): void
+    {
+        $this->billingBasis = app(CustomerBillingBasisService::class)->build($this->record->fresh());
     }
 
     private function stripeSubscriptionStatusLabel(?string $status): string
