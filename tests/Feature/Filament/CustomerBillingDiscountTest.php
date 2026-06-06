@@ -188,11 +188,11 @@ class CustomerBillingDiscountTest extends TestCase
     {
         config([
             'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => '127.0.0.1',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => '',
+            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
+            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
+            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
+            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
+            'database.connections.pgsql.password' => env('DB_PASSWORD', ''),
             'database.connections.pgsql.search_path' => 'public',
         ]);
 

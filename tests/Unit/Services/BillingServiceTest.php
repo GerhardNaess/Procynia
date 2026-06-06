@@ -419,23 +419,12 @@ class BillingServiceTest extends TestCase
 
     private function projectEnv(string $key, string $default): string
     {
-        static $values = null;
+        $value = env($key);
 
-        if (! is_array($values)) {
-            $values = [];
-
-            foreach (file(base_path('.env'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $trimmed = trim($line);
-
-                if ($trimmed === '' || str_starts_with($trimmed, '#') || ! str_contains($trimmed, '=')) {
-                    continue;
-                }
-
-                [$envKey, $envValue] = explode('=', $trimmed, 2);
-                $values[trim($envKey)] = trim($envValue, " \t\n\r\0\x0B\"'");
-            }
+        if (is_string($value) && $value !== '') {
+            return $value;
         }
 
-        return (string) ($values[$key] ?? $default);
+        return $default;
     }
 }
