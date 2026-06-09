@@ -21,6 +21,8 @@ class QueueScheduler extends Page
 
     protected static ?int $navigationSort = 3;
 
+    protected static bool $shouldRegisterNavigation = false;
+
     /**
      * Current runtime snapshot shown on the page.
      *

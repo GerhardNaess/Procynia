@@ -67,6 +67,8 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
             $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
 
+            $this->assertFalse(QueueScheduler::shouldRegisterNavigation());
+
             $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
             $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
             $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());

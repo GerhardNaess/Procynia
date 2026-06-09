@@ -6,6 +6,7 @@ use App\Filament\Pages\DoffinHarvest;
 use App\Filament\Pages\DoffinSupplierHarvest;
 use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
+use App\Filament\Pages\QueueScheduler;
 use App\Filament\Pages\SystemStatus;
 use App\Filament\Resources\DepartmentResource;
 use App\Filament\Resources\NoticeAttentionResource;
@@ -25,6 +26,11 @@ class HiddenAdminNavigationTest extends TestCase
     {
         $this->assertTrue(DoffinSupplierHarvest::shouldRegisterNavigation());
         $this->assertTrue(SystemStatus::shouldRegisterNavigation());
+    }
+
+    public function test_queue_scheduler_is_hidden_from_navigation(): void
+    {
+        $this->assertFalse(QueueScheduler::shouldRegisterNavigation());
     }
 
     public function test_unrelated_admin_resources_are_hidden_from_navigation(): void
