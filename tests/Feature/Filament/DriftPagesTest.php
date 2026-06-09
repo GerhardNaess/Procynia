@@ -55,24 +55,31 @@ class DriftPagesTest extends TestCase
 
     public function test_drift_pages_expose_expected_navigation_metadata(): void
     {
-        $this->assertSame('Drift', SystemStatus::getNavigationGroup());
-        $this->assertSame('Drift', Monitoring::getNavigationGroup());
-        $this->assertSame('Drift', QueueScheduler::getNavigationGroup());
-        $this->assertSame('Drift', Incidents::getNavigationGroup());
-        $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
-        $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
+        $previousLocale = app()->getLocale();
+        app()->setLocale('no');
 
-        $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
-        $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
-        $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());
-        $this->assertSame('Incidents', Incidents::getNavigationLabel());
-        $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
-        $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
+        try {
+            $this->assertSame('Drift', SystemStatus::getNavigationGroup());
+            $this->assertSame('Drift', Monitoring::getNavigationGroup());
+            $this->assertSame('Drift', QueueScheduler::getNavigationGroup());
+            $this->assertSame('Drift', Incidents::getNavigationGroup());
+            $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
+            $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
 
-        $this->assertArrayHasKey('index', OperationalRunbookResource::getPages());
-        $this->assertArrayHasKey('create', OperationalRunbookResource::getPages());
-        $this->assertArrayHasKey('edit', OperationalRunbookResource::getPages());
-        $this->assertArrayHasKey('view', OperationalRunbookResource::getPages());
+            $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
+            $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
+            $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());
+            $this->assertSame('Incidents', Incidents::getNavigationLabel());
+            $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
+            $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
+
+            $this->assertArrayHasKey('index', OperationalRunbookResource::getPages());
+            $this->assertArrayHasKey('create', OperationalRunbookResource::getPages());
+            $this->assertArrayHasKey('edit', OperationalRunbookResource::getPages());
+            $this->assertArrayHasKey('view', OperationalRunbookResource::getPages());
+        } finally {
+            app()->setLocale($previousLocale);
+        }
     }
 
     public function test_internal_admin_can_open_the_drift_pages(): void
@@ -882,22 +889,25 @@ class DriftPagesTest extends TestCase
 
     public function test_clear_failed_jobs_translation_keys_resolve_correctly(): void
     {
-        $this->assertSame('Rydd feilede jobber', __('procynia.system_status.actions.clear_failed_jobs'));
-        $this->assertSame('Feilede jobber er ryddet.', __('procynia.system_status.messages.failed_jobs_cleared'));
-        $this->assertSame('Slett', __('procynia.system_status.actions.delete_failed_job'));
-        $this->assertSame('Handling', __('procynia.system_status.fields.actions'));
-        $this->assertSame('Fremdrift', __('procynia.system_status.scheduler.progress'));
-        $this->assertSame('Neste kjøring', __('procynia.system_status.scheduler.next_run'));
-        $this->assertSame('om', __('procynia.system_status.scheduler.in_prefix'));
-        $this->assertSame('nå', __('procynia.system_status.scheduler.now'));
-        $this->assertSame('Ikke tilgjengelig', __('procynia.system_status.scheduler.unavailable'));
-        $this->assertSame('Feilet jobb er slettet.', __('procynia.system_status.messages.failed_job_deleted'));
-        $this->assertSame('Feilet jobb finnes ikke lenger.', __('procynia.system_status.messages.failed_job_not_found'));
-        $this->assertStringContainsString('failed_jobs-listen', (string) __('procynia.system_status.messages.clear_failed_jobs_description'));
-
-        app()->setLocale('en');
+        $previousLocale = app()->getLocale();
+        app()->setLocale('no');
 
         try {
+            $this->assertSame('Rydd feilede jobber', __('procynia.system_status.actions.clear_failed_jobs'));
+            $this->assertSame('Feilede jobber er ryddet.', __('procynia.system_status.messages.failed_jobs_cleared'));
+            $this->assertSame('Slett', __('procynia.system_status.actions.delete_failed_job'));
+            $this->assertSame('Handling', __('procynia.system_status.fields.actions'));
+            $this->assertSame('Fremdrift', __('procynia.system_status.scheduler.progress'));
+            $this->assertSame('Neste kjøring', __('procynia.system_status.scheduler.next_run'));
+            $this->assertSame('om', __('procynia.system_status.scheduler.in_prefix'));
+            $this->assertSame('nå', __('procynia.system_status.scheduler.now'));
+            $this->assertSame('Ikke tilgjengelig', __('procynia.system_status.scheduler.unavailable'));
+            $this->assertSame('Feilet jobb er slettet.', __('procynia.system_status.messages.failed_job_deleted'));
+            $this->assertSame('Feilet jobb finnes ikke lenger.', __('procynia.system_status.messages.failed_job_not_found'));
+            $this->assertStringContainsString('failed_jobs-listen', (string) __('procynia.system_status.messages.clear_failed_jobs_description'));
+
+            app()->setLocale('en');
+
             $this->assertSame('Clear failed jobs', __('procynia.system_status.actions.clear_failed_jobs'));
             $this->assertSame('Failed jobs have been cleared.', __('procynia.system_status.messages.failed_jobs_cleared'));
             $this->assertSame('Delete', __('procynia.system_status.actions.delete_failed_job'));
@@ -905,7 +915,7 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Failed job deleted.', __('procynia.system_status.messages.failed_job_deleted'));
             $this->assertSame('Failed job no longer exists.', __('procynia.system_status.messages.failed_job_not_found'));
         } finally {
-            app()->setLocale('no');
+            app()->setLocale($previousLocale);
         }
     }
 
@@ -1005,11 +1015,11 @@ class DriftPagesTest extends TestCase
     {
         config([
             'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => '127.0.0.1',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => '',
+            'database.connections.pgsql.database' => env('DB_DATABASE', 'procynia_test'),
+            'database.connections.pgsql.host' => env('DB_HOST', 'postgres'),
+            'database.connections.pgsql.port' => env('DB_PORT', '5432'),
+            'database.connections.pgsql.username' => env('DB_USERNAME', 'gehard'),
+            'database.connections.pgsql.password' => env('DB_PASSWORD', 'Opaque01'),
             'database.connections.pgsql.search_path' => 'public',
         ]);
 

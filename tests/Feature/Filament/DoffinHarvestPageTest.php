@@ -4,33 +4,21 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\DoffinHarvest;
 use App\Models\SupplierLookupRun;
-use App\Services\Doffin\SupplierLookupRunService;
 use App\Models\User;
+use App\Services\Doffin\SupplierLookupRunService;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Mockery;
 use Tests\TestCase;
 
 class DoffinHarvestPageTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        $this->useTestingPostgresConnection();
-        DB::beginTransaction();
-    }
+    use RefreshDatabase;
 
     protected function tearDown(): void
     {
         Mockery::close();
-
-        if (DB::transactionLevel() > 0) {
-            DB::rollBack();
-        }
-
-        DB::disconnect(DB::getDefaultConnection());
 
         parent::tearDown();
     }
@@ -169,22 +157,5 @@ class DoffinHarvestPageTest extends TestCase
             'customer_id' => null,
             'is_active' => true,
         ]);
-    }
-
-    private function useTestingPostgresConnection(): void
-    {
-        config([
-            'database.default' => 'pgsql',
-            'database.connections.pgsql.database' => 'procynia_test',
-            'database.connections.pgsql.host' => '127.0.0.1',
-            'database.connections.pgsql.port' => '5432',
-            'database.connections.pgsql.username' => 'gehard',
-            'database.connections.pgsql.password' => '',
-            'database.connections.pgsql.search_path' => 'public',
-        ]);
-
-        DB::purge('pgsql');
-        DB::setDefaultConnection('pgsql');
-        DB::reconnect('pgsql');
     }
 }
