@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Models\Customer;
+use App\Support\CustomerContext;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
@@ -14,6 +15,11 @@ class PlanDistributionWidget extends TableWidget
     protected static ?int $sort = 2;
 
     protected int|string|array $columnSpan = 'full';
+
+    public static function canView(): bool
+    {
+        return app(CustomerContext::class)->isInternalAdmin();
+    }
 
     public function table(Table $table): Table
     {

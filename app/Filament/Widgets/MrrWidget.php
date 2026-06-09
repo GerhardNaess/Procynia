@@ -4,12 +4,18 @@ namespace App\Filament\Widgets;
 
 use App\Models\BillingPrice;
 use App\Models\Customer;
+use App\Support\CustomerContext;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class MrrWidget extends StatsOverviewWidget
 {
     protected static ?int $sort = 1;
+
+    public static function canView(): bool
+    {
+        return app(CustomerContext::class)->isInternalAdmin();
+    }
 
     protected function getStats(): array
     {
