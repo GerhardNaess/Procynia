@@ -20,6 +20,8 @@ class Incidents extends Page
 
     protected static ?int $navigationSort = 4;
 
+    protected static bool $shouldRegisterNavigation = false;
+
     /**
      * Restrict the page to internal admins.
      */
