@@ -16,9 +16,9 @@ class AdminNotifications extends Page
 
     protected static ?string $navigationLabel = 'Varsler';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Fakturering';
+    protected static string|UnitEnum|null $navigationGroup = 'Drift';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 6;
 
     /**
      * @var array<int, array<string, mixed>>

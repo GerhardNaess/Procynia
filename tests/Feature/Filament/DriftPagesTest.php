@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BackupRecovery;
+use App\Filament\Pages\AdminNotifications;
 use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
 use App\Filament\Pages\QueueScheduler;
@@ -69,6 +70,7 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
             $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
             $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());
+            $this->assertSame('Varsler', AdminNotifications::getNavigationLabel());
             $this->assertSame('Incidents', Incidents::getNavigationLabel());
             $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
             $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
