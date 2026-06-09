@@ -36,6 +36,11 @@ class WatchProfileResource extends Resource
 
     protected static bool $shouldRegisterNavigation = false;
 
+    public static function canAccess(): bool
+    {
+        return app(CustomerContext::class)->isInternalAdmin();
+    }
+
     public static function form(Schema $schema): Schema
     {
         return $schema
