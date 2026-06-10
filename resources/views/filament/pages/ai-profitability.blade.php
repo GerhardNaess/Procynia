@@ -19,7 +19,7 @@
             <div class="border-b border-gray-100 px-5 py-4">
                 <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Procynia intern</p>
                 <h2 class="mt-1 text-xl font-extrabold tracking-tight text-gray-950">AI-lønnsomhet</h2>
-                <p class="mt-1 text-sm text-gray-500">Viser estimert lønnsomhet per kunde og case med allokert inntekt, intern AI-kost og dekningsbidrag.</p>
+                <p class="mt-1 text-sm text-gray-500">Intern estimert analyse av AI-økonomi. Tallene er ikke fakturagrunnlag eller regnskap.</p>
             </div>
 
             <div class="border-b border-gray-100 px-5 py-4 space-y-3">
@@ -59,9 +59,12 @@
 
             <div class="border-t border-amber-100 bg-amber-50 px-5 py-3">
                 <p class="text-xs leading-relaxed text-amber-700">
-                    <strong>Intern beregning:</strong>
-                    Inntekt er en allokert verdi basert på plan og inkluderte AI-case.
-                    Kost hentes fra historiske token-events og historisk modellpris.
+                    <strong>Intern estimert analyse:</strong>
+                    Inntekt er allokert fra kundens avtale og AI-aktive saker.
+                </p>
+                <p class="mt-1 text-xs leading-relaxed text-amber-700">
+                    Intern kost er estimert fra tokenbruk, modellpriser og valutakurser.
+                    Manglende eller delvise data betyr usikkerhet, ikke null.
                 </p>
             </div>
         </aside>
@@ -69,9 +72,9 @@
         <section class="min-w-0 space-y-5">
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Intern lønnsomhetsanalyse</p>
+                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400">Intern estimert analyse</p>
                     <h1 class="mt-1 text-3xl font-extrabold tracking-tight text-gray-950">{{ $pageContextTitle }}</h1>
-                    <p class="mt-1 text-sm text-gray-500">Periode {{ $periodLabel }} · allokert inntekt, intern AI-kost og dekningsbidrag per kunde og case.</p>
+                    <p class="mt-1 text-sm text-gray-500">Periode {{ $periodLabel }} · estimert inntekt, estimert intern AI-kost og estimert dekningsbidrag per kunde og case.</p>
                 </div>
                 <div class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-500 shadow-sm whitespace-nowrap">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -101,13 +104,13 @@
             </div>
 
             <p class="text-[11px] text-gray-400">
-                Manglende prisgrunnlag, manglende kostgrunnlag og delvis beregnede rader vises eksplisitt for å unngå at usikre tall tolkes som fullverdige.
+                Manglende prisgrunnlag, manglende kostgrunnlag og delvis beregnede rader vises eksplisitt. Manglende data betyr usikkerhet, ikke null.
             </p>
 
             <article class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
                 <div class="border-b border-gray-100 px-5 py-4">
                     <h3 class="font-bold text-gray-900">Kundetabell</h3>
-                    <p class="mt-0.5 text-sm text-gray-500">Allokert inntekt og intern AI-kost per kunde i valgt periode.</p>
+                    <p class="mt-0.5 text-sm text-gray-500">Estimert inntekt og estimert intern AI-kost per kunde i valgt periode.</p>
                 </div>
 
                 <div class="overflow-x-auto">
@@ -115,9 +118,9 @@
                         <thead class="bg-gray-50/80 text-xs uppercase tracking-wider text-gray-500">
                             <tr>
                                 <th class="px-5 py-3">Kunde</th>
-                                <th class="px-5 py-3">Allokert inntekt</th>
-                                <th class="px-5 py-3">Intern AI-kost</th>
-                                <th class="px-5 py-3">Dekningsbidrag</th>
+                                <th class="px-5 py-3">Estimert inntekt</th>
+                                <th class="px-5 py-3">Estimert intern AI-kost</th>
+                                <th class="px-5 py-3">Estimert dekningsbidrag</th>
                                 <th class="px-5 py-3">Margin %</th>
                                 <th class="px-5 py-3">Revenue status</th>
                                 <th class="px-5 py-3">Cost status</th>
@@ -177,7 +180,7 @@
             <article class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
                 <div class="border-b border-gray-100 px-5 py-4">
                     <h3 class="font-bold text-gray-900">Casetabell</h3>
-                    <p class="mt-0.5 text-sm text-gray-500">Detaljer per AI-aktivt case, måned og ledgerspor.</p>
+                    <p class="mt-0.5 text-sm text-gray-500">Detaljer per AI-aktivt case, måned og ledgerspor. Tallene er estimater.</p>
                 </div>
 
                 <div class="overflow-x-auto">
@@ -187,9 +190,9 @@
                                 <th class="px-5 py-3">Kunde</th>
                                 <th class="px-5 py-3">Case</th>
                                 <th class="px-5 py-3">Måned</th>
-                                <th class="px-5 py-3">Allokert inntekt</th>
-                                <th class="px-5 py-3">Intern AI-kost</th>
-                                <th class="px-5 py-3">Dekningsbidrag</th>
+                                <th class="px-5 py-3">Estimert inntekt</th>
+                                <th class="px-5 py-3">Estimert intern AI-kost</th>
+                                <th class="px-5 py-3">Estimert dekningsbidrag</th>
                                 <th class="px-5 py-3">Margin %</th>
                                 <th class="px-5 py-3">Revenue status</th>
                                 <th class="px-5 py-3">Cost status</th>

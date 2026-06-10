@@ -80,7 +80,7 @@ class AiProfitability extends Page
 
     public function getSubheading(): ?string
     {
-        return 'Estimert lønnsomhet per kunde og case · Kun Super Admin';
+        return 'Intern estimert analyse av AI-økonomi · ikke fakturagrunnlag eller regnskap';
     }
 
     public function mount(AiCaseProfitabilityService $service): void
@@ -166,7 +166,7 @@ class AiProfitability extends Page
 
         return [
             [
-                'label' => 'Allokert inntekt',
+                'label' => 'Estimert inntekt',
                 'value' => $this->moneyValue(
                     $this->summary['allocated_revenue_nok'] ?? null,
                     (string) ($this->summary['revenue_status'] ?? 'missing'),
@@ -175,7 +175,7 @@ class AiProfitability extends Page
                 'tone' => $this->summaryTone((string) ($this->summary['revenue_status'] ?? 'missing')),
             ],
             [
-                'label' => 'Intern AI-kost',
+                'label' => 'Estimert intern AI-kost',
                 'value' => $this->moneyValue(
                     $this->summary['internal_cost_nok'] ?? null,
                     (string) ($this->summary['cost_status'] ?? 'missing'),
@@ -184,7 +184,7 @@ class AiProfitability extends Page
                 'tone' => $this->summaryTone((string) ($this->summary['cost_status'] ?? 'missing')),
             ],
             [
-                'label' => 'Dekningsbidrag',
+                'label' => 'Estimert dekningsbidrag',
                 'value' => $this->moneyValue(
                     $this->summary['contribution_margin_nok'] ?? null,
                     $this->summaryMarginStatus(),
@@ -310,9 +310,9 @@ class AiProfitability extends Page
     {
         return match ($status) {
             'ok' => match ($kind) {
-                'revenue' => 'Allokert fra AI-case',
-                'cost' => 'Intern AI-kost',
-                'margin' => 'Beregnet fra inntekt og kost',
+                'revenue' => 'Estimert fra avtale og AI-case',
+                'cost' => 'Estimert intern AI-kost',
+                'margin' => 'Beregnet fra estimert inntekt og estimert intern kost',
                 default => 'Beregnet',
             },
             'partial' => 'Delvis beregnet',

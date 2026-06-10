@@ -79,17 +79,20 @@ class AiProfitabilityPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSeeText('AI-lønnsomhet');
-        $response->assertSeeText('Estimert lønnsomhet per kunde og case');
-        $response->assertSeeText('allokert inntekt, intern AI-kost og dekningsbidrag');
+        $response->assertSeeText('Intern estimert analyse av AI-økonomi');
+        $response->assertSeeText('ikke fakturagrunnlag');
+        $response->assertSeeText('Tallene er ikke fakturagrunnlag eller regnskap');
+        $response->assertSeeText('estimert inntekt, estimert intern AI-kost og estimert dekningsbidrag');
         $response->assertSeeText('Alle kunder samlet');
-        $response->assertSeeText('Allokert inntekt');
-        $response->assertSeeText('Intern AI-kost');
-        $response->assertSeeText('Dekningsbidrag');
+        $response->assertSeeText('Estimert inntekt');
+        $response->assertSeeText('Estimert intern AI-kost');
+        $response->assertSeeText('Estimert dekningsbidrag');
         $response->assertSeeText('Margin %');
         $response->assertSeeText('Kunder');
         $response->assertSeeText('AI-caser');
         $response->assertSeeText('Manglende inntekt');
         $response->assertSeeText('Ufullstendig kost');
+        $response->assertSeeText('Manglende data betyr usikkerhet, ikke null');
         $response->assertSeeText('Lønnsom Kunde A');
         $response->assertSeeText('Mangler Kunde B');
         $response->assertSeeText('Lønnsom Case A');
@@ -104,9 +107,9 @@ class AiProfitabilityPageTest extends TestCase
         $response->assertSeeText('Mangler prisgrunnlag');
         $response->assertSeeText('Mangler kostgrunnlag');
         $response->assertSeeText('Delvis beregnet');
-        $response->assertSeeText('Allokert fra AI-case');
-        $response->assertSeeText('Intern AI-kost');
-        $response->assertSeeText('Beregnet fra inntekt og kost');
+        $response->assertSeeText('Estimert fra avtale og AI-case');
+        $response->assertSeeText('Estimert intern AI-kost');
+        $response->assertSeeText('Beregnet fra estimert inntekt og estimert intern kost');
     }
 
     /**
