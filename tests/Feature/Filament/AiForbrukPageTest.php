@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiForbruk;
+use App\Models\AdminPageHelp;
 use App\Models\CustomerAiCaseUsage;
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
@@ -33,6 +34,15 @@ class AiForbrukPageTest extends TestCase
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
+        AdminPageHelp::create([
+            'page_key'    => 'admin.ai_forbruk',
+            'title'       => 'Hjelp — AI-forbruk',
+            'description' => 'Intern oversikt over AI-bruk, tokenforbruk, kostnadsestimat og kapasitetsstatus.',
+            'intro'       => 'Tallene er interne styringsindikatorer og skal ikke behandles som ikke fakturagrunnlag.',
+            'sections'    => [],
+            'is_active'   => true,
+        ]);
+
         $admin = $this->internalAdmin();
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
@@ -44,6 +54,18 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('Hjelp — AI-forbruk');
         $response->assertSee('Intern oversikt over AI-bruk');
         $response->assertSee('ikke fakturagrunnlag');
+    }
+
+    public function test_ai_forbruk_page_renders_without_help_panel_when_no_record_exists(): void
+    {
+        Carbon::setTestNow('2026-06-02 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('AI-forbruk');
+        $response->assertDontSee('Hjelp — AI-forbruk');
     }
 
     public function test_customer_admin_cannot_access_ai_forbruk_page(): void

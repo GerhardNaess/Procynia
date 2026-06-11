@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\AdminPageHelp;
 use App\Models\AiModelPrice;
 use App\Models\CustomerAiCaseUsage;
 use App\Models\AiTokenEvent;
@@ -35,6 +36,8 @@ class AiForbruk extends Page
     protected static string|UnitEnum|null $navigationGroup = 'Fakturering';
 
     protected static ?int $navigationSort = 4;
+
+    public ?AdminPageHelp $pageHelp = null;
 
     // --- Filters ---
     public string $selectedCustomerId = '';
@@ -118,6 +121,11 @@ class AiForbruk extends Page
 
     public function mount(): void
     {
+        $this->pageHelp = AdminPageHelp::query()
+            ->where('page_key', 'admin.ai_forbruk')
+            ->where('is_active', true)
+            ->first();
+
         $this->dateFrom = now()->subDays(29)->toDateString();
         $this->dateTo   = now()->toDateString();
         $this->customerList = $this->buildCustomerList();
