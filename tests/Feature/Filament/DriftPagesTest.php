@@ -8,6 +8,8 @@ use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
 use App\Filament\Pages\QueueScheduler;
 use App\Filament\Pages\SystemStatus;
+use App\Filament\Resources\DoffinImportRunResource;
+use App\Filament\Resources\SyncLogResource;
 use App\Filament\Resources\OperationalRunbookResource;
 use App\Filament\Resources\OperationalRunbookResource\Pages\CreateOperationalRunbook;
 use App\Filament\Resources\OperationalRunbookResource\Pages\EditOperationalRunbook;
@@ -66,8 +68,12 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Drift', Incidents::getNavigationGroup());
             $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
             $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
+            $this->assertSame('Drift', DoffinImportRunResource::getNavigationGroup());
+            $this->assertSame('Drift', SyncLogResource::getNavigationGroup());
 
             $this->assertFalse(QueueScheduler::shouldRegisterNavigation());
+            $this->assertTrue(DoffinImportRunResource::shouldRegisterNavigation());
+            $this->assertTrue(SyncLogResource::shouldRegisterNavigation());
 
             $this->assertSame('Systemstatus', SystemStatus::getNavigationLabel());
             $this->assertSame('Overvåkning', Monitoring::getNavigationLabel());
@@ -76,6 +82,11 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Incidents', Incidents::getNavigationLabel());
             $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
             $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
+            $this->assertSame('Import Runs', DoffinImportRunResource::getNavigationLabel());
+            $this->assertSame('Sync Logs', SyncLogResource::getNavigationLabel());
+
+            $this->assertSame(7, DoffinImportRunResource::getNavigationSort());
+            $this->assertSame(8, SyncLogResource::getNavigationSort());
 
             $this->assertArrayHasKey('index', OperationalRunbookResource::getPages());
             $this->assertArrayHasKey('create', OperationalRunbookResource::getPages());
