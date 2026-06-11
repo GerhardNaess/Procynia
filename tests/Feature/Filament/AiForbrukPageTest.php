@@ -65,6 +65,29 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('Hjelp');
     }
 
+    public function test_page_help_partial_shows_edit_link_when_edit_url_provided(): void
+    {
+        $html = view('filament.components.page-help', [
+            'intro'     => 'Test intro',
+            'sections'  => [],
+            'editUrl'   => '/admin/admin-page-helps/1/edit',
+            'editLabel' => 'Rediger hjelpetekst',
+        ])->render();
+
+        $this->assertStringContainsString('Rediger hjelpetekst', $html);
+        $this->assertStringContainsString('/admin/admin-page-helps/1/edit', $html);
+    }
+
+    public function test_page_help_partial_does_not_show_edit_link_without_edit_url(): void
+    {
+        $html = view('filament.components.page-help', [
+            'intro'    => 'Test intro',
+            'sections' => [],
+        ])->render();
+
+        $this->assertStringNotContainsString('Rediger hjelpetekst', $html);
+    }
+
     public function test_ai_forbruk_page_renders_without_help_action_when_no_record_exists(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');

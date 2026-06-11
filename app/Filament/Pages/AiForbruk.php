@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\AdminPageHelpResource;
 use App\Models\AdminPageHelp;
 use App\Models\AiModelPrice;
 use App\Models\CustomerAiCaseUsage;
@@ -117,8 +118,12 @@ class AiForbruk extends Page
                 ->modalHeading(fn (): string => $this->pageHelp?->title ?? 'Hjelp')
                 ->modalDescription(fn (): ?string => $this->pageHelp?->description)
                 ->modalContent(fn (): \Illuminate\Contracts\View\View => view('filament.components.page-help', [
-                    'intro'    => $this->pageHelp?->intro,
-                    'sections' => $this->pageHelp?->sections ?? [],
+                    'intro'     => $this->pageHelp?->intro,
+                    'sections'  => $this->pageHelp?->sections ?? [],
+                    'editUrl'   => ($this->pageHelp && AdminPageHelpResource::canAccess())
+                        ? AdminPageHelpResource::getUrl('edit', ['record' => $this->pageHelp->getKey()])
+                        : null,
+                    'editLabel' => 'Rediger hjelpetekst',
                 ]))
                 ->modalSubmitAction(false)
                 ->modalCancelActionLabel('Lukk'),
