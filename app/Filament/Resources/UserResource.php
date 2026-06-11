@@ -12,6 +12,7 @@ use App\Models\Nationality;
 use App\Models\User;
 use App\Support\CustomerContext;
 use BackedEnum;
+use UnitEnum;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -35,7 +36,9 @@ class UserResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
 
-    protected static ?int $navigationSort = 1;
+    protected static string|UnitEnum|null $navigationGroup = 'Kunder';
+
+    protected static ?int $navigationSort = 2;
 
     public static function form(Schema $schema): Schema
     {
@@ -137,7 +140,7 @@ class UserResource extends Resource
                 TextColumn::make('is_active')
                     ->label(__('procynia.user.is_active'))
                     ->badge()
-                    ->formatStateUsing(fn (bool $state): string => $state ? 'Yes' : 'No')
+                    ->formatStateUsing(fn (bool $state): string => $state ? 'Aktiv' : 'Inaktiv')
                     ->sortable(),
                 TextColumn::make('created_at')
                     ->label(__('procynia.common.created_at'))
