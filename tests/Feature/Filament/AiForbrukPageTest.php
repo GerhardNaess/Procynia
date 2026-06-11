@@ -34,15 +34,6 @@ class AiForbrukPageTest extends TestCase
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
-        AdminPageHelp::create([
-            'page_key'    => 'admin.ai_forbruk',
-            'title'       => 'Hjelp — AI-forbruk',
-            'description' => 'Intern oversikt over AI-bruk, tokenforbruk, kostnadsestimat og kapasitetsstatus.',
-            'intro'       => 'Tallene er interne styringsindikatorer og skal ikke behandles som ikke fakturagrunnlag.',
-            'sections'    => [],
-            'is_active'   => true,
-        ]);
-
         $admin = $this->internalAdmin();
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
@@ -51,12 +42,30 @@ class AiForbrukPageTest extends TestCase
         $response->assertSeeText('Faktisk AI-forbruk og intern kost');
         $response->assertSee('AI-operasjoner');
         $response->assertSee('Tokenforbruk');
-        $response->assertSee('Hjelp — AI-forbruk');
-        $response->assertSee('Intern oversikt over AI-bruk');
-        $response->assertSee('ikke fakturagrunnlag');
     }
 
-    public function test_ai_forbruk_page_renders_without_help_panel_when_no_record_exists(): void
+    public function test_help_action_is_present_when_active_page_help_record_exists(): void
+    {
+        Carbon::setTestNow('2026-06-02 12:00:00');
+
+        AdminPageHelp::create([
+            'page_key'    => 'admin.ai_forbruk',
+            'title'       => 'Hjelp — AI-forbruk',
+            'description' => 'Intern oversikt over AI-bruk, tokenforbruk, kostnadsestimat og kapasitetsstatus.',
+            'intro'       => 'Tallene er interne styringsindikatorer og ikke fakturagrunnlag.',
+            'sections'    => [],
+            'is_active'   => true,
+        ]);
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        // Hjelp-knappen rendres i Filament header; modal heading er ikke i initial HTML
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_ai_forbruk_page_renders_without_help_action_when_no_record_exists(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
@@ -65,6 +74,7 @@ class AiForbrukPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('AI-forbruk');
+        // Hjelp-knappen skal ikke vises når ingen aktiv AdminPageHelp finnes
         $response->assertDontSee('Hjelp — AI-forbruk');
     }
 

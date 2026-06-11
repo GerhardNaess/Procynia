@@ -1,13 +1,4 @@
 <x-filament-panels::page>
-    @if ($pageHelp)
-        @include('filament.components.page-help', [
-            'title'       => $pageHelp->title,
-            'description' => $pageHelp->description,
-            'intro'       => $pageHelp->intro,
-            'sections'    => $pageHelp->sections ?? [],
-        ])
-    @endif
-
     <style>
         .ai-forbruk-layout {
             display: grid;

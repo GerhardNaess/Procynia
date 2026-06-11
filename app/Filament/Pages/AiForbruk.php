@@ -12,7 +12,9 @@ use App\Models\RequirementExtractionRun;
 use App\Services\Ai\Pricing\AiTokenCostEstimator;
 use App\Support\CustomerContext;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Pages\Page;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -102,6 +104,25 @@ class AiForbruk extends Page
     public static function canAccess(): bool
     {
         return app(CustomerContext::class)->isInternalAdmin();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('pageHelp')
+                ->label('Hjelp')
+                ->icon(Heroicon::OutlinedQuestionMarkCircle)
+                ->color('gray')
+                ->visible(fn (): bool => $this->pageHelp !== null)
+                ->modalHeading(fn (): string => $this->pageHelp?->title ?? 'Hjelp')
+                ->modalDescription(fn (): ?string => $this->pageHelp?->description)
+                ->modalContent(fn (): \Illuminate\Contracts\View\View => view('filament.components.page-help', [
+                    'intro'    => $this->pageHelp?->intro,
+                    'sections' => $this->pageHelp?->sections ?? [],
+                ]))
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Lukk'),
+        ];
     }
 
     public static function getNavigationLabel(): string
