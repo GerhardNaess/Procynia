@@ -19,7 +19,7 @@ class BackupRecovery extends Page
 {
     protected string $view = 'filament.pages.backup-recovery';
 
-    protected static ?string $navigationLabel = 'Backup and recovery';
+    protected static ?string $navigationLabel = 'Sikkerhetskopi og gjenoppretting';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedShieldCheck;
 

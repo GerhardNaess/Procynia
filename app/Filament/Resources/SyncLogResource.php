@@ -17,7 +17,7 @@ class SyncLogResource extends Resource
 {
     protected static ?string $model = SyncLog::class;
 
-    protected static ?string $navigationLabel = 'Sync Logs';
+    protected static ?string $navigationLabel = 'Synkroniseringslogg';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 

@@ -31,7 +31,7 @@ class CustomerUserServiceLevelResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Fakturering';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 3;
 
     protected static ?string $modelLabel = 'brukerlisens';
 

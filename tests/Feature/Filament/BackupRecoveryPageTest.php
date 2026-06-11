@@ -46,7 +46,7 @@ class BackupRecoveryPageTest extends TestCase
         $this->actingAs($admin)
             ->get(BackupRecovery::getUrl())
             ->assertOk()
-            ->assertSee('Backup and recovery');
+            ->assertSee('Sikkerhetskopi og gjenoppretting');
     }
 
     public function test_backup_recovery_page_clarifies_that_restore_is_controlled(): void

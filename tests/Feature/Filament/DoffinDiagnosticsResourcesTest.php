@@ -22,13 +22,13 @@ class DoffinDiagnosticsResourcesTest extends TestCase
 
     public function test_doffin_diagnostics_resources_expose_expected_navigation_metadata(): void
     {
-        $this->assertSame('Import Runs', DoffinImportRunResource::getNavigationLabel());
+        $this->assertSame('Importkjøringer', DoffinImportRunResource::getNavigationLabel());
         $this->assertSame('Drift', DoffinImportRunResource::getNavigationGroup());
         $this->assertSame(7, DoffinImportRunResource::getNavigationSort());
         $this->assertTrue(DoffinImportRunResource::shouldRegisterNavigation());
         $this->assertSame(['index', 'view'], array_keys(DoffinImportRunResource::getPages()));
 
-        $this->assertSame('Sync Logs', SyncLogResource::getNavigationLabel());
+        $this->assertSame('Synkroniseringslogg', SyncLogResource::getNavigationLabel());
         $this->assertSame('Drift', SyncLogResource::getNavigationGroup());
         $this->assertSame(8, SyncLogResource::getNavigationSort());
         $this->assertTrue(SyncLogResource::shouldRegisterNavigation());

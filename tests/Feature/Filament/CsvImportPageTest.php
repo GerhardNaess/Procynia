@@ -21,7 +21,7 @@ class CsvImportPageTest extends TestCase
             ->get(CsvImport::getUrl());
 
         $response->assertOk();
-        $response->assertSee('CPV Import');
+        $response->assertSee('CPV-import');
     }
 
     public function test_run_import_calls_the_canonical_cpv_import_command(): void

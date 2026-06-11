@@ -80,10 +80,10 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Queue and scheduler', QueueScheduler::getNavigationLabel());
             $this->assertSame('Varsler', AdminNotifications::getNavigationLabel());
             $this->assertSame('Incidents', Incidents::getNavigationLabel());
-            $this->assertSame('Backup and recovery', BackupRecovery::getNavigationLabel());
+            $this->assertSame('Sikkerhetskopi og gjenoppretting', BackupRecovery::getNavigationLabel());
             $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
-            $this->assertSame('Import Runs', DoffinImportRunResource::getNavigationLabel());
-            $this->assertSame('Sync Logs', SyncLogResource::getNavigationLabel());
+            $this->assertSame('Importkjøringer', DoffinImportRunResource::getNavigationLabel());
+            $this->assertSame('Synkroniseringslogg', SyncLogResource::getNavigationLabel());
 
             $this->assertSame(7, DoffinImportRunResource::getNavigationSort());
             $this->assertSame(8, SyncLogResource::getNavigationSort());
@@ -105,7 +105,7 @@ class DriftPagesTest extends TestCase
         $this->actingAs($admin)->get(Monitoring::getUrl())->assertOk()->assertSee('Overvåkning');
         $this->actingAs($admin)->get(QueueScheduler::getUrl())->assertOk()->assertSee('Queue and scheduler');
         $this->actingAs($admin)->get(Incidents::getUrl())->assertOk()->assertSee('Incidents');
-        $this->actingAs($admin)->get(BackupRecovery::getUrl())->assertOk()->assertSee('Backup and recovery');
+        $this->actingAs($admin)->get(BackupRecovery::getUrl())->assertOk()->assertSee('Sikkerhetskopi og gjenoppretting');
     }
 
     public function test_non_internal_admin_cannot_open_the_drift_pages(): void

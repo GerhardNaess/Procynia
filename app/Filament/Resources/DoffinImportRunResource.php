@@ -21,7 +21,7 @@ class DoffinImportRunResource extends Resource
 {
     protected static ?string $model = DoffinImportRun::class;
 
-    protected static ?string $navigationLabel = 'Import Runs';
+    protected static ?string $navigationLabel = 'Importkjøringer';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 

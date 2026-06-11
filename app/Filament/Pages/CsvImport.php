@@ -19,7 +19,7 @@ class CsvImport extends Page
 {
     protected string $view = 'filament.pages.csv-import';
 
-    protected static ?string $navigationLabel = 'CPV Import';
+    protected static ?string $navigationLabel = 'CPV-import';
 
     protected static string|UnitEnum|null $navigationGroup = 'Imports';
 

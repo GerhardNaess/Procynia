@@ -39,7 +39,7 @@ class DoffinSupplierHarvest extends Page implements HasForms
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCloudArrowDown;
 
-    protected static ?string $navigationLabel = 'Supplier Harvest';
+    protected static ?string $navigationLabel = 'Leverandørinnhenting';
 
     protected static string|UnitEnum|null $navigationGroup = 'Doffin';
 
