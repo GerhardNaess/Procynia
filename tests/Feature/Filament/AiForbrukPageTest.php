@@ -41,6 +41,9 @@ class AiForbrukPageTest extends TestCase
         $response->assertSeeText('Faktisk AI-forbruk og intern kost');
         $response->assertSee('AI-operasjoner');
         $response->assertSee('Tokenforbruk');
+        $response->assertSee('Hjelp — AI-forbruk');
+        $response->assertSee('Intern oversikt over AI-bruk');
+        $response->assertSee('ikke fakturagrunnlag');
     }
 
     public function test_customer_admin_cannot_access_ai_forbruk_page(): void

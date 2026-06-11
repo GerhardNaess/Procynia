@@ -1,4 +1,45 @@
 <x-filament-panels::page>
+    @include('filament.components.page-help', [
+        'title'       => 'Hjelp — AI-forbruk',
+        'description' => 'Intern oversikt over AI-bruk, tokenforbruk, kostnadsestimat og kapasitetsstatus.',
+        'intro'       => 'Denne siden brukes av Procynia Super Admin til å følge med på AI-bruk på tvers av kunder. Tallene er interne styringsindikatorer og skal ikke behandles som fakturagrunnlag.',
+        'sections'    => [
+            [
+                'title' => 'Hva viser siden?',
+                'items' => [
+                    ['title' => 'Operasjoner',      'text' => 'Viser registrerte AI-hendelser i valgt periode.'],
+                    ['title' => 'Blokkert',          'text' => 'Viser AI-hendelser som er stoppet av kapasitets- eller tilgangsregler.'],
+                    ['title' => 'Tokenforbruk',      'text' => 'Viser registrerte input- og output-tokens der tokenlogging finnes.'],
+                    ['title' => 'Estimert kost',     'text' => 'Viser beregnet intern AI-kost basert på modellpriser og valutakurser.'],
+                ],
+            ],
+            [
+                'title' => 'Kost og priser',
+                'items' => [
+                    ['title' => 'Intern beregning',           'text' => 'Estimert kost er en intern beregning og ikke fakturagrunnlag.'],
+                    ['title' => 'Avhengighet av prisdata',    'text' => 'Beregningen avhenger av at modellpris og valutakurs finnes for perioden.'],
+                    ['title' => 'Manglende grunnlag',         'text' => 'Manglende pris eller valutakurs betyr at kost ikke kan beregnes sikkert.'],
+                    ['title' => 'Ikke kundens pris',          'text' => 'Beløpene er ikke faktura, regnskap eller kundens pris.'],
+                ],
+            ],
+            [
+                'title' => 'Kapasitet',
+                'items' => [
+                    ['title' => 'Kapasitetsvisning',  'text' => 'Hjelper med å se hvilke kunder som nærmer seg eller overstiger kommersielle AI-rammer.'],
+                    ['title' => 'Kontekst',           'text' => 'Kapasitet må forstås sammen med kundens abonnement, inkluderte AI-rammer og faktisk bruk.'],
+                    ['title' => 'Advarsel betyr vurdering', 'text' => 'En advarsel betyr at kunden bør vurderes, ikke at systemet automatisk skal endres.'],
+                ],
+            ],
+            [
+                'title' => 'Viktige avgrensninger',
+                'items' => [
+                    ['title' => 'Ingen endringer',  'text' => 'Siden endrer ikke kundens abonnement, AI-tilgang, priser eller modellvalg.'],
+                    ['title' => 'Analyse og kontroll', 'text' => 'Siden er et analyse- og kontrollverktøy for intern administrasjon.'],
+                ],
+            ],
+        ],
+    ])
+
     <style>
         .ai-forbruk-layout {
             display: grid;
