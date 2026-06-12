@@ -2,7 +2,7 @@
 
 namespace App\Filament\Pages;
 
-use App\Filament\Resources\AdminPageHelpResource;
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Models\AdminPageHelp;
 use App\Models\AiModelPrice;
 use App\Models\CustomerAiCaseUsage;
@@ -13,9 +13,7 @@ use App\Models\RequirementExtractionRun;
 use App\Services\Ai\Pricing\AiTokenCostEstimator;
 use App\Support\CustomerContext;
 use BackedEnum;
-use Filament\Actions\Action;
 use Filament\Pages\Page;
-use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +28,7 @@ use UnitEnum;
  */
 class AiForbruk extends Page
 {
+    use HasAdminPageHelp;
     protected string $view = 'filament.pages.ai-forbruk';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-presentation-chart-line';
@@ -110,23 +109,7 @@ class AiForbruk extends Page
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('pageHelp')
-                ->label('Hjelp')
-                ->icon(Heroicon::OutlinedQuestionMarkCircle)
-                ->color('gray')
-                ->visible(fn (): bool => $this->pageHelp !== null)
-                ->modalHeading(fn (): string => $this->pageHelp?->title ?? 'Hjelp')
-                ->modalDescription(fn (): ?string => $this->pageHelp?->description)
-                ->modalContent(fn (): \Illuminate\Contracts\View\View => view('filament.components.page-help', [
-                    'intro'     => $this->pageHelp?->intro,
-                    'sections'  => $this->pageHelp?->sections ?? [],
-                    'editUrl'   => ($this->pageHelp && AdminPageHelpResource::canAccess())
-                        ? AdminPageHelpResource::getUrl('edit', ['record' => $this->pageHelp->getKey()])
-                        : null,
-                    'editLabel' => 'Rediger hjelpetekst',
-                ]))
-                ->modalSubmitAction(false)
-                ->modalCancelActionLabel('Lukk'),
+            $this->buildPageHelpAction($this->pageHelp),
         ];
     }
 
@@ -147,10 +130,7 @@ class AiForbruk extends Page
 
     public function mount(): void
     {
-        $this->pageHelp = AdminPageHelp::query()
-            ->where('page_key', 'admin.ai_forbruk')
-            ->where('is_active', true)
-            ->first();
+        $this->pageHelp = static::fetchPageHelp('admin.billing.ai_usage', 'admin.ai_forbruk');
 
         $this->dateFrom = now()->subDays(29)->toDateString();
         $this->dateTo   = now()->toDateString();

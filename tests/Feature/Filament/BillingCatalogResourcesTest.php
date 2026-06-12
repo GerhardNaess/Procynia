@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament;
 use App\Filament\Resources\BillingPriceResource;
 use App\Filament\Resources\BillingProductResource;
 use App\Filament\Resources\CustomerUserServiceLevelResource;
+use App\Models\AdminPageHelp;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -80,6 +81,40 @@ class BillingCatalogResourcesTest extends TestCase
         $this->assertFalse(BillingProductResource::canAccess());
         $this->assertFalse(BillingPriceResource::canAccess());
         $this->assertFalse(CustomerUserServiceLevelResource::canAccess());
+    }
+
+    public function test_brukerlisenser_list_can_be_accessed_by_internal_admin(): void
+    {
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(CustomerUserServiceLevelResource::getUrl('index'));
+
+        $response->assertOk();
+        $response->assertSee('Brukerlisenser');
+    }
+
+    public function test_brukerlisenser_help_action_is_present_when_page_help_record_exists(): void
+    {
+        AdminPageHelp::create([
+            'page_key'  => 'admin.billing.user_licenses',
+            'title'     => 'Hjelp — Brukerlisenser',
+            'sections'  => [],
+            'is_active' => true,
+        ]);
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(CustomerUserServiceLevelResource::getUrl('index'));
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_brukerlisenser_page_renders_without_help_action_when_no_record_exists(): void
+    {
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(CustomerUserServiceLevelResource::getUrl('index'));
+
+        $response->assertOk();
+        $response->assertDontSee('Hjelp — Brukerlisenser');
     }
 
     private function internalAdmin(): User

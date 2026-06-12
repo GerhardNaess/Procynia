@@ -44,24 +44,39 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('Tokenforbruk');
     }
 
-    public function test_help_action_is_present_when_active_page_help_record_exists(): void
+    public function test_help_action_is_present_when_primary_key_record_exists(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
 
         AdminPageHelp::create([
-            'page_key'    => 'admin.ai_forbruk',
-            'title'       => 'Hjelp — AI-forbruk',
-            'description' => 'Intern oversikt over AI-bruk, tokenforbruk, kostnadsestimat og kapasitetsstatus.',
-            'intro'       => 'Tallene er interne styringsindikatorer og ikke fakturagrunnlag.',
-            'sections'    => [],
-            'is_active'   => true,
+            'page_key'  => 'admin.billing.ai_usage',
+            'title'     => 'Hjelp — AI-forbruk',
+            'sections'  => [],
+            'is_active' => true,
         ]);
 
         $admin = $this->internalAdmin();
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
         $response->assertOk();
-        // Hjelp-knappen rendres i Filament header; modal heading er ikke i initial HTML
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_help_action_falls_back_to_legacy_key_when_new_key_missing(): void
+    {
+        Carbon::setTestNow('2026-06-02 12:00:00');
+
+        AdminPageHelp::create([
+            'page_key'  => 'admin.ai_forbruk',
+            'title'     => 'Hjelp — AI-forbruk',
+            'sections'  => [],
+            'is_active' => true,
+        ]);
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
         $response->assertSee('Hjelp');
     }
 
