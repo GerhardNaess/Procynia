@@ -3,27 +3,31 @@
 @endif
 
 @if (!empty($sections))
-    <div class="space-y-4">
-        @foreach ($sections as $section)
-            <div>
-                @if (!empty($section['title']))
-                    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                        {{ $section['title'] }}
-                    </h3>
-                @endif
+    <div class="space-y-1">
+        @foreach ($sections as $loop_index => $section)
+            <details
+                class="group rounded-lg border border-gray-200"
+                @if ($loop_index === 0) open @endif
+            >
+                <summary class="flex cursor-pointer select-none items-center justify-between px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                    {{ $section['title'] ?? '' }}
+                    <svg class="h-4 w-4 shrink-0 text-gray-400 transition-transform group-open:rotate-180" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/>
+                    </svg>
+                </summary>
                 @if (!empty($section['items']))
-                    <ul class="space-y-2">
+                    <ul class="border-t border-gray-100 px-4 py-2">
                         @foreach ($section['items'] as $item)
-                            <li class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                            <li class="py-1.5">
                                 @if (!empty($item['title']))
-                                    <p class="mb-0.5 text-sm font-semibold text-gray-700">{{ $item['title'] }}</p>
+                                    <span class="text-xs font-semibold text-gray-700">{{ $item['title'] }}: </span>
                                 @endif
-                                <p class="text-sm leading-5 text-gray-500">{{ $item['text'] }}</p>
+                                <span class="text-xs leading-5 text-gray-500">{{ $item['text'] }}</span>
                             </li>
                         @endforeach
                     </ul>
                 @endif
-            </div>
+            </details>
         @endforeach
     </div>
 @endif
