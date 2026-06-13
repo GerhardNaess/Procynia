@@ -468,8 +468,6 @@ class AiCaseProfitabilityService
      */
     private function resolveRevenueProxy(Customer $customer): array
     {
-        $planConfig = $customer->planConfig();
-        $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
         $discountPercent = max(0.0, min(100.0, (float) ($customer->billing_discount_percent ?? 0)));
 
         $includedAiCredits = $this->billingEntitlementService->includedAiCredits($customer);
@@ -478,19 +476,28 @@ class AiCaseProfitabilityService
             return $this->missingRevenueProxy($includedAiCredits);
         }
 
-        $planPriceKey = $billingInterval === Customer::BILLING_YEARLY
-            ? 'yearly_price_nok'
-            : 'monthly_price_nok';
+        // Priority 1: monthly value from the active Tjenestekatalog base-plan line.
+        $monthlyEquivalent = $this->billingEntitlementService->basePlanMonthlyValueNok($customer);
 
-        $planPrice = $planConfig[$planPriceKey] ?? null;
+        // Priority 2: config/procynia_plans.php fallback when no Tjenestekatalog price is available.
+        if ($monthlyEquivalent === null) {
+            $planConfig = $customer->planConfig();
+            $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
 
-        if ($planPrice === null) {
-            return $this->missingRevenueProxy($includedAiCredits);
+            $planPriceKey = $billingInterval === Customer::BILLING_YEARLY
+                ? 'yearly_price_nok'
+                : 'monthly_price_nok';
+
+            $planPrice = $planConfig[$planPriceKey] ?? null;
+
+            if ($planPrice === null) {
+                return $this->missingRevenueProxy($includedAiCredits);
+            }
+
+            $monthlyEquivalent = $billingInterval === Customer::BILLING_YEARLY
+                ? ((float) $planPrice / 12)
+                : (float) $planPrice;
         }
-
-        $monthlyEquivalent = $billingInterval === Customer::BILLING_YEARLY
-            ? ((float) $planPrice / 12)
-            : (float) $planPrice;
 
         $monthlyEquivalentAfterDiscount = round($monthlyEquivalent * (1 - ($discountPercent / 100)), 4);
         $allocatedRevenuePerCase = round($monthlyEquivalentAfterDiscount / $includedAiCredits, 4);

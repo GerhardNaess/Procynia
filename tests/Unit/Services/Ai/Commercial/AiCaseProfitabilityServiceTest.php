@@ -323,6 +323,168 @@ class AiCaseProfitabilityServiceTest extends TestCase
     }
 
     /**
+     * Purpose: Verify that Tjenestekatalog monthly price overrides the config price in revenue calculation.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_it_uses_tjenestekatalog_price_over_config_price_for_revenue(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        // Pro plan config price is 990 NOK/month. Tjenestekatalog price is 1500 NOK/month.
+        $customer = $this->createCustomer('Tjenestekatalog Pris AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3, 0);
+        $notice = $this->createSavedNotice($customer->id, 'TJENESTE-PRIS-001', 'Tjenestekatalog Pris Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test-pris-base-plan-monthly',
+            'name' => 'Test Base Plan',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test-pris-monthly',
+            'name' => 'Test Monthly Price',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 150000,
+            'included_ai_offers' => 3,
+            'is_active' => true,
+            'is_recurring' => true,
+            'included_quantity' => 1,
+        ]);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'billing_product_id' => $product->id,
+            'description' => 'Test base plan line',
+            'quantity' => 1,
+            'status' => 'active',
+        ]);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame('ok', $caseRow['revenue_status']);
+        // Tjenestekatalog: 1500 NOK / 3 credits = 500 NOK. Config would give 990 / 3 = 330.
+        $this->assertEqualsWithDelta(500.0, $caseRow['allocated_revenue_nok'], 0.0001);
+        $this->assertEqualsWithDelta(1500.0, $caseRow['monthly_plan_value_nok'], 0.0001);
+    }
+
+    /**
+     * Purpose: Verify that a yearly Tjenestekatalog price is divided by 12 for the monthly equivalent.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_it_uses_monthly_equivalent_from_yearly_tjenestekatalog_price(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Tjenestekatalog Yearly AS', Customer::PLAN_PRO, Customer::BILLING_YEARLY, 12, 0);
+        $notice = $this->createSavedNotice($customer->id, 'TJENESTE-YEARLY-001', 'Tjenestekatalog Yearly Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test-pris-base-plan-yearly',
+            'name' => 'Test Base Plan Yearly',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test-pris-yearly',
+            'name' => 'Test Yearly Price',
+            'interval' => BillingPrice::INTERVAL_YEARLY,
+            'currency' => 'nok',
+            'unit_amount' => 1200000,
+            'included_ai_offers' => 12,
+            'is_active' => true,
+            'is_recurring' => true,
+            'included_quantity' => 1,
+        ]);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'billing_product_id' => $product->id,
+            'description' => 'Test yearly base plan line',
+            'quantity' => 1,
+            'status' => 'active',
+        ]);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame('ok', $caseRow['revenue_status']);
+        // 1200000 øre = 12000 NOK/year → 1000 NOK/month. 1000 / 12 credits = 83.3333 NOK.
+        $this->assertEqualsWithDelta(1000.0, $caseRow['monthly_plan_value_nok'], 0.0001);
+        $this->assertEqualsWithDelta(round(1000.0 / 12, 4), $caseRow['allocated_revenue_nok'], 0.0001);
+    }
+
+    /**
+     * Purpose: Verify that a customer-specific price from billing line metadata overrides the standard catalog price.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_it_uses_customer_specific_price_from_metadata(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Kundespesifikk Pris AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 5, 0);
+        $notice = $this->createSavedNotice($customer->id, 'KUNDEPRIS-001', 'Kundespesifikk Pris Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test-pris-custom-base-plan',
+            'name' => 'Test Custom Base Plan',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test-pris-custom-monthly',
+            'name' => 'Test Custom Monthly Price',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 150000,
+            'included_ai_offers' => 5,
+            'is_active' => true,
+            'is_recurring' => true,
+            'included_quantity' => 1,
+        ]);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'billing_product_id' => $product->id,
+            'description' => 'Kundespesifikk avtalepris',
+            'quantity' => 1,
+            'status' => 'active',
+            'source' => CustomerBillingLine::SOURCE_CUSTOMER_PRICE,
+            'metadata' => ['custom_unit_amount' => 50000],
+        ]);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame('ok', $caseRow['revenue_status']);
+        // custom_unit_amount 50000 øre = 500 NOK. 500 / 5 credits = 100 NOK.
+        $this->assertEqualsWithDelta(500.0, $caseRow['monthly_plan_value_nok'], 0.0001);
+        $this->assertEqualsWithDelta(100.0, $caseRow['allocated_revenue_nok'], 0.0001);
+    }
+
+    /**
      * Purpose: Verify that an active Tjenestekatalog billing line takes priority over the snapshot field.
      * Inputs: None.
      * Returns: None.
