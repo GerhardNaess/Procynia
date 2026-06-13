@@ -56,10 +56,26 @@ class BillingEntitlementService
 
     public function includedAiCredits(Customer $customer): int
     {
+        // Priority 1: active base-plan billing line with included_ai_offers configured (> 0).
+        // A value of 0 is treated as "not configured" because the column defaults to 0 in the
+        // schema — there is no way to distinguish a default 0 from an explicit 0 without a
+        // nullable column (planned in a future migration).
+        $line = $customer->billingLines()
+            ->whereIn('status', ['active', 'pending_cancel'])
+            ->whereHas('billingPrice.product', fn ($q) => $q->where('category', BillingProduct::CATEGORY_BASE_PLAN))
+            ->with('billingPrice')
+            ->first();
+
+        if ($line !== null && ($line->billingPrice?->included_ai_offers ?? 0) > 0) {
+            return (int) $line->billingPrice->included_ai_offers;
+        }
+
+        // Priority 2: customer snapshot written by BillingService::syncPlanMeta.
         if ($customer->included_ai_credits !== null) {
             return (int) $customer->included_ai_credits;
         }
 
+        // Priority 3: plan config fallback for customers without a snapshot.
         return (int) ($customer->planConfig()['included_ai_credits'] ?? 0);
     }
 

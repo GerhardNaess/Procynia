@@ -11,6 +11,7 @@ use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\RequirementExtractionRun;
 use App\Services\Ai\Pricing\AiTokenCostEstimator;
+use App\Services\Billing\BillingEntitlementService;
 use App\Support\CustomerContext;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -297,7 +298,9 @@ class AiForbruk extends Page
             $q->where('id', (int) $this->selectedCustomerId);
         }
 
-        return (int) $q->sum('included_ai_credits');
+        $service = app(BillingEntitlementService::class);
+
+        return (int) $q->get()->sum(fn (Customer $c) => $service->includedAiCredits($c));
     }
 
     // -------------------------------------------------------------------------
@@ -392,9 +395,11 @@ class AiForbruk extends Page
             ->get()
             ->keyBy('customer_id');
 
-        return $customers->map(function (Customer $customer) use ($casesByCustomer): array {
+        $service = app(BillingEntitlementService::class);
+
+        return $customers->map(function (Customer $customer) use ($casesByCustomer, $service): array {
             $cases           = (int) ($casesByCustomer->get($customer->id)?->case_count ?? 0);
-            $limit           = (int) $customer->included_ai_credits;
+            $limit           = $service->includedAiCredits($customer);
             $limitDefined    = $limit > 0;
             $pct             = $limitDefined ? min(100, (int) round($cases / $limit * 100)) : null;
             $status          = $limitDefined

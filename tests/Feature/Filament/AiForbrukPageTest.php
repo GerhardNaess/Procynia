@@ -538,23 +538,21 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('1 / 60');
     }
 
-    public function test_capacity_reads_from_customers_included_ai_credits_not_from_billing_price_ai_offers(): void
+    public function test_capacity_reads_from_active_billing_price_ai_offers_when_available(): void
     {
-        // Documents the current source of AI capacity in AiForbruk:
-        // The ceiling comes from customers.included_ai_credits, NOT from billing_prices.included_ai_offers.
-        // Even when the customer has an active billing line pointing to a BillingPrice with a
-        // different included_ai_offers value (999 here), that value must not influence the display.
+        // When the customer has an active base-plan billing line pointing to a BillingPrice
+        // with included_ai_offers configured (> 0), AiForbruk must use that value as the
+        // capacity ceiling — not customers.included_ai_credits.
+        // This verifies that Tjenestekatalog is the authoritative source when present.
         Carbon::setTestNow('2026-06-13 12:00:00');
 
         $admin = $this->internalAdmin();
-        $customer = $this->createCustomer('Kildekontroll Kunde');
+        $customer = $this->createCustomer('Tjenestekatalog Kapasitet Kunde');
         $customer->update(['included_ai_credits' => 60]);
 
-        // Create a BillingProduct + BillingPrice with included_ai_offers = 999.
-        // This is the Tjenestekatalog field. AiForbruk must not read it as the capacity ceiling.
         $product = BillingProduct::query()->create([
-            'key' => 'test_kildekontroll_plan',
-            'name' => 'Test Kildekontroll Plan',
+            'key' => 'test_tjenestekatalog_plan',
+            'name' => 'Test Tjenestekatalog Plan',
             'category' => BillingProduct::CATEGORY_BASE_PLAN,
             'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
             'is_active' => true,
@@ -562,8 +560,8 @@ class AiForbrukPageTest extends TestCase
         ]);
         $price = BillingPrice::query()->create([
             'billing_product_id' => $product->id,
-            'key' => 'test_kildekontroll_monthly',
-            'name' => 'Test Kildekontroll Månedlig',
+            'key' => 'test_tjenestekatalog_monthly',
+            'name' => 'Test Tjenestekatalog Månedlig',
             'interval' => BillingPrice::INTERVAL_MONTHLY,
             'currency' => 'nok',
             'is_recurring' => true,
@@ -572,8 +570,6 @@ class AiForbrukPageTest extends TestCase
             'included_ai_offers' => 999,
         ]);
 
-        // Link the customer to this BillingPrice via an active billing line.
-        // This simulates a real subscription — the customer IS associated with the 999-offer price.
         CustomerBillingLine::query()->create([
             'customer_id' => $customer->id,
             'billing_product_id' => $product->id,
@@ -584,7 +580,7 @@ class AiForbrukPageTest extends TestCase
             'source' => 'system',
         ]);
 
-        $savedNotice = $this->createSavedNotice($customer, 'KILDEKONTROLL-001', 'Kildekontroll case');
+        $savedNotice = $this->createSavedNotice($customer, 'TJKATALOG-001', 'Tjenestekatalog case');
         $this->createCaseUsage(
             $customer,
             $savedNotice,
@@ -595,9 +591,37 @@ class AiForbrukPageTest extends TestCase
         $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
 
         $response->assertOk();
-        // Ceiling is customers.included_ai_credits = 60, not billing_prices.included_ai_offers = 999.
+        // Tjenestekatalog value (999) takes priority over customer snapshot (60).
+        $response->assertSee('1 / 999');
+        $response->assertDontSee('1 / 60');
+    }
+
+    public function test_capacity_falls_back_to_customer_included_ai_credits_when_no_billing_price_capacity_exists(): void
+    {
+        // When the customer has no active base-plan billing line with included_ai_offers > 0,
+        // AiForbruk must fall back to customers.included_ai_credits.
+        // This covers existing customers whose plans have not yet been configured in Tjenestekatalog.
+        Carbon::setTestNow('2026-06-13 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Fallback Kapasitet Kunde');
+        $customer->update(['included_ai_credits' => 60]);
+
+        // No active CustomerBillingLine — simulates a customer without a catalog-based subscription.
+
+        $savedNotice = $this->createSavedNotice($customer, 'FALLBACK-KAPASITET-001', 'Fallback case');
+        $this->createCaseUsage(
+            $customer,
+            $savedNotice,
+            '2026-06-01 10:00:00',
+            AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        // No catalog price configured — falls back to customers.included_ai_credits = 60.
         $response->assertSee('1 / 60');
-        $response->assertDontSee('1 / 999');
     }
 
     public function test_trend_data_covers_full_selected_period_when_data_stops_early(): void
