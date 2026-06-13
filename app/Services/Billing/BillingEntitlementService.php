@@ -2,8 +2,10 @@
 
 namespace App\Services\Billing;
 
+use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
+use App\Models\CustomerBillingLine;
 use App\Models\User;
 
 class BillingEntitlementService
@@ -60,11 +62,7 @@ class BillingEntitlementService
         // A value of 0 is treated as "not configured" because the column defaults to 0 in the
         // schema — there is no way to distinguish a default 0 from an explicit 0 without a
         // nullable column (planned in a future migration).
-        $line = $customer->billingLines()
-            ->whereIn('status', ['active', 'pending_cancel'])
-            ->whereHas('billingPrice.product', fn ($q) => $q->where('category', BillingProduct::CATEGORY_BASE_PLAN))
-            ->with('billingPrice')
-            ->first();
+        $line = $this->activeBasePlanLine($customer);
 
         if ($line !== null && ($line->billingPrice?->included_ai_offers ?? 0) > 0) {
             return (int) $line->billingPrice->included_ai_offers;
@@ -77,6 +75,53 @@ class BillingEntitlementService
 
         // Priority 3: plan config fallback for customers without a snapshot.
         return (int) ($customer->planConfig()['included_ai_credits'] ?? 0);
+    }
+
+    public function basePlanMonthlyValueNok(Customer $customer): ?float
+    {
+        $line = $this->activeBasePlanLine($customer);
+
+        if ($line === null) {
+            return null;
+        }
+
+        $currency = strtolower((string) ($line->billingPrice?->currency ?? ''));
+
+        if ($currency !== 'nok') {
+            return null;
+        }
+
+        $isCustomPrice = $line->source === CustomerBillingLine::SOURCE_CUSTOMER_PRICE;
+        $metadata = is_array($line->metadata) ? $line->metadata : [];
+
+        if ($isCustomPrice) {
+            $raw = data_get($metadata, 'custom_unit_amount');
+            $amountOere = is_numeric($raw) && (int) $raw > 0 ? (int) $raw : null;
+        } else {
+            $raw = $line->billingPrice?->unit_amount;
+            $amountOere = is_numeric($raw) && (int) $raw > 0 ? (int) $raw : null;
+        }
+
+        if ($amountOere === null) {
+            return null;
+        }
+
+        $interval = $line->billingPrice?->interval;
+
+        return match ($interval) {
+            BillingPrice::INTERVAL_MONTHLY => (float) ($amountOere / 100),
+            BillingPrice::INTERVAL_YEARLY  => (float) ($amountOere / 100 / 12),
+            default                        => null,
+        };
+    }
+
+    private function activeBasePlanLine(Customer $customer): ?CustomerBillingLine
+    {
+        return $customer->billingLines()
+            ->whereIn('status', ['active', 'pending_cancel'])
+            ->whereHas('billingPrice.product', fn ($q) => $q->where('category', BillingProduct::CATEGORY_BASE_PLAN))
+            ->with('billingPrice')
+            ->first();
     }
 
     public function currentBillableUsers(Customer $customer): int
