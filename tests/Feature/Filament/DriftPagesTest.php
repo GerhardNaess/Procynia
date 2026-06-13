@@ -993,6 +993,26 @@ class DriftPagesTest extends TestCase
         $this->assertSame(0, (int) DB::table($table)->count());
     }
 
+    public function test_operational_runbook_view_renders_multiline_summary_with_preserved_whitespace(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $runbook = OperationalRunbook::query()->create([
+            'title' => 'Rutine med avsnitt',
+            'category' => 'general',
+            'summary' => "Første avsnitt.\nAndre avsnitt.\nTredje avsnitt.",
+            'is_active' => true,
+            'sort_order' => 1,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(ViewOperationalRunbook::getUrl(['record' => $runbook]))
+            ->assertOk()
+            ->assertSee('Første avsnitt.')
+            ->assertSee('Andre avsnitt.')
+            ->assertSee('whitespace-pre-wrap', false);
+    }
+
     private function internalAdmin(): User
     {
         return User::query()->create([

@@ -200,10 +200,10 @@ class OperationalRunbookResource extends Resource
                     ->compact()
                     ->visible(fn (OperationalRunbook $record): bool => filled($record->summary))
                     ->schema([
-                        TextEntry::make('summary')
+                        ViewEntry::make('summary')
                             ->hiddenLabel()
-                            ->wrap()
-                            ->columnSpanFull(),
+                            ->columnSpanFull()
+                            ->view('filament.infolists.runbook-summary'),
                     ]),
                 Section::make(__('procynia.operational_runbooks.sections.attachments'))
                     ->description(__('procynia.operational_runbooks.help.attachments'))
