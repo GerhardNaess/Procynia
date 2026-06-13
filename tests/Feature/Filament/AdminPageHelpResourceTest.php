@@ -139,6 +139,26 @@ class AdminPageHelpResourceTest extends TestCase
         $this->assertNull($inactive);
     }
 
+    public function test_ai_profitability_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.ai_profitability')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.ai_profitability mangler i admin_page_helps');
+        $this->assertSame('AI-lønnsomhet', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+
+        $allText = collect($record->sections)
+            ->flatMap(fn ($s) => array_merge([$s['title'] ?? ''], array_column($s['items'] ?? [], 'text')))
+            ->implode(' ');
+
+        $this->assertStringContainsString('Tjenestekatalog', $allText);
+        $this->assertStringContainsString('ikke regnskap', $allText);
+        $this->assertStringContainsString('ikke faktura', $allText);
+    }
+
     private function internalAdmin(): User
     {
         return User::factory()->create([
