@@ -540,7 +540,7 @@ class AiForbruk extends Page
         $usageRows = $usageQ->get()->keyBy('period_key');
         $tokenRows = $tokenQ->get()->keyBy('period_key');
 
-        $allKeys = $usageRows->keys()->merge($tokenRows->keys())->unique()->sort()->values();
+        $allKeys = $this->buildPeriodBuckets($from, $to);
 
         return $allKeys->map(function (string $key) use ($usageRows, $tokenRows, $rateMap): array {
             $usage        = $usageRows->get($key);
@@ -565,6 +565,40 @@ class AiForbruk extends Page
                 'cost_status' => $costData['status'],
             ];
         })->values()->all();
+    }
+
+    /**
+     * Generate a complete ordered list of period bucket keys from $from to $to,
+     * using the same key format as the SQL group-by expressions in buildTrendRows.
+     * Ensures the chart x-axis covers the full selected period even when data is sparse.
+     *
+     * @return \Illuminate\Support\Collection<int, string>
+     */
+    private function buildPeriodBuckets(Carbon $from, Carbon $to): Collection
+    {
+        $buckets = collect();
+
+        if ($this->trendGrouping === 'week') {
+            $cursor = $from->copy()->startOfWeek(Carbon::MONDAY);
+            while ($cursor->lte($to)) {
+                $buckets->push($cursor->format('o-W'));
+                $cursor->addWeek();
+            }
+        } elseif ($this->trendGrouping === 'month') {
+            $cursor = $from->copy()->startOfMonth();
+            while ($cursor->lte($to)) {
+                $buckets->push($cursor->format('Y-m'));
+                $cursor->addMonth();
+            }
+        } else {
+            $cursor = $from->copy()->startOfDay();
+            while ($cursor->lte($to)) {
+                $buckets->push($cursor->format('Y-m-d'));
+                $cursor->addDay();
+            }
+        }
+
+        return $buckets;
     }
 
     /**

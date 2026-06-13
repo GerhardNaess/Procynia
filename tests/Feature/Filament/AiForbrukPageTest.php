@@ -480,6 +480,31 @@ class AiForbrukPageTest extends TestCase
         $response->assertSee('Unik Ledger Kunde');
     }
 
+    public function test_trend_data_covers_full_selected_period_when_data_stops_early(): void
+    {
+        // Period: 2026-05-15 to 2026-06-13 (last30 preset from mount())
+        Carbon::setTestNow('2026-06-13 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Trend Dekning Kunde');
+        $user = $this->createUser($customer);
+
+        // Create one event on 2026-06-03 — 10 days before the period end
+        Carbon::setTestNow('2026-06-03 10:00:00');
+        $this->createUsageEvent($customer, $user, 'draft', AiUsageEvent::STATUS_ALLOWED, 1);
+
+        Carbon::setTestNow('2026-06-13 12:00:00');
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+
+        // The trend table must cover the full period, not just dates with data.
+        // Without the fix, only 2026-06-03 would appear; the period end would be missing.
+        $response->assertSee('2026-06-13'); // last date of period — no events, value must be 0
+        $response->assertSee('2026-05-15'); // first date of period — also no events
+    }
+
     public function test_page_handles_empty_data_cleanly(): void
     {
         Carbon::setTestNow('2026-06-02 12:00:00');
