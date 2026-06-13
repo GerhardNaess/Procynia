@@ -4,8 +4,11 @@ namespace Tests\Unit\Services\Ai\Commercial;
 
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
+use App\Models\BillingPrice;
+use App\Models\BillingProduct;
 use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
+use App\Models\CustomerBillingLine;
 use App\Models\ExchangeRate;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -317,6 +320,74 @@ class AiCaseProfitabilityServiceTest extends TestCase
         $this->assertSame(1, count($report['customers']));
         $this->assertSame(1, count($report['cases']));
         $this->assertSame($noticeIn->id, $report['cases'][0]['saved_notice_id']);
+    }
+
+    /**
+     * Purpose: Verify that an active Tjenestekatalog billing line takes priority over the snapshot field.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_it_reads_included_ai_credits_from_tjenestekatalog_when_billing_line_exists(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Tjenestekatalog Prioritet AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 60, 0);
+        $notice = $this->createSavedNotice($customer->id, 'TJENESTE-001', 'Tjenestekatalog Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $product = BillingProduct::query()->create([
+            'key' => 'test-base-plan-tjeneste',
+            'name' => 'Test Base Plan',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => 'customer',
+            'is_active' => true,
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test-price-tjeneste-monthly',
+            'name' => 'Test Price Monthly',
+            'interval' => 'monthly',
+            'included_ai_offers' => 999,
+            'is_active' => true,
+        ]);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'billing_product_id' => $product->id,
+            'description' => 'Test base plan line',
+            'quantity' => 1,
+            'status' => 'active',
+        ]);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame(999, $caseRow['included_ai_credits']);
+        $this->assertSame('ok', $caseRow['revenue_status']);
+    }
+
+    /**
+     * Purpose: Verify that the snapshot field is used as fallback when no active billing line exists.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_it_falls_back_to_snapshot_when_no_active_billing_line_exists(): void
+    {
+        Carbon::setTestNow('2026-06-15 12:00:00');
+
+        $customer = $this->createCustomer('Snapshot Fallback AS', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 5, 0);
+        $notice = $this->createSavedNotice($customer->id, 'SNAPSHOT-001', 'Snapshot Fallback Case');
+        $this->createCaseUsage($customer, $notice, '2026-06-10 10:00:00', AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD);
+
+        $report = $this->analyze('2026-06-01', '2026-06-30');
+
+        $caseRow = $this->caseRow($report, $notice->id);
+        $this->assertSame(5, $caseRow['included_ai_credits']);
+        $this->assertSame('ok', $caseRow['revenue_status']);
     }
 
     /**

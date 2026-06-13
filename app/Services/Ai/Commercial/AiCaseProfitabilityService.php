@@ -6,6 +6,7 @@ use App\Models\AiTokenEvent;
 use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
 use App\Services\Ai\Pricing\AiTokenCostEstimator;
+use App\Services\Billing\BillingEntitlementService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -19,13 +20,14 @@ use Illuminate\Support\Collection;
 class AiCaseProfitabilityService
 {
     /**
-     * Purpose: Create the profitability service with the historical AI cost estimator.
-     * Inputs: The internal cost estimator dependency.
+     * Purpose: Create the profitability service with the historical AI cost estimator and entitlement service.
+     * Inputs: The internal cost estimator and billing entitlement dependencies.
      * Returns: None.
      * Side effects: None.
      */
     public function __construct(
         private readonly AiTokenCostEstimator $costEstimator,
+        private readonly BillingEntitlementService $billingEntitlementService,
     ) {
     }
 
@@ -470,11 +472,7 @@ class AiCaseProfitabilityService
         $billingInterval = $customer->billing_interval ?? Customer::BILLING_MONTHLY;
         $discountPercent = max(0.0, min(100.0, (float) ($customer->billing_discount_percent ?? 0)));
 
-        if ($customer->included_ai_credits !== null) {
-            $includedAiCredits = (int) $customer->included_ai_credits;
-        } else {
-            $includedAiCredits = (int) ($planConfig['included_ai_credits'] ?? 0);
-        }
+        $includedAiCredits = $this->billingEntitlementService->includedAiCredits($customer);
 
         if ($includedAiCredits <= 0) {
             return $this->missingRevenueProxy($includedAiCredits);
