@@ -4,7 +4,10 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiForbruk;
 use App\Models\AdminPageHelp;
+use App\Models\BillingPrice;
+use App\Models\BillingProduct;
 use App\Models\CustomerAiCaseUsage;
+use App\Models\CustomerBillingLine;
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
@@ -533,6 +536,68 @@ class AiForbrukPageTest extends TestCase
 
         $response->assertOk();
         $response->assertSee('1 / 60');
+    }
+
+    public function test_capacity_reads_from_customers_included_ai_credits_not_from_billing_price_ai_offers(): void
+    {
+        // Documents the current source of AI capacity in AiForbruk:
+        // The ceiling comes from customers.included_ai_credits, NOT from billing_prices.included_ai_offers.
+        // Even when the customer has an active billing line pointing to a BillingPrice with a
+        // different included_ai_offers value (999 here), that value must not influence the display.
+        Carbon::setTestNow('2026-06-13 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $customer = $this->createCustomer('Kildekontroll Kunde');
+        $customer->update(['included_ai_credits' => 60]);
+
+        // Create a BillingProduct + BillingPrice with included_ai_offers = 999.
+        // This is the Tjenestekatalog field. AiForbruk must not read it as the capacity ceiling.
+        $product = BillingProduct::query()->create([
+            'key' => 'test_kildekontroll_plan',
+            'name' => 'Test Kildekontroll Plan',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 99,
+        ]);
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => 'test_kildekontroll_monthly',
+            'name' => 'Test Kildekontroll Månedlig',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 15,
+            'included_ai_offers' => 999,
+        ]);
+
+        // Link the customer to this BillingPrice via an active billing line.
+        // This simulates a real subscription — the customer IS associated with the 999-offer price.
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $product->id,
+            'billing_price_id' => $price->id,
+            'description' => 'Test baseplanlinje',
+            'quantity' => 1,
+            'status' => 'active',
+            'source' => 'system',
+        ]);
+
+        $savedNotice = $this->createSavedNotice($customer, 'KILDEKONTROLL-001', 'Kildekontroll case');
+        $this->createCaseUsage(
+            $customer,
+            $savedNotice,
+            '2026-06-01 10:00:00',
+            AiUsageGuard::OPERATION_SAVED_NOTICE_DOCUMENTS_UPLOAD,
+        );
+
+        $response = $this->actingAs($admin)->get(AiForbruk::getUrl());
+
+        $response->assertOk();
+        // Ceiling is customers.included_ai_credits = 60, not billing_prices.included_ai_offers = 999.
+        $response->assertSee('1 / 60');
+        $response->assertDontSee('1 / 999');
     }
 
     public function test_trend_data_covers_full_selected_period_when_data_stops_early(): void
