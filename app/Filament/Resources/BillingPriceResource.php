@@ -414,7 +414,7 @@ class BillingPriceResource extends Resource
             ->label('Pris')
             ->suffix('kr')
             ->required()
-            ->helperText('Angi pris i kroner. Lagres internt i øre.')
+            ->helperText('Angi pris i kroner. Lagres internt i øre. For baseplaner brukes beløpet som inntektsgrunnlag i AI-lønnsomhet.')
             ->formatStateUsing(function ($state): string {
                 if ($state === null || $state === '') {
                     return '';
@@ -491,7 +491,7 @@ class BillingPriceResource extends Resource
             TextInput::make('tier_key')
                 ->label('Tier-nøkkel')
                 ->maxLength(255)
-                ->helperText('Intern plan- eller nivånøkkel.'),
+                ->helperText('Intern plan- eller nivånøkkel, for eksempel pro, max eller ultra. Brukes til å knytte prislinjen til riktig kommersiell plan og bør ikke endres uten separat avklaring.'),
 
             TextInput::make('product_sort_order')
                 ->label('Visningsrekkefølge')

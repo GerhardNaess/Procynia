@@ -679,6 +679,53 @@ class BillingProductPricesPageTest extends TestCase
         $response->assertSee('Yearly-priser periodiseres til månedlig verdi ved å dele årsbeløpet på 12');
     }
 
+    public function test_unit_amount_helper_text_forklarer_ore_og_inntektsgrunnlag(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key'      => 'base_amount_help_'.Str::lower(Str::random(6)),
+            'name'     => 'Ultra amount help',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key'      => 'ultra_amount_help_'.Str::lower(Str::random(8)),
+            'name'     => 'Ultra månedlig amount help',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('Angi pris i kroner. Lagres internt i øre.');
+        $response->assertSee('For baseplaner brukes beløpet som inntektsgrunnlag i AI-lønnsomhet.');
+    }
+
+    public function test_tier_key_helper_text_forklarer_plan_nokkel_og_advarsel(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key'      => 'base_tierkey_help_'.Str::lower(Str::random(6)),
+            'name'     => 'Ultra tier key help',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key'      => 'ultra_tierkey_help_'.Str::lower(Str::random(8)),
+            'name'     => 'Ultra månedlig tier key help',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'tier_key' => 'ultra',
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('Intern plan- eller nivånøkkel, for eksempel pro, max eller ultra');
+        $response->assertSee('bør ikke endres uten separat avklaring');
+    }
+
     public function test_currency_helper_text_forklarer_nok_krav_for_ai_lønnsomhet(): void
     {
         $admin = $this->internalAdmin();
