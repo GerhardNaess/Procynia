@@ -11,6 +11,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -157,6 +158,75 @@ class BillingCatalogResourcesTest extends TestCase
 
         $response->assertOk();
         $response->assertDontSee('Hjelp — Tjenestekatalog');
+    }
+
+    public function test_included_ai_offers_backfill_sets_correct_values_for_seeded_prices(): void
+    {
+        $expected = ['pro' => 3, 'max' => 20, 'ultra' => 60, 'free' => 0];
+
+        foreach ($expected as $tierKey => $expectedOffers) {
+            $rows = DB::table('billing_prices')->where('tier_key', $tierKey)->get();
+            $this->assertNotEmpty($rows, "Expected seeded prices for tier_key '{$tierKey}'");
+
+            foreach ($rows as $row) {
+                $this->assertSame(
+                    $expectedOffers,
+                    $row->included_ai_offers,
+                    "tier_key '{$tierKey}' should have included_ai_offers = {$expectedOffers}",
+                );
+            }
+        }
+    }
+
+    public function test_included_ai_offers_backfill_does_not_overwrite_existing_nonzero_values(): void
+    {
+        $row = DB::table('billing_prices')->where('tier_key', 'ultra')->first();
+        $this->assertNotNull($row, 'Expected seeded ultra pricing row');
+
+        DB::table('billing_prices')->where('id', $row->id)->update(['included_ai_offers' => 99]);
+
+        foreach (['ultra' => 60, 'max' => 20, 'pro' => 3] as $tierKey => $aiOffers) {
+            DB::table('billing_prices')
+                ->where('tier_key', $tierKey)
+                ->where('included_ai_offers', 0)
+                ->update(['included_ai_offers' => $aiOffers]);
+        }
+
+        $this->assertSame(99, DB::table('billing_prices')->where('id', $row->id)->value('included_ai_offers'));
+    }
+
+    public function test_included_ai_offers_backfill_does_not_touch_unknown_tier_keys(): void
+    {
+        $productId = DB::table('billing_products')->insertGetId([
+            'key'           => 'test_custom_'.Str::lower(Str::random(6)),
+            'name'          => 'Custom Test Plan',
+            'category'      => 'base_plan',
+            'billing_scope' => 'customer',
+            'is_active'     => true,
+            'sort_order'    => 99,
+            'created_at'    => now(),
+            'updated_at'    => now(),
+        ]);
+
+        $priceId = DB::table('billing_prices')->insertGetId([
+            'billing_product_id' => $productId,
+            'key'                => 'custom_monthly_'.Str::lower(Str::random(6)),
+            'name'               => 'Custom Monthly',
+            'interval'           => 'monthly',
+            'tier_key'           => 'unknown_custom_tier',
+            'included_ai_offers' => 0,
+            'created_at'         => now(),
+            'updated_at'         => now(),
+        ]);
+
+        foreach (['ultra' => 60, 'max' => 20, 'pro' => 3] as $tierKey => $aiOffers) {
+            DB::table('billing_prices')
+                ->where('tier_key', $tierKey)
+                ->where('included_ai_offers', 0)
+                ->update(['included_ai_offers' => $aiOffers]);
+        }
+
+        $this->assertSame(0, DB::table('billing_prices')->where('id', $priceId)->value('included_ai_offers'));
     }
 
     private function internalAdmin(): User
