@@ -117,6 +117,48 @@ class BillingCatalogResourcesTest extends TestCase
         $response->assertDontSee('Hjelp — Brukerlisenser');
     }
 
+    public function test_tjenestekatalog_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.tjenestekatalog')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.tjenestekatalog mangler i admin_page_helps');
+        $this->assertSame('Tjenestekatalog', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+
+        $allText = collect($record->sections)
+            ->flatMap(fn ($s) => array_merge([$s['title'] ?? ''], array_column($s['items'] ?? [], 'text')))
+            ->implode(' ');
+
+        $this->assertStringContainsString('included_ai_offers', $allText);
+        $this->assertStringContainsString('AI-forbruk', $allText);
+        $this->assertStringContainsString('AI-lønnsomhet', $allText);
+        $this->assertStringContainsString('NOK', $allText);
+        $this->assertStringContainsString('yearly', $allText);
+        $this->assertStringContainsString('Tjenestekatalog', $allText);
+    }
+
+    public function test_tjenestekatalog_help_action_is_present_when_page_help_record_exists(): void
+    {
+        // admin.tjenestekatalog is seeded by the migration — no separate create needed.
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('index'));
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_tjenestekatalog_page_renders_without_help_action_when_no_record_exists(): void
+    {
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('index'));
+
+        $response->assertOk();
+        $response->assertDontSee('Hjelp — Tjenestekatalog');
+    }
+
     private function internalAdmin(): User
     {
         return User::query()->create([
