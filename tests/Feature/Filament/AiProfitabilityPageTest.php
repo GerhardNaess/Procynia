@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiProfitability;
+use App\Models\AdminPageHelp;
 use App\Models\AiModelPrice;
 use App\Models\AiTokenEvent;
 use App\Models\Customer;
@@ -118,6 +119,27 @@ class AiProfitabilityPageTest extends TestCase
      * Returns: None.
      * Side effects: Writes one customer and one user to the test database.
      */
+    public function test_ai_profitability_page_shows_help_action_when_record_exists(): void
+    {
+        // admin.ai_profitability is seeded by migration 2026_06_13_000001
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(AiProfitability::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_ai_profitability_page_renders_without_help_action_when_no_record_exists(): void
+    {
+        AdminPageHelp::query()->where('page_key', 'admin.ai_profitability')->delete();
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(AiProfitability::getUrl());
+
+        $response->assertOk();
+        $response->assertDontSee('Hjelp — AI-lønnsomhet');
+    }
+
     public function test_customer_admin_cannot_access_ai_profitability_page(): void
     {
         $customer = $this->createCustomer('Tilgangskunde', Customer::PLAN_PRO, Customer::BILLING_MONTHLY, 3);

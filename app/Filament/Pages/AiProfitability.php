@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Models\Customer;
 use App\Services\Ai\Commercial\AiCaseProfitabilityService;
 use App\Support\CustomerContext;
@@ -18,6 +19,8 @@ use UnitEnum;
  */
 class AiProfitability extends Page
 {
+    use HasAdminPageHelp;
+
     protected string $view = 'filament.pages.ai-profitability';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-scale';
@@ -66,6 +69,15 @@ class AiProfitability extends Page
     public static function canAccess(): bool
     {
         return app(CustomerContext::class)->isInternalAdmin();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            $this->buildPageHelpAction(
+                static::fetchPageHelp('admin.ai_profitability')
+            ),
+        ];
     }
 
     public static function getNavigationLabel(): string
