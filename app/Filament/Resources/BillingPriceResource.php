@@ -400,7 +400,8 @@ class BillingPriceResource extends Resource
         $fields[] = Select::make('interval')
             ->label('Intervall')
             ->options(fn (): array => self::intervalOptions())
-            ->required();
+            ->required()
+            ->helperText('AI-lønnsomhet bruker monthly-priser direkte. Yearly-priser periodiseres til månedlig verdi ved å dele årsbeløpet på 12.');
 
         $fields[] = TextInput::make('currency')
             ->label('Valuta')

@@ -656,6 +656,29 @@ class BillingProductPricesPageTest extends TestCase
         ]);
     }
 
+    public function test_interval_helper_text_forklarer_monthly_og_yearly_periodisering(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key'      => 'base_interval_help_'.Str::lower(Str::random(6)),
+            'name'     => 'Ultra interval help',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key'      => 'ultra_interval_help_'.Str::lower(Str::random(8)),
+            'name'     => 'Ultra månedlig interval help',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('AI-lønnsomhet bruker monthly-priser direkte');
+        $response->assertSee('Yearly-priser periodiseres til månedlig verdi ved å dele årsbeløpet på 12');
+    }
+
     public function test_currency_helper_text_forklarer_nok_krav_for_ai_lønnsomhet(): void
     {
         $admin = $this->internalAdmin();
