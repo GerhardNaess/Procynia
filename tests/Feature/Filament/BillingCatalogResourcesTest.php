@@ -93,15 +93,31 @@ class BillingCatalogResourcesTest extends TestCase
         $response->assertSee('Brukerlisenser');
     }
 
+    public function test_brukerlisenser_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.billing.user_licenses')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.billing.user_licenses mangler i admin_page_helps');
+        $this->assertSame('Brukerlisenser', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+
+        $allText = collect($record->sections)
+            ->flatMap(fn ($s) => array_merge([$s['title'] ?? ''], array_column($s['items'] ?? [], 'text')))
+            ->implode(' ');
+
+        $this->assertStringContainsString('Tjenestekatalog', $allText);
+        $this->assertStringContainsString('AI-forbruk', $allText);
+        $this->assertStringContainsString('AI-lønnsomhet', $allText);
+        $this->assertStringContainsString('ikke regnskap', $allText);
+        $this->assertStringContainsString('ikke faktura', $allText);
+    }
+
     public function test_brukerlisenser_help_action_is_present_when_page_help_record_exists(): void
     {
-        AdminPageHelp::create([
-            'page_key'  => 'admin.billing.user_licenses',
-            'title'     => 'Hjelp — Brukerlisenser',
-            'sections'  => [],
-            'is_active' => true,
-        ]);
-
+        // admin.billing.user_licenses is seeded by migration 2026_06_14_000004
         $admin = $this->internalAdmin();
         $response = $this->actingAs($admin)->get(CustomerUserServiceLevelResource::getUrl('index'));
 
