@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Services\Ai\AiUsageReportingService;
 use App\Support\CustomerContext;
 use BackedEnum;
@@ -13,6 +14,8 @@ use UnitEnum;
 
 class AiUsageCapacity extends Page
 {
+    use HasAdminPageHelp;
+
     protected string $view = 'filament.pages.ai-usage-capacity';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-chart-bar';
@@ -105,6 +108,15 @@ class AiUsageCapacity extends Page
     public static function getNavigationLabel(): string
     {
         return (string) __('procynia.ai_usage_capacity.navigation_label');
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            $this->buildPageHelpAction(
+                static::fetchPageHelp('admin.ai_usage_capacity')
+            ),
+        ];
     }
 
     public function mount(AiUsageReportingService $service): void

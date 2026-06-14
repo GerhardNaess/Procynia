@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\AiUsageCapacity;
+use App\Models\AdminPageHelp;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\Language;
@@ -45,6 +46,32 @@ class AiUsageCapacityPageTest extends TestCase
         $response->assertSee(__('procynia.ai_usage_capacity.sections.customers'));
         $response->assertSee(__('procynia.ai_usage_capacity.sections.users'));
         $response->assertSee(__('procynia.ai_usage_capacity.sections.operations'));
+    }
+
+    public function test_ai_usage_capacity_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.ai_usage_capacity')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.ai_usage_capacity mangler i admin_page_helps');
+        $this->assertSame('admin.ai_usage_capacity', $record->page_key);
+        $this->assertSame('AI-bruksmønster og varsler', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+    }
+
+    public function test_ai_usage_capacity_page_shows_help_action_when_page_help_record_exists(): void
+    {
+        Carbon::setTestNow('2026-05-15 12:00:00');
+
+        $admin = $this->internalAdmin();
+        $this->seedAiUsageData();
+
+        $response = $this->actingAs($admin)->get(AiUsageCapacity::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
     }
 
     public function test_ai_usage_capacity_page_is_grouped_under_drift(): void
