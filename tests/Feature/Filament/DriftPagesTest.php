@@ -141,6 +141,29 @@ class DriftPagesTest extends TestCase
         $response->assertSee('Hjelp');
     }
 
+    public function test_operational_runbooks_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.operational_runbooks')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.operational_runbooks mangler i admin_page_helps');
+        $this->assertSame('admin.operational_runbooks', $record->page_key);
+        $this->assertSame('Driftsrutiner', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+    }
+
+    public function test_operational_runbooks_list_page_shows_help_action_when_page_help_record_exists(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $response = $this->actingAs($admin)->get(ListOperationalRunbooks::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
     public function test_non_internal_admin_cannot_open_the_drift_pages(): void
     {
         $customer = $this->createCustomer();
