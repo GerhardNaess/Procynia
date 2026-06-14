@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Filament\Resources\CustomerResource;
 use App\Filament\Resources\CustomerResource\Pages\ManageCustomerBilling;
 use App\Models\Customer;
@@ -13,6 +14,8 @@ use UnitEnum;
 
 class BillingOverview extends Page
 {
+    use HasAdminPageHelp;
+
     protected string $view = 'filament.pages.billing-overview';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
@@ -45,6 +48,15 @@ class BillingOverview extends Page
     public static function canAccess(): bool
     {
         return app(CustomerContext::class)->isInternalAdmin();
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            $this->buildPageHelpAction(
+                static::fetchPageHelp('admin.billing.overview')
+            ),
+        ];
     }
 
     public static function getNavigationLabel(): string

@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BillingOverview;
 use App\Filament\Resources\CustomerResource;
+use App\Models\AdminPageHelp;
 use App\Models\Customer;
 use App\Models\Language;
 use App\Models\Nationality;
@@ -77,6 +78,49 @@ class BillingOverviewPageTest extends TestCase
         ]);
         $response->assertSee('Administrer');
         $response->assertSee(CustomerResource::getUrl('billing', ['record' => $alpha]), false);
+    }
+
+    public function test_billing_overview_page_shows_help_action_when_record_exists(): void
+    {
+        // admin.billing.overview is seeded by migration 2026_06_14_000003
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(BillingOverview::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_billing_overview_page_renders_without_help_action_when_no_record_exists(): void
+    {
+        AdminPageHelp::query()->where('page_key', 'admin.billing.overview')->delete();
+
+        $admin = $this->internalAdmin();
+        $response = $this->actingAs($admin)->get(BillingOverview::getUrl());
+
+        $response->assertOk();
+        $response->assertDontSee('Hjelp — Faktureringsoversikt');
+    }
+
+    public function test_billing_overview_page_help_record_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.billing.overview')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.billing.overview mangler i admin_page_helps');
+        $this->assertSame('Faktureringsoversikt', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+
+        $allText = collect($record->sections)
+            ->flatMap(fn ($s) => array_merge([$s['title'] ?? ''], array_column($s['items'] ?? [], 'text')))
+            ->implode(' ');
+
+        $this->assertStringContainsString('Tjenestekatalog', $allText);
+        $this->assertStringContainsString('AI-forbruk', $allText);
+        $this->assertStringContainsString('AI-lønnsomhet', $allText);
+        $this->assertStringContainsString('ikke regnskap', $allText);
+        $this->assertStringContainsString('ikke faktura', $allText);
     }
 
     public function test_customer_admin_cannot_access_billing_overview(): void
