@@ -406,7 +406,8 @@ class BillingPriceResource extends Resource
             ->label('Valuta')
             ->required()
             ->maxLength(10)
-            ->default('nok');
+            ->default('nok')
+            ->helperText('AI-lønnsomhet bruker kun priser med valuta nok som inntektsgrunnlag. Andre valutaer blir ikke brukt i lønnsomhetsberegningen.');
 
         $fields[] = TextInput::make('unit_amount')
             ->label('Pris')

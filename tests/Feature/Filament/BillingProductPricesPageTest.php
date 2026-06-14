@@ -656,6 +656,29 @@ class BillingProductPricesPageTest extends TestCase
         ]);
     }
 
+    public function test_currency_helper_text_forklarer_nok_krav_for_ai_lønnsomhet(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key'      => 'base_currency_help_'.Str::lower(Str::random(6)),
+            'name'     => 'Ultra currency help',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key'      => 'ultra_currency_help_'.Str::lower(Str::random(8)),
+            'name'     => 'Ultra månedlig currency help',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('AI-lønnsomhet bruker kun priser med valuta nok som inntektsgrunnlag');
+        $response->assertSee('Andre valutaer blir ikke brukt i lønnsomhetsberegningen');
+    }
+
     public function test_included_ai_offers_helper_text_forklarer_ai_forbruk_og_fallback(): void
     {
         $admin = $this->internalAdmin();
