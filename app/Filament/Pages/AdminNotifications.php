@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Models\AdminNotification;
 use App\Support\CustomerContext;
 use BackedEnum;
@@ -10,6 +11,8 @@ use UnitEnum;
 
 class AdminNotifications extends Page
 {
+    use HasAdminPageHelp;
+
     protected string $view = 'filament.pages.admin-notifications';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-bell-alert';
@@ -40,6 +43,15 @@ class AdminNotifications extends Page
     public static function getNavigationLabel(): string
     {
         return 'Varsler';
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            $this->buildPageHelpAction(
+                static::fetchPageHelp('admin.notifications')
+            ),
+        ];
     }
 
     public function getTitle(): string
