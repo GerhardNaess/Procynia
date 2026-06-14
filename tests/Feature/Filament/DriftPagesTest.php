@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BackupRecovery;
+use App\Models\AdminPageHelp;
 use App\Filament\Pages\AdminNotifications;
 use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
@@ -106,6 +107,38 @@ class DriftPagesTest extends TestCase
         $this->actingAs($admin)->get(QueueScheduler::getUrl())->assertOk()->assertSee('Queue and scheduler');
         $this->actingAs($admin)->get(Incidents::getUrl())->assertOk()->assertSee('Incidents');
         $this->actingAs($admin)->get(BackupRecovery::getUrl())->assertOk()->assertSee('Sikkerhetskopi og gjenoppretting');
+    }
+
+    public function test_system_status_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.system_status')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.system_status mangler i admin_page_helps');
+        $this->assertSame('Systemstatus', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+
+        $allText = collect($record->sections)
+            ->flatMap(fn ($section) => array_merge([$section['title'] ?? ''], array_column($section['items'] ?? [], 'text')))
+            ->implode(' ');
+
+        $this->assertStringContainsString('Driftsrutiner', $allText);
+        $this->assertStringContainsString('Avvik og forbedringer', $allText);
+        $this->assertStringContainsString('Sikkerhetskopi og gjenoppretting', $allText);
+        $this->assertStringContainsString('Importkjøringer', $allText);
+        $this->assertStringContainsString('Synkroniseringslogg', $allText);
+    }
+
+    public function test_system_status_page_shows_help_action_when_page_help_record_exists(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $response = $this->actingAs($admin)->get(SystemStatus::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
     }
 
     public function test_non_internal_admin_cannot_open_the_drift_pages(): void

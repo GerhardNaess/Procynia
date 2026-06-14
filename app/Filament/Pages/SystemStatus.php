@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasAdminPageHelp;
 use App\Services\Operations\QueueSchedulerHealthService;
 use App\Services\Operations\RuntimeStatusService;
 use App\Support\CustomerContext;
@@ -17,6 +18,8 @@ use UnitEnum;
 
 class SystemStatus extends Page
 {
+    use HasAdminPageHelp;
+
     protected string $view = 'filament.pages.system-status';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedServerStack;
@@ -70,6 +73,10 @@ class SystemStatus extends Page
                 ->modalCancelActionLabel((string) __('procynia.system_status.actions.cancel'))
                 ->visible(fn (): bool => (int) ($this->snapshot['failed_jobs_count'] ?? 0) > 0)
                 ->action(fn () => $this->handleClearFailedJobs()),
+
+            $this->buildPageHelpAction(
+                static::fetchPageHelp('admin.system_status')
+            ),
         ];
     }
 
