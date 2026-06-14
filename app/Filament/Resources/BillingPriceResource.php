@@ -457,7 +457,7 @@ class BillingPriceResource extends Resource
             ->minValue(0)
             ->default(0)
             ->required()
-            ->helperText('Antall tilbud som kan lages med bruk av AI.');
+            ->helperText('Styrer AI-kapasitet i Fakturering → AI-forbruk. Må settes over 0 på betalte baseplaner (pro, max, ultra). Dersom feltet er 0, bruker systemet eldre kapasitetsdata fra kunden som fallback.');
 
         $fields[] = Toggle::make('is_active')
             ->label('Aktiv')

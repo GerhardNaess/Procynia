@@ -235,7 +235,7 @@ class BillingProductPricesPageTest extends TestCase
         $response->assertSee('Inkludert antall brukere');
         $response->assertSee('Antall brukere som er inkludert i denne prisen.');
         $response->assertSee('Inkludert antall AI-tilbud');
-        $response->assertSee('Antall tilbud som kan lages med bruk av AI.');
+        $response->assertSee('Styrer AI-kapasitet i Fakturering');
 
         // Krav 11: Pris i kroner vises
         $response->assertSee('Pris');
@@ -528,7 +528,7 @@ class BillingProductPricesPageTest extends TestCase
         $response->assertSee('Inkludert antall brukere');
         $response->assertSee('Antall brukere som er inkludert i denne prisen.');
         $response->assertSee('Inkludert antall AI-tilbud');
-        $response->assertSee('Antall tilbud som kan lages med bruk av AI.');
+        $response->assertSee('Styrer AI-kapasitet i Fakturering');
         $response->assertDontSee('Inkludert antall"');
         $response->assertDontSee('Bruk 0 hvis dette ikke er relevant.');
     }
@@ -654,6 +654,35 @@ class BillingProductPricesPageTest extends TestCase
             'id' => $price->id,
             'included_ai_offers' => 0,
         ]);
+    }
+
+    public function test_included_ai_offers_helper_text_forklarer_ai_forbruk_og_fallback(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $product = $this->createProduct([
+            'key'      => 'base_helpertext_'.Str::lower(Str::random(6)),
+            'name'     => 'Ultra helpertext',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+        ]);
+
+        $price = $this->createPrice($product, [
+            'key'                => 'ultra_helpertext_'.Str::lower(Str::random(8)),
+            'name'               => 'Ultra månedlig helpertext',
+            'interval'           => BillingPrice::INTERVAL_MONTHLY,
+            'unit_amount'        => 649000,
+            'included_ai_offers' => 0,
+            'is_active'          => true,
+        ]);
+
+        $response = $this->actingAs($admin)->get(BillingPriceResource::getUrl('edit', ['record' => $price]));
+
+        $response->assertOk();
+        $response->assertSee('Styrer AI-kapasitet i Fakturering');
+        $response->assertSee('AI-forbruk');
+        $response->assertSee('Må settes over 0 på betalte baseplaner (pro, max, ultra)');
+        $response->assertSee('eldre kapasitetsdata fra kunden som fallback');
+        $response->assertDontSee('Antall tilbud som kan lages med bruk av AI.');
     }
 
     public function test_beskrivelse_og_visningsrekkefølge_kan_redigeres_fra_tjenestekatalog(): void
