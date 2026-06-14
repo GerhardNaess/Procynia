@@ -11,6 +11,7 @@ use App\Filament\Pages\QueueScheduler;
 use App\Filament\Pages\SystemStatus;
 use App\Filament\Resources\DoffinImportRunResource;
 use App\Filament\Resources\SyncLogResource;
+use App\Filament\Resources\SyncLogResource\Pages\ListSyncLogs;
 use App\Filament\Resources\OperationalRunbookResource;
 use App\Filament\Resources\OperationalRunbookResource\Pages\CreateOperationalRunbook;
 use App\Filament\Resources\OperationalRunbookResource\Pages\EditOperationalRunbook;
@@ -159,6 +160,29 @@ class DriftPagesTest extends TestCase
         $admin = $this->internalAdmin();
 
         $response = $this->actingAs($admin)->get(ListOperationalRunbooks::getUrl());
+
+        $response->assertOk();
+        $response->assertSee('Hjelp');
+    }
+
+    public function test_sync_logs_page_help_is_seeded_by_migration(): void
+    {
+        $record = AdminPageHelp::query()
+            ->where('page_key', 'admin.sync_logs')
+            ->first();
+
+        $this->assertNotNull($record, 'admin.sync_logs mangler i admin_page_helps');
+        $this->assertSame('admin.sync_logs', $record->page_key);
+        $this->assertSame('Synkroniseringslogg', $record->title);
+        $this->assertTrue($record->is_active);
+        $this->assertCount(5, $record->sections);
+    }
+
+    public function test_sync_logs_list_page_shows_help_action_when_page_help_record_exists(): void
+    {
+        $admin = $this->internalAdmin();
+
+        $response = $this->actingAs($admin)->get(ListSyncLogs::getUrl());
 
         $response->assertOk();
         $response->assertSee('Hjelp');
