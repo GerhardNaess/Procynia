@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
@@ -57,6 +58,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeChunkMetadataGenerationService $knowledgeChunkMetadataGenerationService,
         private readonly KnowledgeDocumentSummaryGenerationService $knowledgeDocumentSummaryGenerationService,
         private readonly KnowledgeChunkVocabularyCandidateService $knowledgeChunkVocabularyCandidateService,
+        private readonly KnowledgeMetadataVocabularyService $knowledgeMetadataVocabularyService,
         private readonly PdfFigurePreviewRenderer $pdfFigurePreviewRenderer,
         private readonly AiUsageGuard $aiUsageGuard,
     ) {
@@ -242,6 +244,7 @@ class KnowledgeBaseController extends Controller
         return Inertia::render('App/AI/KnowledgeBase/Create', [
             'pageTitle' => 'Kunnskapsdokumenter · Last opp',
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'defaultDocumentType' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'storeUrl' => route('app.ai.knowledge-base.store'),
             'indexUrl' => route('app.ai.knowledge-base.index'),
@@ -372,6 +375,7 @@ class KnowledgeBaseController extends Controller
             'pageTitle' => 'Kunnskapsdokumenter · Rediger',
             'knowledgeItem' => $this->documentFormPayload($record),
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'updateUrl' => route('app.ai.knowledge-base.update', ['knowledgeItem' => $record->id]),
             'deleteUrl' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $record->id]),
             'indexUrl' => route('app.ai.knowledge-base.index'),
@@ -729,6 +733,53 @@ class KnowledgeBaseController extends Controller
             ],
             KnowledgeItem::DOCUMENT_TYPES,
         );
+    }
+
+    /**
+     * Purpose: Build the approved document theme options for one customer.
+     * Inputs: The customer id.
+     * Returns: A stable option list for document-theme selection.
+     * Side effects: None.
+     */
+    private function documentThemeOptionsForCustomer(int $customerId): array
+    {
+        $catalog = $this->knowledgeMetadataVocabularyService->buildCatalogForCustomer($customerId);
+        $themeTerms = data_get($catalog, 'groups.'.KnowledgeMetadataTerm::TYPE_THEME_TAG, []);
+
+        if (! is_array($themeTerms)) {
+            return [];
+        }
+
+        $options = array_values(array_filter(array_map(
+            static function (array $term): ?array {
+                $id = (int) data_get($term, 'id');
+                $label = trim((string) data_get($term, 'canonical_name', ''));
+                $type = (string) data_get($term, 'type', '');
+
+                if ($id <= 0 || $label === '' || $type !== KnowledgeMetadataTerm::TYPE_THEME_TAG) {
+                    return null;
+                }
+
+                return [
+                    'id' => $id,
+                    'label' => $label,
+                    'type' => $type,
+                ];
+            },
+            $themeTerms,
+        )));
+
+        usort(
+            $options,
+            static function (array $left, array $right): int {
+                return strcmp(
+                    mb_strtolower((string) data_get($left, 'label', ''), 'UTF-8'),
+                    mb_strtolower((string) data_get($right, 'label', ''), 'UTF-8'),
+                ) ?: ((int) data_get($left, 'id', 0) <=> (int) data_get($right, 'id', 0));
+            },
+        );
+
+        return $options;
     }
 
     /**

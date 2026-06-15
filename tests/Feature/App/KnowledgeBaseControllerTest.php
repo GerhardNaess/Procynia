@@ -122,6 +122,109 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_base_create_and_edit_pages_expose_filtered_document_theme_options(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Three Theme Options AS');
+        $foreignContext = $this->customerContext('Customer Three Theme Options Foreign AS');
+
+        $approvedLateTheme = $this->createKnowledgeThemeTerm($context['customer'], 'Zulu tema');
+        $approvedEarlyTheme = $this->createKnowledgeThemeTerm($context['customer'], 'Alfa tema');
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            'canonical_name' => 'Skjult tema',
+            'synonyms' => ['skjult'],
+            'description' => 'Skal ikke vises fordi den ikke er godkjent.',
+            'approved' => false,
+        ]);
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $foreignContext['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            'canonical_name' => 'Fremmed tema',
+            'synonyms' => ['fremmed'],
+            'description' => 'Skal ikke vises fordi den tilhører en annen kunde.',
+            'approved' => true,
+        ]);
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_DOCUMENT_TYPE,
+            'canonical_name' => 'Dokumentkategori',
+            'synonyms' => ['kategori'],
+            'description' => 'Skal ikke vises fordi den har feil term-type.',
+            'approved' => true,
+        ]);
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_TOPIC,
+            'canonical_name' => 'Tema fra chunk',
+            'synonyms' => ['chunk-tema'],
+            'description' => 'Skal ikke vises fordi den ikke er dokumenttema.',
+            'approved' => true,
+        ]);
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_SUB_TOPIC,
+            'canonical_name' => 'Underemne fra chunk',
+            'synonyms' => ['chunk-underemne'],
+            'description' => 'Skal ikke vises fordi den ikke er dokumenttema.',
+            'approved' => true,
+        ]);
+
+        KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_SERVICE_PRODUCT_TAG,
+            'canonical_name' => 'Tjenesteprodukt',
+            'synonyms' => ['produkt'],
+            'description' => 'Skal ikke vises fordi den ikke er dokumenttema.',
+            'approved' => true,
+        ]);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-options.docx', 'Document content used to open the edit page.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-options.docx')
+            ->firstOrFail();
+
+        $expectedOptions = [
+            [
+                'id' => $approvedEarlyTheme->id,
+                'label' => $approvedEarlyTheme->canonical_name,
+                'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            ],
+            [
+                'id' => $approvedLateTheme->id,
+                'label' => $approvedLateTheme->canonical_name,
+                'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            ],
+        ];
+
+        $createResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.create'));
+        $createResponse->assertOk();
+        $createResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Create'
+                && data_get($page, 'props.documentThemeOptions') === $expectedOptions;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($page, 'props.documentThemeOptions') === $expectedOptions;
+        });
+    }
+
     public function test_knowledge_base_index_payload_exposes_document_theme_metadata_and_nulls_when_missing(): void
     {
         Storage::fake('local');
