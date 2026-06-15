@@ -1095,7 +1095,7 @@ return [
         'copy_result_empty' => 'Nothing to copy',
         'copy_result_copied' => 'Copied',
         'unknown_document_title' => 'Unknown document',
-        'document_type_label' => 'Document type',
+        'document_type_label' => 'Document category',
         'requirement_total_prefix' => 'total',
         'requirement_prompt_button' => 'Open individual prompt for this requirement',
         'requirement_generate_button' => 'Generate answer draft for this requirement',

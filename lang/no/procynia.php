@@ -1095,7 +1095,7 @@ return [
         'copy_result_empty' => 'Ingenting å kopiere',
         'copy_result_copied' => 'Kopiert',
         'unknown_document_title' => 'Ukjent dokument',
-        'document_type_label' => 'Dokumenttype',
+        'document_type_label' => 'Dokumentkategori',
         'requirement_total_prefix' => 'totalt',
         'requirement_prompt_button' => 'Åpne individuell prompt for dette kravet',
         'requirement_generate_button' => 'Generer svarutkast for dette kravet',
