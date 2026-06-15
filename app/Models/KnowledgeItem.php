@@ -8,6 +8,22 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class KnowledgeItem extends Model
 {
+    public const OWNERSHIP_TYPE_COMPANY = 'company';
+
+    public const OWNERSHIP_TYPE_PERSONAL = 'personal';
+
+    public const OWNERSHIP_TYPE_CASE = 'case';
+
+    public const OWNERSHIP_TYPES = [
+        self::OWNERSHIP_TYPE_COMPANY,
+        self::OWNERSHIP_TYPE_PERSONAL,
+        self::OWNERSHIP_TYPE_CASE,
+    ];
+
+    protected $attributes = [
+        'ownership_type' => self::OWNERSHIP_TYPE_COMPANY,
+    ];
+
     public const DOCUMENT_TYPE_COMPANY = 'company';
 
     public const DOCUMENT_TYPE_METHOD = 'method';
@@ -74,6 +90,7 @@ class KnowledgeItem extends Model
 
     protected $fillable = [
         'customer_id',
+        'ownership_type',
         'title',
         'content',
         'original_filename',
@@ -86,6 +103,8 @@ class KnowledgeItem extends Model
         'summary',
         'extraction_status',
         'extraction_error',
+        'owner_user_id',
+        'owning_saved_notice_id',
         'uploaded_by_user_id',
         'is_active',
     ];
@@ -94,6 +113,8 @@ class KnowledgeItem extends Model
     {
         return [
             'file_size_bytes' => 'integer',
+            'owner_user_id' => 'integer',
+            'owning_saved_notice_id' => 'integer',
             'uploaded_by_user_id' => 'integer',
             'is_active' => 'boolean',
         ];
@@ -109,10 +130,47 @@ class KnowledgeItem extends Model
         return $this->belongsTo(User::class, 'uploaded_by_user_id');
     }
 
+    /**
+     * Purpose: Resolve the user who owns this knowledge document.
+     * Inputs: None.
+     * Returns: The related owner user relation.
+     * Side effects: None.
+     */
+    public function owner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    /**
+     * Purpose: Resolve the SavedNotice that owns this knowledge document when it is case-scoped.
+     * Inputs: None.
+     * Returns: The related saved notice relation.
+     * Side effects: None.
+     */
+    public function owningSavedNotice(): BelongsTo
+    {
+        return $this->belongsTo(SavedNotice::class, 'owning_saved_notice_id');
+    }
+
     public function chunks(): HasMany
     {
         return $this->hasMany(KnowledgeItemChunk::class)
             ->orderBy('chunk_index');
+    }
+
+    public function isCompanyOwned(): bool
+    {
+        return $this->ownership_type === self::OWNERSHIP_TYPE_COMPANY;
+    }
+
+    public function isPersonalOwned(): bool
+    {
+        return $this->ownership_type === self::OWNERSHIP_TYPE_PERSONAL;
+    }
+
+    public function isCaseOwned(): bool
+    {
+        return $this->ownership_type === self::OWNERSHIP_TYPE_CASE;
     }
 
     /**

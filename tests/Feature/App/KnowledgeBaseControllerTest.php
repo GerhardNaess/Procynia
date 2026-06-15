@@ -152,6 +152,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertTrue(Storage::disk('local')->exists($document->storage_path));
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $document->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $document->content_type);
+        $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_COMPANY, $document->ownership_type);
         $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $document->extraction_status);
         $this->assertSame('', (string) $document->extraction_error);
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));

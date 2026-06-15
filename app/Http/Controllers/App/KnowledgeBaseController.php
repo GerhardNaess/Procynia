@@ -304,6 +304,7 @@ class KnowledgeBaseController extends Controller
                 $knowledgeDocument = KnowledgeItem::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $request->user()?->id,
+                    'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
                     'title' => $payload['document']->getClientOriginalName(),
                     'content' => $extractedText !== ''
                         ? $extractedText
