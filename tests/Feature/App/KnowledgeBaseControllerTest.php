@@ -2642,48 +2642,191 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($initialChunkCount, $updatedChunkCount);
     }
 
-    public function test_knowledge_document_store_and_update_ignore_document_theme_term_id_for_now(): void
+    public function test_knowledge_document_store_persists_valid_document_theme_term_id_and_defaults_to_null_when_missing(): void
     {
         Storage::fake('local');
 
-        $context = $this->customerContext('Customer Theme Write AS');
-        $firstThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Strategisk risiko');
-        $secondThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Operativ styring');
+        $context = $this->customerContext('Customer Theme Store AS');
+        $themeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Strategisk risiko');
 
-        $storeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
-            'document' => $this->createDocxUpload('theme-write.docx', 'Document content used to verify theme write behavior.'),
+        $storeWithThemeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-store.docx', 'Document content used to verify theme write behavior.'),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_BOILERPLATE,
             'is_active' => true,
-            'document_theme_term_id' => $firstThemeTerm->id,
+            'document_theme_term_id' => $themeTerm->id,
         ]);
 
-        $storeResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+        $storeWithThemeResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $themedDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-store.docx')
+            ->firstOrFail();
+
+        $this->assertSame($themeTerm->id, $themedDocument->document_theme_term_id);
+        $this->assertSame($themeTerm->id, $themedDocument->documentThemeTerm?->id);
+        $this->assertSame(KnowledgeMetadataTerm::TYPE_THEME_TAG, $themedDocument->documentThemeTerm?->type);
+        $this->assertSame($themeTerm->canonical_name, $themedDocument->documentThemeTerm?->canonical_name);
+
+        $storeWithoutThemeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-store-empty.docx', 'Document content used to verify null theme behavior.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_BOILERPLATE,
+            'is_active' => true,
+        ]);
+
+        $storeWithoutThemeResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $plainDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-store-empty.docx')
+            ->firstOrFail();
+
+        $this->assertNull($plainDocument->document_theme_term_id);
+        $this->assertFalse($plainDocument->hasDocumentTheme());
+        $this->assertNull($plainDocument->documentThemeTerm);
+    }
+
+    public function test_knowledge_document_update_persists_preserves_and_clears_document_theme_term_id(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Theme Update AS');
+        $initialThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Strategisk risiko');
+        $replacementThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Operativ styring');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-update.docx', 'Document content used to verify theme update behavior.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_BOILERPLATE,
+            'is_active' => true,
+            'document_theme_term_id' => $initialThemeTerm->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-write.docx')
+            ->where('original_filename', 'theme-update.docx')
             ->firstOrFail();
 
-        $this->assertNull($document->document_theme_term_id, 'Store must ignore document_theme_term_id until the UI is ready.');
-
-        $document->forceFill([
-            'document_theme_term_id' => $firstThemeTerm->id,
-        ])->save();
-
-        $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+        $updateWithThemeResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'is_active' => false,
-            'document_theme_term_id' => $secondThemeTerm->id,
+            'document_theme_term_id' => $replacementThemeTerm->id,
         ]);
 
-        $updateResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+        $updateWithThemeResponse->assertRedirect(route('app.ai.knowledge-base.index'));
 
         $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
         $this->assertFalse((bool) $updatedDocument->is_active);
-        $this->assertSame($firstThemeTerm->id, $updatedDocument->document_theme_term_id, 'Update must ignore document_theme_term_id until the UI is ready.');
+        $this->assertSame($replacementThemeTerm->id, $updatedDocument->document_theme_term_id);
+        $this->assertSame($replacementThemeTerm->id, $updatedDocument->documentThemeTerm?->id);
+
+        $preserveResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ]);
+
+        $preserveResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $preservedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $preservedDocument->document_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $preservedDocument->content_type);
+        $this->assertTrue((bool) $preservedDocument->is_active);
+        $this->assertSame($replacementThemeTerm->id, $preservedDocument->document_theme_term_id);
+
+        $clearResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_theme_term_id' => null,
+        ]);
+
+        $clearResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $clearedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $clearedDocument->document_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $clearedDocument->content_type);
+        $this->assertTrue((bool) $clearedDocument->is_active);
+        $this->assertNull($clearedDocument->document_theme_term_id);
+        $this->assertFalse($clearedDocument->hasDocumentTheme());
+        $this->assertNull($clearedDocument->documentThemeTerm);
+    }
+
+    public function test_knowledge_document_store_and_update_reject_invalid_document_theme_term_id_values(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Theme Validation AS');
+        $foreignContext = $this->customerContext('Customer Theme Validation Foreign AS');
+        $validThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Gyldig tema');
+
+        $foreignThemeTerm = $this->createKnowledgeThemeTerm($foreignContext['customer'], 'Fremmed tema');
+        $unapprovedThemeTerm = KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            'canonical_name' => 'Skjult tema',
+            'synonyms' => ['skjult'],
+            'description' => 'Skal ikke kunne velges fordi den ikke er godkjent.',
+            'approved' => false,
+        ]);
+        $wrongTypeTerm = KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $context['customer']->id,
+            'type' => KnowledgeMetadataTerm::TYPE_DOCUMENT_TYPE,
+            'canonical_name' => 'Dokumentkategori',
+            'synonyms' => ['kategori'],
+            'description' => 'Skal ikke kunne velges fordi typen er feil.',
+            'approved' => true,
+        ]);
+
+        $invalidThemeIds = [
+            $foreignThemeTerm->id,
+            $unapprovedThemeTerm->id,
+            $wrongTypeTerm->id,
+        ];
+
+        foreach ($invalidThemeIds as $index => $invalidThemeId) {
+            $filename = sprintf('invalid-theme-%d.docx', $index + 1);
+
+            $storeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+                'document' => $this->createDocxUpload($filename, 'Store validation content.'),
+                'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+                'is_active' => true,
+                'document_theme_term_id' => $invalidThemeId,
+            ]);
+
+            $storeResponse->assertSessionHasErrors(['document_theme_term_id']);
+            $this->assertDatabaseMissing('knowledge_items', [
+                'customer_id' => $context['customer']->id,
+                'original_filename' => $filename,
+            ]);
+        }
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('valid-theme-update.docx', 'Document content used to verify invalid update behavior.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_theme_term_id' => $validThemeTerm->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'valid-theme-update.docx')
+            ->firstOrFail();
+
+        foreach ($invalidThemeIds as $invalidThemeId) {
+            $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+                'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+                'is_active' => false,
+                'document_theme_term_id' => $invalidThemeId,
+            ]);
+
+            $updateResponse->assertSessionHasErrors(['document_theme_term_id']);
+
+            $document->refresh();
+            $this->assertSame($validThemeTerm->id, $document->document_theme_term_id);
+        }
     }
 
     public function test_knowledge_document_destroy_removes_the_database_row_chunks_and_file(): void

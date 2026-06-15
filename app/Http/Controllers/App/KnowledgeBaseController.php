@@ -260,7 +260,7 @@ class KnowledgeBaseController extends Controller
     public function store(Request $request): RedirectResponse
     {
         [$user, $customerId] = $this->frontendContext($request);
-        $payload = $this->validatedStorePayload($request);
+        $payload = $this->validatedStorePayload($request, $customerId);
         $customer = Customer::query()->findOrFail($customerId);
         $this->assertAiAccess($customer);
         $usageWarning = $this->aiUsageGuard->assertCanStartAiOperation(
@@ -321,6 +321,7 @@ class KnowledgeBaseController extends Controller
                     'file_size_bytes' => (int) $payload['document']->getSize(),
                     'content_type' => $payload['document_type'],
                     'document_type' => $payload['document_type'],
+                    'document_theme_term_id' => $payload['document_theme_term_id'],
                     'extracted_text' => $extractedText,
                     'extraction_status' => $extractionFailed
                         ? KnowledgeItem::EXTRACTION_STATUS_FAILED
@@ -392,13 +393,19 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
-        $payload = $this->validatedUpdatePayload($request);
+        $payload = $this->validatedUpdatePayload($request, $customerId);
 
-        $record->forceFill([
+        $updates = [
             'document_type' => $payload['document_type'],
             'content_type' => $payload['document_type'],
             'is_active' => $payload['is_active'],
-        ])->save();
+        ];
+
+        if (array_key_exists('document_theme_term_id', $payload)) {
+            $updates['document_theme_term_id'] = $payload['document_theme_term_id'];
+        }
+
+        $record->forceFill($updates)->save();
 
         return redirect()
             ->route('app.ai.knowledge-base.index')
@@ -585,18 +592,22 @@ class KnowledgeBaseController extends Controller
      * Returns: A normalized payload ready for persistence.
      * Side effects: Throws validation errors when the request is invalid.
      */
-    private function validatedStorePayload(Request $request): array
+    private function validatedStorePayload(Request $request, int $customerId): array
     {
         $validated = $request->validate([
             'document' => ['required', 'file', 'mimes:pdf,docx,xlsx', 'max:20480'],
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'is_active' => ['required', 'boolean'],
+            'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
 
         return [
             'document' => $validated['document'],
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'is_active' => (bool) $validated['is_active'],
+            'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
+                ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
+                : null,
         ];
     }
 
@@ -606,17 +617,24 @@ class KnowledgeBaseController extends Controller
      * Returns: A normalized payload ready for persistence.
      * Side effects: Throws validation errors when the request is invalid.
      */
-    private function validatedUpdatePayload(Request $request): array
+    private function validatedUpdatePayload(Request $request, int $customerId): array
     {
         $validated = $request->validate([
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'is_active' => ['required', 'boolean'],
+            'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
 
-        return [
+        $payload = [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'is_active' => (bool) $validated['is_active'],
         ];
+
+        if (array_key_exists('document_theme_term_id', $validated)) {
+            $payload['document_theme_term_id'] = $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id']);
+        }
+
+        return $payload;
     }
 
     /**
@@ -780,6 +798,54 @@ class KnowledgeBaseController extends Controller
         );
 
         return $options;
+    }
+
+    /**
+     * Purpose: Build the list of approved document theme term ids for one customer.
+     * Inputs: The customer id.
+     * Returns: A stable list of theme term ids.
+     * Side effects: None.
+     *
+     * @return array<int, int>
+     */
+    private function documentThemeTermIdsForCustomer(int $customerId): array
+    {
+        return array_values(array_filter(
+            array_map(
+                static fn (array $option): int => (int) data_get($option, 'id', 0),
+                $this->documentThemeOptionsForCustomer($customerId),
+            ),
+            static fn (int $termId): bool => $termId > 0,
+        ));
+    }
+
+    /**
+     * Purpose: Build the validation rules for a customer-scoped document theme term id.
+     * Inputs: The customer id.
+     * Returns: Validation rules that only accept approved theme terms for the current customer.
+     * Side effects: None.
+     *
+     * @return array<int, mixed>
+     */
+    private function documentThemeValidationRulesForCustomer(int $customerId): array
+    {
+        return [
+            'sometimes',
+            'nullable',
+            'integer',
+            Rule::in($this->documentThemeTermIdsForCustomer($customerId)),
+        ];
+    }
+
+    /**
+     * Purpose: Normalize an optional document theme term id after validation.
+     * Inputs: A validated raw theme term id.
+     * Returns: An integer id or null.
+     * Side effects: None.
+     */
+    private function normalizeNullableDocumentThemeTermId(mixed $value): ?int
+    {
+        return $value === null ? null : (int) $value;
     }
 
     /**
