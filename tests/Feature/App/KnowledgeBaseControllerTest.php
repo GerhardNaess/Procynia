@@ -13,6 +13,7 @@ use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
+use App\Models\SavedNotice;
 use App\Models\User;
 use App\Services\Billing\BillingEntitlementService;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
@@ -2088,6 +2089,112 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_base_payloads_expose_ownership_metadata_for_company_personal_and_case_documents(): void
+    {
+        $context = $this->customerContext('Customer Ownership Payload AS');
+        $owner = User::factory()->create([
+            'customer_id' => $context['customer']->id,
+            'role' => User::ROLE_USER,
+            'is_active' => true,
+            'name' => 'Ansvarlig bruker',
+        ]);
+        $savedNotice = SavedNotice::query()->create([
+            'customer_id' => $context['customer']->id,
+            'external_id' => 'OWNERSHIP-CASE-001',
+            'title' => 'Sak for dokumenttilhørighet',
+            'buyer_name' => 'Procynia',
+        ]);
+
+        $companyDocument = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'company-ownership.docx',
+            'title' => 'company-ownership.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+            'owner_user_id' => null,
+            'owning_saved_notice_id' => null,
+        ]);
+
+        $personalDocument = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'personal-ownership.docx',
+            'title' => 'personal-ownership.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'owner_user_id' => $owner->id,
+            'owning_saved_notice_id' => null,
+        ]);
+
+        $caseDocument = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'case-ownership.docx',
+            'title' => 'case-ownership.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_CASE,
+            'owner_user_id' => $owner->id,
+            'owning_saved_notice_id' => $savedNotice->id,
+        ]);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($companyDocument, $personalDocument, $caseDocument, $owner, $savedNotice): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+            $companyItem = $items->firstWhere('original_filename', $companyDocument->original_filename);
+            $personalItem = $items->firstWhere('original_filename', $personalDocument->original_filename);
+            $caseItem = $items->firstWhere('original_filename', $caseDocument->original_filename);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $companyItem !== null
+                && data_get($companyItem, 'ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_COMPANY
+                && data_get($companyItem, 'ownership_label') === 'Selskap'
+                && data_get($companyItem, 'owner_user_id') === null
+                && data_get($companyItem, 'owner_name') === null
+                && data_get($companyItem, 'owning_saved_notice_id') === null
+                && data_get($companyItem, 'owning_saved_notice_title') === null
+                && $personalItem !== null
+                && data_get($personalItem, 'ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_PERSONAL
+                && data_get($personalItem, 'ownership_label') === 'Personlig'
+                && data_get($personalItem, 'owner_user_id') === $owner->id
+                && data_get($personalItem, 'owner_name') === $owner->name
+                && data_get($personalItem, 'owning_saved_notice_id') === null
+                && data_get($personalItem, 'owning_saved_notice_title') === null
+                && $caseItem !== null
+                && data_get($caseItem, 'ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_CASE
+                && data_get($caseItem, 'ownership_label') === 'Sak'
+                && data_get($caseItem, 'owner_user_id') === $owner->id
+                && data_get($caseItem, 'owner_name') === $owner->name
+                && data_get($caseItem, 'owning_saved_notice_id') === $savedNotice->id
+                && data_get($caseItem, 'owning_saved_notice_title') === $savedNotice->title;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $caseDocument->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($caseDocument, $owner, $savedNotice): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($knowledgeItem, 'id') === $caseDocument->id
+                && data_get($knowledgeItem, 'ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_CASE
+                && data_get($knowledgeItem, 'ownership_label') === 'Sak'
+                && data_get($knowledgeItem, 'owner_user_id') === $owner->id
+                && data_get($knowledgeItem, 'owner_name') === $owner->name
+                && data_get($knowledgeItem, 'owning_saved_notice_id') === $savedNotice->id
+                && data_get($knowledgeItem, 'owning_saved_notice_title') === $savedNotice->title;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $personalDocument->id]));
+
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($personalDocument, $owner): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($knowledgeItem, 'id') === $personalDocument->id
+                && data_get($knowledgeItem, 'ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_PERSONAL
+                && data_get($knowledgeItem, 'ownership_label') === 'Personlig'
+                && data_get($knowledgeItem, 'owner_user_id') === $owner->id
+                && data_get($knowledgeItem, 'owner_name') === $owner->name
+                && data_get($knowledgeItem, 'owning_saved_notice_id') === null
+                && data_get($knowledgeItem, 'owning_saved_notice_title') === null;
+        });
+    }
+
     public function test_knowledge_base_show_page_can_be_opened_with_chunks_and_metadata(): void
     {
         Storage::fake('local');
@@ -3264,6 +3371,43 @@ class KnowledgeBaseControllerTest extends TestCase
             'description' => 'Dokumenttema brukt i payloadtest.',
             'approved' => true,
         ]);
+    }
+
+    /**
+     * Purpose: Create a direct knowledge item fixture for payload assertions.
+     * Inputs: The owning customer, the uploader, and optional field overrides.
+     * Returns: A persisted knowledge item.
+     * Side effects: Persists one knowledge item row.
+     *
+     * @param array<string, mixed> $overrides
+     */
+    private function createKnowledgeItemPayloadFixture(Customer $customer, User $uploadedBy, array $overrides = []): KnowledgeItem
+    {
+        $title = (string) ($overrides['title'] ?? 'Ownership payload document');
+        $originalFilename = (string) ($overrides['original_filename'] ?? 'ownership-payload.docx');
+        $content = (string) ($overrides['content'] ?? 'Ownership payload content.');
+
+        return KnowledgeItem::query()->create(array_merge([
+            'customer_id' => $customer->id,
+            'uploaded_by_user_id' => $uploadedBy->id,
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+            'title' => $title,
+            'content' => $content,
+            'original_filename' => $originalFilename,
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/'.$originalFilename,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_theme_term_id' => null,
+            'extracted_text' => $content,
+            'summary' => 'Oppsummering for '.$title,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'owner_user_id' => null,
+            'owning_saved_notice_id' => null,
+            'is_active' => true,
+        ], $overrides));
     }
 
     /**

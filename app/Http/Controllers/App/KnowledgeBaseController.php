@@ -76,6 +76,8 @@ class KnowledgeBaseController extends Controller
 
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'owner',
+                'owningSavedNotice',
                 'documentThemeTerm',
                 'uploadedBy',
                 'chunks' => static fn ($query) => $query
@@ -108,6 +110,8 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'owner',
+                'owningSavedNotice',
                 'documentThemeTerm',
                 'uploadedBy',
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
@@ -365,6 +369,8 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $record->loadMissing([
+            'owner',
+            'owningSavedNotice',
             'documentThemeTerm',
             'uploadedBy',
             'chunks' => static fn ($query) => $query
@@ -754,6 +760,80 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Convert the ownership data into a frontend payload.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The document ownership fields needed by read payloads.
+     * Side effects: None.
+     */
+    private function ownershipPayload(KnowledgeItem $knowledgeDocument): array
+    {
+        return [
+            'ownership_type' => $knowledgeDocument->ownership_type,
+            'ownership_label' => $this->ownershipLabel($knowledgeDocument),
+            'owner_user_id' => $knowledgeDocument->owner_user_id,
+            'owner_name' => $this->ownerName($knowledgeDocument),
+            'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
+            'owning_saved_notice_title' => $this->owningSavedNoticeTitle($knowledgeDocument),
+        ];
+    }
+
+    /**
+     * Purpose: Resolve the display label for a knowledge document ownership type.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: A localized ownership label or the raw ownership type when unknown.
+     * Side effects: None.
+     */
+    private function ownershipLabel(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $ownershipType = trim((string) $knowledgeDocument->ownership_type);
+
+        if ($ownershipType === '') {
+            return null;
+        }
+
+        return match ($ownershipType) {
+            KnowledgeItem::OWNERSHIP_TYPE_COMPANY => 'Selskap',
+            KnowledgeItem::OWNERSHIP_TYPE_PERSONAL => 'Personlig',
+            KnowledgeItem::OWNERSHIP_TYPE_CASE => 'Sak',
+            default => $ownershipType,
+        };
+    }
+
+    /**
+     * Purpose: Resolve the user-facing owner name for a knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The owning user name or null when no owner is assigned.
+     * Side effects: None.
+     */
+    private function ownerName(KnowledgeItem $knowledgeDocument): ?string
+    {
+        if ($knowledgeDocument->owner_user_id === null) {
+            return null;
+        }
+
+        $name = trim((string) ($knowledgeDocument->owner?->name ?? ''));
+
+        return $name !== '' ? $name : null;
+    }
+
+    /**
+     * Purpose: Resolve the user-facing SavedNotice title for a case-owned knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The saved notice title or null when no case is assigned.
+     * Side effects: None.
+     */
+    private function owningSavedNoticeTitle(KnowledgeItem $knowledgeDocument): ?string
+    {
+        if ($knowledgeDocument->owning_saved_notice_id === null) {
+            return null;
+        }
+
+        $title = trim((string) ($knowledgeDocument->owningSavedNotice?->title ?? ''));
+
+        return $title !== '' ? $title : null;
+    }
+
+    /**
      * Purpose: Build the approved document theme options for one customer.
      * Inputs: The customer id.
      * Returns: A stable option list for document-theme selection.
@@ -892,7 +972,7 @@ class KnowledgeBaseController extends Controller
      */
     private function documentListPayload(KnowledgeItem $knowledgeDocument): array
     {
-        return [
+        return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
@@ -918,7 +998,7 @@ class KnowledgeBaseController extends Controller
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
             'edit_url' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $knowledgeDocument->id]),
             'delete_url' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $knowledgeDocument->id]),
-        ];
+        ]);
     }
 
     /**
@@ -929,7 +1009,7 @@ class KnowledgeBaseController extends Controller
      */
     private function documentFormPayload(KnowledgeItem $knowledgeDocument): array
     {
-        return [
+        return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
@@ -954,7 +1034,7 @@ class KnowledgeBaseController extends Controller
             'extraction_error' => $knowledgeDocument->extraction_error,
             'chunk_count' => $knowledgeDocument->chunks->count(),
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
-        ];
+        ]);
     }
 
     /**
