@@ -122,6 +122,53 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_base_index_payload_exposes_document_theme_metadata_and_nulls_when_missing(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Three Theme Index AS');
+        $themeName = 'Bærekraft';
+        $themeTerm = $this->createKnowledgeThemeTerm($context['customer'], $themeName);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-index.docx', 'Themed document content with enough text to persist.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('plain-index.docx', 'Plain document content with enough text to persist.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $themedDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-index.docx')
+            ->firstOrFail();
+
+        $themedDocument->forceFill([
+            'document_theme_term_id' => $themeTerm->id,
+        ])->save();
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($themeTerm): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+            $themedItem = $items->firstWhere('original_filename', 'theme-index.docx');
+            $plainItem = $items->firstWhere('original_filename', 'plain-index.docx');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $themedItem !== null
+                && data_get($themedItem, 'document_theme_term_id') === $themeTerm->id
+                && data_get($themedItem, 'document_theme_label') === $themeTerm->canonical_name
+                && $plainItem !== null
+                && data_get($plainItem, 'document_theme_term_id') === null
+                && data_get($plainItem, 'document_theme_label') === null;
+        });
+    }
+
     public function test_knowledge_document_upload_extracts_text_stores_file_and_chunks_document(): void
     {
         Storage::fake('local');
@@ -1847,6 +1894,97 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_base_show_and_edit_payload_expose_document_theme_metadata_and_nulls_when_missing(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six Theme AS');
+        $themeName = 'Strategisk kontroll';
+        $themeTerm = $this->createKnowledgeThemeTerm($context['customer'], $themeName);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-detail.docx', 'Themed detail document content used for payload verification.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('plain-detail.docx', 'Plain detail document content used for payload verification.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $themedDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-detail.docx')
+            ->firstOrFail();
+
+        $themedDocument->forceFill([
+            'document_theme_term_id' => $themeTerm->id,
+        ])->save();
+
+        $plainDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'plain-detail.docx')
+            ->firstOrFail();
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $themedDocument->id]));
+
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($themedDocument, $themeTerm): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($knowledgeItem, 'id') === $themedDocument->id
+                && data_get($knowledgeItem, 'document_theme_term_id') === $themeTerm->id
+                && data_get($knowledgeItem, 'document_theme_label') === $themeTerm->canonical_name
+                && data_get($knowledgeItem, 'document_theme_term.id') === $themeTerm->id
+                && data_get($knowledgeItem, 'document_theme_term.type') === KnowledgeMetadataTerm::TYPE_THEME_TAG
+                && data_get($knowledgeItem, 'document_theme_term.canonical_name') === $themeTerm->canonical_name;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $themedDocument->id]));
+
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($themedDocument, $themeTerm): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($knowledgeItem, 'id') === $themedDocument->id
+                && data_get($knowledgeItem, 'document_theme_term_id') === $themeTerm->id
+                && data_get($knowledgeItem, 'document_theme_label') === $themeTerm->canonical_name
+                && data_get($knowledgeItem, 'document_theme_term.id') === $themeTerm->id
+                && data_get($knowledgeItem, 'document_theme_term.type') === KnowledgeMetadataTerm::TYPE_THEME_TAG
+                && data_get($knowledgeItem, 'document_theme_term.canonical_name') === $themeTerm->canonical_name;
+        });
+
+        $showResponseWithoutTheme = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $plainDocument->id]));
+
+        $showResponseWithoutTheme->assertOk();
+        $showResponseWithoutTheme->assertViewHas('page', function (array $page) use ($plainDocument): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($knowledgeItem, 'id') === $plainDocument->id
+                && data_get($knowledgeItem, 'document_theme_term_id') === null
+                && data_get($knowledgeItem, 'document_theme_label') === null
+                && data_get($knowledgeItem, 'document_theme_term') === null;
+        });
+
+        $editResponseWithoutTheme = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $plainDocument->id]));
+
+        $editResponseWithoutTheme->assertOk();
+        $editResponseWithoutTheme->assertViewHas('page', function (array $page) use ($plainDocument): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($knowledgeItem, 'id') === $plainDocument->id
+                && data_get($knowledgeItem, 'document_theme_term_id') === null
+                && data_get($knowledgeItem, 'document_theme_label') === null
+                && data_get($knowledgeItem, 'document_theme_term') === null;
+        });
+    }
+
     public function test_knowledge_base_show_page_can_be_opened_with_chunks_and_metadata(): void
     {
         Storage::fake('local');
@@ -2401,6 +2539,50 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($initialChunkCount, $updatedChunkCount);
     }
 
+    public function test_knowledge_document_store_and_update_ignore_document_theme_term_id_for_now(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Theme Write AS');
+        $firstThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Strategisk risiko');
+        $secondThemeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Operativ styring');
+
+        $storeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('theme-write.docx', 'Document content used to verify theme write behavior.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_BOILERPLATE,
+            'is_active' => true,
+            'document_theme_term_id' => $firstThemeTerm->id,
+        ]);
+
+        $storeResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'theme-write.docx')
+            ->firstOrFail();
+
+        $this->assertNull($document->document_theme_term_id, 'Store must ignore document_theme_term_id until the UI is ready.');
+
+        $document->forceFill([
+            'document_theme_term_id' => $firstThemeTerm->id,
+        ])->save();
+
+        $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => false,
+            'document_theme_term_id' => $secondThemeTerm->id,
+        ]);
+
+        $updateResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
+        $this->assertFalse((bool) $updatedDocument->is_active);
+        $this->assertSame($firstThemeTerm->id, $updatedDocument->document_theme_term_id, 'Update must ignore document_theme_term_id until the UI is ready.');
+    }
+
     public function test_knowledge_document_destroy_removes_the_database_row_chunks_and_file(): void
     {
         Storage::fake('local');
@@ -2818,6 +3000,24 @@ class KnowledgeBaseControllerTest extends TestCase
             'customer' => $customer,
             'user' => $user,
         ];
+    }
+
+    /**
+     * Purpose: Create a deterministic document-theme term for payload tests.
+     * Inputs: The owning customer and canonical theme name.
+     * Returns: The created knowledge metadata term.
+     * Side effects: Persists one approved theme term row.
+     */
+    private function createKnowledgeThemeTerm(Customer $customer, string $canonicalName): KnowledgeMetadataTerm
+    {
+        return KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $customer->id,
+            'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            'canonical_name' => $canonicalName,
+            'synonyms' => [$canonicalName],
+            'description' => 'Dokumenttema brukt i payloadtest.',
+            'approved' => true,
+        ]);
     }
 
     /**

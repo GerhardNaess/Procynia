@@ -8,6 +8,7 @@ use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeMetadataTerm;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
@@ -73,6 +74,7 @@ class KnowledgeBaseController extends Controller
 
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'documentThemeTerm',
                 'uploadedBy',
                 'chunks' => static fn ($query) => $query
                     ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
@@ -104,6 +106,7 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'documentThemeTerm',
                 'uploadedBy',
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
             ])
@@ -358,6 +361,7 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $record->loadMissing([
+            'documentThemeTerm',
             'uploadedBy',
             'chunks' => static fn ($query) => $query
                 ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
@@ -728,6 +732,42 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Resolve the document-level theme label for frontend payloads.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The canonical theme name or null when no theme is assigned.
+     * Side effects: None.
+     */
+    private function documentThemeLabel(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $label = trim((string) ($knowledgeDocument->documentThemeTerm?->canonical_name ?? ''));
+
+        return $label !== '' ? $label : null;
+    }
+
+    /**
+     * Purpose: Convert the assigned theme term into a compact payload for frontend reads.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: A small theme object or null when no theme is assigned.
+     * Side effects: None.
+     *
+     * @return array{id:int,type:string,canonical_name:?string}|null
+     */
+    private function documentThemeTermPayload(KnowledgeItem $knowledgeDocument): ?array
+    {
+        $term = $knowledgeDocument->documentThemeTerm;
+
+        if (! $term instanceof KnowledgeMetadataTerm) {
+            return null;
+        }
+
+        return [
+            'id' => $term->id,
+            'type' => $term->type,
+            'canonical_name' => $this->documentThemeLabel($knowledgeDocument),
+        ];
+    }
+
+    /**
      * Purpose: Convert a knowledge document into a compact index payload.
      * Inputs: A customer-scoped knowledge document with chunk counts loaded.
      * Returns: An array ready for the index page.
@@ -738,6 +778,8 @@ class KnowledgeBaseController extends Controller
         return [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
+            'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
+            'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
             'content_type' => $knowledgeDocument->document_type,
@@ -773,6 +815,9 @@ class KnowledgeBaseController extends Controller
         return [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
+            'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
+            'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
+            'document_theme_term' => $this->documentThemeTermPayload($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'content_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
