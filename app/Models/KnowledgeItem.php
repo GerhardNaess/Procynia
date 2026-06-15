@@ -91,6 +91,7 @@ class KnowledgeItem extends Model
     protected $fillable = [
         'customer_id',
         'ownership_type',
+        'document_theme_term_id',
         'title',
         'content',
         'original_filename',
@@ -113,6 +114,7 @@ class KnowledgeItem extends Model
     {
         return [
             'file_size_bytes' => 'integer',
+            'document_theme_term_id' => 'integer',
             'owner_user_id' => 'integer',
             'owning_saved_notice_id' => 'integer',
             'uploaded_by_user_id' => 'integer',
@@ -152,6 +154,11 @@ class KnowledgeItem extends Model
         return $this->belongsTo(SavedNotice::class, 'owning_saved_notice_id');
     }
 
+    public function documentThemeTerm(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeMetadataTerm::class, 'document_theme_term_id');
+    }
+
     public function chunks(): HasMany
     {
         return $this->hasMany(KnowledgeItemChunk::class)
@@ -171,6 +178,11 @@ class KnowledgeItem extends Model
     public function isCaseOwned(): bool
     {
         return $this->ownership_type === self::OWNERSHIP_TYPE_CASE;
+    }
+
+    public function hasDocumentTheme(): bool
+    {
+        return $this->document_theme_term_id !== null;
     }
 
     /**

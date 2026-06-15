@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
@@ -26,8 +27,10 @@ class KnowledgeItemOwnershipTest extends TestCase
         $this->assertTrue($document->isCompanyOwned());
         $this->assertFalse($document->isPersonalOwned());
         $this->assertFalse($document->isCaseOwned());
+        $this->assertFalse($document->hasDocumentTheme());
         $this->assertNull($document->owner);
         $this->assertNull($document->owningSavedNotice);
+        $this->assertNull($document->documentThemeTerm);
     }
 
     public function test_it_resolves_personal_owner_and_case_notice_relations(): void
@@ -66,6 +69,36 @@ class KnowledgeItemOwnershipTest extends TestCase
         $this->assertSame($savedNotice->id, $caseDocument->owningSavedNotice?->id);
     }
 
+    public function test_it_resolves_document_theme_term_and_nulls_the_reference_when_the_term_is_deleted(): void
+    {
+        $customer = $this->createCustomer('Ownership Theme Customer AS');
+        $term = KnowledgeMetadataTerm::query()->create([
+            'customer_id' => $customer->id,
+            'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
+            'canonical_name' => 'Strategi',
+            'synonyms' => ['Strategi'],
+            'description' => 'Tema for dokumentet',
+            'approved' => true,
+        ]);
+
+        $document = $this->createKnowledgeItem($customer, [
+            'document_theme_term_id' => $term->id,
+        ]);
+
+        $this->assertSame($term->id, $document->document_theme_term_id);
+        $this->assertTrue($document->hasDocumentTheme());
+        $this->assertSame($term->id, $document->documentThemeTerm?->id);
+
+        $term->delete();
+
+        $freshDocument = $document->fresh();
+
+        $this->assertNotNull($freshDocument);
+        $this->assertNull($freshDocument->document_theme_term_id);
+        $this->assertFalse($freshDocument->hasDocumentTheme());
+        $this->assertNull($freshDocument->documentThemeTerm);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -102,6 +135,7 @@ class KnowledgeItemOwnershipTest extends TestCase
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_theme_term_id' => $overrides['document_theme_term_id'] ?? null,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
             'summary' => $overrides['summary'] ?? 'Oppsummering',
             'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
