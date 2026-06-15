@@ -596,6 +596,7 @@ export default function KnowledgeBaseIndex({
                                         const status = getKnowledgeDocumentStatus(item);
                                         const statusClass = DOCUMENT_STATUS_CLASS[status] ?? DOCUMENT_STATUS_CLASS.review;
                                         const statusLabel = DOCUMENT_STATUS_LABEL[status] ?? DOCUMENT_STATUS_LABEL.review;
+                                        const ownershipLabel = String(item?.ownership_label ?? '').trim();
                                         const ownerName = item.uploaded_by ?? tk.unknown_owner;
                                         const ownerInitials = getOwnerInitials(ownerName, tk.unknown_owner_initials);
                                         const versionLabel = item.version_label ?? tk.version_1;
@@ -619,9 +620,16 @@ export default function KnowledgeBaseIndex({
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                                                        {item.document_type_label ?? item.document_type ?? commonText.not_available}
-                                                    </span>
+                                                    <div className="space-y-1">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                                                            {item.document_type_label ?? item.document_type ?? commonText.not_available}
+                                                        </span>
+                                                        {ownershipLabel !== '' ? (
+                                                            <div className="text-[11px] leading-5 text-slate-500">
+                                                                <span className="font-medium text-slate-600">Tilhørighet:</span> {ownershipLabel}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>

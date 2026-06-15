@@ -620,6 +620,9 @@ export default function KnowledgeBaseShow({
     const tabsRef = useRef(null);
 
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
+    const ownershipLabel = String(knowledgeItem?.ownership_label ?? '').trim();
+    const ownerName = String(knowledgeItem?.owner_name ?? '').trim();
+    const owningSavedNoticeTitle = String(knowledgeItem?.owning_saved_notice_title ?? '').trim();
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
     const documentStatusMeta = {
@@ -1029,6 +1032,11 @@ export default function KnowledgeBaseShow({
                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
                                             {knowledgeItem?.document_type_label ?? '—'}
                                         </span>
+                                        {ownershipLabel !== '' ? (
+                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                                {ownershipLabel}
+                                            </span>
+                                        ) : null}
                                         <span className={classNames(
                                             'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
                                             documentStatusMeta.className,
@@ -1152,6 +1160,24 @@ export default function KnowledgeBaseShow({
                                 <dt className="text-slate-500">{tks.doc_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                             </div>
+                            {ownershipLabel !== '' ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">Tilhørighet</dt>
+                                    <dd className="text-right font-medium text-slate-950">{ownershipLabel}</dd>
+                                </div>
+                            ) : null}
+                            {ownerName !== '' ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">Eier</dt>
+                                    <dd className="text-right font-medium text-slate-950">{ownerName}</dd>
+                                </div>
+                            ) : null}
+                            {owningSavedNoticeTitle !== '' ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">Sak</dt>
+                                    <dd className="text-right font-medium text-slate-950">{owningSavedNoticeTitle}</dd>
+                                </div>
+                            ) : null}
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_activity}</dt>
                                 <dd className="text-right font-medium text-slate-950">{activeLabel}</dd>
