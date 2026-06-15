@@ -89,6 +89,39 @@ class KnowledgeVocabularyControllerTest extends TestCase
         });
     }
 
+    public function test_it_excludes_non_company_documents_from_the_source_document_list(): void
+    {
+        $context = $this->customerContext('Vocabulary Ownership Scope AS');
+
+        $personalDocument = $this->createKnowledgeItem($context['customer'], [
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'original_filename' => 'personal.docx',
+            'title' => 'Personal document',
+            'summary' => 'Personlig dokument.',
+            'extracted_text' => 'Personlig innhold.',
+        ]);
+
+        $companyDocument = $this->createKnowledgeItem($context['customer'], [
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+            'original_filename' => 'company.docx',
+            'title' => 'Company document',
+            'summary' => 'Selskapsdokument.',
+            'extracted_text' => 'Selskapsinnhold.',
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-vocabulary.index'));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($companyDocument, $personalDocument): bool {
+            $sourceDocuments = collect(data_get($page, 'props.sourceDocuments', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeVocabulary/Index'
+                && $sourceDocuments->count() === 1
+                && $sourceDocuments->contains('id', $companyDocument->id)
+                && ! $sourceDocuments->contains('id', $personalDocument->id);
+        });
+    }
+
     public function test_it_shows_correct_field_labels_for_chunk_based_suggestions(): void
     {
         $context = $this->customerContext('Vocabulary Chunk Labels AS');

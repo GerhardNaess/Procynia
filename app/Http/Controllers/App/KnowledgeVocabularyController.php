@@ -558,6 +558,7 @@ class KnowledgeVocabularyController extends Controller
         return KnowledgeItem::query()
             ->withCount('chunks')
             ->where('customer_id', $customerId)
+            ->where('ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->whereNotNull('storage_path')
             ->where('extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->orderByDesc('updated_at')
