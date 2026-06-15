@@ -149,7 +149,7 @@ export default function KnowledgeItemForm({
 
                             <div className="grid gap-4 sm:grid-cols-3">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Dokumenttype</span>
+                                    <span className="text-sm font-medium text-slate-700">Dokumentkategori</span>
                                     <select
                                         value={form.data.document_type}
                                         onChange={(event) => form.setData('document_type', event.target.value)}
@@ -264,7 +264,7 @@ export default function KnowledgeItemForm({
 
                 <div className="grid gap-4 sm:grid-cols-3">
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Dokumenttype</span>
+                        <span className="text-sm font-medium text-slate-700">Dokumentkategori</span>
                         <select
                             value={form.data.document_type}
                             onChange={(event) => form.setData('document_type', event.target.value)}

@@ -36,7 +36,7 @@ export default function KnowledgeBaseEdit({
                             Rediger kunnskapsdokument
                         </h1>
                         <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                            Oppdater dokumenttype eller status. For å endre innholdet må du laste opp et nytt dokument.
+                            Oppdater dokumentkategori eller status. For å endre innholdet må du laste opp et nytt dokument.
                         </p>
                     </div>
                 </section>
