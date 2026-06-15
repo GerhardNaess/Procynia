@@ -189,6 +189,48 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertSame(1.0, $result->first()['embedding_similarity']);
     }
 
+    public function test_it_excludes_non_company_documents_even_when_they_match_metadata_and_embedding(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Company Scope AS');
+        $companyDocument = $this->createKnowledgeItem($customer, ['original_filename' => 'company-scope.docx']);
+        $personalDocument = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'personal-scope.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+        ]);
+        $requirementEmbedding = $this->embeddingVector(1536, 0);
+
+        $companyChunk = $this->createChunk($companyDocument, 0, [
+            'topic' => 'Løsning',
+            'sub_topic' => 'Dokumentasjon',
+            'keywords' => ['løsningen'],
+            'content' => 'Leverandøren skal beskrive løsningen.',
+            'embedding_vector_pgvector' => PgVector::literal($requirementEmbedding),
+        ]);
+        $this->createChunk($personalDocument, 0, [
+            'topic' => 'Løsning',
+            'sub_topic' => 'Dokumentasjon',
+            'keywords' => ['løsningen'],
+            'content' => 'Leverandøren skal beskrive løsningen.',
+            'embedding_vector_pgvector' => PgVector::literal($requirementEmbedding),
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => [
+                'topic' => ['Løsning'],
+                'sub_topic' => ['Dokumentasjon'],
+                'keywords' => ['løsningen'],
+            ],
+            'search_text' => 'leverandøren skal beskrive løsningen',
+            'intent_summary' => 'Tester company scope.',
+            'confidence' => 0.95,
+        ], $requirementEmbedding);
+
+        $this->assertCount(1, $result);
+        $this->assertSame($companyChunk->id, $result->first()['chunk_id']);
+        $this->assertSame($companyDocument->id, $result->first()['knowledge_item_id']);
+    }
+
     public function test_it_falls_back_to_default_ordering_when_requirement_embedding_has_wrong_dimension(): void
     {
         $service = app(MetadataCandidateRetrievalService::class);

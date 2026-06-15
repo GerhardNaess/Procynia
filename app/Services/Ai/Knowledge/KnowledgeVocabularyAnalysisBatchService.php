@@ -226,6 +226,7 @@ class KnowledgeVocabularyAnalysisBatchService
 
         return KnowledgeItem::query()
             ->where('customer_id', $batch->customer_id)
+            ->where('ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->whereIn('id', $documentIds)
             ->whereNotNull('storage_path')
             ->with([

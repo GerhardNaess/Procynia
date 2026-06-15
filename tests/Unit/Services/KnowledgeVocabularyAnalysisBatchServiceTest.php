@@ -117,6 +117,57 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
         $this->assertSame(0, KnowledgeMetadataTermSuggestion::query()->count());
     }
 
+    public function test_it_filters_non_company_documents_before_running_vocabulary_analysis(): void
+    {
+        [$customer, $user] = $this->customerContext('Batch Company Scope AS');
+        $companyDocument = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'company-analysis.docx',
+            'extracted_text' => 'Selskapet beskriver styring og samhandling.',
+            'summary' => 'Selskapsoppsummering.',
+        ]);
+        $personalDocument = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'personal-analysis.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'extracted_text' => 'Personlig dokument med relevant innhold.',
+            'summary' => 'Personlig oppsummering.',
+        ]);
+
+        $extraction = Mockery::mock(KnowledgeVocabularyExtractionService::class);
+        $extraction->shouldReceive('extract')
+            ->once()
+            ->with(
+                Mockery::type(KnowledgeVocabularyAnalysisBatch::class),
+                Mockery::on(function (Collection $documents) use ($companyDocument): bool {
+                    return $documents->count() === 1
+                        && (int) $documents->first()->id === (int) $companyDocument->id
+                        && $documents->first()->id !== null;
+                }),
+                Mockery::type('array'),
+            )
+            ->andReturn([
+                'batch_summary' => 'Selskapsdokumentet beskriver styring.',
+                'suggestions' => [],
+            ]);
+        $this->app->instance(KnowledgeVocabularyExtractionService::class, $extraction);
+
+        $validation = Mockery::mock(\App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionValidationService::class);
+        $validation->shouldReceive('validateAndPersist')
+            ->once()
+            ->andReturn([
+                'batch_summary' => 'Selskapsdokumentet beskriver styring.',
+                'created_count' => 0,
+                'related_count' => 0,
+            ]);
+        $this->app->instance(\App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionValidationService::class, $validation);
+
+        $service = app(KnowledgeVocabularyAnalysisBatchService::class);
+        $batch = $service->createBatch($customer->id, [$companyDocument->id, $personalDocument->id], $user->id);
+        $result = $service->startAnalysis($batch->id);
+
+        $this->assertSame(KnowledgeVocabularyAnalysisBatch::STATUS_COMPLETED, $result->status);
+        $this->assertSame('Selskapsdokumentet beskriver styring.', $result->summary);
+    }
+
     private function customerContext(string $customerName): array
     {
         $customer = $this->createCustomer($customerName);

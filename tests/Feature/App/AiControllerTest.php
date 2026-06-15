@@ -1571,13 +1571,19 @@ class AiControllerTest extends TestCase
             'title' => 'Irrelevant knowledge',
             'original_filename' => 'irrelevant-knowledge.docx',
             'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'content' => 'Denne teksten handler om noe annet.',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'content' => 'Leverandøren skal beskrive løsningen.',
             'is_active' => true,
         ]);
         $this->syncKnowledgeItemChunks($otherKnowledge);
         $otherKnowledge->chunks()->firstOrFail()->forceFill([
-            'title' => 'Urelevant struktur',
-            'embedding_vector' => [0.0, 1.0],
+            'title' => 'Dokumentstruktur',
+            'topic' => 'Løsning',
+            'sub_topic' => 'Dokumentasjon',
+            'keywords' => ['løsningen'],
+            'section_title' => 'SIEM',
+            'section_path' => 'SOC-tjenester > SIEM',
+            'embedding_vector' => [1.0, 0.0],
             'embedding_model' => 'text-embedding-3-small',
             'embedding_generated_at' => '2026-04-06 12:43:00',
             'embedding_error' => null,

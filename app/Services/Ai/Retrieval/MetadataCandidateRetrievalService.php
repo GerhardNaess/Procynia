@@ -266,6 +266,7 @@ class MetadataCandidateRetrievalService
         return KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
             ->where('knowledge_items.customer_id', $customerId)
+            ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.is_active', true)
             ->whereNotNull('knowledge_items.storage_path')
             ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)

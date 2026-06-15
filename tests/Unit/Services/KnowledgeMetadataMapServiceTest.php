@@ -62,6 +62,53 @@ class KnowledgeMetadataMapServiceTest extends TestCase
         $this->assertSame(2, $map['field_counts']['theme_tag']);
     }
 
+    public function test_it_ignores_non_company_documents_when_building_the_active_chunk_inventory(): void
+    {
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Metadata Company Scope AS');
+        $companyDocument = $this->createKnowledgeItem($customer, [
+            'title' => 'Company document',
+            'original_filename' => 'company-document.docx',
+            'summary' => 'Selskapsoppsummering',
+        ]);
+        $personalDocument = $this->createKnowledgeItem($customer, [
+            'title' => 'Personal document',
+            'original_filename' => 'personal-document.docx',
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'summary' => 'Personlig oppsummering',
+        ]);
+
+        $this->createChunk($companyDocument, 0, [
+            'topic' => 'Tema A',
+            'sub_topic' => 'Underemne A',
+            'keywords' => ['Nøkkelord A'],
+            'service_product_tag' => 'Tag A',
+            'theme_tag' => 'Tag B',
+            'section_title' => 'Del 1',
+            'section_path' => 'Kapittel > Del 1',
+        ]);
+        $this->createChunk($personalDocument, 0, [
+            'topic' => 'Tema Privat',
+            'sub_topic' => 'Underemne Privat',
+            'keywords' => ['Privat nøkkelord'],
+            'service_product_tag' => 'Tag Privat',
+            'theme_tag' => 'Tag Privat',
+            'section_title' => 'Privat del',
+            'section_path' => 'Kapittel > Privat del',
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(1, $map['chunk_count']);
+        $this->assertSame(['Tema A'], $map['fields']['topic']);
+        $this->assertSame(['Underemne A'], $map['fields']['sub_topic']);
+        $this->assertSame(['Nøkkelord A'], $map['fields']['keywords']);
+        $this->assertSame(['Tag A'], $map['fields']['service_product_tag']);
+        $this->assertSame(['Tag B'], $map['fields']['theme_tag']);
+        $this->assertSame(['Del 1'], $map['fields']['section_title']);
+        $this->assertSame(['Kapittel > Del 1'], $map['fields']['section_path']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
