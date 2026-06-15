@@ -6,12 +6,14 @@ export default function KnowledgeBaseEdit({
     pageTitle = 'Kunnskapsdokumenter · Rediger',
     knowledgeItem,
     documentTypeOptions,
+    documentThemeOptions = [],
     updateUrl,
     deleteUrl,
     indexUrl,
 }) {
     const form = useForm({
         document_type: knowledgeItem.document_type,
+        document_theme_term_id: knowledgeItem.document_theme_term_id ?? '',
         is_active: knowledgeItem.is_active,
     });
 
@@ -42,6 +44,7 @@ export default function KnowledgeBaseEdit({
                 <KnowledgeItemForm
                     form={form}
                     documentTypeOptions={documentTypeOptions}
+                    documentThemeOptions={documentThemeOptions}
                     backHref={indexUrl}
                     submitLabel="Lagre endringer"
                     onSubmit={submit}

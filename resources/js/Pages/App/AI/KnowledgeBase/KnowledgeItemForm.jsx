@@ -59,6 +59,7 @@ function formatDateTime(value) {
 export default function KnowledgeItemForm({
     form,
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+    documentThemeOptions = [],
     backHref,
     submitLabel,
     onSubmit,
@@ -69,12 +70,31 @@ export default function KnowledgeItemForm({
     const [deleting, setDeleting] = useState(false);
     const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
+    const selectedDocumentThemeTermId = form.data.document_theme_term_id ?? '';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
     const contentExcerptLimit = 220;
     const hasLongContentExcerpt = contentExcerpt.length > contentExcerptLimit;
     const visibleContentExcerpt = hasLongContentExcerpt && !contentExcerptExpanded
         ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
         : contentExcerpt;
+    const documentThemeSelect = (
+        <label className="space-y-2">
+            <span className="text-sm font-medium text-slate-700">Tema</span>
+            <select
+                value={selectedDocumentThemeTermId}
+                onChange={(event) => form.setData('document_theme_term_id', event.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+            >
+                <option value="">Ingen tema</option>
+                {documentThemeOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                        {option.label}
+                    </option>
+                ))}
+            </select>
+            {form.errors.document_theme_term_id ? <p className="text-sm text-rose-600">{form.errors.document_theme_term_id}</p> : null}
+        </label>
+    );
 
     const deleteKnowledgeItem = () => {
         if (!deleteUrl || deleting) {
@@ -127,7 +147,7 @@ export default function KnowledgeItemForm({
                                 {form.errors.document ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
                             </div>
 
-                            <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="grid gap-4 sm:grid-cols-3">
                                 <label className="space-y-2">
                                     <span className="text-sm font-medium text-slate-700">Dokumenttype</span>
                                     <select
@@ -143,6 +163,8 @@ export default function KnowledgeItemForm({
                                     </select>
                                     {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
                                 </label>
+
+                                {documentThemeSelect}
 
                                 <label className="space-y-2">
                                     <span className="text-sm font-medium text-slate-700">Status</span>
@@ -240,7 +262,7 @@ export default function KnowledgeItemForm({
                     </section>
                 ) : null}
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-3">
                     <label className="space-y-2">
                         <span className="text-sm font-medium text-slate-700">Dokumenttype</span>
                         <select
@@ -256,6 +278,8 @@ export default function KnowledgeItemForm({
                         </select>
                         {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
                     </label>
+
+                    {documentThemeSelect}
 
                     <label className="space-y-2">
                         <span className="text-sm font-medium text-slate-700">Status</span>
