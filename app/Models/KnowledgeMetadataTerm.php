@@ -59,7 +59,7 @@ class KnowledgeMetadataTerm extends Model
         self::TYPE_PROCESS => 'Prosess',
         self::TYPE_SYSTEM => 'System',
         self::TYPE_TECHNOLOGY => 'Teknologi',
-        self::TYPE_DOCUMENT_TYPE => 'Dokumenttype',
+        self::TYPE_DOCUMENT_TYPE => 'Dokumentkategori',
         self::TYPE_INDUSTRY => 'Bransje',
     ];
 
