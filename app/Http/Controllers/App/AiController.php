@@ -1744,6 +1744,7 @@ class AiController extends Controller
         return array_merge(
             $viewData->toArray(),
             [
+                'source_document_preview_url' => $this->requirementSourceDocumentPreviewUrl($requirement),
                 'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
                 'answer_basis_item_ids' => $selectedAnswerBasisItems
                     ->pluck('id')
@@ -1766,6 +1767,27 @@ class AiController extends Controller
                 'evidence' => $this->aiRequirementEvidencePayload($requirement),
             ],
         );
+    }
+
+    /**
+     * Purpose: Resolve the preview URL for the exact source document behind one requirement.
+     * Inputs: A requirement row with its document relation loaded.
+     * Returns: A preview route URL when the concrete source document can be previewed, or null.
+     * Side effects: None.
+     */
+    private function requirementSourceDocumentPreviewUrl(SavedNoticeAiRequirement $requirement): ?string
+    {
+        $requirement->loadMissing('document');
+        $document = $requirement->document;
+
+        if ($document === null || $this->documentPreviewService->previewMode($document) === 'unavailable') {
+            return null;
+        }
+
+        return route('app.ai.documents.preview', [
+            'savedNotice' => $document->saved_notice_id,
+            'document' => $document->id,
+        ]);
     }
 
     /**

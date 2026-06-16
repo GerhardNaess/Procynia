@@ -3754,10 +3754,9 @@ export default function AiShow({
                                                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                                                     {(() => {
                                                         const sourceDocument = resolveRequirementSourceDocument(requirement);
-                                                        const sourceDocumentUrl = sourceDocument?.preview_url ?? null;
-                                                        const sourceDocumentPreviewMode = sourceDocument?.preview_mode ?? 'unavailable';
+                                                        const sourceDocumentUrl = requirement?.source_document_preview_url ?? sourceDocument?.preview_url ?? null;
                                                         const sourceDocumentLabel = sourceDocument?.original_filename ?? requirement.document_filename ?? '—';
-                                                        const canPreviewSourceDocument = Boolean(sourceDocumentUrl) && sourceDocumentPreviewMode !== 'unavailable';
+                                                        const canPreviewSourceDocument = Boolean(sourceDocumentUrl);
 
                                                         if (canPreviewSourceDocument) {
                                                             return (

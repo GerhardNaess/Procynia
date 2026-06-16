@@ -7920,6 +7920,67 @@ class AiControllerTest extends TestCase
         );
     }
 
+    public function test_requirement_payload_keeps_preview_link_for_hidden_source_document_with_duplicate_filename(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-DEDUP-003', 'Dedup requirement target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        Storage::fake('local');
+
+        $olderDocument = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/kravspesifikasjon-older.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2048,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+            'extracted_text' => 'Eldre opplasting med kravgrunnlag.',
+            'text_extracted_at' => '2026-04-06 12:00:00',
+        ]);
+        Storage::disk('local')->put($olderDocument->stored_path, 'older-pdf-content');
+        $olderChunk = $this->createAiDocumentChunk($olderDocument, 'Eldre opplasting med kravgrunnlag.');
+        $requirement = $this->createAiRequirement($savedNotice, $olderDocument, $olderChunk, [
+            'requirement_identifier' => '1.1',
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+        ]);
+
+        $newerDocument = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravspesifikasjon.pdf',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/kravspesifikasjon-newer.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 4096,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+            'extracted_text' => 'Nyere opplasting med samme filnavn.',
+            'text_extracted_at' => '2026-04-06 12:10:00',
+        ]);
+        Storage::disk('local')->put($newerDocument->stored_path, 'newer-pdf-content');
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($requirement, $olderDocument, $newerDocument, $savedNotice): bool {
+            $documents = collect(data_get($page, 'props.documents', []));
+            $requirements = collect(data_get($page, 'props.requirements', []));
+            $requirementRow = $requirements->firstWhere('saved_notice_ai_document_id', $olderDocument->id);
+
+            return data_get($page, 'component') === 'App/AI/Show'
+                && $documents->count() === 1
+                && (int) data_get($documents->first(), 'id') === $newerDocument->id
+                && (int) data_get($requirementRow, 'saved_notice_ai_document_id') === $olderDocument->id
+                && data_get($requirementRow, 'document_filename') === $olderDocument->original_filename
+                && data_get($requirementRow, 'source_document_preview_url') === route('app.ai.documents.preview', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $olderDocument->id,
+                ])
+                && data_get($requirementRow, 'source_document_preview_url') !== route('app.ai.documents.preview', [
+                    'savedNotice' => $savedNotice->id,
+                    'document' => $newerDocument->id,
+                ]);
+        });
+    }
+
     public function test_documents_payload_includes_requirement_extraction_progress_with_call_counts(): void
     {
         $context = $this->customerAdminContext();
