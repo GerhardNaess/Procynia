@@ -399,6 +399,7 @@ class AiControllerTest extends TestCase
 
         $this->assertSame('App/AI/Show', data_get($page, 'component'));
         $this->assertSame(1, data_get($page, 'props.requirements_count'));
+        $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.saved_notice_show_url'));
         $this->assertSame(route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_store_url'));
         $this->assertSame(route('app.ai.requirements.destroy-all', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_destroy_all_url'));
         $this->assertCount(1, $requirements);

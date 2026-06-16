@@ -144,6 +144,7 @@ class AiController extends Controller
 
         return Inertia::render('App/AI/Show', [
             'pageTitle' => sprintf('I arbeid · %s', $record->title),
+            'saved_notice_show_url' => route('app.notices.saved.show', ['savedNotice' => $record->id]),
             'case' => [
                 'id' => $analysisCase['id'],
                 'title' => $analysisCase['title'],

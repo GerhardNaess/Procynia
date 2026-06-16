@@ -1,4 +1,4 @@
-import { router, useForm, usePage } from '@inertiajs/react';
+import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import InfoHint from '../../../Components/App/InfoHint';
@@ -1558,6 +1558,7 @@ function getRequirementExtractionBannerData(documents) {
  */
 export default function AiShow({
     pageTitle = 'I arbeid',
+    saved_notice_show_url: savedNoticeShowUrl = '',
     case: caseData = null,
     ai_status: aiStatus = 'not_started',
     requirements_count: requirementsCount = 0,
@@ -2904,15 +2905,33 @@ export default function AiShow({
         <CustomerAppLayout title={pageTitle} showPageTitle={false}>
             <div className="space-y-7">
                 <section className="space-y-4">
-                    <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                                {caseData?.title ?? tai.ai_case_title}
-                            </h1>
-                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
-                                {aiStatusMeta.label}
-                            </span>
-                            <InfoHint size="sm" label="Vis forklaring for AI-status" text={tai.hint_ai_status} />
+                    <div className="space-y-3">
+                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            {tai.case_workspace_overline ?? 'Saksdokumenter og AI'}
+                        </div>
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div className="space-y-3">
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                                        {caseData?.title ?? tai.ai_case_title}
+                                    </h1>
+                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
+                                        {aiStatusMeta.label}
+                                    </span>
+                                    <InfoHint size="sm" label="Vis forklaring for AI-status" text={tai.hint_ai_status} />
+                                </div>
+                                <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                                    {tai.case_workspace_intro ?? 'Arbeidsflaten gjelder dokumenter, krav og AI-arbeid for denne konkrete saken.'}
+                                </p>
+                            </div>
+                            {savedNoticeShowUrl ? (
+                                <Link
+                                    href={savedNoticeShowUrl}
+                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                >
+                                    {tai.case_workspace_back_to_case ?? 'Tilbake til saken'}
+                                </Link>
+                            ) : null}
                         </div>
                         <div className="flex flex-wrap gap-2 text-sm text-slate-500">
                             <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5">
