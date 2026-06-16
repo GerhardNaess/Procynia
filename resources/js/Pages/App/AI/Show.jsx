@@ -57,7 +57,7 @@ function isEnglishLocale(locale) {
     return String(locale ?? '').toLowerCase().startsWith('en');
 }
 
-function getDocumentListStatusMeta(status, locale) {
+function getDocumentStatusMeta(status, locale) {
     const english = isEnglishLocale(locale);
     const metaByStatus = {
         uploaded: {
@@ -94,6 +94,66 @@ function getDocumentListStatusMeta(status, locale) {
         label: english ? 'Unknown status' : 'Ukjent status',
         className: 'bg-slate-100 text-slate-700 ring-slate-200',
     };
+}
+
+function getRequirementStatusMeta(progress, locale, texts = {}) {
+    const english = isEnglishLocale(locale);
+    const status = String(progress?.status ?? '').trim();
+
+    const metaByStatus = {
+        not_started: {
+            label: texts.requirementStatusNotStarted ?? (english ? 'Not started' : 'Ikke startet'),
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        processing: {
+            label: texts.requirementStatusProcessing ?? (english ? 'Processing requirements' : 'Behandler krav'),
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+        completed: {
+            label: texts.requirementStatusCompleted ?? (english ? 'Requirements extracted' : 'Krav ferdig hentet ut'),
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        failed: {
+            label: texts.requirementStatusFailed ?? (english ? 'Requirement extraction failed' : 'Krav-ekstraksjon feilet'),
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    if (status === '') {
+        return metaByStatus.not_started;
+    }
+
+    if (status === 'failed') {
+        return metaByStatus.failed;
+    }
+
+    if (status === 'completed') {
+        return metaByStatus.completed;
+    }
+
+    return metaByStatus.processing;
+}
+
+function getRequirementProgressText(progress, locale, texts = {}) {
+    if (!progress || typeof progress !== 'object') {
+        return '';
+    }
+
+    const completed = Number(progress?.completed_calls ?? 0);
+    const total = Number(progress?.total_calls ?? 0);
+
+    if (total <= 0) {
+        return '';
+    }
+
+    const english = isEnglishLocale(locale);
+    const template = texts.requirementProgressCount
+        ?? (english ? ':completed of :total parts completed' : ':completed av :total deler ferdig');
+
+    return formatLocalizedTemplate(template, {
+        completed,
+        total,
+    });
 }
 
 function formatDocumentTimestamp(value, locale) {
@@ -1646,6 +1706,15 @@ export default function AiShow({
     } = usePage().props;
     const tai = translations?.ai ?? {};
     const isEnglish = isEnglishLocale(locale);
+    const documentListTexts = {
+        documentStatusLabel: tai.document_status_label ?? (isEnglish ? 'Document status' : 'Dokumentstatus'),
+        requirementStatusLabel: tai.requirement_status_label ?? (isEnglish ? 'Requirement status' : 'Kravstatus'),
+        requirementStatusNotStarted: tai.requirement_status_not_started ?? (isEnglish ? 'Not started' : 'Ikke startet'),
+        requirementStatusProcessing: tai.requirement_status_processing ?? (isEnglish ? 'Processing requirements' : 'Behandler krav'),
+        requirementStatusCompleted: tai.requirement_status_completed ?? (isEnglish ? 'Requirements extracted' : 'Krav ferdig hentet ut'),
+        requirementStatusFailed: tai.requirement_status_failed ?? (isEnglish ? 'Requirement extraction failed' : 'Krav-ekstraksjon feilet'),
+        requirementProgressCount: tai.requirement_progress_count ?? (isEnglish ? ':completed of :total parts completed' : ':completed av :total deler ferdig'),
+    };
     const currentUser = auth.user ?? null;
     const billingHref = currentUser?.is_system_owner ? '/app/billing' : '';
 
@@ -3195,16 +3264,11 @@ export default function AiShow({
                             {documentRows.length > 0 ? (
                                 <ul className="space-y-3">
                                     {documentRows.map((document) => {
-                                        const statusMeta = getDocumentListStatusMeta(document?.processing_status, locale);
+                                        const documentStatusMeta = getDocumentStatusMeta(document?.processing_status, locale);
+                                        const requirementStatusMeta = getRequirementStatusMeta(document?.requirement_extraction_progress, locale, documentListTexts);
                                         const uploadedAtLabel = formatDocumentTimestamp(document?.uploaded_at, locale);
                                         const requirementExtractionProgress = document?.requirement_extraction_progress ?? null;
-                                        const completedCalls = Number(requirementExtractionProgress?.completed_calls ?? 0);
-                                        const totalCalls = Number(requirementExtractionProgress?.total_calls ?? 0);
-                                        const progressLabel = requirementExtractionProgress !== null && totalCalls > 0
-                                            ? (isEnglish
-                                                ? `Requirement extraction: ${completedCalls} / ${totalCalls} steps`
-                                                : `Kravekstraksjon: ${completedCalls} / ${totalCalls} steg`)
-                                            : null;
+                                        const progressLabel = getRequirementProgressText(requirementExtractionProgress, locale, documentListTexts);
 
                                         return (
                                             <li
@@ -3217,9 +3281,25 @@ export default function AiShow({
                                                             <span className="min-w-0 truncate text-sm font-semibold text-slate-950">
                                                                 {document.original_filename ?? (isEnglish ? 'Untitled document' : 'Uten filnavn')}
                                                             </span>
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${statusMeta.className}`}>
-                                                                {statusMeta.label}
-                                                            </span>
+                                                        </div>
+
+                                                        <div className="grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    {documentListTexts.documentStatusLabel}
+                                                                </span>
+                                                                <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${documentStatusMeta.className}`}>
+                                                                    {documentStatusMeta.label}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                                                    {documentListTexts.requirementStatusLabel}
+                                                                </span>
+                                                                <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${requirementStatusMeta.className}`}>
+                                                                    {requirementStatusMeta.label}
+                                                                </span>
+                                                            </div>
                                                         </div>
 
                                                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
