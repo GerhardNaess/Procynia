@@ -1642,24 +1642,12 @@ function getRequirementExtractionBannerData(documents) {
         return null;
     }
 
-    const failedDocument = documents.find((document) => document?.processing_status === 'failed');
+    const activeStatuses = new Set([
+        ...DOCUMENT_PROCESSING_ACTIVE_STATUSES,
+        'text_extracted',
+    ]);
 
-    if (failedDocument) {
-        return {
-            state: 'failed',
-            document: failedDocument,
-            count: 1,
-            message: String(
-                failedDocument?.processing_failure_message
-                ?? failedDocument?.processing_error_message
-                ?? failedDocument?.processing_failure_type
-                ?? failedDocument?.processing_error_type
-                ?? '',
-            ).trim(),
-        };
-    }
-
-    const activeDocuments = documents.filter((document) => DOCUMENT_PROCESSING_ACTIVE_STATUSES.has(document?.processing_status));
+    const activeDocuments = documents.filter((document) => activeStatuses.has(document?.processing_status));
 
     if (activeDocuments.length > 0) {
         return {
@@ -1667,6 +1655,17 @@ function getRequirementExtractionBannerData(documents) {
             document: activeDocuments[0],
             count: activeDocuments.length,
             message: null,
+        };
+    }
+
+    const failedDocuments = documents.filter((document) => document?.processing_status === 'failed');
+
+    if (failedDocuments.length > 0) {
+        return {
+            state: 'failed',
+            document: failedDocuments[0],
+            count: failedDocuments.length,
+            message: '',
         };
     }
 
