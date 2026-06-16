@@ -605,11 +605,27 @@ export default function KnowledgeBaseIndex({
                                         const uploadedByLabelText = tk.uploaded_by_label ?? 'Opplastet av';
                                         const themeLabelText = tk.theme_label ?? 'Tema';
                                         const caseLabelText = tk.case_label ?? 'Sak';
+                                        const documentTypeLabel = String(item?.document_type_label ?? '').trim();
+                                        const documentTypeValue = String(item?.document_type ?? '').trim();
                                         const ownerName = String(item?.owner_name ?? '').trim();
                                         const ownerDisplayName = ownerName !== '' ? ownerName : tk.unknown_owner;
                                         const uploadedByName = String(item?.uploaded_by ?? '').trim();
                                         const documentThemeLabel = String(item?.document_theme_label ?? '').trim();
                                         const owningSavedNoticeTitle = String(item?.owning_saved_notice_title ?? '').trim();
+                                        const missingMetadataIndicators = [];
+
+                                        if (ownerName === '') {
+                                            missingMetadataIndicators.push(tk.missing_owner ?? 'Mangler eier');
+                                        }
+
+                                        if (documentThemeLabel === '') {
+                                            missingMetadataIndicators.push(tk.missing_theme ?? 'Mangler tema');
+                                        }
+
+                                        if (documentTypeLabel === '' && documentTypeValue === '') {
+                                            missingMetadataIndicators.push(tk.missing_document_category ?? 'Mangler dokumentkategori');
+                                        }
+
                                         const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : tk.unknown_owner_initials;
                                         const versionLabel = item.version_label ?? tk.version_1;
                                         const subtitle = `${versionLabel} · ${item.file_size_human ?? commonText.not_available}`;
@@ -634,7 +650,7 @@ export default function KnowledgeBaseIndex({
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                                                            {item.document_type_label ?? item.document_type ?? commonText.not_available}
+                                                            {documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
                                                         {ownershipLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
@@ -649,6 +665,18 @@ export default function KnowledgeBaseIndex({
                                                         {owningSavedNoticeTitle !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{caseLabelText}:</span> {owningSavedNoticeTitle}
+                                                            </div>
+                                                        ) : null}
+                                                        {missingMetadataIndicators.length > 0 ? (
+                                                            <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                                                {missingMetadataIndicators.map((indicator) => (
+                                                                    <span
+                                                                        key={indicator}
+                                                                        className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800"
+                                                                    >
+                                                                        {indicator}
+                                                                    </span>
+                                                                ))}
                                                             </div>
                                                         ) : null}
                                                     </div>
