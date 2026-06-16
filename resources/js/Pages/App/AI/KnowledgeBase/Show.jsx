@@ -623,6 +623,7 @@ export default function KnowledgeBaseShow({
     const ownershipLabel = String(knowledgeItem?.ownership_label ?? '').trim();
     const ownerName = String(knowledgeItem?.owner_name ?? '').trim();
     const owningSavedNoticeTitle = String(knowledgeItem?.owning_saved_notice_title ?? '').trim();
+    const documentThemeLabel = String(knowledgeItem?.document_theme_label ?? '').trim();
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
     const documentStatusMeta = {
@@ -1160,6 +1161,12 @@ export default function KnowledgeBaseShow({
                                 <dt className="text-slate-500">{tks.doc_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                             </div>
+                            {documentThemeLabel !== '' ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">Tema</dt>
+                                    <dd className="text-right font-medium text-slate-950">{documentThemeLabel}</dd>
+                                </div>
+                            ) : null}
                             {ownershipLabel !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
                                     <dt className="text-slate-500">Tilhørighet</dt>
