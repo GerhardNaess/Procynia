@@ -3197,6 +3197,9 @@ export default function AiShow({
                             <p className="max-w-3xl text-sm leading-6 text-slate-500">
                                 {tai.documents_section_description}
                             </p>
+                            <p className="max-w-3xl text-xs leading-5 text-slate-400">
+                                {tai.documents_section_dedup_notice ?? (isEnglish ? 'The list shows the latest upload per filename. Earlier uploads with the same filename are not shown in this overview.' : 'Listen viser nyeste opplasting per filnavn. Tidligere opplastinger med samme filnavn vises ikke i denne oversikten.')}
+                            </p>
                         </div>
 
                         {canUseAiOffer ? (

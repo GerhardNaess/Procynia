@@ -899,6 +899,7 @@ return [
         'documents_section_overline' => 'Case documents',
         'documents_section_title' => 'Case documents',
         'documents_section_description' => 'Upload documents related to this case. They are used as the basis for requirement and AI work in the case, and are not mixed into general company knowledge.',
+        'documents_section_dedup_notice' => 'The list shows the latest upload per filename. Earlier uploads with the same filename are not shown in this overview.',
         'document_delete_blocked' => 'The case document cannot be deleted because it has already been used in processing or requirement work.',
         'choose_files' => 'Choose files',
         'uploading' => 'Uploading...',

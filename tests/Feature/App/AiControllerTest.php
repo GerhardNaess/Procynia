@@ -307,12 +307,17 @@ class AiControllerTest extends TestCase
             $case = data_get($page, 'props.case', []);
             $documents = collect(data_get($page, 'props.documents', []));
             $documentsByFilename = $documents->keyBy('original_filename');
+            $pageLocale = (string) data_get($page, 'props.locale', 'nb-NO');
+            $expectedDedupNotice = str_starts_with($pageLocale, 'en')
+                ? 'The list shows the latest upload per filename. Earlier uploads with the same filename are not shown in this overview.'
+                : 'Listen viser nyeste opplasting per filnavn. Tidligere opplastinger med samme filnavn vises ikke i denne oversikten.';
 
             return data_get($page, 'component') === 'App/AI/Show'
                 && data_get($page, 'props.pageTitle') === 'I arbeid · Case view target'
                 && data_get($page, 'props.ai_status') === 'ready'
                 && data_get($page, 'props.requirements_count') === 0
                 && data_get($page, 'props.requirements') === []
+                && data_get($page, 'props.translations.ai.documents_section_dedup_notice') === $expectedDedupNotice
                 && data_get($page, 'props.assessment_refresh_url') === route('app.ai.requirements.assessment.refresh', ['savedNotice' => $savedNotice->id])
                 && data_get($page, 'props.documents_upload_url') === route('app.ai.documents.store', ['savedNotice' => $savedNotice->id])
                 && data_get($case, 'id') === $savedNotice->id
