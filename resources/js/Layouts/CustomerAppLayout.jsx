@@ -89,6 +89,16 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : lastStoredIdIsVisible
             ? lastStoredAiCaseId
             : (firstAvailableAiCaseId ?? lastStoredAiCaseId);
+    const aiWorkHref = currentAiCaseId !== null && currentAiCaseId !== undefined
+        ? `/app/ai/${currentAiCaseId}`
+        : rememberedAiCaseId !== null
+            ? `/app/ai/${rememberedAiCaseId}`
+            : null;
+    const aiInstructionsHref = currentAiCaseId !== null && currentAiCaseId !== undefined
+        ? `/app/ai/${currentAiCaseId}/instructions`
+        : rememberedAiCaseId !== null
+            ? `/app/ai/${rememberedAiCaseId}/instructions`
+            : null;
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.is_system_owner ? '/app/billing' : null;
@@ -145,6 +155,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
         return 'overview';
     })();
+    const aiCaseNavigationHint = activeMainArea === 'ai' && aiWorkHref === null && aiInstructionsHref === null
+        ? (String(locale).toLowerCase().startsWith('en')
+            ? 'Open a case first to unlock Work in progress and AI instructions.'
+            : 'Velg en sak først for å åpne I arbeid og AI instrukser.')
+        : '';
 
     const mainNavigation = [
         { key: 'overview', label: navigation.bid_status, href: '/app/dashboard' },
@@ -160,17 +175,6 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
     const secondaryNavigation = (() => {
         if (activeMainArea === 'ai') {
-            const aiWorkHref = currentAiCaseId !== null && currentAiCaseId !== undefined
-                ? `/app/ai/${currentAiCaseId}`
-                : rememberedAiCaseId !== null
-                    ? `/app/ai/${rememberedAiCaseId}`
-                    : null;
-            const aiInstructionsHref = currentAiCaseId !== null && currentAiCaseId !== undefined
-                ? `/app/ai/${currentAiCaseId}/instructions`
-                : rememberedAiCaseId !== null
-                    ? `/app/ai/${rememberedAiCaseId}/instructions`
-                    : null;
-
             return [
                 { key: 'ai-overview', label: navigation.overview, href: '/app/ai' },
                 { key: 'ai-work', label: navigation.worklist, href: aiWorkHref },
@@ -543,6 +547,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                                     className={classNames('rounded-xl px-3 py-2 text-sm font-medium cursor-default text-slate-400 select-none')}
                                                     aria-current={isActive ? 'page' : undefined}
                                                     aria-disabled="true"
+                                                    title={aiCaseNavigationHint || undefined}
                                                 >
                                                     {item.label}
                                                 </span>
@@ -564,6 +569,11 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                                         );
                                     })}
                                 </nav>
+                                {aiCaseNavigationHint !== '' ? (
+                                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                                        {aiCaseNavigationHint}
+                                    </p>
+                                ) : null}
                             </div>
                         ) : null}
                     </div>
