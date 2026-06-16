@@ -608,13 +608,13 @@ export default function KnowledgeBaseIndex({
                                         const documentTypeLabel = String(item?.document_type_label ?? '').trim();
                                         const documentTypeValue = String(item?.document_type ?? '').trim();
                                         const ownerName = String(item?.owner_name ?? '').trim();
-                                        const ownerDisplayName = ownerName !== '' ? ownerName : tk.unknown_owner;
+                                        const ownerDisplayName = ownerName !== '' ? ownerName : ownershipLabel !== '' ? ownershipLabel : tk.unknown_owner;
                                         const uploadedByName = String(item?.uploaded_by ?? '').trim();
                                         const documentThemeLabel = String(item?.document_theme_label ?? '').trim();
                                         const owningSavedNoticeTitle = String(item?.owning_saved_notice_title ?? '').trim();
                                         const missingMetadataIndicators = [];
 
-                                        if (ownerName === '') {
+                                        if (ownerName === '' && ownershipLabel !== 'Selskap') {
                                             missingMetadataIndicators.push(tk.missing_owner ?? 'Mangler eier');
                                         }
 
@@ -622,7 +622,7 @@ export default function KnowledgeBaseIndex({
                                             missingMetadataIndicators.push(tk.missing_document_category ?? 'Mangler dokumentkategori');
                                         }
 
-                                        const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : tk.unknown_owner_initials;
+                                        const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : getOwnerInitials(ownershipLabel, tk.unknown_owner_initials);
                                         const versionLabel = item.version_label ?? tk.version_1;
                                         const subtitle = `${versionLabel} · ${item.file_size_human ?? commonText.not_available}`;
 

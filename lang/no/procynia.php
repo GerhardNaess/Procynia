@@ -1498,6 +1498,7 @@ return [
         'inactive_label' => 'Inaktiv',
         'last_updated' => 'Sist oppdatert',
         'owner' => 'Eier',
+        'uploaded_by_label' => 'Opplastet av',
         'unknown_owner' => 'Ukjent',
         'no_chunks' => 'Ingen chunks',
         'back' => 'Tilbake',

@@ -640,8 +640,10 @@ export default function KnowledgeBaseShow({
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
     const ownershipLabel = String(knowledgeItem?.ownership_label ?? '').trim();
     const ownerName = String(knowledgeItem?.owner_name ?? '').trim();
+    const uploadedByName = String(knowledgeItem?.uploaded_by ?? '').trim();
     const owningSavedNoticeTitle = String(knowledgeItem?.owning_saved_notice_title ?? '').trim();
     const documentThemeLabel = String(knowledgeItem?.document_theme_label ?? '').trim();
+    const ownerDisplayName = ownerName !== '' ? ownerName : ownershipLabel !== '' ? ownershipLabel : tks.unknown_owner;
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
     const documentStatusMeta = {
@@ -1075,8 +1077,13 @@ export default function KnowledgeBaseShow({
                                             {tks.last_updated}: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
                                         </span>
                                         <span>
-                                            {tks.owner}: <span className="font-medium text-slate-900">{knowledgeItem?.uploaded_by ?? tks.unknown_owner}</span>
+                                            {tks.owner}: <span className="font-medium text-slate-900">{ownerDisplayName}</span>
                                         </span>
+                                        {uploadedByName !== '' && uploadedByName !== ownerDisplayName ? (
+                                            <span>
+                                                {tks.uploaded_by_label ?? 'Opplastet av'}: <span className="font-medium text-slate-900">{uploadedByName}</span>
+                                            </span>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
@@ -1218,7 +1225,7 @@ export default function KnowledgeBaseShow({
                             </div>
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_owner}</dt>
-                                <dd className="text-right font-medium text-slate-950">{knowledgeItem?.uploaded_by ?? tks.unknown_owner}</dd>
+                                <dd className="text-right font-medium text-slate-950">{ownerDisplayName}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_last_updated}</dt>
@@ -2092,7 +2099,7 @@ export default function KnowledgeBaseShow({
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                                     <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_owner}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.uploaded_by ?? '—'}</dd>
+                                    <dd className="mt-2 text-sm font-medium text-slate-950">{ownerDisplayName}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                                     <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_chunks}</dt>

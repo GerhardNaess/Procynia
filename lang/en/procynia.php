@@ -1498,6 +1498,7 @@ return [
         'inactive_label' => 'Inactive',
         'last_updated' => 'Last updated',
         'owner' => 'Owner',
+        'uploaded_by_label' => 'Uploaded by',
         'unknown_owner' => 'Unknown',
         'no_chunks' => 'No chunks',
         'back' => 'Back',
