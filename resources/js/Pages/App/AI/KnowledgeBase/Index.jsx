@@ -111,6 +111,10 @@ function matchesSearch(item, needle) {
 
     const searchableText = [
         item?.original_filename,
+        item?.owner_name,
+        item?.ownership_label,
+        item?.owning_saved_notice_title,
+        item?.document_theme_label,
         item?.document_type_label,
         item?.extraction_status_label,
         item?.uploaded_by,
@@ -597,8 +601,16 @@ export default function KnowledgeBaseIndex({
                                         const statusClass = DOCUMENT_STATUS_CLASS[status] ?? DOCUMENT_STATUS_CLASS.review;
                                         const statusLabel = DOCUMENT_STATUS_LABEL[status] ?? DOCUMENT_STATUS_LABEL.review;
                                         const ownershipLabel = String(item?.ownership_label ?? '').trim();
-                                        const ownerName = item.uploaded_by ?? tk.unknown_owner;
-                                        const ownerInitials = getOwnerInitials(ownerName, tk.unknown_owner_initials);
+                                        const ownershipLabelText = tk.ownership_label_text ?? 'Tilhørighet';
+                                        const uploadedByLabelText = tk.uploaded_by_label ?? 'Opplastet av';
+                                        const themeLabelText = tk.theme_label ?? 'Tema';
+                                        const caseLabelText = tk.case_label ?? 'Sak';
+                                        const ownerName = String(item?.owner_name ?? '').trim();
+                                        const ownerDisplayName = ownerName !== '' ? ownerName : tk.unknown_owner;
+                                        const uploadedByName = String(item?.uploaded_by ?? '').trim();
+                                        const documentThemeLabel = String(item?.document_theme_label ?? '').trim();
+                                        const owningSavedNoticeTitle = String(item?.owning_saved_notice_title ?? '').trim();
+                                        const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : tk.unknown_owner_initials;
                                         const versionLabel = item.version_label ?? tk.version_1;
                                         const subtitle = `${versionLabel} · ${item.file_size_human ?? commonText.not_available}`;
 
@@ -620,13 +632,23 @@ export default function KnowledgeBaseIndex({
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <div className="space-y-1">
+                                                    <div className="space-y-1.5">
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
                                                             {item.document_type_label ?? item.document_type ?? commonText.not_available}
                                                         </span>
                                                         {ownershipLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
-                                                                <span className="font-medium text-slate-600">Tilhørighet:</span> {ownershipLabel}
+                                                                <span className="font-medium text-slate-600">{ownershipLabelText}:</span> {ownershipLabel}
+                                                            </div>
+                                                        ) : null}
+                                                        {documentThemeLabel !== '' ? (
+                                                            <div className="text-[11px] leading-5 text-slate-500">
+                                                                <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentThemeLabel}
+                                                            </div>
+                                                        ) : null}
+                                                        {owningSavedNoticeTitle !== '' ? (
+                                                            <div className="text-[11px] leading-5 text-slate-500">
+                                                                <span className="font-medium text-slate-600">{caseLabelText}:</span> {owningSavedNoticeTitle}
                                                             </div>
                                                         ) : null}
                                                     </div>
@@ -656,11 +678,13 @@ export default function KnowledgeBaseIndex({
                                                         </div>
                                                         <div className="min-w-0">
                                                             <div className="truncate text-sm font-medium text-slate-900">
-                                                                {ownerName}
+                                                                {ownerDisplayName}
                                                             </div>
-                                                            <div className="text-xs text-slate-500">
-                                                                {tk.col_owner}
-                                                            </div>
+                                                            {uploadedByName !== '' && uploadedByName !== ownerName ? (
+                                                                <div className="text-xs text-slate-500">
+                                                                    {uploadedByLabelText}: {uploadedByName}
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                 </td>
