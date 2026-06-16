@@ -2261,6 +2261,70 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_document_show_payload_exposes_read_only_revisions_in_sorted_order(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six C Revision AS');
+        $themeTerm = $this->createKnowledgeThemeTerm($context['customer'], 'Revisjonstema');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('revision-detail.docx', 'Revision detail document content that persists enough text.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_theme_term_id' => $themeTerm->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'revision-detail.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => false,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document, $context, $themeTerm): bool {
+            $revisions = collect(data_get($page, 'props.knowledgeItem.revisions', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && $revisions->count() === 2
+                && $revisions->pluck('revision_no')->all() === [1, 2]
+                && $revisions->pluck('change_type')->all() === [
+                    KnowledgeItemRevision::CHANGE_TYPE_CREATED,
+                    KnowledgeItemRevision::CHANGE_TYPE_METADATA_UPDATED,
+                ]
+                && $revisions->pluck('changed_by_user_id')->all() === [
+                    $context['user']->id,
+                    $context['user']->id,
+                ]
+                && $revisions->every(function (array $revision) use ($context): bool {
+                    return $revision['changed_by_name'] === $context['user']->name
+                        && is_string($revision['created_at'])
+                        && $revision['created_at'] !== ''
+                        && is_array($revision['snapshot'])
+                        && ! array_key_exists('extracted_text', $revision['snapshot'])
+                        && ! array_key_exists('chunks', $revision['snapshot'])
+                        && ! array_key_exists('embeddings', $revision['snapshot'])
+                        && ! array_key_exists('content', $revision['snapshot']);
+                })
+                && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.knowledge_item_id') === $document->id
+                && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.document_type') === KnowledgeItem::DOCUMENT_TYPE_REFERENCE
+                && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.mime_type') === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_COMPANY
+                && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.document_theme_term_id') === $themeTerm->id
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.knowledge_item_id') === $document->id
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.document_type') === KnowledgeItem::DOCUMENT_TYPE_OTHER
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.mime_type') === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_COMPANY
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.document_theme_term_id') === $themeTerm->id;
+        });
+    }
+
     public function test_knowledge_document_chunk_review_status_can_be_updated_from_the_show_page(): void
     {
         Storage::fake('local');

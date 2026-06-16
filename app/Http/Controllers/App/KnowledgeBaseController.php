@@ -115,6 +115,10 @@ class KnowledgeBaseController extends Controller
                 'owningSavedNotice',
                 'documentThemeTerm',
                 'uploadedBy',
+                'revisions' => static fn ($query) => $query
+                    ->with('changedBy')
+                    ->orderBy('revision_no')
+                    ->orderBy('id'),
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
             ])
             ->withCount('chunks')
@@ -985,6 +989,27 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Convert a knowledge document revision into a read-only payload.
+     * Inputs: A persisted knowledge document revision.
+     * Returns: A compact revision array for frontend reads.
+     * Side effects: None.
+     *
+     * @return array<string, mixed>
+     */
+    private function documentRevisionPayload(KnowledgeItemRevision $revision): array
+    {
+        return [
+            'id' => $revision->id,
+            'revision_no' => $revision->revision_no,
+            'change_type' => $revision->change_type,
+            'changed_by_user_id' => $revision->changed_by_user_id,
+            'changed_by_name' => $revision->changedBy?->name,
+            'created_at' => optional($revision->created_at)?->toIso8601String(),
+            'snapshot' => $revision->snapshot,
+        ];
+    }
+
+    /**
      * Purpose: Build a revision snapshot for the current persisted state of one knowledge document.
      * Inputs: A customer-scoped knowledge document.
      * Returns: An append-only snapshot array.
@@ -1210,6 +1235,10 @@ class KnowledgeBaseController extends Controller
                         'source_filetype' => $knowledgeDocument->mime_type,
                         'knowledge_item_id' => $knowledgeDocument->id,
                     ])
+                    ->values()
+                    ->all(),
+                'revisions' => $knowledgeDocument->revisions
+                    ->map(fn (KnowledgeItemRevision $revision): array => $this->documentRevisionPayload($revision))
                     ->values()
                     ->all(),
             ],
