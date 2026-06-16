@@ -1594,7 +1594,7 @@ return [
         'no_chunk_selected_hint' => 'Velg en chunk i listen for å gå gjennom innholdet.',
         'chunk_count' => ':count chunks',
         'review_progress' => ':done av :total chunks er manuelt godkjent',
-        'meta_type' => 'Type',
+        'meta_type' => 'Dokumentkategori',
         'meta_status' => 'Status',
         'meta_activity' => 'Aktivitet',
         'meta_file_size' => 'Filstørrelse',

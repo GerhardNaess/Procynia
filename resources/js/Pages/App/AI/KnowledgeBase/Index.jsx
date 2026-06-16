@@ -618,10 +618,6 @@ export default function KnowledgeBaseIndex({
                                             missingMetadataIndicators.push(tk.missing_owner ?? 'Mangler eier');
                                         }
 
-                                        if (documentThemeLabel === '') {
-                                            missingMetadataIndicators.push(tk.missing_theme ?? 'Mangler tema');
-                                        }
-
                                         if (documentTypeLabel === '' && documentTypeValue === '') {
                                             missingMetadataIndicators.push(tk.missing_document_category ?? 'Mangler dokumentkategori');
                                         }

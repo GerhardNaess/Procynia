@@ -1594,7 +1594,7 @@ return [
         'no_chunk_selected_hint' => 'Select a chunk from the list to review its content.',
         'chunk_count' => ':count chunks',
         'review_progress' => ':done of :total chunks are manually approved',
-        'meta_type' => 'Type',
+        'meta_type' => 'Document category',
         'meta_status' => 'Status',
         'meta_activity' => 'Activity',
         'meta_file_size' => 'File size',
