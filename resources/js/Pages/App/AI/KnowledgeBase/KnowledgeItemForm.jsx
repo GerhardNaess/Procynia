@@ -71,12 +71,29 @@ export default function KnowledgeItemForm({
     const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
     const selectedDocumentThemeTermId = form.data.document_theme_term_id ?? '';
+    const ownershipLabel = knowledgeItem?.ownership_label ?? (!knowledgeItem ? 'Selskap' : null);
+    const ownershipHelpText = knowledgeItem ? null : 'Kunnskapsdokumenter er generell selskapskunnskap og brukes på tvers av saker.';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
     const contentExcerptLimit = 220;
     const hasLongContentExcerpt = contentExcerpt.length > contentExcerptLimit;
     const visibleContentExcerpt = hasLongContentExcerpt && !contentExcerptExpanded
         ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
         : contentExcerpt;
+    const ownershipSummary = ownershipLabel ? (
+        <section className="rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                Tilhørighet
+            </div>
+            <div className="mt-1 text-sm font-medium text-slate-950">
+                Tilhørighet: {ownershipLabel}
+            </div>
+            {ownershipHelpText ? (
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                    {ownershipHelpText}
+                </p>
+            ) : null}
+        </section>
+    ) : null;
     const documentThemeSelect = (
         <label className="space-y-2">
             <span className="text-sm font-medium text-slate-700">Tema</span>
@@ -146,6 +163,8 @@ export default function KnowledgeItemForm({
                                 </p>
                                 {form.errors.document ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
                             </div>
+
+                            {ownershipSummary}
 
                             <div className="grid gap-4 sm:grid-cols-3">
                                 <label className="space-y-2">
@@ -261,6 +280,8 @@ export default function KnowledgeItemForm({
                         </p>
                     </section>
                 ) : null}
+
+                {ownershipSummary}
 
                 <div className="grid gap-4 sm:grid-cols-3">
                     <label className="space-y-2">
