@@ -1539,6 +1539,7 @@ class NoticeController extends Controller
             'title' => $notice->title,
             'organization_name' => $notice->buyer_name,
             'external_url' => $this->savedNoticeExternalUrl($notice),
+            'ai_show_url' => route('app.ai.show', ['savedNotice' => $notice->id]),
             'summary' => $notice->summary,
             'cpv_code' => $notice->cpv_code,
             'publication_date' => optional($notice->publication_date)?->toIso8601String(),

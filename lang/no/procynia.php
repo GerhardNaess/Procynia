@@ -1222,6 +1222,8 @@ return [
         'page_help_item_status_text' => 'Sett bid-status, tilordne bid-manager og kommersiell eier, og registrer sentrale datoer.',
         'page_help_item_documents_title' => 'Saksdokumenter',
         'page_help_item_documents_text' => 'Last opp saksdokumenter for denne saken. De brukes som grunnlag for krav- og AI-arbeid i saken, og blandes ikke inn i generell selskapskunnskap.',
+        'case_documents_cta_label' => 'Åpne saksdokumenter og AI',
+        'case_documents_cta_help' => 'Last opp og arbeid med dokumenter som gjelder denne konkrete saken.',
         'page_help_item_review_title' => 'Business Review',
         'page_help_item_review_text' => 'Opprett Business Review for formell go/no-go-beslutning før ressurser settes inn.',
         'type_prefix' => 'Type:',

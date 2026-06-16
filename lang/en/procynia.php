@@ -1222,6 +1222,8 @@ return [
         'page_help_item_status_text' => 'Set bid status, assign a bid manager and commercial owner, and register key dates.',
         'page_help_item_documents_title' => 'Case documents',
         'page_help_item_documents_text' => 'Upload case documents for this case. They are used as the basis for requirement and AI work in the case, and are not mixed into general company knowledge.',
+        'case_documents_cta_label' => 'Open case documents and AI',
+        'case_documents_cta_help' => 'Upload and work with documents related to this specific case.',
         'page_help_item_review_title' => 'Business Review',
         'page_help_item_review_text' => 'Create a Business Review for a formal go/no-go decision before committing resources.',
         'type_prefix' => 'Type:',

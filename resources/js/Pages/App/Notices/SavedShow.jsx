@@ -888,6 +888,19 @@ export default function SavedNoticeShow({ notice }) {
                         </div>
 
                         <div className="flex flex-wrap items-start gap-3">
+                            {notice.ai_show_url ? (
+                                <div className="space-y-1">
+                                    <Link
+                                        href={notice.ai_show_url}
+                                        className="inline-flex min-h-11 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                    >
+                                        {tsn.case_documents_cta_label ?? 'Åpne saksdokumenter og AI'}
+                                    </Link>
+                                    <p className="max-w-sm text-xs leading-5 text-slate-500">
+                                        {tsn.case_documents_cta_help ?? 'Last opp og arbeid med dokumenter som gjelder denne konkrete saken.'}
+                                    </p>
+                                </div>
+                            ) : null}
                             {notice.external_url ? (
                                 <a
                                     href={notice.external_url}

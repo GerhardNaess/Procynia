@@ -3138,6 +3138,7 @@ class CustomerSavedNoticeWorklistTest extends TestCase
         $this->assertSame('Bid case', $page['props']['notice']['title']);
         $this->assertSame(SavedNotice::BID_STATUS_NEGOTIATION, $page['props']['notice']['bid_status']);
         $this->assertSame('Forhandling', $page['props']['notice']['bid_status_label']);
+        $this->assertSame(route('app.ai.show', ['savedNotice' => $savedNotice->id]), $page['props']['notice']['ai_show_url']);
         $this->assertSame($context['admin']->name, $page['props']['notice']['opportunity_owner']['name']);
         $this->assertSame(User::BID_ROLE_SYSTEM_OWNER, $page['props']['notice']['opportunity_owner']['bid_role']);
         $this->assertSame($bidManager->name, $page['props']['notice']['bid_manager']['name']);
