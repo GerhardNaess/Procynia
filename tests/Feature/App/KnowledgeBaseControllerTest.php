@@ -2787,6 +2787,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(KnowledgeItemRevision::CHANGE_TYPE_CREATED, $themedRevisions[0]->change_type);
         $this->assertSame(1, $themedRevisions[0]->revision_no);
         $this->assertSame($themedDocument->id, $themedRevisions[0]->knowledge_item_id);
+        $this->assertRevisionOwnership($themedRevisions[0], $context['customer'], $context['user']);
         $this->assertSame($themedDocument->id, data_get($themedRevisions[0]->snapshot, 'knowledge_item_id'));
         $this->assertSame($themedDocument->customer_id, data_get($themedRevisions[0]->snapshot, 'customer_id'));
         $this->assertSame($themedDocument->title, data_get($themedRevisions[0]->snapshot, 'title'));
@@ -2795,7 +2796,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($themedDocument->mime_type, data_get($themedRevisions[0]->snapshot, 'mime_type'));
         $this->assertSame($themedDocument->document_type, data_get($themedRevisions[0]->snapshot, 'document_type'));
         $this->assertSame($themeTerm->id, data_get($themedRevisions[0]->snapshot, 'document_theme_term_id'));
-        $this->assertSame($themedDocument->summary, data_get($themedRevisions[0]->snapshot, 'summary'));
+        $this->assertNull(data_get($themedRevisions[0]->snapshot, 'summary'));
 
         $storeWithoutThemeResponse = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('theme-store-empty.docx', 'Document content used to verify null theme behavior.'),
@@ -2824,9 +2825,10 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertCount(1, $plainRevisions);
         $this->assertSame(KnowledgeItemRevision::CHANGE_TYPE_CREATED, $plainRevisions[0]->change_type);
         $this->assertSame(1, $plainRevisions[0]->revision_no);
+        $this->assertRevisionOwnership($plainRevisions[0], $context['customer'], $context['user']);
         $this->assertNull(data_get($plainRevisions[0]->snapshot, 'document_theme_term_id'));
         $this->assertSame($plainDocument->storage_path, data_get($plainRevisions[0]->snapshot, 'path'));
-        $this->assertSame($plainDocument->summary, data_get($plainRevisions[0]->snapshot, 'summary'));
+        $this->assertNull(data_get($plainRevisions[0]->snapshot, 'summary'));
     }
 
     public function test_knowledge_document_update_persists_preserves_and_clears_document_theme_term_id(): void
@@ -2878,6 +2880,9 @@ class KnowledgeBaseControllerTest extends TestCase
             KnowledgeItemRevision::CHANGE_TYPE_CREATED,
             KnowledgeItemRevision::CHANGE_TYPE_METADATA_UPDATED,
         ], $revisionsAfterUpdate->pluck('change_type')->all());
+        foreach ($revisionsAfterUpdate as $revision) {
+            $this->assertRevisionOwnership($revision, $context['customer'], $context['user']);
+        }
         $this->assertSame($initialThemeTerm->id, data_get($revisionsAfterUpdate[0]->snapshot, 'document_theme_term_id'));
         $this->assertSame($replacementThemeTerm->id, data_get($revisionsAfterUpdate[1]->snapshot, 'document_theme_term_id'));
         $this->assertSame($document->storage_path, data_get($revisionsAfterUpdate[0]->snapshot, 'path'));
@@ -2929,6 +2934,9 @@ class KnowledgeBaseControllerTest extends TestCase
             KnowledgeItemRevision::CHANGE_TYPE_METADATA_UPDATED,
             KnowledgeItemRevision::CHANGE_TYPE_METADATA_UPDATED,
         ], $revisionsAfterClear->pluck('change_type')->all());
+        foreach ($revisionsAfterClear as $revision) {
+            $this->assertRevisionOwnership($revision, $context['customer'], $context['user']);
+        }
         $this->assertSame($replacementThemeTerm->id, data_get($revisionsAfterClear[2]->snapshot, 'document_theme_term_id'));
         $this->assertSame(null, data_get($revisionsAfterClear[3]->snapshot, 'document_theme_term_id'));
         $this->assertSame($document->id, data_get($revisionsAfterClear[3]->snapshot, 'knowledge_item_id'));
@@ -3051,6 +3059,9 @@ class KnowledgeBaseControllerTest extends TestCase
         ], $revisions->pluck('change_type')->all());
         $this->assertNull($revisions[0]->knowledge_item_id);
         $this->assertNull($revisions[1]->knowledge_item_id);
+        foreach ($revisions as $revision) {
+            $this->assertRevisionOwnership($revision, $context['customer'], $context['user']);
+        }
         $this->assertSame($document->id, data_get($revisions[0]->snapshot, 'knowledge_item_id'));
         $this->assertSame($document->id, data_get($revisions[1]->snapshot, 'knowledge_item_id'));
 
@@ -3462,6 +3473,18 @@ class KnowledgeBaseControllerTest extends TestCase
             'description' => 'Dokumenttema brukt i payloadtest.',
             'approved' => true,
         ]);
+    }
+
+    /**
+     * Purpose: Assert that a knowledge-item revision is scoped to the given customer and user.
+     * Inputs: The revision row plus the expected customer and user.
+     * Returns: None.
+     * Side effects: None.
+     */
+    private function assertRevisionOwnership(KnowledgeItemRevision $revision, Customer $customer, User $user): void
+    {
+        $this->assertSame($customer->id, $revision->customer_id);
+        $this->assertSame($user->id, $revision->changed_by_user_id);
     }
 
     /**

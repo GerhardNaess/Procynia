@@ -306,6 +306,7 @@ class KnowledgeBaseController extends Controller
                 $customerId,
                 $payload,
                 $request,
+                $user,
                 $storedPath,
                 $absolutePath,
                 $extractedText,
@@ -337,6 +338,12 @@ class KnowledgeBaseController extends Controller
                     'is_active' => $payload['is_active'],
                 ]);
 
+                $this->recordKnowledgeItemRevision(
+                    $knowledgeDocument,
+                    KnowledgeItemRevision::CHANGE_TYPE_CREATED,
+                    (int) $user->id,
+                );
+
                 return [
                     'knowledge_document' => $knowledgeDocument,
                     'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads, $absolutePath),
@@ -345,11 +352,6 @@ class KnowledgeBaseController extends Controller
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
             $this->ensureDocumentSummary($result['knowledge_document'], (int) $user->id);
-            $this->recordKnowledgeItemRevision(
-                $result['knowledge_document'],
-                KnowledgeItemRevision::CHANGE_TYPE_CREATED,
-                (int) $user->id,
-            );
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
