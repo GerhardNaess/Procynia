@@ -53,6 +53,69 @@ const DOCUMENT_STATUS_META = {
     },
 };
 
+function isEnglishLocale(locale) {
+    return String(locale ?? '').toLowerCase().startsWith('en');
+}
+
+function getDocumentListStatusMeta(status, locale) {
+    const english = isEnglishLocale(locale);
+    const metaByStatus = {
+        uploaded: {
+            label: english ? 'Uploaded' : 'Lastet opp',
+            className: 'bg-slate-100 text-slate-700 ring-slate-200',
+        },
+        text_extracted: {
+            label: english ? 'Text extracted' : 'Tekst hentet ut',
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        queued: {
+            label: english ? 'Waiting for processing' : 'Venter på behandling',
+            className: 'bg-amber-100 text-amber-700 ring-amber-200',
+        },
+        processing: {
+            label: english ? 'Processing' : 'Behandles',
+            className: 'bg-violet-100 text-violet-700 ring-violet-200',
+        },
+        merging: {
+            label: english ? 'Finalising requirements' : 'Ferdigstiller krav',
+            className: 'bg-sky-100 text-sky-700 ring-sky-200',
+        },
+        completed: {
+            label: english ? 'Completed' : 'Ferdig behandlet',
+            className: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        },
+        failed: {
+            label: english ? 'Failed' : 'Feilet',
+            className: 'bg-rose-100 text-rose-700 ring-rose-200',
+        },
+    };
+
+    return metaByStatus[String(status ?? '').trim()] ?? {
+        label: english ? 'Unknown status' : 'Ukjent status',
+        className: 'bg-slate-100 text-slate-700 ring-slate-200',
+    };
+}
+
+function formatDocumentTimestamp(value, locale) {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    return new Intl.DateTimeFormat(locale, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(date);
+}
+
 const REQUIREMENT_TYPE_META = {
     mandatory: {
         label: 'Obligatorisk',
@@ -1582,6 +1645,7 @@ export default function AiShow({
         can_use_ai_offer: canUseAiOffer = true,
     } = usePage().props;
     const tai = translations?.ai ?? {};
+    const isEnglish = isEnglishLocale(locale);
     const currentUser = auth.user ?? null;
     const billingHref = currentUser?.is_system_owner ? '/app/billing' : '';
 
@@ -3117,6 +3181,95 @@ export default function AiShow({
                                 {tai.ai_access_unavailable_message}
                             </div>
                         )}
+
+                        <div className="space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                    {isEnglish ? 'Uploaded case documents' : 'Opplastede saksdokumenter'}
+                                </h3>
+                                <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                    {documentRows.length}
+                                </span>
+                            </div>
+
+                            {documentRows.length > 0 ? (
+                                <ul className="space-y-3">
+                                    {documentRows.map((document) => {
+                                        const statusMeta = getDocumentListStatusMeta(document?.processing_status, locale);
+                                        const uploadedAtLabel = formatDocumentTimestamp(document?.uploaded_at, locale);
+                                        const requirementExtractionProgress = document?.requirement_extraction_progress ?? null;
+                                        const completedCalls = Number(requirementExtractionProgress?.completed_calls ?? 0);
+                                        const totalCalls = Number(requirementExtractionProgress?.total_calls ?? 0);
+                                        const progressLabel = requirementExtractionProgress !== null && totalCalls > 0
+                                            ? (isEnglish
+                                                ? `Requirement extraction: ${completedCalls} / ${totalCalls} steps`
+                                                : `Kravekstraksjon: ${completedCalls} / ${totalCalls} steg`)
+                                            : null;
+
+                                        return (
+                                            <li
+                                                key={document.id}
+                                                className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4"
+                                            >
+                                                <div className="flex flex-wrap items-start justify-between gap-4">
+                                                    <div className="min-w-0 space-y-2">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="min-w-0 truncate text-sm font-semibold text-slate-950">
+                                                                {document.original_filename ?? (isEnglish ? 'Untitled document' : 'Uten filnavn')}
+                                                            </span>
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-semibold ring-1 ring-inset ${statusMeta.className}`}>
+                                                                {statusMeta.label}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                                                            {document.uploaded_by ? (
+                                                                <span>
+                                                                    {isEnglish ? 'Uploaded by' : 'Lastet opp av'} {document.uploaded_by}
+                                                                </span>
+                                                            ) : null}
+                                                            {uploadedAtLabel ? (
+                                                                <span>
+                                                                    {isEnglish ? 'Uploaded' : 'Lastet opp'} {uploadedAtLabel}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+
+                                                        {progressLabel ? (
+                                                            <p className="text-xs leading-5 text-slate-500">
+                                                                {progressLabel}
+                                                            </p>
+                                                        ) : null}
+                                                    </div>
+
+                                                    {document.preview_url ? (
+                                                        <a
+                                                            href={document.preview_url}
+                                                            className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                        >
+                                                            {isEnglish ? 'Preview' : 'Forhåndsvis'}
+                                                        </a>
+                                                    ) : null}
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            ) : (
+                                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8">
+                                    <div className="text-base font-semibold text-slate-900">
+                                        {isEnglish
+                                            ? 'No case documents have been uploaded yet.'
+                                            : 'Ingen saksdokumenter er lastet opp ennå.'}
+                                    </div>
+                                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                                        {isEnglish
+                                            ? 'Upload tender documents, requirement documents or other files related to this specific case.'
+                                            : 'Last opp konkurransegrunnlag, kravdokumenter eller andre dokumenter som gjelder denne konkrete saken.'}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </section>
 
