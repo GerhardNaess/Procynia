@@ -530,6 +530,24 @@ function buildHistoryEntries(item, locale, status, labels = {}) {
     return entries;
 }
 
+function getRevisionChangeTypeLabel(changeType) {
+    const normalized = String(changeType ?? '').trim();
+
+    if (normalized === 'created') {
+        return 'Opprettet';
+    }
+
+    if (normalized === 'metadata_updated') {
+        return 'Metadata endret';
+    }
+
+    if (normalized === 'deleted') {
+        return 'Slettet';
+    }
+
+    return normalized !== '' ? normalized : '—';
+}
+
 function getChunkRangeLabel(chunk) {
     const startOffset = Number(chunk?.start_offset ?? 0);
     const endOffset = Number(chunk?.end_offset ?? 0);
@@ -744,7 +762,8 @@ export default function KnowledgeBaseShow({
         image_description: '',
     });
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
-    const historyEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus, knowledgeShowLabels);
+    const revisionEntries = Array.isArray(knowledgeItem?.revisions) ? knowledgeItem.revisions : [];
+    const processHistoryEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus, knowledgeShowLabels);
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -2090,29 +2109,114 @@ export default function KnowledgeBaseShow({
                     ) : null}
 
                     {activeTab === 'history' ? (
-                        <div className="space-y-3">
-                            {historyEntries.map((entry) => (
-                                <div
-                                    key={`${entry.label}-${entry.time}`}
-                                    className="flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-slate-50/70 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"
-                                >
-                                    <div className="flex gap-3">
-                                        <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500" />
-                                        <div className="space-y-1">
-                                            <div className="text-sm font-medium text-slate-900">
-                                                {entry.label}
-                                            </div>
-                                            <p className="text-sm leading-6 text-slate-600">
-                                                {entry.text}
-                                            </p>
+                        <div className="space-y-6">
+                            <section className="space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                            Revisjoner
                                         </div>
-                                    </div>
-
-                                    <div className="text-sm font-medium text-slate-500">
-                                        {entry.time}
+                                        <p className="mt-1 text-sm text-slate-500">
+                                            Read-only historikk for lagrede dokumentendringer.
+                                        </p>
                                     </div>
                                 </div>
-                            ))}
+
+                                {revisionEntries.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {revisionEntries.map((revision) => (
+                                            <div
+                                                key={revision.id}
+                                                className="flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-start sm:justify-between"
+                                            >
+                                                <div className="space-y-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                                                            Revisjon {revision.revision_no}
+                                                        </span>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                                                            {getRevisionChangeTypeLabel(revision.change_type)}
+                                                        </span>
+                                                    </div>
+
+                                                    <dl className="grid gap-x-6 gap-y-2 text-sm text-slate-600 sm:grid-cols-2">
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                Endringstype
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {getRevisionChangeTypeLabel(revision.change_type)}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                Tidspunkt
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {formatDateTime(revision.created_at, locale)}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="space-y-0.5 sm:col-span-2">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                Bruker
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {revision.changed_by_name || '—'}
+                                                            </dd>
+                                                        </div>
+                                                    </dl>
+                                                </div>
+
+                                                <div className="text-sm font-medium text-slate-500">
+                                                    #{revision.revision_no}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-sm text-slate-500">
+                                        Ingen revisjoner registrert ennå.
+                                    </div>
+                                )}
+                            </section>
+
+                            <section className="space-y-3">
+                                <div>
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        Prosesshistorikk
+                                    </div>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        Opplasting, lagring og ekstraksjon for dokumentet.
+                                    </p>
+                                </div>
+
+                                {processHistoryEntries.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {processHistoryEntries.map((entry) => (
+                                            <div
+                                                key={`${entry.label}-${entry.time}`}
+                                                className="flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-slate-50/70 px-5 py-4 sm:flex-row sm:items-start sm:justify-between"
+                                            >
+                                                <div className="flex gap-3">
+                                                    <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500" />
+                                                    <div className="space-y-1">
+                                                        <div className="text-sm font-medium text-slate-900">
+                                                            {entry.label}
+                                                        </div>
+                                                        <p className="text-sm leading-6 text-slate-600">
+                                                            {entry.text}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="text-sm font-medium text-slate-500">
+                                                    {entry.time}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </section>
                         </div>
                     ) : null}
                 </section>
