@@ -165,6 +165,13 @@ class KnowledgeItem extends Model
             ->orderBy('chunk_index');
     }
 
+    public function revisions(): HasMany
+    {
+        return $this->hasMany(KnowledgeItemRevision::class)
+            ->orderBy('revision_no')
+            ->orderBy('id');
+    }
+
     public function isCompanyOwned(): bool
     {
         return $this->ownership_type === self::OWNERSHIP_TYPE_COMPANY;

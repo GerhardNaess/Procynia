@@ -8,6 +8,7 @@ use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeItemRevision;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
@@ -344,6 +345,11 @@ class KnowledgeBaseController extends Controller
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
             $this->ensureDocumentSummary($result['knowledge_document'], (int) $user->id);
+            $this->recordKnowledgeItemRevision(
+                $result['knowledge_document'],
+                KnowledgeItemRevision::CHANGE_TYPE_CREATED,
+                (int) $user->id,
+            );
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
@@ -401,17 +407,24 @@ class KnowledgeBaseController extends Controller
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $payload = $this->validatedUpdatePayload($request, $customerId);
 
-        $updates = [
-            'document_type' => $payload['document_type'],
-            'content_type' => $payload['document_type'],
-            'is_active' => $payload['is_active'],
-        ];
+        DB::transaction(function () use ($record, $payload, $user): void {
+            $updates = [
+                'document_type' => $payload['document_type'],
+                'content_type' => $payload['document_type'],
+                'is_active' => $payload['is_active'],
+            ];
 
-        if (array_key_exists('document_theme_term_id', $payload)) {
-            $updates['document_theme_term_id'] = $payload['document_theme_term_id'];
-        }
+            if (array_key_exists('document_theme_term_id', $payload)) {
+                $updates['document_theme_term_id'] = $payload['document_theme_term_id'];
+            }
 
-        $record->forceFill($updates)->save();
+            $record->forceFill($updates)->save();
+            $this->recordKnowledgeItemRevision(
+                $record,
+                KnowledgeItemRevision::CHANGE_TYPE_METADATA_UPDATED,
+                (int) $user->id,
+            );
+        });
 
         return redirect()
             ->route('app.ai.knowledge-base.index')
@@ -430,7 +443,12 @@ class KnowledgeBaseController extends Controller
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $storedPath = $record->storage_path;
 
-        DB::transaction(function () use ($record): void {
+        DB::transaction(function () use ($record, $user): void {
+            $this->recordKnowledgeItemRevision(
+                $record,
+                KnowledgeItemRevision::CHANGE_TYPE_DELETED,
+                (int) $user->id,
+            );
             $record->chunks()->delete();
             $record->delete();
         });
@@ -962,6 +980,74 @@ class KnowledgeBaseController extends Controller
             'type' => $term->type,
             'canonical_name' => $this->documentThemeLabel($knowledgeDocument),
         ];
+    }
+
+    /**
+     * Purpose: Build a revision snapshot for the current persisted state of one knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: An append-only snapshot array.
+     * Side effects: None.
+     *
+     * @return array<string, mixed>
+     */
+    private function knowledgeItemRevisionSnapshot(KnowledgeItem $knowledgeDocument): array
+    {
+        return [
+            'knowledge_item_id' => $knowledgeDocument->id,
+            'customer_id' => $knowledgeDocument->customer_id,
+            'title' => $knowledgeDocument->title,
+            'original_filename' => $knowledgeDocument->original_filename,
+            'path' => $knowledgeDocument->storage_path,
+            'mime_type' => $knowledgeDocument->mime_type,
+            'document_type' => $knowledgeDocument->document_type,
+            'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
+            'content_type' => $knowledgeDocument->content_type,
+            'ownership_type' => $knowledgeDocument->ownership_type,
+            'owner_user_id' => $knowledgeDocument->owner_user_id,
+            'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
+            'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
+            'is_active' => (bool) $knowledgeDocument->is_active,
+            'extraction_status' => $knowledgeDocument->extraction_status,
+            'extraction_error' => $knowledgeDocument->extraction_error,
+            'summary' => $knowledgeDocument->summary,
+            'uploaded_by_user_id' => $knowledgeDocument->uploaded_by_user_id,
+            'created_at' => $knowledgeDocument->created_at?->toIso8601String(),
+            'updated_at' => $knowledgeDocument->updated_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Purpose: Persist one append-only revision row for a knowledge document.
+     * Inputs: The customer-scoped knowledge document, a revision change type, and the current user id.
+     * Returns: The created revision model.
+     * Side effects: Writes one revision row.
+     */
+    private function recordKnowledgeItemRevision(
+        KnowledgeItem $knowledgeDocument,
+        string $changeType,
+        ?int $changedByUserId,
+    ): KnowledgeItemRevision {
+        return KnowledgeItemRevision::query()->create([
+            'knowledge_item_id' => $knowledgeDocument->id,
+            'customer_id' => $knowledgeDocument->customer_id,
+            'revision_no' => $this->nextKnowledgeItemRevisionNo($knowledgeDocument),
+            'change_type' => $changeType,
+            'changed_by_user_id' => $changedByUserId,
+            'snapshot' => $this->knowledgeItemRevisionSnapshot($knowledgeDocument),
+        ]);
+    }
+
+    /**
+     * Purpose: Resolve the next revision number for one knowledge document.
+     * Inputs: The customer-scoped knowledge document.
+     * Returns: The next revision number in sequence.
+     * Side effects: None.
+     */
+    private function nextKnowledgeItemRevisionNo(KnowledgeItem $knowledgeDocument): int
+    {
+        return (int) (KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $knowledgeDocument->id)
+            ->max('revision_no') ?? 0) + 1;
     }
 
     /**
