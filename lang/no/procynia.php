@@ -899,6 +899,7 @@ return [
         'documents_section_overline' => 'Saksdokumenter',
         'documents_section_title' => 'Saksdokumenter',
         'documents_section_description' => 'Last opp dokumenter som gjelder denne saken. De brukes som grunnlag for krav- og AI-arbeid i saken, og blandes ikke inn i generell selskapskunnskap.',
+        'document_delete_blocked' => 'Saksdokumentet kan ikke slettes fordi det allerede er brukt i behandling eller kravarbeid.',
         'choose_files' => 'Velg filer',
         'uploading' => 'Laster opp...',
         'refreshing' => 'Oppdaterer...',

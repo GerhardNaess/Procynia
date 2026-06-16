@@ -4002,7 +4002,7 @@ class AiControllerTest extends TestCase
         $response->assertSessionHasErrors(['documents.0']);
     }
 
-    public function test_ai_document_delete_removes_file_chunks_requirements_and_returns_to_the_case_view(): void
+    public function test_ai_document_delete_is_blocked_when_document_has_chunks_requirements_or_runs(): void
     {
         Storage::fake('local');
 
@@ -4040,19 +4040,131 @@ class AiControllerTest extends TestCase
             ]));
 
         $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('error', __('procynia.ai.document_delete_blocked'));
+        $this->assertDatabaseHas('saved_notice_ai_documents', ['id' => $document->id]);
+        $this->assertDatabaseHas('saved_notice_ai_document_chunks', ['id' => $chunk->id]);
+        $this->assertDatabaseHas('saved_notice_ai_requirements', ['id' => $requirement->id]);
+        $this->assertTrue(Storage::disk('local')->exists($document->stored_path));
+    }
+
+    public function test_ai_document_delete_is_blocked_when_processing_is_still_active(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-ACTIVE', 'Active delete target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:16:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'active-delete.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/active-delete.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED,
+        ]);
+        Storage::disk('local')->put($document->stored_path, 'document bytes');
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->delete(route('app.ai.documents.destroy', [
+                'savedNotice' => $savedNotice->id,
+                'document' => $document->id,
+            ]));
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('error', __('procynia.ai.document_delete_blocked'));
+        $this->assertDatabaseHas('saved_notice_ai_documents', ['id' => $document->id]);
+        $this->assertTrue(Storage::disk('local')->exists($document->stored_path));
+    }
+
+    public function test_ai_document_delete_is_blocked_when_an_extraction_run_exists(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-RUN', 'Run delete target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:17:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'run-delete.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/run-delete.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_COMPLETED,
+        ]);
+        Storage::disk('local')->put($document->stored_path, 'document bytes');
+
+        $run = RequirementExtractionRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'saved_notice_id' => $savedNotice->id,
+            'saved_notice_ai_document_id' => $document->id,
+            'status' => RequirementExtractionRun::STATUS_COMPLETED,
+            'strategy' => RequirementExtractionRun::STRATEGY_PHASE_1_REQUIREMENT_EXTRACTION,
+            'prompt_version' => 1,
+            'model' => 'gpt-4.1-mini',
+            'candidate_count' => 0,
+            'persisted_requirement_count' => 0,
+            'openai_call_count' => 0,
+            'input_tokens_total' => 0,
+            'output_tokens_total' => 0,
+            'total_tokens_total' => 0,
+            'queued_at' => '2026-04-06 12:17:01',
+            'started_at' => '2026-04-06 12:17:02',
+            'finished_at' => '2026-04-06 12:17:03',
+            'last_heartbeat_at' => '2026-04-06 12:17:03',
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->delete(route('app.ai.documents.destroy', [
+                'savedNotice' => $savedNotice->id,
+                'document' => $document->id,
+            ]));
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $response->assertSessionHas('error', __('procynia.ai.document_delete_blocked'));
+        $this->assertDatabaseHas('saved_notice_ai_documents', ['id' => $document->id]);
+        $this->assertDatabaseHas('requirement_extraction_runs', ['id' => $run->id]);
+        $this->assertTrue(Storage::disk('local')->exists($document->stored_path));
+    }
+
+    public function test_ai_document_delete_removes_an_isolated_document_and_returns_to_the_case_view(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-ISO', 'Isolated delete target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-04-06 12:18:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'isolated-delete.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/isolated-delete.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'processing_status' => SavedNoticeAiDocument::PROCESSING_STATUS_UPLOADED,
+        ]);
+        Storage::disk('local')->put($document->stored_path, 'document bytes');
+
+        $response = $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->delete(route('app.ai.documents.destroy', [
+                'savedNotice' => $savedNotice->id,
+                'document' => $document->id,
+            ]));
+
+        $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
         $response->assertSessionHas('success', 'Deleted 1 document.');
         $this->assertDatabaseMissing('saved_notice_ai_documents', ['id' => $document->id]);
-        $this->assertDatabaseMissing('saved_notice_ai_document_chunks', ['id' => $chunk->id]);
-        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $requirement->id]);
         $this->assertTrue(Storage::disk('local')->missing($document->stored_path));
-
-        $pageResponse = $this->actingAs($context['user'])
-            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-
-        $pageResponse->assertOk();
-        $page = $this->inertiaPageFromResponse($pageResponse);
-
-        $this->assertSame([], data_get($page, 'props.documents', []));
     }
 
     public function test_ai_document_delete_is_scoped_to_the_visible_saved_notice(): void

@@ -68,6 +68,13 @@ class AiController extends Controller
         SavedNotice::BID_STATUS_NEGOTIATION,
     ];
 
+    private const CASE_DOCUMENT_DELETE_BLOCKING_STATUSES = [
+        SavedNoticeAiDocument::PROCESSING_STATUS_QUEUED,
+        SavedNoticeAiDocument::PROCESSING_STATUS_PROCESSING,
+        SavedNoticeAiDocument::PROCESSING_STATUS_TEXT_EXTRACTED,
+        SavedNoticeAiDocument::PROCESSING_STATUS_MERGING,
+    ];
+
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly SavedNoticeAccessService $savedNoticeAccess,
@@ -439,6 +446,13 @@ class AiController extends Controller
         $ownedDocument = $record->aiDocuments()
             ->whereKey($document->id)
             ->firstOrFail();
+
+        if ($this->documentDeleteIsBlocked($ownedDocument)) {
+            return redirect()
+                ->route('app.ai.show', ['savedNotice' => $record->id])
+                ->with('error', __('procynia.ai.document_delete_blocked'));
+        }
+
         $storedPath = $ownedDocument->stored_path;
 
         DB::transaction(function () use ($ownedDocument): void {
@@ -452,6 +466,29 @@ class AiController extends Controller
         return redirect()
             ->route('app.ai.show', ['savedNotice' => $record->id])
             ->with('success', 'Deleted 1 document.');
+    }
+
+    /**
+     * Purpose: Decide whether an AI case document is still protected from hard deletion.
+     * Inputs: The owned document row.
+     * Returns: True when the document still has processing, chunk, requirement, or extraction history.
+     * Side effects: None.
+     */
+    private function documentDeleteIsBlocked(SavedNoticeAiDocument $document): bool
+    {
+        if (in_array($document->processing_status, self::CASE_DOCUMENT_DELETE_BLOCKING_STATUSES, true)) {
+            return true;
+        }
+
+        if ($document->chunks()->exists()) {
+            return true;
+        }
+
+        if ($document->requirements()->exists()) {
+            return true;
+        }
+
+        return $document->extractionRuns()->exists();
     }
 
     /**
