@@ -59,6 +59,7 @@ function formatDateTime(value) {
 export default function KnowledgeItemForm({
     form,
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+    documentOwnershipOptions = [],
     documentThemeOptions = [],
     documentOwnerOptions = [],
     backHref,
@@ -70,13 +71,13 @@ export default function KnowledgeItemForm({
 }) {
     const { translations = {} } = usePage().props;
     const commonText = translations?.common ?? {};
+    const knowledgeText = translations?.knowledge ?? {};
     const [deleting, setDeleting] = useState(false);
     const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
+    const selectedOwnershipType = form.data.ownership_type ?? 'company';
     const selectedDocumentThemeTermId = form.data.document_theme_term_id ?? '';
     const selectedDocumentOwnerUserId = form.data.owner_user_id ?? '';
-    const ownershipLabel = knowledgeItem?.ownership_label ?? (!knowledgeItem ? 'Selskap' : null);
-    const ownershipHelpText = knowledgeItem ? null : 'Kunnskapsdokumenter er generell selskapskunnskap og brukes på tvers av saker.';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
     const contentExcerptLimit = 220;
     const hasLongContentExcerpt = contentExcerpt.length > contentExcerptLimit;
@@ -84,22 +85,39 @@ export default function KnowledgeItemForm({
         ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
         : contentExcerpt;
     const documentOwnerLabel = commonText.document_owner_label ?? 'Dokumenteier';
+    const ownershipLabel = knowledgeText.ownership_label_text ?? 'Tilhørighet';
+    const ownershipHelpText = !knowledgeItem
+        ? knowledgeText.ownership_default_help ?? 'Selskap er standard for nye dokumenter.'
+        : null;
+    const selectableOwnershipOptions = (Array.isArray(documentOwnershipOptions) ? documentOwnershipOptions : [])
+        .filter((option) => option?.selectable !== false || option?.value === selectedOwnershipType);
     const notSetLabel = commonText.not_set ?? 'Ikke satt';
-    const ownershipSummary = ownershipLabel ? (
-        <section className="rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
-                Tilhørighet
-            </div>
-            <div className="mt-1 text-sm font-medium text-slate-950">
-                Tilhørighet: {ownershipLabel}
-            </div>
+    const ownershipSelect = (
+        <label className="space-y-2">
+            <span className="text-sm font-medium text-slate-700">{ownershipLabel}</span>
+            <select
+                value={selectedOwnershipType}
+                onChange={(event) => form.setData('ownership_type', event.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+            >
+                {selectableOwnershipOptions.map((option) => (
+                    <option
+                        key={option.value}
+                        value={option.value}
+                        disabled={option.selectable === false && option.value !== selectedOwnershipType}
+                    >
+                        {option.label}
+                    </option>
+                ))}
+            </select>
             {ownershipHelpText ? (
-                <p className="mt-2 text-sm leading-6 text-slate-500">
+                <p className="text-xs leading-5 text-slate-500">
                     {ownershipHelpText}
                 </p>
             ) : null}
-        </section>
-    ) : null;
+            {form.errors.ownership_type ? <p className="text-sm text-rose-600">{form.errors.ownership_type}</p> : null}
+        </label>
+    );
     const documentOwnerSelect = knowledgeItem ? (
         <label className="space-y-2">
             <span className="text-sm font-medium text-slate-700">{documentOwnerLabel}</span>
@@ -188,9 +206,7 @@ export default function KnowledgeItemForm({
                                 {form.errors.document ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
                             </div>
 
-                            {ownershipSummary}
-
-                            <div className="grid gap-4 sm:grid-cols-3">
+                            <div className="grid gap-4 sm:grid-cols-4">
                                 <label className="space-y-2">
                                     <span className="text-sm font-medium text-slate-700">Dokumentkategori</span>
                                     <select
@@ -206,6 +222,8 @@ export default function KnowledgeItemForm({
                                     </select>
                                     {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
                                 </label>
+
+                                {ownershipSelect}
 
                                 {documentThemeSelect}
 
@@ -305,13 +323,10 @@ export default function KnowledgeItemForm({
                     </section>
                 ) : null}
 
-                {ownershipSummary}
-
-                {documentOwnerSelect ? (
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        {documentOwnerSelect}
-                    </div>
-                ) : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                    {ownershipSelect}
+                    {documentOwnerSelect}
+                </div>
 
                 <div className="grid gap-4 sm:grid-cols-3">
                     <label className="space-y-2">
@@ -327,7 +342,7 @@ export default function KnowledgeItemForm({
                                 </option>
                             ))}
                         </select>
-                        {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
+                            {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
                     </label>
 
                     {documentThemeSelect}

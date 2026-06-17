@@ -253,6 +253,7 @@ class KnowledgeBaseController extends Controller
         return Inertia::render('App/AI/KnowledgeBase/Create', [
             'pageTitle' => 'Kunnskapsdokumenter · Last opp',
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentOwnershipOptions' => $this->documentOwnershipOptions(),
             'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'defaultDocumentType' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'storeUrl' => route('app.ai.knowledge-base.store'),
@@ -321,7 +322,7 @@ class KnowledgeBaseController extends Controller
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $request->user()?->id,
                     'owner_user_id' => $request->user()?->id,
-                    'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+                    'ownership_type' => $payload['ownership_type'],
                     'title' => $payload['document']->getClientOriginalName(),
                     'content' => $extractedText !== ''
                         ? $extractedText
@@ -395,6 +396,7 @@ class KnowledgeBaseController extends Controller
             'pageTitle' => 'Kunnskapsdokumenter · Rediger',
             'knowledgeItem' => $this->documentFormPayload($record),
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentOwnershipOptions' => $this->documentOwnershipOptions(),
             'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'documentOwnerOptions' => $this->documentOwnerOptionsForCustomer($customerId),
             'updateUrl' => route('app.ai.knowledge-base.update', ['knowledgeItem' => $record->id]),
@@ -419,6 +421,7 @@ class KnowledgeBaseController extends Controller
             $updates = [
                 'document_type' => $payload['document_type'],
                 'content_type' => $payload['document_type'],
+                'ownership_type' => $payload['ownership_type'],
                 'is_active' => $payload['is_active'],
             ];
 
@@ -633,6 +636,7 @@ class KnowledgeBaseController extends Controller
         $validated = $request->validate([
             'document' => ['required', 'file', 'mimes:pdf,docx,xlsx', 'max:20480'],
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
+            'ownership_type' => ['nullable', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
             'is_active' => ['required', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
@@ -640,6 +644,9 @@ class KnowledgeBaseController extends Controller
         return [
             'document' => $validated['document'],
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
+            'ownership_type' => array_key_exists('ownership_type', $validated)
+                ? Str::lower(trim((string) $validated['ownership_type']))
+                : KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
             'is_active' => (bool) $validated['is_active'],
             'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
                 ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
@@ -657,6 +664,7 @@ class KnowledgeBaseController extends Controller
     {
         $validated = $request->validate([
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
+            'ownership_type' => ['required', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
             'is_active' => ['required', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
             'owner_user_id' => $this->documentOwnerValidationRulesForCustomer($customerId),
@@ -664,6 +672,7 @@ class KnowledgeBaseController extends Controller
 
         $payload = [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
+            'ownership_type' => Str::lower(trim((string) $validated['ownership_type'])),
             'is_active' => (bool) $validated['is_active'],
         ];
 
@@ -794,6 +803,33 @@ class KnowledgeBaseController extends Controller
             ],
             KnowledgeItem::DOCUMENT_TYPES,
         );
+    }
+
+    /**
+     * Purpose: Build the selectable ownership options used by the knowledge document forms.
+     * Inputs: None.
+     * Returns: A stable list of ownership options.
+     * Side effects: None.
+     */
+    private function documentOwnershipOptions(): array
+    {
+        return [
+            [
+                'value' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+                'label' => __('procynia.knowledge.ownership_company'),
+                'selectable' => true,
+            ],
+            [
+                'value' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+                'label' => __('procynia.knowledge.ownership_personal'),
+                'selectable' => true,
+            ],
+            [
+                'value' => KnowledgeItem::OWNERSHIP_TYPE_CASE,
+                'label' => __('procynia.knowledge.ownership_case'),
+                'selectable' => false,
+            ],
+        ];
     }
 
     /**

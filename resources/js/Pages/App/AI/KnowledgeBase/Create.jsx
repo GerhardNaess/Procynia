@@ -5,6 +5,7 @@ import KnowledgeItemForm, { KNOWLEDGE_DOCUMENT_TYPE_OPTIONS } from './KnowledgeI
 export default function KnowledgeBaseCreate({
     pageTitle = 'Kunnskapsdokumenter · Last opp',
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+    documentOwnershipOptions = [],
     documentThemeOptions = [],
     defaultDocumentType = 'other',
     storeUrl = '/app/ai/knowledge-base',
@@ -13,6 +14,7 @@ export default function KnowledgeBaseCreate({
     const form = useForm({
         document: null,
         document_type: defaultDocumentType,
+        ownership_type: 'company',
         document_theme_term_id: '',
         is_active: true,
     });
@@ -44,6 +46,7 @@ export default function KnowledgeBaseCreate({
                     <KnowledgeItemForm
                         form={form}
                         documentTypeOptions={documentTypeOptions}
+                        documentOwnershipOptions={documentOwnershipOptions}
                         documentThemeOptions={documentThemeOptions}
                         backHref={indexUrl}
                         submitLabel="Last opp dokument"

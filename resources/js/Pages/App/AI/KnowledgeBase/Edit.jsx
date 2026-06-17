@@ -6,6 +6,7 @@ export default function KnowledgeBaseEdit({
     pageTitle = 'Kunnskapsdokumenter · Rediger',
     knowledgeItem,
     documentTypeOptions,
+    documentOwnershipOptions = [],
     documentThemeOptions = [],
     documentOwnerOptions = [],
     updateUrl,
@@ -14,6 +15,7 @@ export default function KnowledgeBaseEdit({
 }) {
     const form = useForm({
         document_type: knowledgeItem.document_type,
+        ownership_type: knowledgeItem.ownership_type ?? 'company',
         document_theme_term_id: knowledgeItem.document_theme_term_id ?? '',
         owner_user_id: knowledgeItem.owner_user_id ?? '',
         is_active: knowledgeItem.is_active,
@@ -38,7 +40,7 @@ export default function KnowledgeBaseEdit({
                             Rediger kunnskapsdokument
                         </h1>
                         <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
-                            Oppdater dokumenteier, dokumentkategori eller status. For å endre innholdet må du laste opp et nytt dokument.
+                            Oppdater tilhørighet, dokumenteier, dokumentkategori eller status. For å endre innholdet må du laste opp et nytt dokument.
                         </p>
                     </div>
                 </section>
@@ -46,6 +48,7 @@ export default function KnowledgeBaseEdit({
                 <KnowledgeItemForm
                     form={form}
                     documentTypeOptions={documentTypeOptions}
+                    documentOwnershipOptions={documentOwnershipOptions}
                     documentThemeOptions={documentThemeOptions}
                     documentOwnerOptions={documentOwnerOptions}
                     backHref={indexUrl}

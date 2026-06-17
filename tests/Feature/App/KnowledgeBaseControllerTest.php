@@ -115,9 +115,15 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $page): bool {
+            $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
+
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Create'
                 && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · Last opp'
                 && count(data_get($page, 'props.documentTypeOptions', [])) === 6
+                && $ownershipOptions->count() === 3
+                && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)['selectable'] === true
+                && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_PERSONAL)['selectable'] === true
+                && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false
                 && data_get($page, 'props.defaultDocumentType') === KnowledgeItem::DOCUMENT_TYPE_OTHER
                 && data_get($page, 'props.storeUrl') === route('app.ai.knowledge-base.store')
                 && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index');
@@ -215,16 +221,73 @@ class KnowledgeBaseControllerTest extends TestCase
         $createResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.create'));
         $createResponse->assertOk();
         $createResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
+
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Create'
-                && data_get($page, 'props.documentThemeOptions') === $expectedOptions;
+                && data_get($page, 'props.documentThemeOptions') === $expectedOptions
+                && $ownershipOptions->count() === 3
+                && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false;
         });
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
         $editResponse->assertOk();
         $editResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
+
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
-                && data_get($page, 'props.documentThemeOptions') === $expectedOptions;
+                && data_get($page, 'props.documentThemeOptions') === $expectedOptions
+                && $ownershipOptions->count() === 3
+                && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false;
         });
+    }
+
+    public function test_knowledge_document_upload_can_persist_explicit_personal_ownership(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Three Personal Ownership AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('personal-ownership.docx', 'Personal ownership content used for validation.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_PERSONAL,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->with(['owner', 'uploadedBy'])
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'personal-ownership.docx')
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_PERSONAL, $document->ownership_type);
+        $this->assertSame($context['user']->id, $document->owner_user_id);
+        $this->assertSame($context['user']->name, $document->owner?->name);
+        $this->assertSame($context['user']->id, $document->uploaded_by_user_id);
+        $this->assertSame($context['user']->name, $document->uploadedBy?->name);
+    }
+
+    public function test_knowledge_document_store_rejects_invalid_ownership_type(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Three Invalid Ownership AS');
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('invalid-ownership.docx', 'Invalid ownership document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => 'invalid',
+            'is_active' => true,
+        ]);
+
+        $response->assertSessionHasErrors(['ownership_type']);
+
+        $this->assertDatabaseMissing('knowledge_items', [
+            'customer_id' => $context['customer']->id,
+            'original_filename' => 'invalid-ownership.docx',
+        ]);
     }
 
     public function test_knowledge_base_index_payload_exposes_document_theme_metadata_and_nulls_when_missing(): void
@@ -2050,6 +2113,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
             'owner_user_id' => $newOwner->id,
             'is_active' => true,
         ]);
@@ -2101,6 +2165,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $clearResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
             'owner_user_id' => '',
             'is_active' => true,
         ]);
@@ -2163,6 +2228,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
             'owner_user_id' => $foreignOwner->id,
             'is_active' => true,
         ]);
@@ -2456,6 +2522,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'ownership_type' => $document->ownership_type,
             'is_active' => false,
         ])->assertRedirect(route('app.ai.knowledge-base.index'));
 
@@ -2970,6 +3037,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'ownership_type' => $document->ownership_type,
             'is_active' => false,
         ]);
 
@@ -3091,6 +3159,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $updateWithThemeResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'ownership_type' => $document->ownership_type,
             'is_active' => false,
             'document_theme_term_id' => $replacementThemeTerm->id,
         ]);
@@ -3128,6 +3197,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $preserveResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
             'is_active' => true,
         ]);
 
@@ -3142,6 +3212,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $clearResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
             'is_active' => true,
             'document_theme_term_id' => null,
         ]);
@@ -3244,6 +3315,7 @@ class KnowledgeBaseControllerTest extends TestCase
         foreach ($invalidThemeIds as $invalidThemeId) {
             $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
                 'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+                'ownership_type' => $document->ownership_type,
                 'is_active' => false,
                 'document_theme_term_id' => $invalidThemeId,
             ]);
