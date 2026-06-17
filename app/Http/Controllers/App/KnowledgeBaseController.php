@@ -396,6 +396,7 @@ class KnowledgeBaseController extends Controller
             'knowledgeItem' => $this->documentFormPayload($record),
             'documentTypeOptions' => $this->documentTypeOptions(),
             'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
+            'documentOwnerOptions' => $this->documentOwnerOptionsForCustomer($customerId),
             'updateUrl' => route('app.ai.knowledge-base.update', ['knowledgeItem' => $record->id]),
             'deleteUrl' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $record->id]),
             'indexUrl' => route('app.ai.knowledge-base.index'),
@@ -423,6 +424,10 @@ class KnowledgeBaseController extends Controller
 
             if (array_key_exists('document_theme_term_id', $payload)) {
                 $updates['document_theme_term_id'] = $payload['document_theme_term_id'];
+            }
+
+            if (array_key_exists('owner_user_id', $payload)) {
+                $updates['owner_user_id'] = $payload['owner_user_id'];
             }
 
             $record->forceFill($updates)->save();
@@ -654,6 +659,7 @@ class KnowledgeBaseController extends Controller
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'is_active' => ['required', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
+            'owner_user_id' => $this->documentOwnerValidationRulesForCustomer($customerId),
         ]);
 
         $payload = [
@@ -663,6 +669,12 @@ class KnowledgeBaseController extends Controller
 
         if (array_key_exists('document_theme_term_id', $validated)) {
             $payload['document_theme_term_id'] = $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id']);
+        }
+
+        if (array_key_exists('owner_user_id', $validated)) {
+            $payload['owner_user_id'] = $validated['owner_user_id'] !== null
+                ? (int) $validated['owner_user_id']
+                : null;
         }
 
         return $payload;
@@ -906,6 +918,32 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Build the selectable document owner options for one customer.
+     * Inputs: The customer id.
+     * Returns: A stable list of customer-scoped user options.
+     * Side effects: None.
+     */
+    private function documentOwnerOptionsForCustomer(int $customerId): array
+    {
+        return User::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])
+            ->orderByDesc('is_active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'is_active'])
+            ->map(static function (User $user): array {
+                return [
+                    'id' => $user->id,
+                    'label' => $user->is_active
+                        ? sprintf('%s · %s', $user->name, $user->email)
+                        : sprintf('%s · %s (inactive)', $user->name, $user->email),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
      * Purpose: Build the list of approved document theme term ids for one customer.
      * Inputs: The customer id.
      * Returns: A stable list of theme term ids.
@@ -922,6 +960,25 @@ class KnowledgeBaseController extends Controller
             ),
             static fn (int $termId): bool => $termId > 0,
         ));
+    }
+
+    /**
+     * Purpose: Build the validation rules for a customer-scoped document owner user id.
+     * Inputs: The customer id.
+     * Returns: Validation rules that only accept assignable users for the current customer.
+     * Side effects: None.
+     *
+     * @return array<int, mixed>
+     */
+    private function documentOwnerValidationRulesForCustomer(int $customerId): array
+    {
+        return [
+            'nullable',
+            'integer',
+            Rule::exists(User::class, 'id')->where(fn ($query) => $query
+                ->where('customer_id', $customerId)
+                ->whereIn('role', [User::ROLE_CUSTOMER_ADMIN, User::ROLE_USER])),
+        ];
     }
 
     /**

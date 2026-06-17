@@ -1978,6 +1978,17 @@ class KnowledgeBaseControllerTest extends TestCase
         Storage::fake('local');
 
         $context = $this->customerContext('Customer Six AS');
+        $secondaryOwner = User::factory()->create([
+            'customer_id' => $context['customer']->id,
+            'role' => User::ROLE_USER,
+            'is_active' => true,
+        ]);
+        $foreignContext = $this->customerContext('Customer Six Foreign AS');
+        $foreignOwner = User::factory()->create([
+            'customer_id' => $foreignContext['customer']->id,
+            'role' => User::ROLE_USER,
+            'is_active' => true,
+        ]);
         $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
             'document' => $this->createDocxUpload('reference-profile.docx', 'Reference project description used for AI knowledge.'),
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
@@ -1992,14 +2003,174 @@ class KnowledgeBaseControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($document): bool {
+        $response->assertViewHas('page', function (array $page) use ($document, $context, $secondaryOwner, $foreignOwner): bool {
+            $ownerOptions = collect(data_get($page, 'props.documentOwnerOptions', []));
+
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
                 && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · Rediger'
                 && data_get($page, 'props.knowledgeItem.id') === $document->id
                 && data_get($page, 'props.knowledgeItem.original_filename') === 'reference-profile.docx'
+                && data_get($page, 'props.knowledgeItem.owner_user_id') === $context['user']->id
+                && data_get($page, 'props.knowledgeItem.owner_name') === $context['user']->name
                 && data_get($page, 'props.knowledgeItem.extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
-                && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index');
+                && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index')
+                && $ownerOptions->firstWhere('id', $context['user']->id) !== null
+                && $ownerOptions->firstWhere('id', $secondaryOwner->id) !== null
+                && $ownerOptions->firstWhere('id', $foreignOwner->id) === null;
         });
+    }
+
+    public function test_knowledge_document_update_can_change_and_clear_document_owner_without_touching_uploaded_by(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six Owner Flow AS');
+        $newOwner = User::factory()->create([
+            'customer_id' => $context['customer']->id,
+            'role' => User::ROLE_USER,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('owner-flow.docx', 'Owner flow content that is long enough to persist.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->with(['owner', 'uploadedBy'])
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'owner-flow.docx')
+            ->firstOrFail();
+
+        $this->assertSame($context['user']->id, $document->owner_user_id);
+        $this->assertSame($context['user']->name, $document->owner?->name);
+        $this->assertSame($context['user']->id, $document->uploaded_by_user_id);
+        $this->assertSame($context['user']->name, $document->uploadedBy?->name);
+
+        $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'owner_user_id' => $newOwner->id,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $updatedDocument = KnowledgeItem::query()
+            ->with(['owner', 'uploadedBy'])
+            ->whereKey($document->id)
+            ->firstOrFail();
+
+        $this->assertSame($newOwner->id, $updatedDocument->owner_user_id);
+        $this->assertSame($newOwner->name, $updatedDocument->owner?->name);
+        $this->assertSame($context['user']->id, $updatedDocument->uploaded_by_user_id);
+        $this->assertSame($context['user']->name, $updatedDocument->uploadedBy?->name);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document, $newOwner, $context): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $item !== null
+                && data_get($item, 'owner_user_id') === $newOwner->id
+                && data_get($item, 'owner_name') === $newOwner->name
+                && data_get($item, 'uploaded_by') === $context['user']->name;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($document, $newOwner, $context): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.owner_user_id') === $newOwner->id
+                && data_get($page, 'props.knowledgeItem.owner_name') === $newOwner->name
+                && data_get($page, 'props.knowledgeItem.uploaded_by') === $context['user']->name;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($document, $newOwner, $context): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.owner_user_id') === $newOwner->id
+                && data_get($page, 'props.knowledgeItem.owner_name') === $newOwner->name
+                && data_get($page, 'props.knowledgeItem.uploaded_by') === $context['user']->name;
+        });
+
+        $clearResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'owner_user_id' => '',
+            'is_active' => true,
+        ]);
+
+        $clearResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $clearedDocument = KnowledgeItem::query()
+            ->with(['owner', 'uploadedBy'])
+            ->whereKey($document->id)
+            ->firstOrFail();
+
+        $this->assertNull($clearedDocument->owner_user_id);
+        $this->assertNull($clearedDocument->owner?->name);
+        $this->assertSame($context['user']->id, $clearedDocument->uploaded_by_user_id);
+        $this->assertSame($context['user']->name, $clearedDocument->uploadedBy?->name);
+
+        $clearedShowResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $clearedShowResponse->assertOk();
+        $clearedShowResponse->assertViewHas('page', function (array $page) use ($document, $context): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.owner_user_id') === null
+                && data_get($page, 'props.knowledgeItem.owner_name') === null
+                && data_get($page, 'props.knowledgeItem.uploaded_by') === $context['user']->name;
+        });
+
+        $clearedEditResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $clearedEditResponse->assertOk();
+        $clearedEditResponse->assertViewHas('page', function (array $page) use ($document, $context): bool {
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($page, 'props.knowledgeItem.id') === $document->id
+                && data_get($page, 'props.knowledgeItem.owner_user_id') === null
+                && data_get($page, 'props.knowledgeItem.owner_name') === null
+                && data_get($page, 'props.knowledgeItem.uploaded_by') === $context['user']->name;
+        });
+    }
+
+    public function test_knowledge_document_update_rejects_document_owner_from_foreign_customer(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Six Foreign Owner AS');
+        $foreignContext = $this->customerContext('Customer Six Foreign Owner Other AS');
+        $foreignOwner = User::factory()->create([
+            'customer_id' => $foreignContext['customer']->id,
+            'role' => User::ROLE_USER,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('owner-foreign.docx', 'Foreign owner validation document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'owner-foreign.docx')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'owner_user_id' => $foreignOwner->id,
+            'is_active' => true,
+        ]);
+
+        $response->assertSessionHasErrors(['owner_user_id']);
+
+        $freshDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $this->assertSame($context['user']->id, $freshDocument->owner_user_id);
     }
 
     public function test_knowledge_base_show_and_edit_payload_expose_document_theme_metadata_and_nulls_when_missing(): void

@@ -1201,6 +1201,7 @@ return [
         'col_action' => 'Handling',
         'unknown_owner' => 'Ukjent eier',
         'unknown_owner_initials' => '??',
+        'document_owner_label' => 'Dokumenteier',
         'version_1' => 'Versjon 1',
         'page_help_button' => 'Hjelp',
         'page_help_title' => 'Kunnskapsdokumenter',

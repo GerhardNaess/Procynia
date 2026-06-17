@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 
 export const KNOWLEDGE_DOCUMENT_TYPE_OPTIONS = [
@@ -60,6 +60,7 @@ export default function KnowledgeItemForm({
     form,
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
     documentThemeOptions = [],
+    documentOwnerOptions = [],
     backHref,
     submitLabel,
     onSubmit,
@@ -67,10 +68,13 @@ export default function KnowledgeItemForm({
     knowledgeItem = null,
     showFileUpload = false,
 }) {
+    const { translations = {} } = usePage().props;
+    const commonText = translations?.common ?? {};
     const [deleting, setDeleting] = useState(false);
     const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
     const selectedDocumentThemeTermId = form.data.document_theme_term_id ?? '';
+    const selectedDocumentOwnerUserId = form.data.owner_user_id ?? '';
     const ownershipLabel = knowledgeItem?.ownership_label ?? (!knowledgeItem ? 'Selskap' : null);
     const ownershipHelpText = knowledgeItem ? null : 'Kunnskapsdokumenter er generell selskapskunnskap og brukes på tvers av saker.';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
@@ -79,6 +83,8 @@ export default function KnowledgeItemForm({
     const visibleContentExcerpt = hasLongContentExcerpt && !contentExcerptExpanded
         ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
         : contentExcerpt;
+    const documentOwnerLabel = commonText.document_owner_label ?? 'Dokumenteier';
+    const notSetLabel = commonText.not_set ?? 'Ikke satt';
     const ownershipSummary = ownershipLabel ? (
         <section className="rounded-[20px] border border-slate-200 bg-slate-50 px-5 py-4">
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
@@ -93,6 +99,24 @@ export default function KnowledgeItemForm({
                 </p>
             ) : null}
         </section>
+    ) : null;
+    const documentOwnerSelect = knowledgeItem ? (
+        <label className="space-y-2">
+            <span className="text-sm font-medium text-slate-700">{documentOwnerLabel}</span>
+            <select
+                value={selectedDocumentOwnerUserId}
+                onChange={(event) => form.setData('owner_user_id', event.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+            >
+                <option value="">{notSetLabel}</option>
+                {documentOwnerOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                        {option.label}
+                    </option>
+                ))}
+            </select>
+            {form.errors.owner_user_id ? <p className="text-sm text-rose-600">{form.errors.owner_user_id}</p> : null}
+        </label>
     ) : null;
     const documentThemeSelect = (
         <label className="space-y-2">
@@ -282,6 +306,12 @@ export default function KnowledgeItemForm({
                 ) : null}
 
                 {ownershipSummary}
+
+                {documentOwnerSelect ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        {documentOwnerSelect}
+                    </div>
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-3">
                     <label className="space-y-2">

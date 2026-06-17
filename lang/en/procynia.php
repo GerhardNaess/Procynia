@@ -1201,6 +1201,7 @@ return [
         'col_action' => 'Action',
         'unknown_owner' => 'Unknown owner',
         'unknown_owner_initials' => '??',
+        'document_owner_label' => 'Document owner',
         'version_1' => 'Version 1',
         'page_help_button' => 'Help',
         'page_help_title' => 'Knowledge documents',

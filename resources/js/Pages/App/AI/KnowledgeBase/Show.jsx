@@ -578,6 +578,7 @@ export default function KnowledgeBaseShow({
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tks = translations?.knowledge_show ?? {};
+    const commonText = translations?.common ?? {};
     const knowledgeShowLabels = {
         graphicLabel: tks.graphic_section,
         tableLabel: tks.table_section,
@@ -604,6 +605,7 @@ export default function KnowledgeBaseShow({
         chunkTypeDocumentLabel: tks.chunk_type_document,
         chunkTypeTextLabel: tks.chunk_type_text,
         unknownValue: tks.unknown_value,
+        documentOwnerLabel: commonText.document_owner_label ?? 'Dokumenteier',
     };
 
     const DOCUMENT_STATUS_LABEL = {
@@ -643,7 +645,7 @@ export default function KnowledgeBaseShow({
     const uploadedByName = String(knowledgeItem?.uploaded_by ?? '').trim();
     const owningSavedNoticeTitle = String(knowledgeItem?.owning_saved_notice_title ?? '').trim();
     const documentThemeLabel = String(knowledgeItem?.document_theme_label ?? '').trim();
-    const ownerDisplayName = ownerName !== '' ? ownerName : ownershipLabel !== '' ? ownershipLabel : tks.unknown_owner;
+    const ownerDisplayName = ownerName !== '' ? ownerName : commonText.not_set ?? tks.unknown_owner;
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
     const documentStatusMeta = {
@@ -1077,7 +1079,7 @@ export default function KnowledgeBaseShow({
                                             {tks.last_updated}: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
                                         </span>
                                         <span>
-                                            {tks.owner}: <span className="font-medium text-slate-900">{ownerDisplayName}</span>
+                                            {knowledgeShowLabels.documentOwnerLabel}: <span className="font-medium text-slate-900">{ownerDisplayName}</span>
                                         </span>
                                         {uploadedByName !== '' && uploadedByName !== ownerDisplayName ? (
                                             <span>
@@ -1224,7 +1226,7 @@ export default function KnowledgeBaseShow({
                                 <dd className="text-right font-medium text-slate-950">{formatFileTypeLabel(knowledgeItem?.mime_type, knowledgeShowLabels)}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{tks.doc_owner}</dt>
+                                <dt className="text-slate-500">{knowledgeShowLabels.documentOwnerLabel}</dt>
                                 <dd className="text-right font-medium text-slate-950">{ownerDisplayName}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
@@ -2098,7 +2100,7 @@ export default function KnowledgeBaseShow({
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.mime_type ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_owner}</dt>
+                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{knowledgeShowLabels.documentOwnerLabel}</dt>
                                     <dd className="mt-2 text-sm font-medium text-slate-950">{ownerDisplayName}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
