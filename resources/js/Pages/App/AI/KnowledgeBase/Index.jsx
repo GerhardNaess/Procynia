@@ -104,6 +104,22 @@ function formatChunkRatio(item, emptyLabel = '') {
     return `${processed} / ${total}`;
 }
 
+function getKnowledgeDocumentOwnerFilterValue(item) {
+    const ownerUserId = String(item?.owner_user_id ?? '').trim();
+
+    if (ownerUserId !== '') {
+        return `user:${ownerUserId}`;
+    }
+
+    const ownerName = String(item?.owner_name ?? '').trim();
+
+    if (ownerName !== '') {
+        return `name:${ownerName}`;
+    }
+
+    return 'none';
+}
+
 function matchesSearch(item, needle) {
     if (needle === '') {
         return true;
@@ -269,6 +285,8 @@ export default function KnowledgeBaseIndex({
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [documentTypeFilter, setDocumentTypeFilter] = useState('all');
+    const [ownershipFilter, setOwnershipFilter] = useState('all');
+    const [ownerFilter, setOwnerFilter] = useState('all');
     const [showMoreFilters, setShowMoreFilters] = useState(false);
     const [showHelpDetails, setShowHelpDetails] = useState(false);
     const [deleteCandidate, setDeleteCandidate] = useState(null);
@@ -287,12 +305,41 @@ export default function KnowledgeBaseIndex({
         { value: 'all', label: tk.filter_all },
         ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS.filter((option) => option.value !== 'company'),
     ];
+    const DOCUMENT_OWNERSHIP_FILTER_OPTIONS = [
+        { value: 'all', label: tk.filter_all },
+        { value: 'company', label: 'Selskap' },
+        { value: 'case', label: 'Sak/anbudssak' },
+        { value: 'department', label: 'Avdeling/team' },
+        { value: 'personal', label: 'Personlig' },
+    ];
     const DOCUMENT_STATUS_LABEL = {
         review: tk.filter_review,
         processing: tk.filter_processing,
         approved: tk.filter_approved,
         failed: tk.filter_failed,
     };
+    const DOCUMENT_OWNER_FILTER_OPTIONS = (() => {
+        const options = new Map();
+
+        items.forEach((item) => {
+            const ownerFilterValue = getKnowledgeDocumentOwnerFilterValue(item);
+
+            if (ownerFilterValue === 'none' || options.has(ownerFilterValue)) {
+                return;
+            }
+
+            const ownerName = String(item?.owner_name ?? '').trim();
+            options.set(ownerFilterValue, ownerName !== '' ? ownerName : commonText.not_set ?? 'Ikke satt');
+        });
+
+        return [
+            { value: 'all', label: tk.filter_all },
+            { value: 'none', label: commonText.not_set ?? 'Ikke satt' },
+            ...Array.from(options.entries())
+                .map(([value, label]) => ({ value, label }))
+                .sort((left, right) => left.label.localeCompare(right.label, 'nb-NO')),
+        ];
+    })();
 
     const statusCounts = items.reduce((accumulator, item) => {
         const status = getKnowledgeDocumentStatus(item);
@@ -311,9 +358,11 @@ export default function KnowledgeBaseIndex({
         const status = getKnowledgeDocumentStatus(item);
         const matchesStatus = statusFilter === 'all' || status === statusFilter;
         const matchesType = documentTypeFilter === 'all' || item.document_type === documentTypeFilter;
+        const matchesOwnership = ownershipFilter === 'all' || String(item?.ownership_type ?? '').trim() === ownershipFilter;
+        const matchesOwner = ownerFilter === 'all' || getKnowledgeDocumentOwnerFilterValue(item) === ownerFilter;
         const matchesText = matchesSearch(item, normalizeSearchText(searchQuery));
 
-        return matchesStatus && matchesType && matchesText;
+        return matchesStatus && matchesType && matchesOwnership && matchesOwner && matchesText;
     });
 
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -322,16 +371,22 @@ export default function KnowledgeBaseIndex({
     const pagedItems = filteredItems.slice(startIndex, startIndex + pageSize);
     const pageStart = filteredItems.length === 0 ? 0 : startIndex + 1;
     const pageEnd = Math.min(startIndex + pageSize, filteredItems.length);
-    const isTypeFilterActive = documentTypeFilter !== 'all';
+    const isAnyFilterActive = statusFilter !== 'all'
+        || documentTypeFilter !== 'all'
+        || ownershipFilter !== 'all'
+        || ownerFilter !== 'all';
     const newDocumentUrl = createUrl.includes('?') ? `${createUrl}&mode=new` : `${createUrl}?mode=new`;
     const pageTitleText = pageTitle ?? tk.title;
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery, statusFilter, documentTypeFilter]);
+    }, [searchQuery, statusFilter, documentTypeFilter, ownershipFilter, ownerFilter]);
 
     const clearMoreFilters = () => {
         setDocumentTypeFilter('all');
+        setOwnershipFilter('all');
+        setOwnerFilter('all');
+        setStatusFilter('all');
         setShowMoreFilters(false);
     };
 
@@ -515,7 +570,7 @@ export default function KnowledgeBaseIndex({
                                 onClick={() => setShowMoreFilters((current) => !current)}
                                 className={classNames(
                                     'inline-flex h-[54px] items-center justify-center gap-2 rounded-2xl border px-5 text-sm font-semibold transition',
-                                    showMoreFilters || isTypeFilterActive
+                                    showMoreFilters || isAnyFilterActive
                                         ? 'border-violet-200 bg-violet-50 text-violet-700'
                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
                                 )}
@@ -528,8 +583,8 @@ export default function KnowledgeBaseIndex({
 
                     {showMoreFilters ? (
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
-                            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                                <label className="space-y-2 md:max-w-sm md:flex-1">
+                            <div className="grid gap-4 xl:grid-cols-4">
+                                <label className="space-y-2">
                                     <span className="text-sm font-medium text-slate-700">{tk.filter_document_type}</span>
                                     <select
                                         value={documentTypeFilter}
@@ -544,15 +599,60 @@ export default function KnowledgeBaseIndex({
                                     </select>
                                 </label>
 
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={clearMoreFilters}
-                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{tk.status}</span>
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(event) => setStatusFilter(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
-                                        {tk.clear_filters}
-                                    </button>
-                                </div>
+                                        {DOCUMENT_STATUS_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{ownershipLabelText}</span>
+                                    <select
+                                        value={ownershipFilter}
+                                        onChange={(event) => setOwnershipFilter(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    >
+                                        {DOCUMENT_OWNERSHIP_FILTER_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{tk.col_owner}</span>
+                                    <select
+                                        value={ownerFilter}
+                                        onChange={(event) => setOwnerFilter(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    >
+                                        {DOCUMENT_OWNER_FILTER_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div className="mt-4 flex items-center justify-end">
+                                <button
+                                    type="button"
+                                    onClick={clearMoreFilters}
+                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                >
+                                    {tk.clear_filters}
+                                </button>
                             </div>
                         </div>
                     ) : null}
