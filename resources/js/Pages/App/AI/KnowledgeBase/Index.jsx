@@ -264,6 +264,7 @@ export default function KnowledgeBaseIndex({
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tk = translations?.knowledge ?? {};
     const commonText = translations?.common ?? {};
+    const ownershipLabelText = tk.ownership_label_text ?? 'Tilhørighet';
     const items = Array.isArray(knowledgeItems) ? knowledgeItems : [];
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
@@ -588,6 +589,9 @@ export default function KnowledgeBaseIndex({
                                             {tk.col_updated}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                            {ownershipLabelText}
+                                        </th>
+                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_owner}
                                         </th>
                                         <th className="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
@@ -601,28 +605,15 @@ export default function KnowledgeBaseIndex({
                                         const statusClass = DOCUMENT_STATUS_CLASS[status] ?? DOCUMENT_STATUS_CLASS.review;
                                         const statusLabel = DOCUMENT_STATUS_LABEL[status] ?? DOCUMENT_STATUS_LABEL.review;
                                         const ownershipLabel = String(item?.ownership_label ?? '').trim();
-                                        const ownershipLabelText = tk.ownership_label_text ?? 'Tilhørighet';
                                         const uploadedByLabelText = tk.uploaded_by_label ?? 'Opplastet av';
                                         const themeLabelText = tk.theme_label ?? 'Tema';
-                                        const caseLabelText = tk.case_label ?? 'Sak';
                                         const documentTypeLabel = String(item?.document_type_label ?? '').trim();
                                         const documentTypeValue = String(item?.document_type ?? '').trim();
                                         const ownerName = String(item?.owner_name ?? '').trim();
-                                        const ownerDisplayName = ownerName !== '' ? ownerName : ownershipLabel !== '' ? ownershipLabel : tk.unknown_owner;
+                                        const ownerDisplayName = ownerName !== '' ? ownerName : commonText.not_set;
                                         const uploadedByName = String(item?.uploaded_by ?? '').trim();
                                         const documentThemeLabel = String(item?.document_theme_label ?? '').trim();
-                                        const owningSavedNoticeTitle = String(item?.owning_saved_notice_title ?? '').trim();
-                                        const missingMetadataIndicators = [];
-
-                                        if (ownerName === '' && ownershipLabel !== 'Selskap') {
-                                            missingMetadataIndicators.push(tk.missing_owner ?? 'Mangler eier');
-                                        }
-
-                                        if (documentTypeLabel === '' && documentTypeValue === '') {
-                                            missingMetadataIndicators.push(tk.missing_document_category ?? 'Mangler dokumentkategori');
-                                        }
-
-                                        const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : getOwnerInitials(ownershipLabel, tk.unknown_owner_initials);
+                                        const ownerInitials = ownerName !== '' ? getOwnerInitials(ownerName, tk.unknown_owner_initials) : '';
                                         const versionLabel = item.version_label ?? tk.version_1;
                                         const subtitle = `${versionLabel} · ${item.file_size_human ?? commonText.not_available}`;
 
@@ -648,31 +639,9 @@ export default function KnowledgeBaseIndex({
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
                                                             {documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
-                                                        {ownershipLabel !== '' ? (
-                                                            <div className="text-[11px] leading-5 text-slate-500">
-                                                                <span className="font-medium text-slate-600">{ownershipLabelText}:</span> {ownershipLabel}
-                                                            </div>
-                                                        ) : null}
                                                         {documentThemeLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentThemeLabel}
-                                                            </div>
-                                                        ) : null}
-                                                        {owningSavedNoticeTitle !== '' ? (
-                                                            <div className="text-[11px] leading-5 text-slate-500">
-                                                                <span className="font-medium text-slate-600">{caseLabelText}:</span> {owningSavedNoticeTitle}
-                                                            </div>
-                                                        ) : null}
-                                                        {missingMetadataIndicators.length > 0 ? (
-                                                            <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                                                {missingMetadataIndicators.map((indicator) => (
-                                                                    <span
-                                                                        key={indicator}
-                                                                        className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800"
-                                                                    >
-                                                                        {indicator}
-                                                                    </span>
-                                                                ))}
                                                             </div>
                                                         ) : null}
                                                     </div>
@@ -690,26 +659,38 @@ export default function KnowledgeBaseIndex({
                                                         <div className="text-sm font-medium text-slate-900">
                                                             {formatDate(item.updated_at ?? item.uploaded_at, locale, commonText.not_available)}
                                                         </div>
-                                                        <div className="text-xs text-slate-500">
-                                                            {tk.by_prefix} {ownerName}
-                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                                                            {ownerInitials}
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <div className="truncate text-sm font-medium text-slate-900">
-                                                                {ownerDisplayName}
-                                                            </div>
-                                                            {uploadedByName !== '' && uploadedByName !== ownerName ? (
-                                                                <div className="text-xs text-slate-500">
-                                                                    {uploadedByLabelText}: {uploadedByName}
+                                                    <div className="space-y-1.5">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-medium text-violet-700">
+                                                            {ownershipLabel !== '' ? ownershipLabel : commonText.not_set}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3.5">
+                                                    <div className="space-y-1.5">
+                                                        {ownerName !== '' ? (
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                                                                    {ownerInitials}
                                                                 </div>
-                                                            ) : null}
-                                                        </div>
+                                                                <div className="min-w-0">
+                                                                    <div className="truncate text-sm font-medium text-slate-900">
+                                                                        {ownerDisplayName}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+                                                                {ownerDisplayName}
+                                                            </span>
+                                                        )}
+                                                        {uploadedByName !== '' ? (
+                                                            <div className="text-xs text-slate-500">
+                                                                {uploadedByLabelText}: {uploadedByName}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right">
