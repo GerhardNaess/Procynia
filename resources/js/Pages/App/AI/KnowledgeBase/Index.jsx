@@ -288,7 +288,6 @@ export default function KnowledgeBaseIndex({
     const [ownershipFilter, setOwnershipFilter] = useState('all');
     const [ownerFilter, setOwnerFilter] = useState('all');
     const [showMoreFilters, setShowMoreFilters] = useState(false);
-    const [showHelpDetails, setShowHelpDetails] = useState(false);
     const [deleteCandidate, setDeleteCandidate] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
@@ -845,32 +844,6 @@ export default function KnowledgeBaseIndex({
                                 {commonText.next}
                             </PaginationButton>
                         </div>
-                    </div>
-                </section>
-
-                <section className="rounded-[22px] border border-slate-200 bg-slate-50/80 px-5 py-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="max-w-3xl">
-                            <div className="text-sm font-medium text-slate-900">
-                                {tk.help_title}
-                            </div>
-                            <p className="mt-1 text-sm leading-6 text-slate-500">
-                                {tk.help_text}
-                            </p>
-                            {showHelpDetails ? (
-                                <p className="mt-2 text-sm leading-6 text-slate-500">
-                                    {tk.help_text_more}
-                                </p>
-                            ) : null}
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => setShowHelpDetails((current) => !current)}
-                            className="inline-flex items-center justify-center self-start rounded-xl px-0 text-sm font-medium text-slate-500 transition hover:text-slate-700"
-                        >
-                            {showHelpDetails ? tk.help_hide : tk.help_read_more}
-                        </button>
                     </div>
                 </section>
             </div>
