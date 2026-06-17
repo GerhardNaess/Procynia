@@ -285,7 +285,7 @@ export default function KnowledgeBaseIndex({
     ];
     const DOCUMENT_TYPE_FILTER_OPTIONS = [
         { value: 'all', label: tk.filter_all },
-        ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+        ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS.filter((option) => option.value !== 'company'),
     ];
     const DOCUMENT_STATUS_LABEL = {
         review: tk.filter_review,
