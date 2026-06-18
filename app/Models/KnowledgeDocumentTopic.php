@@ -62,7 +62,6 @@ class KnowledgeDocumentTopic extends Model
     public function scopeOrdered(Builder $query): Builder
     {
         return $query
-            ->orderBy('sort_order')
             ->orderByRaw('LOWER(name)')
             ->orderBy('id');
     }

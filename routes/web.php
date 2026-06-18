@@ -9,6 +9,7 @@ use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\Ops\QueueSchedulerHealthController;
 use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\KnowledgeBaseController;
+use App\Http\Controllers\App\KnowledgeBaseSettingsController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
 use App\Http\Controllers\App\InfoCenterController;
@@ -140,6 +141,15 @@ Route::prefix('app')
         Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
         Route::get('/customer-environment', [CustomerEnvironmentController::class, 'index'])->name('customer-environment.index');
         Route::patch('/customer-environment/permissions', [CustomerEnvironmentController::class, 'updatePermissions'])->name('customer-environment.permissions.update');
+        Route::prefix('/customer-environment/knowledge-base')->name('customer-environment.knowledge-base.')->group(function (): void {
+            Route::get('/', [KnowledgeBaseSettingsController::class, 'index'])->name('index');
+            Route::post('/categories', [KnowledgeBaseSettingsController::class, 'storeCategory'])->name('categories.store');
+            Route::patch('/categories/{category}', [KnowledgeBaseSettingsController::class, 'updateCategory'])->name('categories.update');
+            Route::delete('/categories/{category}', [KnowledgeBaseSettingsController::class, 'destroyCategory'])->name('categories.destroy');
+            Route::post('/topics', [KnowledgeBaseSettingsController::class, 'storeTopic'])->name('topics.store');
+            Route::patch('/topics/{topic}', [KnowledgeBaseSettingsController::class, 'updateTopic'])->name('topics.update');
+            Route::delete('/topics/{topic}', [KnowledgeBaseSettingsController::class, 'destroyTopic'])->name('topics.destroy');
+        });
         Route::get('/info-center', [InfoCenterController::class, 'index'])->name('info-center.index');
         Route::get('/ai', [AiController::class, 'index'])->name('ai.index');
         Route::prefix('/ai/knowledge-vocabulary')->name('ai.knowledge-vocabulary.')->group(function (): void {

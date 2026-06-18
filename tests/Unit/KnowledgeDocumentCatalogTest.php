@@ -24,11 +24,21 @@ class KnowledgeDocumentCatalogTest extends TestCase
         $creator = $this->createUser($firstCustomer);
         $updater = $this->createUser($firstCustomer);
 
-        $category = KnowledgeDocumentCategory::query()->create([
+        $laterCategory = KnowledgeDocumentCategory::query()->create([
             'customer_id' => $firstCustomer->id,
             'name' => 'Tjenestebeskrivelse',
             'description' => 'Kundens kategorisering.',
             'sort_order' => 20,
+            'is_active' => true,
+            'created_by_user_id' => $creator->id,
+            'updated_by_user_id' => $updater->id,
+        ]);
+
+        $firstCategory = KnowledgeDocumentCategory::query()->create([
+            'customer_id' => $firstCustomer->id,
+            'name' => 'Administrasjon',
+            'description' => 'Skal komme først alfabetisk.',
+            'sort_order' => 5,
             'is_active' => true,
             'created_by_user_id' => $creator->id,
             'updated_by_user_id' => $updater->id,
@@ -46,13 +56,14 @@ class KnowledgeDocumentCatalogTest extends TestCase
 
         $customerCategories = KnowledgeDocumentCategory::query()
             ->forCustomer($firstCustomer)
+            ->ordered()
             ->get();
 
-        $this->assertCount(1, $customerCategories);
-        $this->assertSame($category->id, $customerCategories->firstOrFail()->id);
-        $this->assertSame($firstCustomer->id, $category->customer?->id);
-        $this->assertSame($creator->id, $category->createdBy?->id);
-        $this->assertSame($updater->id, $category->updatedBy?->id);
+        $this->assertCount(2, $customerCategories);
+        $this->assertSame([$firstCategory->id, $laterCategory->id], $customerCategories->pluck('id')->all());
+        $this->assertSame($firstCustomer->id, $laterCategory->customer?->id);
+        $this->assertSame($creator->id, $laterCategory->createdBy?->id);
+        $this->assertSame($updater->id, $laterCategory->updatedBy?->id);
         $this->assertSame($secondCustomer->id, $otherCustomerCategory->customer?->id);
     }
 

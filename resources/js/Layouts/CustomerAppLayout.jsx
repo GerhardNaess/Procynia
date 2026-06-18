@@ -212,6 +212,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 items.push({ key: 'env-settings', label: navigation.customer_environment ?? 'Kundemiljø', href: environmentHref });
             }
             if (user?.is_system_owner) {
+                items.push({ key: 'knowledge-base-settings', label: navigation.knowledge_base_settings ?? 'Kunnskapsbase', href: '/app/customer-environment/knowledge-base' });
+            }
+            if (user?.is_system_owner) {
                 items.push({ key: 'go-no-go-templates', label: translations.frontend?.go_no_go_templates_nav ?? 'Vurderingsmaler', href: '/app/go-no-go-templates' });
             }
             return items;
@@ -254,6 +257,9 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         }
 
         if (activeMainArea === 'environment') {
+            if (pathname.startsWith('/app/customer-environment/knowledge-base')) {
+                return 'knowledge-base-settings';
+            }
             if (pathname.startsWith('/app/go-no-go-templates')) {
                 return 'go-no-go-templates';
             }
