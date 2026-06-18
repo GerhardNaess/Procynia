@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-AI-policy per dokument og dokumentstatus er implementert som del av fase 2.1 og 2.2. Det som gjenstår er revisjon og gyldighet, og versjonering av dokumentinnhold. Disse er beskrevet i §28.
+AI-policy per dokument, dokumentstatus og revisjon og gyldighet er implementert som del av fase 2.1, 2.2 og 2.3. Det som gjenstår av fase 2 er versjonering av dokumentinnhold. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -826,6 +826,28 @@ Gyldige verdier:
 - Opplastings- og redigeringsskjema har ett statusfelt med label «Status» — det gamle synlige `is_active`-checkboxen er fjernet.
 - 5 nye feature-tester dekker store-default, eksplisitt verdi, ugyldig verdi, update/payload-eksponering og skjema-payload (totalt 76 tester, 819 assertions).
 
+### Revisjon og gyldighet (fullført juni 2026)
+
+`last_reviewed_at` og `review_due_at` (nullable datofelt) er lagt til på `knowledge_items`.
+
+- `last_reviewed_at` viser når dokumentet sist ble faglig vurdert.
+- `review_due_at` viser når dokumentet bør vurderes på nytt.
+- `review_state` beregnes i alle payload-metoder og gir enkel synlighet:
+  - `not_set` — ingen revisjonsfrist er satt
+  - `ok` — revisjonsdato er mer enn 30 dager frem i tid
+  - `due_soon` — revisjonsdato er innen 30 dager
+  - `overdue` — revisjonsdato er passert
+
+Revisjonsstatus er en kontroll- og synlighetsmekanisme, ikke automatisk styring:
+- `review_due_at` påvirker ikke `document_status` automatisk.
+- `review_due_at` påvirker ikke `ai_usage_enabled` automatisk.
+- `review_due_at` påvirker ikke `is_active` automatisk.
+- Retrieval er ikke endret.
+
+Revisjons-badge (`review_state`) er synlig i listevisningen for dokumenter med revisjonsfrist. Filter for revisjonsstatus er tilgjengelig under «Flere filtre». Opplastings- og redigeringsskjema har datofelter for begge felt. Detaljsiden viser datoene der de er satt.
+
+9 nye feature-tester dekker store/update-lagring, nullstilling, bevaring av eksisterende verdier og alle fire review_state-verdier (totalt 86 tester, 861 assertions).
+
 ---
 
 ## 28. Fase 2: Neste prioriteringer
@@ -840,16 +862,9 @@ Implementert. `ai_usage_enabled` er lagt til på `knowledge_items` og respektere
 
 Implementert. `document_status` er lagt til på `knowledge_items` og respekteres av retrieval. Se §27 for fullstendig beskrivelse.
 
-### 28.3 Revisjon og gyldighet
+### 28.3 Revisjon og gyldighet ✓ Fullført juni 2026
 
-For at Kunnskapsbase skal opprettholde datakvalitet over tid, trengs:
-
-- `last_reviewed_at` — sist vurdert dato
-- `review_due_at` — neste revisjonsdato
-- Eventuell `expires_at` — utløpsdato
-- Varsling eller filtrering for dokumenter som nærmer seg eller har passert revisjonsdato
-
-Dette hindrer at utdaterte dokumenter stille forblir aktive og påvirker AI-svar.
+Implementert. `last_reviewed_at` og `review_due_at` er lagt til på `knowledge_items` som nullable datofelt. `review_state` beregnes i alle payloads. Se §27 for fullstendig beskrivelse.
 
 ### 28.4 Versjonering av dokumentinnhold
 
@@ -901,6 +916,10 @@ AI-retrieval kan på sikt filtrere på `document_category_id` og `document_topic
 
 Funksjonalitet for å løfte personlige dokumenter eller saksdokumenter til avdelings- eller selskapsnivå, gjennom en kontrollert kandidat-/godkjenningsflyt.
 
+### Varslingssystem for revisjon
+
+Automatisk varsling til dokumenteier eller godkjenner når `review_due_at` nærmer seg eller er passert. Krever en varslingsmotor og brukerinnstillinger for varslingsterskel. Ikke implementert nå — revisjonsdatoene er på plass og synlige, men varsling er utsatt til en dedikert varslingsrunde.
+
 ---
 
 ## 30. Grunnregler for hva som ikke gjøres nå
@@ -927,6 +946,7 @@ Disse reglene gjelder frem til det tas en eksplisitt beslutning om å endre dem.
 **Retrieval**
 - Retrieval, chunking, embeddings og pgvector endres ikke nå.
 - Retrieval-filtrering på `document_category_id` og `document_topic_id` innføres ikke før AI-policy og dokumentstatus er på plass.
+- `review_due_at` endrer ikke automatisk `document_status`, `ai_usage_enabled` eller `is_active`. Dokumenter med passert revisjonsfrist forblir aktive inntil en bruker eksplisitt endrer status.
 
 ---
 
@@ -940,8 +960,14 @@ Fase 2.1 — AI-policy per dokument (`ai_usage_enabled`) — er fullført per ju
 
 Fase 2.2 — Dokumentstatus (`document_status`) — er fullført per juni 2026. Feltet styrer dokumentets livsløp, er den eneste brukerrettede statusen, og respekteres av retrieval. `is_active` avledes automatisk og er ikke lenger brukerrettet.
 
-Neste prioritet er revisjon og gyldighet. Det hindrer at utdaterte dokumenter stille forblir aktive og påvirker AI-svar.
+Fase 2.3 — Revisjon og gyldighet (`last_reviewed_at`, `review_due_at`, `review_state`) — er fullført per juni 2026. Datoene gir kontroll og synlighet for dokumenters faglige gyldighet. Revisjonsstatus er en synlighetsmekanisme — den endrer ikke automatisk status eller AI-bruk.
+
+Kunnskapsbase har nå:
+- Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
+- AI-policy per dokument — `ai_usage_enabled` gir eksplisitt AI-tillatelse per dokument
+- Dokumentstatus — `document_status` styrer livsløpet og respekteres av retrieval
+- Revisjon og gyldighet — `review_due_at` og `last_reviewed_at` gir synlighet for faglig oppdatering
+
+Neste prioritet er versjonering av dokumentinnhold — muligheten til å laste opp en ny fil på et eksisterende dokument uten å miste den forrige versjonen.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det.
-
-Procynia er nå et sted der kunden styrer hva AI har lov til å bruke, per dokument, og der dokumentets livsløpsstatus kontrollerer retrieval. Det neste steget er å gi dokumenter revisjonsdatoer og utløpsstyring.
