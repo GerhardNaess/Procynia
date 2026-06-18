@@ -306,7 +306,7 @@ export default function KnowledgeItemForm({
 
                             <div className="grid gap-4 sm:grid-cols-4">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</span>
+                                    <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
                                     <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
                                         <input
                                             type="checkbox"
@@ -426,7 +426,7 @@ export default function KnowledgeItemForm({
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</span>
+                        <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
                         <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
                             <input
                                 type="checkbox"

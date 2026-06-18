@@ -1221,11 +1221,11 @@ export default function KnowledgeBaseShow({
                                 <dd className="text-right font-medium text-slate-950">{activeLabel}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
-                                <dt className="text-slate-500">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</dt>
+                                <dt className="text-slate-500">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</dt>
                                 <dd className="text-right font-medium text-slate-950">
                                     {knowledgeItem?.ai_usage_enabled !== false
-                                        ? (knowledgeText.ai_usage_on ?? 'Brukes av AI')
-                                        : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}
+                                        ? (knowledgeText.ai_usage_yes ?? 'Ja')
+                                        : (knowledgeText.ai_usage_no ?? 'Nei')}
                                 </dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">

@@ -749,6 +749,9 @@ export default function KnowledgeBaseIndex({
                                             {tk.status}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                            {tk.col_ai_usage ?? 'AI-bruk'}
+                                        </th>
+                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.chunks}
                                         </th>
                                         <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
@@ -804,16 +807,9 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <div className="flex flex-wrap items-center gap-1.5">
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                                                                {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
-                                                            </span>
-                                                            {item.ai_usage_enabled === false ? (
-                                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-amber-600">
-                                                                    {tk.ai_usage_off ?? 'Ikke AI'}
-                                                                </span>
-                                                            ) : null}
-                                                        </div>
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                                                            {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
+                                                        </span>
                                                         {documentTopicDisplayLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}
@@ -825,6 +821,17 @@ export default function KnowledgeBaseIndex({
                                                     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>
                                                         {statusLabel}
                                                     </span>
+                                                </td>
+                                                <td className="px-4 py-3.5">
+                                                    {item.ai_usage_enabled !== false ? (
+                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-emerald-100 text-emerald-700 ring-emerald-200">
+                                                            {tk.ai_usage_yes ?? 'Ja'}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-amber-100 text-amber-800 ring-amber-200">
+                                                            {tk.ai_usage_no ?? 'Nei'}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="px-4 py-3.5 text-sm text-slate-500">
                                                     {formatChunkRatio(item, commonText.not_available)}
