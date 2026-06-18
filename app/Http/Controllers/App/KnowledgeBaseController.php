@@ -355,6 +355,7 @@ class KnowledgeBaseController extends Controller
                     'document_category_id' => $payload['document_category_id'],
                     'document_topic_id' => $payload['document_topic_id'],
                     'document_theme_term_id' => $payload['document_theme_term_id'],
+                    'ai_usage_enabled' => $payload['ai_usage_enabled'],
                     'extracted_text' => $extractedText,
                     'extraction_status' => $extractionFailed
                         ? KnowledgeItem::EXTRACTION_STATUS_FAILED
@@ -447,6 +448,7 @@ class KnowledgeBaseController extends Controller
                 'content_type' => $payload['document_type'],
                 'ownership_type' => $payload['ownership_type'],
                 'is_active' => $payload['is_active'],
+                'ai_usage_enabled' => $payload['ai_usage_enabled'],
             ];
 
             if (array_key_exists('document_category_id', $payload)) {
@@ -672,6 +674,7 @@ class KnowledgeBaseController extends Controller
             'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
             'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
             'is_active' => ['required', 'boolean'],
+            'ai_usage_enabled' => ['sometimes', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
 
@@ -686,6 +689,9 @@ class KnowledgeBaseController extends Controller
             'document_category_id' => $catalogPayload['document_category_id'] ?? null,
             'document_topic_id' => $catalogPayload['document_topic_id'] ?? null,
             'is_active' => (bool) $validated['is_active'],
+            'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
+                ? (bool) $validated['ai_usage_enabled']
+                : true,
             'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
                 ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
                 : null,
@@ -706,6 +712,7 @@ class KnowledgeBaseController extends Controller
             'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
             'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
             'is_active' => ['required', 'boolean'],
+            'ai_usage_enabled' => ['sometimes', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
             'owner_user_id' => $this->documentOwnerValidationRulesForCustomer($customerId),
         ]);
@@ -715,6 +722,9 @@ class KnowledgeBaseController extends Controller
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'ownership_type' => Str::lower(trim((string) $validated['ownership_type'])),
             'is_active' => (bool) $validated['is_active'],
+            'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
+                ? (bool) $validated['ai_usage_enabled']
+                : (bool) $knowledgeDocument->ai_usage_enabled,
         ];
 
         if (array_key_exists('document_category_id', $catalogPayload)) {
@@ -1410,6 +1420,7 @@ class KnowledgeBaseController extends Controller
             'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
             'is_active' => (bool) $knowledgeDocument->is_active,
+            'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'extraction_status' => $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
             'summary' => $knowledgeDocument->summary,
@@ -1478,6 +1489,7 @@ class KnowledgeBaseController extends Controller
             'summary' => $knowledgeDocument->summary,
             'is_active' => (bool) $knowledgeDocument->is_active,
             'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
+            'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'extraction_status' => $knowledgeDocument->extraction_status,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
@@ -1520,6 +1532,7 @@ class KnowledgeBaseController extends Controller
             'summary' => $knowledgeDocument->summary,
             'is_active' => (bool) $knowledgeDocument->is_active,
             'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
+            'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'file_size_bytes' => $knowledgeDocument->file_size_bytes,
             'file_size_human' => $this->humanFileSize($knowledgeDocument->file_size_bytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),

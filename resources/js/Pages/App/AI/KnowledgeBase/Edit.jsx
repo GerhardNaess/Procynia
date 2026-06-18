@@ -22,6 +22,7 @@ export default function KnowledgeBaseEdit({
         document_theme_term_id: knowledgeItem.document_theme_term_id ?? '',
         owner_user_id: knowledgeItem.owner_user_id ?? '',
         is_active: knowledgeItem.is_active,
+        ai_usage_enabled: knowledgeItem.ai_usage_enabled ?? true,
     });
 
     const submit = (event) => {

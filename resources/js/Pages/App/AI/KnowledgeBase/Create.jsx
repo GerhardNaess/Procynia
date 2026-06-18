@@ -20,6 +20,7 @@ export default function KnowledgeBaseCreate({
         ownership_type: 'company',
         document_theme_term_id: '',
         is_active: true,
+        ai_usage_enabled: true,
     });
 
     const submit = (event) => {

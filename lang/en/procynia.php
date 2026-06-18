@@ -1241,6 +1241,10 @@ return [
         'page_help_section_recommendation' => 'Practical recommendation',
         'page_help_item_recommendation_title' => 'Start with the best documents',
         'page_help_item_recommendation_body' => 'Start with a few representative documents of high quality. Fewer good and up-to-date documents are better than many outdated or overlapping ones. Review documents that fail or need review before relying on them in AI work.',
+        'ai_usage_label' => 'AI usage',
+        'ai_usage_help' => 'Enable to include the document as a foundation in AI work. Disable to keep the document out of AI runs without deactivating it.',
+        'ai_usage_on' => 'Used by AI',
+        'ai_usage_off' => 'Not used by AI',
     ],
     'saved_notice' => [
         'archived' => 'Archived',

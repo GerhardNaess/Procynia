@@ -5698,6 +5698,86 @@ XML;
         return is_string($normalized) ? $normalized : trim($text);
     }
 
+    public function test_knowledge_document_store_defaults_ai_usage_enabled_to_true_when_not_provided(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Ai Usage Default Store AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('ai-usage-default.docx', 'Document content for AI usage default test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'ai-usage-default.docx')
+            ->firstOrFail();
+
+        $this->assertTrue($document->ai_usage_enabled);
+    }
+
+    public function test_knowledge_document_store_persists_explicit_ai_usage_enabled_false(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Ai Usage Explicit False AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('ai-usage-disabled.docx', 'Document content for AI usage disabled test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'ai_usage_enabled' => false,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'ai-usage-disabled.docx')
+            ->firstOrFail();
+
+        $this->assertFalse($document->ai_usage_enabled);
+    }
+
+    public function test_knowledge_document_update_persists_ai_usage_enabled_and_index_payload_exposes_it(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Ai Usage Update AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('ai-usage-update.docx', 'Document content for AI usage update test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'ai_usage_enabled' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'ai-usage-update.docx')
+            ->firstOrFail();
+
+        $this->assertTrue($document->ai_usage_enabled);
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
+            'is_active' => true,
+            'ai_usage_enabled' => false,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->assertFalse($document->fresh()->ai_usage_enabled);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null && data_get($item, 'ai_usage_enabled') === false;
+        });
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

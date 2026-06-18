@@ -804,9 +804,16 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                                                            {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
-                                                        </span>
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                                                                {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
+                                                            </span>
+                                                            {item.ai_usage_enabled === false ? (
+                                                                <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-amber-600">
+                                                                    {tk.ai_usage_off ?? 'Ikke AI'}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
                                                         {documentTopicDisplayLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}

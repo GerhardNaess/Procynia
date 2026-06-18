@@ -303,6 +303,22 @@ export default function KnowledgeItemForm({
                                     {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
                                 </label>
                             </div>
+
+                            <div className="grid gap-4 sm:grid-cols-4">
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</span>
+                                    <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={form.data.ai_usage_enabled}
+                                            onChange={(event) => form.setData('ai_usage_enabled', event.target.checked)}
+                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                        />
+                                        <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
+                                    </label>
+                                    <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
+                                </label>
+                            </div>
                         </div>
 
                         <button
@@ -390,7 +406,7 @@ export default function KnowledgeItemForm({
                     {documentOwnerSelect}
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-4">
                     {documentCategorySelect}
 
                     {documentTopicSelect}
@@ -407,6 +423,20 @@ export default function KnowledgeItemForm({
                             <span>{form.data.is_active ? 'Aktiv' : 'Inaktiv'}</span>
                         </label>
                         {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
+                    </label>
+
+                    <label className="space-y-2">
+                        <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</span>
+                        <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={form.data.ai_usage_enabled}
+                                onChange={(event) => form.setData('ai_usage_enabled', event.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                            />
+                            <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
+                        </label>
+                        <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                     </label>
                 </div>
 

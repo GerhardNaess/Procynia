@@ -578,6 +578,7 @@ export default function KnowledgeBaseShow({
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tks = translations?.knowledge_show ?? {};
+    const knowledgeText = translations?.knowledge ?? {};
     const commonText = translations?.common ?? {};
     const knowledgeShowLabels = {
         graphicLabel: tks.graphic_section,
@@ -1218,6 +1219,14 @@ export default function KnowledgeBaseShow({
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_activity}</dt>
                                 <dd className="text-right font-medium text-slate-950">{activeLabel}</dd>
+                            </div>
+                            <div className="flex items-start justify-between gap-4">
+                                <dt className="text-slate-500">{knowledgeText.ai_usage_label ?? 'Bruk i AI'}</dt>
+                                <dd className="text-right font-medium text-slate-950">
+                                    {knowledgeItem?.ai_usage_enabled !== false
+                                        ? (knowledgeText.ai_usage_on ?? 'Brukes av AI')
+                                        : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}
+                                </dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_file_size}</dt>

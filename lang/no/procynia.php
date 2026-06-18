@@ -1241,6 +1241,10 @@ return [
         'page_help_section_recommendation' => 'Praktisk anbefaling',
         'page_help_item_recommendation_title' => 'Start med de beste dokumentene',
         'page_help_item_recommendation_body' => 'Start med noen få representative dokumenter av høy kvalitet. Det er bedre med få gode og oppdaterte dokumenter enn mange utdaterte eller overlappende dokumenter. Gå gjennom dokumenter som feiler eller trenger review før du stoler på dem i AI-arbeidet.',
+        'ai_usage_label' => 'Bruk i AI',
+        'ai_usage_help' => 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid. Deaktiver for å holde dokumentet utenfor AI-kjøringer uten å deaktivere det.',
+        'ai_usage_on' => 'Brukes av AI',
+        'ai_usage_off' => 'Brukes ikke av AI',
     ],
     'saved_notice' => [
         'archived' => 'Arkivert',

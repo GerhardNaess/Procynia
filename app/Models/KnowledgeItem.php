@@ -22,6 +22,7 @@ class KnowledgeItem extends Model
 
     protected $attributes = [
         'ownership_type' => self::OWNERSHIP_TYPE_COMPANY,
+        'ai_usage_enabled' => true,
     ];
 
     public const DOCUMENT_TYPE_COMPANY = 'company';
@@ -110,6 +111,7 @@ class KnowledgeItem extends Model
         'owning_saved_notice_id',
         'uploaded_by_user_id',
         'is_active',
+        'ai_usage_enabled',
     ];
 
     protected function casts(): array
@@ -123,6 +125,7 @@ class KnowledgeItem extends Model
             'owning_saved_notice_id' => 'integer',
             'uploaded_by_user_id' => 'integer',
             'is_active' => 'boolean',
+            'ai_usage_enabled' => 'boolean',
         ];
     }
 
