@@ -140,6 +140,8 @@ class KnowledgeItem extends Model
         'is_active',
         'ai_usage_enabled',
         'document_status',
+        'last_reviewed_at',
+        'review_due_at',
     ];
 
     protected function casts(): array
@@ -154,6 +156,8 @@ class KnowledgeItem extends Model
             'uploaded_by_user_id' => 'integer',
             'is_active' => 'boolean',
             'ai_usage_enabled' => 'boolean',
+            'last_reviewed_at' => 'date',
+            'review_due_at' => 'date',
         ];
     }
 

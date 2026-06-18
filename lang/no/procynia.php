@@ -1254,6 +1254,13 @@ return [
         'filter_archived' => 'Arkivert',
         'document_status_help' => 'Status viser hvor dokumentet er i livsløpet. Kun aktive dokumenter kan brukes som aktivt kunnskapsgrunnlag.',
         'document_status_label' => 'Status',
+        'last_reviewed_at_label' => 'Sist gjennomgått',
+        'review_due_at_label' => 'Neste gjennomgang',
+        'review_state_not_set' => 'Ingen frist',
+        'review_state_ok' => 'Oppdatert',
+        'review_state_due_soon' => 'Snart',
+        'review_state_overdue' => 'Forfalt',
+        'review_date_label' => 'Revisjon',
     ],
     'saved_notice' => [
         'archived' => 'Arkivert',

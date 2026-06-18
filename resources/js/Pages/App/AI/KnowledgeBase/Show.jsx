@@ -62,6 +62,20 @@ function formatDateTime(value, locale) {
     }).format(new Date(value));
 }
 
+function formatDateOnly(value, locale) {
+    if (!value) {
+        return '—';
+    }
+
+    const [year, month, day] = String(value).split('-').map(Number);
+
+    return new Intl.DateTimeFormat(locale, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    }).format(new Date(year, month - 1, day));
+}
+
 function formatFileSize(bytes) {
     const value = Number(bytes ?? 0);
 
@@ -1234,6 +1248,18 @@ export default function KnowledgeBaseShow({
                                 <dt className="text-slate-500">{knowledgeText.document_status_label ?? 'Livsløpstatus'}</dt>
                                 <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_status_label ?? documentStatusMeta.label}</dd>
                             </div>
+                            {knowledgeItem?.review_due_at ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">{knowledgeText.review_due_at_label ?? 'Neste gjennomgang'}</dt>
+                                    <dd className="text-right font-medium text-slate-950">{formatDateOnly(knowledgeItem.review_due_at, locale)}</dd>
+                                </div>
+                            ) : null}
+                            {knowledgeItem?.last_reviewed_at ? (
+                                <div className="flex items-start justify-between gap-4">
+                                    <dt className="text-slate-500">{knowledgeText.last_reviewed_at_label ?? 'Sist gjennomgått'}</dt>
+                                    <dd className="text-right font-medium text-slate-950">{formatDateOnly(knowledgeItem.last_reviewed_at, locale)}</dd>
+                                </div>
+                            ) : null}
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_file_size}</dt>
                                 <dd className="text-right font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>

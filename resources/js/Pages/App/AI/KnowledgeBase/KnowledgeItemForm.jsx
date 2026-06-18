@@ -99,6 +99,8 @@ export default function KnowledgeItemForm({
     const selectableOwnershipOptions = (Array.isArray(documentOwnershipOptions) ? documentOwnershipOptions : [])
         .filter((option) => option?.selectable !== false || option?.value === selectedOwnershipType);
     const notSetLabel = commonText.not_set ?? 'Ikke satt';
+    const lastReviewedAtLabel = knowledgeText.last_reviewed_at_label ?? 'Sist gjennomgått';
+    const reviewDueAtLabel = knowledgeText.review_due_at_label ?? 'Neste gjennomgang';
     const documentStatusLabel = knowledgeText.document_status_label ?? 'Livsløpstatus';
     const documentStatusHelpText = knowledgeText.document_status_help ?? 'Status viser hvor dokumentet er i livsløpet. Kun aktive dokumenter kan brukes som aktivt kunnskapsgrunnlag.';
     const documentStatusOptions = [
@@ -209,6 +211,31 @@ export default function KnowledgeItemForm({
             <p className="text-[12px] leading-5 text-slate-400">{documentStatusHelpText}</p>
             {form.errors.document_status ? <p className="text-sm text-rose-600">{form.errors.document_status}</p> : null}
         </label>
+    );
+
+    const reviewDatesSection = (
+        <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-700">{lastReviewedAtLabel}</span>
+                <input
+                    type="date"
+                    value={form.data.last_reviewed_at ?? ''}
+                    onChange={(event) => form.setData('last_reviewed_at', event.target.value || null)}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                />
+                {form.errors.last_reviewed_at ? <p className="text-sm text-rose-600">{form.errors.last_reviewed_at}</p> : null}
+            </label>
+            <label className="space-y-2">
+                <span className="text-sm font-medium text-slate-700">{reviewDueAtLabel}</span>
+                <input
+                    type="date"
+                    value={form.data.review_due_at ?? ''}
+                    onChange={(event) => form.setData('review_due_at', event.target.value || null)}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                />
+                {form.errors.review_due_at ? <p className="text-sm text-rose-600">{form.errors.review_due_at}</p> : null}
+            </label>
+        </div>
     );
 
     const documentCategorySelect = (
@@ -335,6 +362,8 @@ export default function KnowledgeItemForm({
 
                                 {documentStatusSelect}
                             </div>
+
+                            {reviewDatesSection}
                         </div>
 
                         <button
@@ -445,6 +474,8 @@ export default function KnowledgeItemForm({
                 <div className="grid gap-4 sm:grid-cols-4">
                     {documentStatusSelect}
                 </div>
+
+                {reviewDatesSection}
 
                 <div className={classNames(
                     'flex flex-col gap-3 sm:flex-row',

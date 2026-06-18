@@ -1254,6 +1254,13 @@ return [
         'filter_archived' => 'Archived',
         'document_status_help' => 'Status shows where the document is in its lifecycle. Only active documents can be used as knowledge sources.',
         'document_status_label' => 'Status',
+        'last_reviewed_at_label' => 'Last reviewed',
+        'review_due_at_label' => 'Next review',
+        'review_state_not_set' => 'No deadline',
+        'review_state_ok' => 'Up to date',
+        'review_state_due_soon' => 'Due soon',
+        'review_state_overdue' => 'Overdue',
+        'review_date_label' => 'Review',
     ],
     'saved_notice' => [
         'archived' => 'Archived',

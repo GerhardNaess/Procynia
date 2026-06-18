@@ -285,6 +285,7 @@ export default function KnowledgeBaseIndex({
     const items = Array.isArray(knowledgeItems) ? knowledgeItems : [];
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
+    const [reviewStateFilter, setReviewStateFilter] = useState('all');
     const [documentTypeFilter, setDocumentTypeFilter] = useState('all');
     const [documentCategoryFilter, setDocumentCategoryFilter] = useState('all');
     const [documentTopicFilter, setDocumentTopicFilter] = useState('all');
@@ -368,6 +369,25 @@ export default function KnowledgeBaseIndex({
         expired: tk.filter_expired,
         archived: tk.filter_archived,
     };
+    const REVIEW_STATE_CLASS = {
+        not_set: 'bg-slate-100 text-slate-400 ring-slate-200',
+        ok: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+        due_soon: 'bg-amber-100 text-amber-800 ring-amber-200',
+        overdue: 'bg-rose-100 text-rose-700 ring-rose-200',
+    };
+    const REVIEW_STATE_LABEL = {
+        not_set: tk.review_state_not_set ?? 'Ingen frist',
+        ok: tk.review_state_ok ?? 'Oppdatert',
+        due_soon: tk.review_state_due_soon ?? 'Snart',
+        overdue: tk.review_state_overdue ?? 'Forfalt',
+    };
+    const REVIEW_STATE_FILTER_OPTIONS = [
+        { value: 'all', label: tk.filter_all },
+        { value: 'overdue', label: tk.review_state_overdue ?? 'Forfalt' },
+        { value: 'due_soon', label: tk.review_state_due_soon ?? 'Snart' },
+        { value: 'ok', label: tk.review_state_ok ?? 'Oppdatert' },
+        { value: 'not_set', label: tk.review_state_not_set ?? 'Ingen frist' },
+    ];
     const DOCUMENT_OWNER_FILTER_OPTIONS = (() => {
         const options = new Map();
 
@@ -407,6 +427,7 @@ export default function KnowledgeBaseIndex({
     const filteredItems = items.filter((item) => {
         const status = getKnowledgeDocumentStatus(item);
         const matchesStatus = statusFilter === 'all' || status === statusFilter;
+        const matchesReviewState = reviewStateFilter === 'all' || (item?.review_state ?? 'not_set') === reviewStateFilter;
         const matchesType = documentTypeFilter === 'all' || item.document_type === documentTypeFilter;
         const matchesCategory = documentCategoryFilter === 'all' || String(item?.document_category_id ?? '') === documentCategoryFilter;
         const matchesTopic = documentTopicFilter === 'all' || String(item?.document_topic_id ?? '') === documentTopicFilter;
@@ -414,7 +435,7 @@ export default function KnowledgeBaseIndex({
         const matchesOwner = ownerFilter === 'all' || getKnowledgeDocumentOwnerFilterValue(item) === ownerFilter;
         const matchesText = matchesSearch(item, normalizeSearchText(searchQuery));
 
-        return matchesStatus && matchesType && matchesCategory && matchesTopic && matchesOwnership && matchesOwner && matchesText;
+        return matchesStatus && matchesReviewState && matchesType && matchesCategory && matchesTopic && matchesOwnership && matchesOwner && matchesText;
     });
 
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -424,6 +445,7 @@ export default function KnowledgeBaseIndex({
     const pageStart = filteredItems.length === 0 ? 0 : startIndex + 1;
     const pageEnd = Math.min(startIndex + pageSize, filteredItems.length);
     const isAnyFilterActive = statusFilter !== 'all'
+        || reviewStateFilter !== 'all'
         || documentTypeFilter !== 'all'
         || documentCategoryFilter !== 'all'
         || documentTopicFilter !== 'all'
@@ -434,7 +456,7 @@ export default function KnowledgeBaseIndex({
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery, statusFilter, documentTypeFilter, documentCategoryFilter, documentTopicFilter, ownershipFilter, ownerFilter]);
+    }, [searchQuery, statusFilter, reviewStateFilter, documentTypeFilter, documentCategoryFilter, documentTopicFilter, ownershipFilter, ownerFilter]);
 
     const clearMoreFilters = () => {
         setDocumentTypeFilter('all');
@@ -443,6 +465,7 @@ export default function KnowledgeBaseIndex({
         setOwnershipFilter('all');
         setOwnerFilter('all');
         setStatusFilter('all');
+        setReviewStateFilter('all');
         setShowMoreFilters(false);
     };
 
@@ -714,6 +737,21 @@ export default function KnowledgeBaseIndex({
                                         ))}
                                     </select>
                                 </label>
+
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{tk.review_date_label ?? 'Revisjon'}</span>
+                                    <select
+                                        value={reviewStateFilter}
+                                        onChange={(event) => setReviewStateFilter(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    >
+                                        {REVIEW_STATE_FILTER_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
                             </div>
 
                             <div className="mt-4 flex items-center justify-end">
@@ -823,9 +861,18 @@ export default function KnowledgeBaseIndex({
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>
-                                                        {statusLabel}
-                                                    </span>
+                                                    <div className="space-y-1.5">
+                                                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>
+                                                            {statusLabel}
+                                                        </span>
+                                                        {item?.review_state && item.review_state !== 'not_set' ? (
+                                                            <div>
+                                                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${REVIEW_STATE_CLASS[item.review_state] ?? REVIEW_STATE_CLASS.not_set}`}>
+                                                                    {REVIEW_STATE_LABEL[item.review_state] ?? item.review_state}
+                                                                </span>
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     {item.ai_usage_enabled !== false ? (

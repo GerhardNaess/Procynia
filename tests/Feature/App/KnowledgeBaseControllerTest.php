@@ -5900,6 +5900,259 @@ XML;
         });
     }
 
+    public function test_knowledge_document_store_defaults_review_dates_to_null_when_not_provided(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Default AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-default.docx', 'Review dates default test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-dates-default.docx')
+            ->firstOrFail();
+
+        $this->assertNull($document->last_reviewed_at);
+        $this->assertNull($document->review_due_at);
+    }
+
+    public function test_knowledge_document_store_persists_explicit_review_dates(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Explicit AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-explicit.docx', 'Review dates explicit test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'last_reviewed_at' => '2026-05-01',
+            'review_due_at' => '2026-12-31',
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-dates-explicit.docx')
+            ->firstOrFail();
+
+        $this->assertSame('2026-05-01', $document->last_reviewed_at?->toDateString());
+        $this->assertSame('2026-12-31', $document->review_due_at?->toDateString());
+    }
+
+    public function test_knowledge_document_store_rejects_invalid_date_format(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Invalid AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-invalid.docx', 'Review dates invalid test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'review_due_at' => 'not-a-date',
+        ])->assertSessionHasErrors(['review_due_at']);
+    }
+
+    public function test_knowledge_document_update_persists_and_clears_review_dates(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Update AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-update.docx', 'Review dates update test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'last_reviewed_at' => '2026-04-01',
+            'review_due_at' => '2026-10-01',
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-dates-update.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
+            'last_reviewed_at' => '2026-06-01',
+            'review_due_at' => null,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document->refresh();
+        $this->assertSame('2026-06-01', $document->last_reviewed_at?->toDateString());
+        $this->assertNull($document->review_due_at);
+    }
+
+    public function test_knowledge_document_update_preserves_review_dates_when_not_sent(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Preserve AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-preserve.docx', 'Review dates preserve test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'last_reviewed_at' => '2026-03-15',
+            'review_due_at' => '2026-09-15',
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-dates-preserve.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document->refresh();
+        $this->assertSame('2026-03-15', $document->last_reviewed_at?->toDateString());
+        $this->assertSame('2026-09-15', $document->review_due_at?->toDateString());
+    }
+
+    public function test_knowledge_document_payload_exposes_review_state_not_set_when_no_due_date(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review State Not Set AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-state-not-set.docx', 'Review state not set test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-state-not-set.docx')
+            ->firstOrFail();
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'review_state') === 'not_set'
+                && data_get($item, 'review_due_at') === null
+                && data_get($item, 'last_reviewed_at') === null;
+        });
+    }
+
+    public function test_knowledge_document_payload_exposes_review_state_ok_when_due_date_is_far_future(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review State Ok AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-state-ok.docx', 'Review state ok test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'review_due_at' => now()->addDays(90)->toDateString(),
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-state-ok.docx')
+            ->firstOrFail();
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null && data_get($item, 'review_state') === 'ok';
+        });
+    }
+
+    public function test_knowledge_document_payload_exposes_review_state_due_soon_when_due_within_30_days(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review State Due Soon AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-state-due-soon.docx', 'Review state due soon test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'review_due_at' => now()->addDays(15)->toDateString(),
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-state-due-soon.docx')
+            ->firstOrFail();
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null && data_get($item, 'review_state') === 'due_soon';
+        });
+    }
+
+    public function test_knowledge_document_payload_exposes_review_state_overdue_when_due_date_is_in_past(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review State Overdue AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-state-overdue.docx', 'Review state overdue test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'review_due_at' => now()->subDays(10)->toDateString(),
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-state-overdue.docx')
+            ->firstOrFail();
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null && data_get($item, 'review_state') === 'overdue';
+        });
+    }
+
+    public function test_knowledge_document_form_payload_exposes_review_dates(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Review Dates Form Payload AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('review-dates-form.docx', 'Review dates form payload test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'last_reviewed_at' => '2026-02-01',
+            'review_due_at' => '2026-08-01',
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'review-dates-form.docx')
+            ->firstOrFail();
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'last_reviewed_at') === '2026-02-01'
+                && data_get($item, 'review_due_at') === '2026-08-01'
+                && data_get($item, 'review_state') === 'ok';
+        });
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

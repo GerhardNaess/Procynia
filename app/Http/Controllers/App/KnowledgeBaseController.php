@@ -357,6 +357,8 @@ class KnowledgeBaseController extends Controller
                     'document_theme_term_id' => $payload['document_theme_term_id'],
                     'ai_usage_enabled' => $payload['ai_usage_enabled'],
                     'document_status' => $payload['document_status'],
+                    'last_reviewed_at' => $payload['last_reviewed_at'],
+                    'review_due_at' => $payload['review_due_at'],
                     'extracted_text' => $extractedText,
                     'extraction_status' => $extractionFailed
                         ? KnowledgeItem::EXTRACTION_STATUS_FAILED
@@ -451,6 +453,8 @@ class KnowledgeBaseController extends Controller
                 'is_active' => $payload['is_active'],
                 'ai_usage_enabled' => $payload['ai_usage_enabled'],
                 'document_status' => $payload['document_status'],
+                'last_reviewed_at' => $payload['last_reviewed_at'],
+                'review_due_at' => $payload['review_due_at'],
             ];
 
             if (array_key_exists('document_category_id', $payload)) {
@@ -678,6 +682,8 @@ class KnowledgeBaseController extends Controller
             'ai_usage_enabled' => ['sometimes', 'boolean'],
             'document_status' => ['sometimes', 'string', Rule::in(KnowledgeItem::DOCUMENT_STATUSES)],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
+            'last_reviewed_at' => ['sometimes', 'nullable', 'date'],
+            'review_due_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
         $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId);
@@ -701,6 +707,8 @@ class KnowledgeBaseController extends Controller
             'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
                 ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
                 : null,
+            'last_reviewed_at' => $this->normalizeNullableDateString($validated['last_reviewed_at'] ?? null),
+            'review_due_at' => $this->normalizeNullableDateString($validated['review_due_at'] ?? null),
         ];
     }
 
@@ -721,6 +729,8 @@ class KnowledgeBaseController extends Controller
             'document_status' => ['sometimes', 'string', Rule::in(KnowledgeItem::DOCUMENT_STATUSES)],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
             'owner_user_id' => $this->documentOwnerValidationRulesForCustomer($customerId),
+            'last_reviewed_at' => ['sometimes', 'nullable', 'date'],
+            'review_due_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
         $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId, $knowledgeDocument);
@@ -735,6 +745,12 @@ class KnowledgeBaseController extends Controller
                 ? (bool) $validated['ai_usage_enabled']
                 : (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $documentStatus,
+            'last_reviewed_at' => array_key_exists('last_reviewed_at', $validated)
+                ? $this->normalizeNullableDateString($validated['last_reviewed_at'])
+                : $knowledgeDocument->last_reviewed_at?->toDateString(),
+            'review_due_at' => array_key_exists('review_due_at', $validated)
+                ? $this->normalizeNullableDateString($validated['review_due_at'])
+                : $knowledgeDocument->review_due_at?->toDateString(),
         ];
 
         if (array_key_exists('document_category_id', $catalogPayload)) {
@@ -1344,6 +1360,36 @@ class KnowledgeBaseController extends Controller
         return $value === null ? null : (int) $value;
     }
 
+    private function normalizeNullableDateString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return \Carbon\Carbon::parse($value)->toDateString();
+    }
+
+    private function resolveReviewStateForDocument(KnowledgeItem $knowledgeDocument): string
+    {
+        $dueAt = $knowledgeDocument->review_due_at;
+
+        if ($dueAt === null) {
+            return 'not_set';
+        }
+
+        $today = today();
+
+        if ($dueAt->lt($today)) {
+            return 'overdue';
+        }
+
+        if ($dueAt->lte($today->copy()->addDays(30))) {
+            return 'due_soon';
+        }
+
+        return 'ok';
+    }
+
     /**
      * Purpose: Resolve the document-level theme label for frontend payloads.
      * Inputs: A customer-scoped knowledge document.
@@ -1432,6 +1478,8 @@ class KnowledgeBaseController extends Controller
             'is_active' => (bool) $knowledgeDocument->is_active,
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+            'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
+            'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
             'extraction_status' => $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
             'summary' => $knowledgeDocument->summary,
@@ -1503,6 +1551,9 @@ class KnowledgeBaseController extends Controller
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],
+            'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
+            'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
+            'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
             'extraction_status' => $knowledgeDocument->extraction_status,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
@@ -1548,6 +1599,9 @@ class KnowledgeBaseController extends Controller
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],
+            'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
+            'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
+            'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
             'file_size_bytes' => $knowledgeDocument->file_size_bytes,
             'file_size_human' => $this->humanFileSize($knowledgeDocument->file_size_bytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
