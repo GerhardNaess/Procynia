@@ -90,6 +90,8 @@ class KnowledgeItem extends Model
 
     protected $fillable = [
         'customer_id',
+        'document_category_id',
+        'document_topic_id',
         'ownership_type',
         'document_theme_term_id',
         'title',
@@ -114,6 +116,8 @@ class KnowledgeItem extends Model
     {
         return [
             'file_size_bytes' => 'integer',
+            'document_category_id' => 'integer',
+            'document_topic_id' => 'integer',
             'document_theme_term_id' => 'integer',
             'owner_user_id' => 'integer',
             'owning_saved_notice_id' => 'integer',
@@ -152,6 +156,16 @@ class KnowledgeItem extends Model
     public function owningSavedNotice(): BelongsTo
     {
         return $this->belongsTo(SavedNotice::class, 'owning_saved_notice_id');
+    }
+
+    public function documentCategory(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeDocumentCategory::class, 'document_category_id');
+    }
+
+    public function documentTopic(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeDocumentTopic::class, 'document_topic_id');
     }
 
     public function documentThemeTerm(): BelongsTo

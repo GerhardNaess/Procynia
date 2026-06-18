@@ -10,6 +10,8 @@ use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemRevision;
 use App\Services\Ai\AiUsageGuard;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeDocumentCategory;
+use App\Models\KnowledgeDocumentTopic;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
@@ -238,6 +240,86 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.documentThemeOptions') === $expectedOptions
                 && $ownershipOptions->count() === 3
                 && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false;
+        });
+    }
+
+    public function test_knowledge_base_create_and_edit_pages_expose_document_category_options_with_nested_topics(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Catalog Options AS');
+        $foreignContext = $this->customerContext('Customer Catalog Options Foreign AS');
+
+        $alphaCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Alfa kategori');
+        $omegaCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Omega kategori');
+        $inactiveCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Skjult kategori', false);
+        $foreignCategory = $this->createKnowledgeDocumentCategory($foreignContext['customer'], 'Fremmed kategori');
+
+        $alphaTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Alfa tema');
+        $zuluTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Zulu tema');
+        $inactiveTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Skjult tema', false);
+        $foreignTopic = $this->createKnowledgeDocumentTopic($foreignContext['customer'], 'Fremmed tema');
+        $omegaTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Beta tema');
+
+        $alphaCategory->topics()->attach([$alphaTopic->id, $zuluTopic->id, $inactiveTopic->id, $foreignTopic->id]);
+        $omegaCategory->topics()->attach([$omegaTopic->id]);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-options.docx', 'Catalog option document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'catalog-options.docx')
+            ->firstOrFail();
+
+        $expectedOptions = [
+            [
+                'id' => $alphaCategory->id,
+                'name' => $alphaCategory->name,
+                'topics' => [
+                    [
+                        'id' => $alphaTopic->id,
+                        'name' => $alphaTopic->name,
+                    ],
+                    [
+                        'id' => $zuluTopic->id,
+                        'name' => $zuluTopic->name,
+                    ],
+                ],
+            ],
+            [
+                'id' => $omegaCategory->id,
+                'name' => $omegaCategory->name,
+                'topics' => [
+                    [
+                        'id' => $omegaTopic->id,
+                        'name' => $omegaTopic->name,
+                    ],
+                ],
+            ],
+        ];
+
+        $createResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.create'));
+        $createResponse->assertOk();
+        $createResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Create'
+                && data_get($page, 'props.documentCategoryOptions') === $expectedOptions
+                && $ownershipOptions->count() === 3;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+            $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($page, 'props.documentCategoryOptions') === $expectedOptions
+                && $ownershipOptions->count() === 3;
         });
     }
 
@@ -2330,6 +2412,94 @@ class KnowledgeBaseControllerTest extends TestCase
         });
     }
 
+    public function test_knowledge_document_store_and_payloads_expose_document_category_and_topic_metadata_and_nulls_when_missing(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Catalog Payload AS');
+        $category = $this->createKnowledgeDocumentCategory($context['customer'], 'Sikkerhetskategori');
+        $topic = $this->createKnowledgeDocumentTopic($context['customer'], 'Sikkerhetstema');
+        $category->topics()->attach($topic->id);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-payload.docx', 'Catalog payload document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_category_id' => $category->id,
+            'document_topic_id' => $topic->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-payload-empty.docx', 'Plain payload document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $catalogDocument = KnowledgeItem::query()
+            ->with(['documentCategory', 'documentTopic'])
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'catalog-payload.docx')
+            ->firstOrFail();
+
+        $plainDocument = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'catalog-payload-empty.docx')
+            ->firstOrFail();
+
+        $this->assertSame($category->id, $catalogDocument->document_category_id);
+        $this->assertSame($topic->id, $catalogDocument->document_topic_id);
+        $this->assertSame($category->name, $catalogDocument->documentCategory?->name);
+        $this->assertSame($topic->name, $catalogDocument->documentTopic?->name);
+        $this->assertNull($plainDocument->document_category_id);
+        $this->assertNull($plainDocument->document_topic_id);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($catalogDocument, $plainDocument, $category, $topic): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+            $catalogItem = $items->firstWhere('id', $catalogDocument->id);
+            $plainItem = $items->firstWhere('id', $plainDocument->id);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $catalogItem !== null
+                && data_get($catalogItem, 'document_category_id') === $category->id
+                && data_get($catalogItem, 'document_category_name') === $category->name
+                && data_get($catalogItem, 'document_topic_id') === $topic->id
+                && data_get($catalogItem, 'document_topic_name') === $topic->name
+                && $plainItem !== null
+                && data_get($plainItem, 'document_category_id') === null
+                && data_get($plainItem, 'document_category_name') === null
+                && data_get($plainItem, 'document_topic_id') === null
+                && data_get($plainItem, 'document_topic_name') === null;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $catalogDocument->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($catalogDocument, $category, $topic): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($knowledgeItem, 'id') === $catalogDocument->id
+                && data_get($knowledgeItem, 'document_category_id') === $category->id
+                && data_get($knowledgeItem, 'document_category_name') === $category->name
+                && data_get($knowledgeItem, 'document_topic_id') === $topic->id
+                && data_get($knowledgeItem, 'document_topic_name') === $topic->name;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $catalogDocument->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($catalogDocument, $category, $topic): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($knowledgeItem, 'id') === $catalogDocument->id
+                && data_get($knowledgeItem, 'document_category_id') === $category->id
+                && data_get($knowledgeItem, 'document_category_name') === $category->name
+                && data_get($knowledgeItem, 'document_topic_id') === $topic->id
+                && data_get($knowledgeItem, 'document_topic_name') === $topic->name;
+        });
+    }
+
     public function test_knowledge_base_payloads_expose_ownership_metadata_for_company_personal_and_case_documents(): void
     {
         $context = $this->customerContext('Customer Ownership Payload AS');
@@ -2434,6 +2604,242 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($knowledgeItem, 'owning_saved_notice_id') === null
                 && data_get($knowledgeItem, 'owning_saved_notice_title') === null;
         });
+    }
+
+    public function test_knowledge_document_update_persists_and_validates_document_category_and_topic_ids(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Catalog Update AS');
+        $foreignContext = $this->customerContext('Customer Catalog Update Foreign AS');
+
+        $initialCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Alfa kategori');
+        $initialTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Alfa tema');
+        $initialCategory->topics()->attach($initialTopic->id);
+
+        $replacementCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Omega kategori');
+        $replacementTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Omega tema');
+        $replacementCategory->topics()->attach($replacementTopic->id);
+
+        $mismatchedCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Tema katalog');
+        $mismatchedTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Tema utenfor valg');
+        $mismatchedCategory->topics()->attach($mismatchedTopic->id);
+
+        $foreignCategory = $this->createKnowledgeDocumentCategory($foreignContext['customer'], 'Fremmed kategori');
+        $foreignTopic = $this->createKnowledgeDocumentTopic($foreignContext['customer'], 'Fremmed tema');
+
+        $inactiveCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Skjult kategori', false);
+        $inactiveTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Skjult tema', false);
+
+        $storeErrorCases = [
+            [
+                'payload' => [
+                    'document_category_id' => $foreignCategory->id,
+                ],
+                'error' => 'document_category_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $inactiveCategory->id,
+                ],
+                'error' => 'document_category_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $initialCategory->id,
+                    'document_topic_id' => $foreignTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $initialCategory->id,
+                    'document_topic_id' => $mismatchedTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+            [
+                'payload' => [
+                    'document_topic_id' => $initialTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $initialCategory->id,
+                    'document_topic_id' => $inactiveTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+        ];
+
+        foreach ($storeErrorCases as $index => $case) {
+            $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), array_merge([
+                'document' => $this->createDocxUpload(sprintf('catalog-invalid-%d.docx', $index + 1), 'Invalid catalog selection content.'),
+                'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+                'is_active' => true,
+            ], $case['payload']));
+
+            $response->assertSessionHasErrors([$case['error']]);
+            $this->assertDatabaseMissing('knowledge_items', [
+                'customer_id' => $context['customer']->id,
+                'original_filename' => sprintf('catalog-invalid-%d.docx', $index + 1),
+            ]);
+        }
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-update.docx', 'Catalog update document content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_category_id' => $initialCategory->id,
+            'document_topic_id' => $initialTopic->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->with(['documentCategory', 'documentTopic'])
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'catalog-update.docx')
+            ->firstOrFail();
+
+        $this->assertSame($initialCategory->id, $document->document_category_id);
+        $this->assertSame($initialTopic->id, $document->document_topic_id);
+
+        $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'ownership_type' => $document->ownership_type,
+            'is_active' => false,
+            'document_category_id' => $replacementCategory->id,
+            'document_topic_id' => $replacementTopic->id,
+        ]);
+
+        $updateResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $updatedDocument = KnowledgeItem::query()
+            ->with(['documentCategory', 'documentTopic'])
+            ->whereKey($document->id)
+            ->firstOrFail();
+
+        $this->assertSame($replacementCategory->id, $updatedDocument->document_category_id);
+        $this->assertSame($replacementCategory->name, $updatedDocument->documentCategory?->name);
+        $this->assertSame($replacementTopic->id, $updatedDocument->document_topic_id);
+        $this->assertSame($replacementTopic->name, $updatedDocument->documentTopic?->name);
+        $this->assertFalse((bool) $updatedDocument->is_active);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($updatedDocument, $replacementCategory, $replacementTopic): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $updatedDocument->id);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $item !== null
+                && data_get($item, 'document_category_id') === $replacementCategory->id
+                && data_get($item, 'document_category_name') === $replacementCategory->name
+                && data_get($item, 'document_topic_id') === $replacementTopic->id
+                && data_get($item, 'document_topic_name') === $replacementTopic->name;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $updatedDocument->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page) use ($updatedDocument, $replacementCategory, $replacementTopic): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($knowledgeItem, 'id') === $updatedDocument->id
+                && data_get($knowledgeItem, 'document_category_id') === $replacementCategory->id
+                && data_get($knowledgeItem, 'document_category_name') === $replacementCategory->name
+                && data_get($knowledgeItem, 'document_topic_id') === $replacementTopic->id
+                && data_get($knowledgeItem, 'document_topic_name') === $replacementTopic->name;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $updatedDocument->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($updatedDocument, $replacementCategory, $replacementTopic): bool {
+            $knowledgeItem = data_get($page, 'props.knowledgeItem', []);
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
+                && data_get($knowledgeItem, 'id') === $updatedDocument->id
+                && data_get($knowledgeItem, 'document_category_id') === $replacementCategory->id
+                && data_get($knowledgeItem, 'document_category_name') === $replacementCategory->name
+                && data_get($knowledgeItem, 'document_topic_id') === $replacementTopic->id
+                && data_get($knowledgeItem, 'document_topic_name') === $replacementTopic->name;
+        });
+
+        $preserveResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $updatedDocument->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $updatedDocument->ownership_type,
+            'is_active' => true,
+        ]);
+
+        $preserveResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $preservedDocument = KnowledgeItem::query()->whereKey($updatedDocument->id)->firstOrFail();
+        $this->assertSame($replacementCategory->id, $preservedDocument->document_category_id);
+        $this->assertSame($replacementTopic->id, $preservedDocument->document_topic_id);
+
+        $clearResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $updatedDocument->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $updatedDocument->ownership_type,
+            'is_active' => true,
+            'document_category_id' => null,
+            'document_topic_id' => null,
+        ]);
+
+        $clearResponse->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $clearedDocument = KnowledgeItem::query()->whereKey($updatedDocument->id)->firstOrFail();
+        $this->assertNull($clearedDocument->document_category_id);
+        $this->assertNull($clearedDocument->document_topic_id);
+        $this->assertFalse($clearedDocument->hasDocumentTheme());
+
+        $invalidUpdateCases = [
+            [
+                'payload' => [
+                    'document_category_id' => $foreignCategory->id,
+                ],
+                'error' => 'document_category_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $inactiveCategory->id,
+                ],
+                'error' => 'document_category_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $replacementCategory->id,
+                    'document_topic_id' => $foreignTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+            [
+                'payload' => [
+                    'document_category_id' => $replacementCategory->id,
+                    'document_topic_id' => $mismatchedTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+            [
+                'payload' => [
+                    'document_topic_id' => $replacementTopic->id,
+                ],
+                'error' => 'document_topic_id',
+            ],
+        ];
+
+        foreach ($invalidUpdateCases as $case) {
+            $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $updatedDocument->id]), array_merge([
+                'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+                'ownership_type' => $clearedDocument->ownership_type,
+                'is_active' => true,
+            ], $case['payload']));
+
+            $response->assertSessionHasErrors([$case['error']]);
+
+            $freshDocument = KnowledgeItem::query()->whereKey($updatedDocument->id)->firstOrFail();
+            $this->assertNull($freshDocument->document_category_id);
+            $this->assertNull($freshDocument->document_topic_id);
+        }
     }
 
     public function test_knowledge_base_show_page_can_be_opened_with_chunks_and_metadata(): void
@@ -3786,6 +4192,40 @@ class KnowledgeBaseControllerTest extends TestCase
     }
 
     /**
+     * Purpose: Create a deterministic knowledge document category for payload tests.
+     * Inputs: The owning customer, the category name, and whether the category is active.
+     * Returns: The created knowledge document category.
+     * Side effects: Persists one category row.
+     */
+    private function createKnowledgeDocumentCategory(Customer $customer, string $name, bool $isActive = true): KnowledgeDocumentCategory
+    {
+        return KnowledgeDocumentCategory::query()->create([
+            'customer_id' => $customer->id,
+            'name' => $name,
+            'description' => 'Dokumentkategori brukt i payloadtest.',
+            'sort_order' => 10,
+            'is_active' => $isActive,
+        ]);
+    }
+
+    /**
+     * Purpose: Create a deterministic knowledge document topic for payload tests.
+     * Inputs: The owning customer, the topic name, and whether the topic is active.
+     * Returns: The created knowledge document topic.
+     * Side effects: Persists one topic row.
+     */
+    private function createKnowledgeDocumentTopic(Customer $customer, string $name, bool $isActive = true): KnowledgeDocumentTopic
+    {
+        return KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $customer->id,
+            'name' => $name,
+            'description' => 'Tema brukt i payloadtest.',
+            'sort_order' => 10,
+            'is_active' => $isActive,
+        ]);
+    }
+
+    /**
      * Purpose: Assert that a knowledge-item revision is scoped to the given customer and user.
      * Inputs: The revision row plus the expected customer and user.
      * Returns: None.
@@ -3823,6 +4263,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_category_id' => null,
+            'document_topic_id' => null,
             'document_theme_term_id' => null,
             'extracted_text' => $content,
             'summary' => 'Oppsummering for '.$title,

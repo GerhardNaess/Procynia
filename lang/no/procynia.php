@@ -1839,6 +1839,13 @@ return [
             'invalid_topic_selection' => 'Valgte temaer må tilhøre samme kunde og være aktive.',
         ],
     ],
+    'knowledge_base' => [
+        'validation' => [
+            'invalid_document_category' => 'Valgt dokumentkategori er ikke gyldig.',
+            'invalid_document_topic' => 'Valgt dokumenttema er ikke gyldig.',
+            'document_topic_requires_category' => 'Velg dokumentkategori før du velger dokumenttema.',
+        ],
+    ],
     'notice' => [
         'resource' => 'Notiser',
         'notice_section' => 'Notis',

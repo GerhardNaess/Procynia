@@ -1839,6 +1839,13 @@ return [
             'invalid_topic_selection' => 'Selected topics must belong to the same customer and be active.',
         ],
     ],
+    'knowledge_base' => [
+        'validation' => [
+            'invalid_document_category' => 'The selected document category is not valid.',
+            'invalid_document_topic' => 'The selected document topic is not valid.',
+            'document_topic_requires_category' => 'Choose a document category before choosing a document topic.',
+        ],
+    ],
     'notice' => [
         'resource' => 'Notices',
         'notice_section' => 'Notice',

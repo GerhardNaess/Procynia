@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
 use App\Models\Customer;
+use App\Models\KnowledgeDocumentCategory;
+use App\Models\KnowledgeDocumentTopic;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItemRevision;
@@ -38,6 +40,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -77,6 +80,8 @@ class KnowledgeBaseController extends Controller
 
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'documentCategory',
+                'documentTopic',
                 'owner',
                 'owningSavedNotice',
                 'documentThemeTerm',
@@ -111,6 +116,8 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocumentsQuery($customerId)
             ->with([
+                'documentCategory',
+                'documentTopic',
                 'owner',
                 'owningSavedNotice',
                 'documentThemeTerm',
@@ -253,6 +260,7 @@ class KnowledgeBaseController extends Controller
         return Inertia::render('App/AI/KnowledgeBase/Create', [
             'pageTitle' => 'Kunnskapsdokumenter · Last opp',
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentCategoryOptions' => $this->documentCategoryOptionsForCustomer($customerId),
             'documentOwnershipOptions' => $this->documentOwnershipOptions(),
             'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'defaultDocumentType' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
@@ -333,6 +341,8 @@ class KnowledgeBaseController extends Controller
                     'file_size_bytes' => (int) $payload['document']->getSize(),
                     'content_type' => $payload['document_type'],
                     'document_type' => $payload['document_type'],
+                    'document_category_id' => $payload['document_category_id'],
+                    'document_topic_id' => $payload['document_topic_id'],
                     'document_theme_term_id' => $payload['document_theme_term_id'],
                     'extracted_text' => $extractedText,
                     'extraction_status' => $extractionFailed
@@ -383,6 +393,8 @@ class KnowledgeBaseController extends Controller
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
         $record->loadMissing([
+            'documentCategory',
+            'documentTopic',
             'owner',
             'owningSavedNotice',
             'documentThemeTerm',
@@ -396,6 +408,7 @@ class KnowledgeBaseController extends Controller
             'pageTitle' => 'Kunnskapsdokumenter · Rediger',
             'knowledgeItem' => $this->documentFormPayload($record),
             'documentTypeOptions' => $this->documentTypeOptions(),
+            'documentCategoryOptions' => $this->documentCategoryOptionsForCustomer($customerId),
             'documentOwnershipOptions' => $this->documentOwnershipOptions(),
             'documentThemeOptions' => $this->documentThemeOptionsForCustomer($customerId),
             'documentOwnerOptions' => $this->documentOwnerOptionsForCustomer($customerId),
@@ -415,7 +428,7 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
-        $payload = $this->validatedUpdatePayload($request, $customerId);
+        $payload = $this->validatedUpdatePayload($request, $customerId, $record);
 
         DB::transaction(function () use ($record, $payload, $user): void {
             $updates = [
@@ -424,6 +437,14 @@ class KnowledgeBaseController extends Controller
                 'ownership_type' => $payload['ownership_type'],
                 'is_active' => $payload['is_active'],
             ];
+
+            if (array_key_exists('document_category_id', $payload)) {
+                $updates['document_category_id'] = $payload['document_category_id'];
+            }
+
+            if (array_key_exists('document_topic_id', $payload)) {
+                $updates['document_topic_id'] = $payload['document_topic_id'];
+            }
 
             if (array_key_exists('document_theme_term_id', $payload)) {
                 $updates['document_theme_term_id'] = $payload['document_theme_term_id'];
@@ -637,9 +658,13 @@ class KnowledgeBaseController extends Controller
             'document' => ['required', 'file', 'mimes:pdf,docx,xlsx', 'max:20480'],
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'ownership_type' => ['nullable', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
+            'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
+            'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
             'is_active' => ['required', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
+
+        $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId);
 
         return [
             'document' => $validated['document'],
@@ -647,6 +672,8 @@ class KnowledgeBaseController extends Controller
             'ownership_type' => array_key_exists('ownership_type', $validated)
                 ? Str::lower(trim((string) $validated['ownership_type']))
                 : KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
+            'document_category_id' => $catalogPayload['document_category_id'] ?? null,
+            'document_topic_id' => $catalogPayload['document_topic_id'] ?? null,
             'is_active' => (bool) $validated['is_active'],
             'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
                 ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
@@ -660,21 +687,32 @@ class KnowledgeBaseController extends Controller
      * Returns: A normalized payload ready for persistence.
      * Side effects: Throws validation errors when the request is invalid.
      */
-    private function validatedUpdatePayload(Request $request, int $customerId): array
+    private function validatedUpdatePayload(Request $request, int $customerId, KnowledgeItem $knowledgeDocument): array
     {
         $validated = $request->validate([
             'document_type' => ['required', 'string', Rule::in(KnowledgeItem::DOCUMENT_TYPES)],
             'ownership_type' => ['required', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
+            'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
+            'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
             'is_active' => ['required', 'boolean'],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
             'owner_user_id' => $this->documentOwnerValidationRulesForCustomer($customerId),
         ]);
 
+        $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId, $knowledgeDocument);
         $payload = [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'ownership_type' => Str::lower(trim((string) $validated['ownership_type'])),
             'is_active' => (bool) $validated['is_active'],
         ];
+
+        if (array_key_exists('document_category_id', $catalogPayload)) {
+            $payload['document_category_id'] = $catalogPayload['document_category_id'];
+        }
+
+        if (array_key_exists('document_topic_id', $catalogPayload)) {
+            $payload['document_topic_id'] = $catalogPayload['document_topic_id'];
+        }
 
         if (array_key_exists('document_theme_term_id', $validated)) {
             $payload['document_theme_term_id'] = $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id']);
@@ -684,6 +722,100 @@ class KnowledgeBaseController extends Controller
             $payload['owner_user_id'] = $validated['owner_user_id'] !== null
                 ? (int) $validated['owner_user_id']
                 : null;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Purpose: Validate and normalize the document category/topic selection for a knowledge document.
+     * Inputs: The current frontend request, the customer id, and the current document when updating.
+     * Returns: A normalized payload with catalog ids when they are present or need clearing.
+     * Side effects: Throws validation errors when category/topic selections are invalid.
+     *
+     * @return array<string, int|null>
+     */
+    private function validatedDocumentCatalogSelection(Request $request, int $customerId, ?KnowledgeItem $knowledgeDocument = null): array
+    {
+        $validated = $request->validate([
+            'document_category_id' => ['sometimes', 'nullable', 'integer', $this->documentCategoryValidationRuleForCustomer($customerId)],
+            'document_topic_id' => ['sometimes', 'nullable', 'integer', $this->documentTopicValidationRuleForCustomer($customerId)],
+        ]);
+
+        $categoryProvided = array_key_exists('document_category_id', $validated);
+        $topicProvided = array_key_exists('document_topic_id', $validated);
+
+        $categoryId = $categoryProvided
+            ? $this->normalizeNullableDocumentCatalogId($validated['document_category_id'])
+            : $knowledgeDocument?->document_category_id;
+        $topicId = $topicProvided
+            ? $this->normalizeNullableDocumentCatalogId($validated['document_topic_id'])
+            : $knowledgeDocument?->document_topic_id;
+
+        if ($categoryProvided && $categoryId === null) {
+            if ($topicProvided && $topicId !== null) {
+                throw ValidationException::withMessages([
+                    'document_topic_id' => __('procynia.knowledge_base.validation.document_topic_requires_category'),
+                ]);
+            }
+
+            $topicId = null;
+        }
+
+        if ($topicId !== null && $categoryId === null) {
+            throw ValidationException::withMessages([
+                'document_topic_id' => __('procynia.knowledge_base.validation.document_topic_requires_category'),
+            ]);
+        }
+
+        $category = null;
+        if ($categoryId !== null) {
+            $category = KnowledgeDocumentCategory::query()
+                ->forCustomer($customerId)
+                ->active()
+                ->with(['topics' => static fn ($query) => $query
+                    ->forCustomer($customerId)
+                    ->active()
+                    ->ordered()])
+                ->whereKey($categoryId)
+                ->first();
+
+            if (! $category instanceof KnowledgeDocumentCategory) {
+                throw ValidationException::withMessages([
+                    'document_category_id' => __('procynia.knowledge_base.validation.invalid_document_category'),
+                ]);
+            }
+        }
+
+        $topic = null;
+        if ($topicId !== null) {
+            $topic = KnowledgeDocumentTopic::query()
+                ->forCustomer($customerId)
+                ->active()
+                ->whereKey($topicId)
+                ->first();
+
+            if (! $topic instanceof KnowledgeDocumentTopic) {
+                throw ValidationException::withMessages([
+                    'document_topic_id' => __('procynia.knowledge_base.validation.invalid_document_topic'),
+                ]);
+            }
+        }
+
+        if ($category !== null && $topic !== null && ! $category->topics->contains(fn (KnowledgeDocumentTopic $allowedTopic): bool => (int) $allowedTopic->id === (int) $topic->id)) {
+            throw ValidationException::withMessages([
+                'document_topic_id' => __('procynia.knowledge_base.validation.document_topic_requires_category'),
+            ]);
+        }
+
+        $payload = [];
+
+        if ($categoryProvided || $knowledgeDocument === null) {
+            $payload['document_category_id'] = $categoryId;
+        }
+
+        if ($topicProvided || ($categoryProvided && $categoryId === null) || ($knowledgeDocument !== null && $knowledgeDocument->document_category_id !== null && $knowledgeDocument->document_topic_id !== null && $categoryProvided && $categoryId !== null)) {
+            $payload['document_topic_id'] = $topicId;
         }
 
         return $payload;
@@ -806,6 +938,40 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Build the selectable document category options used by the knowledge document forms.
+     * Inputs: The customer id.
+     * Returns: A stable list of customer-scoped categories with allowed topic selections.
+     * Side effects: None.
+     */
+    private function documentCategoryOptionsForCustomer(int $customerId): array
+    {
+        return KnowledgeDocumentCategory::query()
+            ->forCustomer($customerId)
+            ->active()
+            ->with(['topics' => static fn ($query) => $query
+                ->forCustomer($customerId)
+                ->active()
+                ->ordered()])
+            ->ordered()
+            ->get()
+            ->map(static function (KnowledgeDocumentCategory $category): array {
+                return [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'topics' => $category->topics
+                        ->map(static fn (KnowledgeDocumentTopic $topic): array => [
+                            'id' => $topic->id,
+                            'name' => $topic->name,
+                        ])
+                        ->values()
+                        ->all(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
      * Purpose: Build the selectable ownership options used by the knowledge document forms.
      * Inputs: None.
      * Returns: A stable list of ownership options.
@@ -833,6 +999,81 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Build the validation rules for a customer-scoped document category id.
+     * Inputs: The customer id.
+     * Returns: Validation rules that only accept active categories for the current customer.
+     * Side effects: None.
+     *
+     * @return array<int, mixed>
+     */
+    private function documentCategoryValidationRulesForCustomer(int $customerId): array
+    {
+        return [
+            'sometimes',
+            'nullable',
+            'integer',
+            $this->documentCategoryValidationRuleForCustomer($customerId),
+        ];
+    }
+
+    /**
+     * Purpose: Build the validation rule for a customer-scoped document category id.
+     * Inputs: The customer id.
+     * Returns: A validation rule accepting only active customer-owned categories.
+     * Side effects: None.
+     */
+    private function documentCategoryValidationRuleForCustomer(int $customerId): \Illuminate\Validation\Rules\Exists
+    {
+        return Rule::exists(KnowledgeDocumentCategory::class, 'id')->where(fn ($query) => $query
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at'));
+    }
+
+    /**
+     * Purpose: Build the validation rules for a customer-scoped document topic id.
+     * Inputs: The customer id.
+     * Returns: Validation rules that only accept active topics for the current customer.
+     * Side effects: None.
+     *
+     * @return array<int, mixed>
+     */
+    private function documentTopicValidationRulesForCustomer(int $customerId): array
+    {
+        return [
+            'sometimes',
+            'nullable',
+            'integer',
+            $this->documentTopicValidationRuleForCustomer($customerId),
+        ];
+    }
+
+    /**
+     * Purpose: Build the validation rule for a customer-scoped document topic id.
+     * Inputs: The customer id.
+     * Returns: A validation rule accepting only active customer-owned topics.
+     * Side effects: None.
+     */
+    private function documentTopicValidationRuleForCustomer(int $customerId): \Illuminate\Validation\Rules\Exists
+    {
+        return Rule::exists(KnowledgeDocumentTopic::class, 'id')->where(fn ($query) => $query
+            ->where('customer_id', $customerId)
+            ->where('is_active', true)
+            ->whereNull('deleted_at'));
+    }
+
+    /**
+     * Purpose: Normalize an optional document category/topic id after validation.
+     * Inputs: A validated raw category or topic id.
+     * Returns: An integer id or null.
+     * Side effects: None.
+     */
+    private function normalizeNullableDocumentCatalogId(mixed $value): ?int
+    {
+        return $value === null ? null : (int) $value;
+    }
+
+    /**
      * Purpose: Convert the ownership data into a frontend payload.
      * Inputs: A customer-scoped knowledge document.
      * Returns: The document ownership fields needed by read payloads.
@@ -848,6 +1089,32 @@ class KnowledgeBaseController extends Controller
             'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
             'owning_saved_notice_title' => $this->owningSavedNoticeTitle($knowledgeDocument),
         ];
+    }
+
+    /**
+     * Purpose: Resolve the user-facing document category name for a knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The category name or null when no category is assigned.
+     * Side effects: None.
+     */
+    private function documentCategoryName(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $name = trim((string) ($knowledgeDocument->documentCategory?->name ?? ''));
+
+        return $name !== '' ? $name : null;
+    }
+
+    /**
+     * Purpose: Resolve the user-facing document topic name for a knowledge document.
+     * Inputs: A customer-scoped knowledge document.
+     * Returns: The topic name or null when no topic is assigned.
+     * Side effects: None.
+     */
+    private function documentTopicName(KnowledgeItem $knowledgeDocument): ?string
+    {
+        $name = trim((string) ($knowledgeDocument->documentTopic?->name ?? ''));
+
+        return $name !== '' ? $name : null;
     }
 
     /**
@@ -1120,6 +1387,10 @@ class KnowledgeBaseController extends Controller
             'original_filename' => $knowledgeDocument->original_filename,
             'path' => $knowledgeDocument->storage_path,
             'mime_type' => $knowledgeDocument->mime_type,
+            'document_category_id' => $knowledgeDocument->document_category_id,
+            'document_category_name' => $this->documentCategoryName($knowledgeDocument),
+            'document_topic_id' => $knowledgeDocument->document_topic_id,
+            'document_topic_name' => $this->documentTopicName($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
             'content_type' => $knowledgeDocument->content_type,
@@ -1182,6 +1453,10 @@ class KnowledgeBaseController extends Controller
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
+            'document_category_id' => $knowledgeDocument->document_category_id,
+            'document_category_name' => $this->documentCategoryName($knowledgeDocument),
+            'document_topic_id' => $knowledgeDocument->document_topic_id,
+            'document_topic_name' => $this->documentTopicName($knowledgeDocument),
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
             'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
@@ -1219,6 +1494,10 @@ class KnowledgeBaseController extends Controller
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
             'original_filename' => $knowledgeDocument->original_filename,
+            'document_category_id' => $knowledgeDocument->document_category_id,
+            'document_category_name' => $this->documentCategoryName($knowledgeDocument),
+            'document_topic_id' => $knowledgeDocument->document_topic_id,
+            'document_topic_name' => $this->documentTopicName($knowledgeDocument),
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
             'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
             'document_theme_term' => $this->documentThemeTermPayload($knowledgeDocument),
