@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-Det som gjenstår er ikke lenger grunnstrukturen. Det er neste lag: AI-policy per dokument, tydelig dokumentstatus og versjonering av dokumentinnhold. Disse er beskrevet som fase 2 i §28.
+AI-policy per dokument er implementert som del av fase 2.1. Det som gjenstår er dokumentstatus, revisjon og gyldighet, og versjonering av dokumentinnhold. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -795,19 +795,28 @@ Verdiene er strengt kundescoped. Tilhørighet er fortsatt systemstyrt og ikke ko
 - 7 unit-tester i `KnowledgeDocumentCatalogTest` dekker modellrelasjoner, kundescoping, navnebegrensning og soft delete
 - 5 feature-tester i `KnowledgeBaseSettingsControllerTest` dekker System Owner-tilgang, CRUD, lovlige temaer per kategori og kryss-kundeblokk
 
+### AI-policy per dokument (fullført juni 2026)
+
+`ai_usage_enabled` (boolean, default `true`) er lagt til på `knowledge_items`. Feltet styrer om et kunnskapsdokument kan brukes som AI-grunnlag i retrieval.
+
+- `ai_usage_enabled` erstatter ikke `is_active`. De to feltene er separate:
+  - `is_active` styrer om dokumentet er aktivt og synlig i Kunnskapsbase
+  - `ai_usage_enabled` styrer om AI har tillatelse til å bruke dokumentet som grunnlag
+- Retrieval filtrerer nå på `ai_usage_enabled = true` i tillegg til `is_active = true`
+- Feltet er eksponert i listevisningen som en dedikert «AI-bruk»-kolonne (Ja/Nei) separat fra Status-kolonnen
+- Opplastings- og redigeringsskjema har et eget felt med label «Kan brukes av AI»
+- Detaljsiden viser «Kan brukes av AI: Ja / Nei» i dokumentinfo-kortet
+- 3 nye feature-tester dekker store-default, eksplisitt false ved store, og update/payload-eksponering (totalt 71 tester, 800 assertions)
+
 ---
 
 ## 28. Fase 2: Neste prioriteringer
 
 Fase 2 kan ikke starte før fase 1 er stabilt i produksjon. Elementene nedenfor er listet i anbefalt rekkefølge.
 
-### 28.1 AI-policy per dokument
+### 28.1 AI-policy per dokument ✓ Fullført juni 2026
 
-Et kunnskapsdokument må kunne angi om det kan brukes som AI-grunnlag eller ikke. Dette skal ikke blandes med `is_active` alene — et dokument kan være aktivt uten at AI skal bruke det.
-
-Foreslått retning: et eget felt, for eksempel `ai_usage_enabled` (boolean), eller en enkel enumtype dersom finere kontroll ønskes på sikt.
-
-Retrieval skal ikke endres før dette feltet er på plass og testet. Når feltet er etablert, kan retrieval-laget oppdateres i én kontrollert endring.
+Implementert. `ai_usage_enabled` er lagt til på `knowledge_items` og respekteres av retrieval. Se §27 for fullstendig beskrivelse.
 
 ### 28.2 Dokumentstatus
 
@@ -917,8 +926,10 @@ Kunnskapsbase har gått fra et åpent dokumentlager til en strukturert kunnskaps
 
 Fase 1 — begrepsmodell, kundestyrte katalogverdier, frontend-integrasjon og validering — er fullført per juni 2026.
 
-Neste prioritet er å etablere tydelig dokumentstatus og AI-policy per dokument. Disse er forutsetninger for mer presis AI-retrieval og for å bygge videre på godkjenningsflyt og kvalitetskontroll i en fremtidig fase.
+Fase 2.1 — AI-policy per dokument (`ai_usage_enabled`) — er fullført per juni 2026. Retrieval respekterer feltet, og det er synlig i listevisning, detaljside og skjema.
+
+Neste prioritet er dokumentstatus. En tydelig statusmodell er forutsetning for mer presis AI-retrieval og for å bygge videre på revisjonsdatoer, godkjenningsflyt og kvalitetskontroll.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det.
 
-Procynia er nå et sted der Kunnskapsbase ikke lenger er et filarkiv. Det neste steget er å gjøre det til et dokumentsystem der kunden selv styrer hva AI har lov til å bruke.
+Procynia er nå et sted der kunden styrer hva AI har lov til å bruke, per dokument. Det neste steget er å gjøre statusmodellen presis nok til at den gir mening som grunnlag for videre styring.
