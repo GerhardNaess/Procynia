@@ -78,7 +78,18 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
 
+        $documentCategoryFilter = $request->query('document_category_id');
+        $documentTopicFilter = $request->query('document_topic_id');
+
         $knowledgeDocuments = $this->scopedDocumentsQuery($customerId)
+            ->when(
+                is_numeric($documentCategoryFilter) && (int) $documentCategoryFilter > 0,
+                static fn ($query) => $query->where('document_category_id', (int) $documentCategoryFilter),
+            )
+            ->when(
+                is_numeric($documentTopicFilter) && (int) $documentTopicFilter > 0,
+                static fn ($query) => $query->where('document_topic_id', (int) $documentTopicFilter),
+            )
             ->with([
                 'documentCategory',
                 'documentTopic',

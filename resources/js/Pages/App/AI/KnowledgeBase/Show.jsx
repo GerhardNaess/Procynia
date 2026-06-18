@@ -644,6 +644,8 @@ export default function KnowledgeBaseShow({
     const ownerName = String(knowledgeItem?.owner_name ?? '').trim();
     const uploadedByName = String(knowledgeItem?.uploaded_by ?? '').trim();
     const owningSavedNoticeTitle = String(knowledgeItem?.owning_saved_notice_title ?? '').trim();
+    const documentCategoryDisplayLabel = String(knowledgeItem?.document_category_name ?? knowledgeItem?.document_type_label ?? '').trim();
+    const documentTopicDisplayLabel = String(knowledgeItem?.document_topic_name ?? knowledgeItem?.document_theme_label ?? '').trim();
     const documentThemeLabel = String(knowledgeItem?.document_theme_label ?? '').trim();
     const ownerDisplayName = ownerName !== '' ? ownerName : commonText.not_set ?? tks.unknown_owner;
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
@@ -1187,12 +1189,12 @@ export default function KnowledgeBaseShow({
                         <dl className="mt-3 space-y-3 text-sm">
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_type}</dt>
-                                <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
+                                <dd className="text-right font-medium text-slate-950">{documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : '—'}</dd>
                             </div>
-                            {documentThemeLabel !== '' ? (
+                            {documentTopicDisplayLabel !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
                                     <dt className="text-slate-500">Tema</dt>
-                                    <dd className="text-right font-medium text-slate-950">{documentThemeLabel}</dd>
+                                    <dd className="text-right font-medium text-slate-950">{documentTopicDisplayLabel}</dd>
                                 </div>
                             ) : null}
                             {ownershipLabel !== '' ? (

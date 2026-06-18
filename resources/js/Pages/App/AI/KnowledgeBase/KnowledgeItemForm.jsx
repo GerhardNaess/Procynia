@@ -1,5 +1,5 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 export const KNOWLEDGE_DOCUMENT_TYPE_OPTIONS = [
     { value: 'company', label: 'Selskap' },
@@ -59,6 +59,7 @@ function formatDateTime(value) {
 export default function KnowledgeItemForm({
     form,
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
+    documentCategoryOptions = [],
     documentOwnershipOptions = [],
     documentThemeOptions = [],
     documentOwnerOptions = [],
@@ -76,7 +77,6 @@ export default function KnowledgeItemForm({
     const [contentExcerptExpanded, setContentExcerptExpanded] = useState(false);
     const selectedDocumentLabel = form.data.document?.name ?? 'Ingen fil valgt ennå.';
     const selectedOwnershipType = form.data.ownership_type ?? 'company';
-    const selectedDocumentThemeTermId = form.data.document_theme_term_id ?? '';
     const selectedDocumentOwnerUserId = form.data.owner_user_id ?? '';
     const contentExcerpt = knowledgeItem?.content_excerpt ?? '';
     const contentExcerptLimit = 220;
@@ -84,6 +84,13 @@ export default function KnowledgeItemForm({
     const visibleContentExcerpt = hasLongContentExcerpt && !contentExcerptExpanded
         ? `${contentExcerpt.slice(0, contentExcerptLimit).trimEnd()}...`
         : contentExcerpt;
+
+    const documentCategoryLabel = knowledgeText.document_category_label ?? 'Dokumentkategori';
+    const documentTopicLabel = knowledgeText.document_topic_label ?? 'Tema';
+    const selectDocumentCategoryText = knowledgeText.select_document_category ?? 'Velg dokumentkategori';
+    const selectDocumentTopicText = knowledgeText.select_document_topic ?? 'Velg tema';
+    const selectDocumentCategoryFirstText = knowledgeText.select_document_category_first ?? 'Velg dokumentkategori først';
+    const noTopicsAvailableText = knowledgeText.no_topics_available ?? 'Ingen temaer er tilgjengelige for valgt dokumentkategori. Administrer temaer under Kundemiljø → Kunnskapsbase.';
     const documentOwnerLabel = commonText.document_owner_label ?? 'Dokumenteier';
     const ownershipLabel = knowledgeText.ownership_label_text ?? 'Tilhørighet';
     const ownershipHelpText = !knowledgeItem
@@ -92,6 +99,44 @@ export default function KnowledgeItemForm({
     const selectableOwnershipOptions = (Array.isArray(documentOwnershipOptions) ? documentOwnershipOptions : [])
         .filter((option) => option?.selectable !== false || option?.value === selectedOwnershipType);
     const notSetLabel = commonText.not_set ?? 'Ikke satt';
+
+    const selectedCategoryId = form.data.document_category_id
+        ? Number(form.data.document_category_id)
+        : null;
+    const selectedTopicId = form.data.document_topic_id
+        ? Number(form.data.document_topic_id)
+        : null;
+
+    const availableTopics = useMemo(() => {
+        if (!selectedCategoryId) {
+            return [];
+        }
+
+        const category = (Array.isArray(documentCategoryOptions) ? documentCategoryOptions : [])
+            .find((cat) => Number(cat.id) === selectedCategoryId);
+
+        return Array.isArray(category?.topics) ? category.topics : [];
+    }, [selectedCategoryId, documentCategoryOptions]);
+
+    const selectedCategoryHasNoTopics = selectedCategoryId !== null && availableTopics.length === 0;
+
+    const handleCategoryChange = (newCategoryId) => {
+        const numericCategoryId = newCategoryId === '' ? null : Number(newCategoryId);
+        form.setData('document_category_id', numericCategoryId);
+
+        const categoryTopics = numericCategoryId !== null
+            ? (Array.isArray(documentCategoryOptions) ? documentCategoryOptions : [])
+                .find((cat) => Number(cat.id) === numericCategoryId)?.topics ?? []
+            : [];
+
+        const isCurrentTopicStillValid = selectedTopicId !== null
+            && categoryTopics.some((topic) => Number(topic.id) === selectedTopicId);
+
+        if (!isCurrentTopicStillValid) {
+            form.setData('document_topic_id', null);
+        }
+    };
+
     const ownershipSelect = (
         <label className="space-y-2">
             <span className="text-sm font-medium text-slate-700">{ownershipLabel}</span>
@@ -118,6 +163,7 @@ export default function KnowledgeItemForm({
             {form.errors.ownership_type ? <p className="text-sm text-rose-600">{form.errors.ownership_type}</p> : null}
         </label>
     );
+
     const documentOwnerSelect = knowledgeItem ? (
         <label className="space-y-2">
             <span className="text-sm font-medium text-slate-700">{documentOwnerLabel}</span>
@@ -136,23 +182,53 @@ export default function KnowledgeItemForm({
             {form.errors.owner_user_id ? <p className="text-sm text-rose-600">{form.errors.owner_user_id}</p> : null}
         </label>
     ) : null;
-    const documentThemeSelect = (
+
+    const documentCategorySelect = (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">Tema</span>
+            <span className="text-sm font-medium text-slate-700">{documentCategoryLabel}</span>
             <select
-                value={selectedDocumentThemeTermId}
-                onChange={(event) => form.setData('document_theme_term_id', event.target.value)}
+                value={selectedCategoryId ?? ''}
+                onChange={(event) => handleCategoryChange(event.target.value)}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
             >
-                <option value="">Ingen tema</option>
-                {documentThemeOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                        {option.label}
+                <option value="">{selectDocumentCategoryText}</option>
+                {(Array.isArray(documentCategoryOptions) ? documentCategoryOptions : []).map((category) => (
+                    <option key={category.id} value={category.id}>
+                        {category.name}
                     </option>
                 ))}
             </select>
-            {form.errors.document_theme_term_id ? <p className="text-sm text-rose-600">{form.errors.document_theme_term_id}</p> : null}
+            {form.errors.document_category_id ? <p className="text-sm text-rose-600">{form.errors.document_category_id}</p> : null}
         </label>
+    );
+
+    const documentTopicSelect = (
+        <div className="space-y-2">
+            <span className="text-sm font-medium text-slate-700">{documentTopicLabel}</span>
+            {selectedCategoryId === null ? (
+                <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-400">
+                    {selectDocumentCategoryFirstText}
+                </div>
+            ) : selectedCategoryHasNoTopics ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm leading-5 text-amber-700">
+                    {noTopicsAvailableText}
+                </div>
+            ) : (
+                <select
+                    value={selectedTopicId ?? ''}
+                    onChange={(event) => form.setData('document_topic_id', event.target.value === '' ? null : Number(event.target.value))}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                >
+                    <option value="">{selectDocumentTopicText}</option>
+                    {availableTopics.map((topic) => (
+                        <option key={topic.id} value={topic.id}>
+                            {topic.name}
+                        </option>
+                    ))}
+                </select>
+            )}
+            {form.errors.document_topic_id ? <p className="text-sm text-rose-600">{form.errors.document_topic_id}</p> : null}
+        </div>
     );
 
     const deleteKnowledgeItem = () => {
@@ -207,25 +283,11 @@ export default function KnowledgeItemForm({
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-4">
-                                <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Dokumentkategori</span>
-                                    <select
-                                        value={form.data.document_type}
-                                        onChange={(event) => form.setData('document_type', event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                                    >
-                                        {documentTypeOptions.map((option) => (
-                                            <option key={option.value} value={option.value}>
-                                                {option.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
-                                </label>
+                                {documentCategorySelect}
+
+                                {documentTopicSelect}
 
                                 {ownershipSelect}
-
-                                {documentThemeSelect}
 
                                 <label className="space-y-2">
                                     <span className="text-sm font-medium text-slate-700">Status</span>
@@ -329,23 +391,9 @@ export default function KnowledgeItemForm({
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-3">
-                    <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Dokumentkategori</span>
-                        <select
-                            value={form.data.document_type}
-                            onChange={(event) => form.setData('document_type', event.target.value)}
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
-                        >
-                            {documentTypeOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
-                            {form.errors.document_type ? <p className="text-sm text-rose-600">{form.errors.document_type}</p> : null}
-                    </label>
+                    {documentCategorySelect}
 
-                    {documentThemeSelect}
+                    {documentTopicSelect}
 
                     <label className="space-y-2">
                         <span className="text-sm font-medium text-slate-700">Status</span>

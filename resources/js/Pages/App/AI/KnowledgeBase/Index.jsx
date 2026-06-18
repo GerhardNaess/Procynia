@@ -130,6 +130,8 @@ function matchesSearch(item, needle) {
         item?.owner_name,
         item?.ownership_label,
         item?.owning_saved_notice_title,
+        item?.document_category_name,
+        item?.document_topic_name,
         item?.document_theme_label,
         item?.document_type_label,
         item?.extraction_status_label,
@@ -285,6 +287,8 @@ export default function KnowledgeBaseIndex({
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [documentTypeFilter, setDocumentTypeFilter] = useState('all');
+    const [documentCategoryFilter, setDocumentCategoryFilter] = useState('all');
+    const [documentTopicFilter, setDocumentTopicFilter] = useState('all');
     const [ownershipFilter, setOwnershipFilter] = useState('all');
     const [ownerFilter, setOwnerFilter] = useState('all');
     const [showMoreFilters, setShowMoreFilters] = useState(false);
@@ -304,6 +308,48 @@ export default function KnowledgeBaseIndex({
         { value: 'all', label: tk.filter_all },
         ...KNOWLEDGE_DOCUMENT_TYPE_OPTIONS.filter((option) => option.value !== 'company'),
     ];
+    const DOCUMENT_CATEGORY_FILTER_OPTIONS = (() => {
+        const options = new Map();
+
+        items.forEach((item) => {
+            const categoryId = item?.document_category_id;
+            const categoryName = String(item?.document_category_name ?? '').trim();
+
+            if (!categoryId || options.has(categoryId)) {
+                return;
+            }
+
+            options.set(categoryId, categoryName !== '' ? categoryName : String(categoryId));
+        });
+
+        return [
+            { value: 'all', label: tk.filter_all },
+            ...Array.from(options.entries())
+                .map(([value, label]) => ({ value: String(value), label }))
+                .sort((left, right) => left.label.localeCompare(right.label, 'nb-NO')),
+        ];
+    })();
+    const DOCUMENT_TOPIC_FILTER_OPTIONS = (() => {
+        const options = new Map();
+
+        items.forEach((item) => {
+            const topicId = item?.document_topic_id;
+            const topicName = String(item?.document_topic_name ?? '').trim();
+
+            if (!topicId || options.has(topicId)) {
+                return;
+            }
+
+            options.set(topicId, topicName !== '' ? topicName : String(topicId));
+        });
+
+        return [
+            { value: 'all', label: tk.filter_all },
+            ...Array.from(options.entries())
+                .map(([value, label]) => ({ value: String(value), label }))
+                .sort((left, right) => left.label.localeCompare(right.label, 'nb-NO')),
+        ];
+    })();
     const DOCUMENT_OWNERSHIP_FILTER_OPTIONS = [
         { value: 'all', label: tk.filter_all },
         { value: 'company', label: 'Selskap' },
@@ -357,11 +403,13 @@ export default function KnowledgeBaseIndex({
         const status = getKnowledgeDocumentStatus(item);
         const matchesStatus = statusFilter === 'all' || status === statusFilter;
         const matchesType = documentTypeFilter === 'all' || item.document_type === documentTypeFilter;
+        const matchesCategory = documentCategoryFilter === 'all' || String(item?.document_category_id ?? '') === documentCategoryFilter;
+        const matchesTopic = documentTopicFilter === 'all' || String(item?.document_topic_id ?? '') === documentTopicFilter;
         const matchesOwnership = ownershipFilter === 'all' || String(item?.ownership_type ?? '').trim() === ownershipFilter;
         const matchesOwner = ownerFilter === 'all' || getKnowledgeDocumentOwnerFilterValue(item) === ownerFilter;
         const matchesText = matchesSearch(item, normalizeSearchText(searchQuery));
 
-        return matchesStatus && matchesType && matchesOwnership && matchesOwner && matchesText;
+        return matchesStatus && matchesType && matchesCategory && matchesTopic && matchesOwnership && matchesOwner && matchesText;
     });
 
     const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
@@ -372,6 +420,8 @@ export default function KnowledgeBaseIndex({
     const pageEnd = Math.min(startIndex + pageSize, filteredItems.length);
     const isAnyFilterActive = statusFilter !== 'all'
         || documentTypeFilter !== 'all'
+        || documentCategoryFilter !== 'all'
+        || documentTopicFilter !== 'all'
         || ownershipFilter !== 'all'
         || ownerFilter !== 'all';
     const newDocumentUrl = createUrl.includes('?') ? `${createUrl}&mode=new` : `${createUrl}?mode=new`;
@@ -379,10 +429,12 @@ export default function KnowledgeBaseIndex({
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchQuery, statusFilter, documentTypeFilter, ownershipFilter, ownerFilter]);
+    }, [searchQuery, statusFilter, documentTypeFilter, documentCategoryFilter, documentTopicFilter, ownershipFilter, ownerFilter]);
 
     const clearMoreFilters = () => {
         setDocumentTypeFilter('all');
+        setDocumentCategoryFilter('all');
+        setDocumentTopicFilter('all');
         setOwnershipFilter('all');
         setOwnerFilter('all');
         setStatusFilter('all');
@@ -584,13 +636,28 @@ export default function KnowledgeBaseIndex({
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
                             <div className="grid gap-4 xl:grid-cols-4">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_type}</span>
+                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_category ?? tk.filter_document_type}</span>
                                     <select
-                                        value={documentTypeFilter}
-                                        onChange={(event) => setDocumentTypeFilter(event.target.value)}
+                                        value={documentCategoryFilter}
+                                        onChange={(event) => setDocumentCategoryFilter(event.target.value)}
                                         className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                     >
-                                        {DOCUMENT_TYPE_FILTER_OPTIONS.map((option) => (
+                                        {DOCUMENT_CATEGORY_FILTER_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+
+                                <label className="space-y-2">
+                                    <span className="text-sm font-medium text-slate-700">{tk.filter_document_topic ?? 'Tema'}</span>
+                                    <select
+                                        value={documentTopicFilter}
+                                        onChange={(event) => setDocumentTopicFilter(event.target.value)}
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                    >
+                                        {DOCUMENT_TOPIC_FILTER_OPTIONS.map((option) => (
                                             <option key={option.value} value={option.value}>
                                                 {option.label}
                                             </option>
@@ -706,8 +773,10 @@ export default function KnowledgeBaseIndex({
                                         const ownershipLabel = String(item?.ownership_label ?? '').trim();
                                         const uploadedByLabelText = tk.uploaded_by_label ?? 'Opplastet av';
                                         const themeLabelText = tk.theme_label ?? 'Tema';
+                                        const documentCategoryDisplayLabel = String(item?.document_category_name ?? item?.document_type_label ?? '').trim();
                                         const documentTypeLabel = String(item?.document_type_label ?? '').trim();
                                         const documentTypeValue = String(item?.document_type ?? '').trim();
+                                        const documentTopicDisplayLabel = String(item?.document_topic_name ?? item?.document_theme_label ?? '').trim();
                                         const ownerName = String(item?.owner_name ?? '').trim();
                                         const ownerDisplayName = ownerName !== '' ? ownerName : commonText.not_set;
                                         const uploadedByName = String(item?.uploaded_by ?? '').trim();
@@ -736,11 +805,11 @@ export default function KnowledgeBaseIndex({
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
-                                                            {documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
+                                                            {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
-                                                        {documentThemeLabel !== '' ? (
+                                                        {documentTopicDisplayLabel !== '' ? (
                                                             <div className="text-[11px] leading-5 text-slate-500">
-                                                                <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentThemeLabel}
+                                                                <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}
                                                             </div>
                                                         ) : null}
                                                     </div>

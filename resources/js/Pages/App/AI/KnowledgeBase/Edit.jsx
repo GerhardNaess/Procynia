@@ -6,6 +6,7 @@ export default function KnowledgeBaseEdit({
     pageTitle = 'Kunnskapsdokumenter · Rediger',
     knowledgeItem,
     documentTypeOptions,
+    documentCategoryOptions = [],
     documentOwnershipOptions = [],
     documentThemeOptions = [],
     documentOwnerOptions = [],
@@ -15,6 +16,8 @@ export default function KnowledgeBaseEdit({
 }) {
     const form = useForm({
         document_type: knowledgeItem.document_type,
+        document_category_id: knowledgeItem.document_category_id ?? null,
+        document_topic_id: knowledgeItem.document_topic_id ?? null,
         ownership_type: knowledgeItem.ownership_type ?? 'company',
         document_theme_term_id: knowledgeItem.document_theme_term_id ?? '',
         owner_user_id: knowledgeItem.owner_user_id ?? '',
@@ -48,6 +51,7 @@ export default function KnowledgeBaseEdit({
                 <KnowledgeItemForm
                     form={form}
                     documentTypeOptions={documentTypeOptions}
+                    documentCategoryOptions={documentCategoryOptions}
                     documentOwnershipOptions={documentOwnershipOptions}
                     documentThemeOptions={documentThemeOptions}
                     documentOwnerOptions={documentOwnerOptions}

@@ -2842,6 +2842,95 @@ class KnowledgeBaseControllerTest extends TestCase
         }
     }
 
+    public function test_knowledge_base_index_filters_by_document_category_id_and_document_topic_id(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Catalog Filter AS');
+
+        $category = $this->createKnowledgeDocumentCategory($context['customer'], 'Filterkategori');
+        $topic = $this->createKnowledgeDocumentTopic($context['customer'], 'Filtertema');
+        $category->topics()->attach($topic->id);
+
+        $otherCategory = $this->createKnowledgeDocumentCategory($context['customer'], 'Annen kategori');
+        $otherTopic = $this->createKnowledgeDocumentTopic($context['customer'], 'Annet tema');
+        $otherCategory->topics()->attach($otherTopic->id);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-filter-match.docx', 'Document matching the catalog filter.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_category_id' => $category->id,
+            'document_topic_id' => $topic->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-filter-other.docx', 'Document with different catalog values.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_category_id' => $otherCategory->id,
+            'document_topic_id' => $otherTopic->id,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('catalog-filter-none.docx', 'Document without catalog values.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $categoryResponse = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.index', ['document_category_id' => $category->id]),
+        );
+        $categoryResponse->assertOk();
+        $categoryResponse->assertViewHas('page', function (array $page) use ($category, $topic): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $items->count() === 1
+                && data_get($items->first(), 'original_filename') === 'catalog-filter-match.docx'
+                && data_get($items->first(), 'document_category_id') === $category->id
+                && data_get($items->first(), 'document_category_name') === $category->name
+                && data_get($items->first(), 'document_topic_id') === $topic->id
+                && data_get($items->first(), 'document_topic_name') === $topic->name;
+        });
+
+        $topicResponse = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.index', ['document_topic_id' => $topic->id]),
+        );
+        $topicResponse->assertOk();
+        $topicResponse->assertViewHas('page', function (array $page): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $items->count() === 1
+                && data_get($items->first(), 'original_filename') === 'catalog-filter-match.docx';
+        });
+
+        $combinedResponse = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.index', [
+                'document_category_id' => $category->id,
+                'document_topic_id' => $topic->id,
+            ]),
+        );
+        $combinedResponse->assertOk();
+        $combinedResponse->assertViewHas('page', function (array $page): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $items->count() === 1
+                && data_get($items->first(), 'original_filename') === 'catalog-filter-match.docx';
+        });
+
+        $noFilterResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $noFilterResponse->assertOk();
+        $noFilterResponse->assertViewHas('page', function (array $page): bool {
+            $items = collect(data_get($page, 'props.knowledgeItems', []));
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
+                && $items->count() === 3;
+        });
+    }
+
     public function test_knowledge_base_show_page_can_be_opened_with_chunks_and_metadata(): void
     {
         Storage::fake('local');
