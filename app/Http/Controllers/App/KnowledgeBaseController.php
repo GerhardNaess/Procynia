@@ -675,13 +675,15 @@ class KnowledgeBaseController extends Controller
             'ownership_type' => ['nullable', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
             'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
             'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
-            'is_active' => ['required', 'boolean'],
             'ai_usage_enabled' => ['sometimes', 'boolean'],
             'document_status' => ['sometimes', 'string', Rule::in(KnowledgeItem::DOCUMENT_STATUSES)],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
         ]);
 
         $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId);
+        $documentStatus = array_key_exists('document_status', $validated)
+            ? (string) $validated['document_status']
+            : KnowledgeItem::DOCUMENT_STATUS_ACTIVE;
 
         return [
             'document' => $validated['document'],
@@ -691,13 +693,11 @@ class KnowledgeBaseController extends Controller
                 : KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
             'document_category_id' => $catalogPayload['document_category_id'] ?? null,
             'document_topic_id' => $catalogPayload['document_topic_id'] ?? null,
-            'is_active' => (bool) $validated['is_active'],
+            'is_active' => $documentStatus === KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
                 ? (bool) $validated['ai_usage_enabled']
                 : true,
-            'document_status' => array_key_exists('document_status', $validated)
-                ? (string) $validated['document_status']
-                : KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+            'document_status' => $documentStatus,
             'document_theme_term_id' => array_key_exists('document_theme_term_id', $validated)
                 ? $this->normalizeNullableDocumentThemeTermId($validated['document_theme_term_id'])
                 : null,
@@ -717,7 +717,6 @@ class KnowledgeBaseController extends Controller
             'ownership_type' => ['required', 'string', Rule::in(KnowledgeItem::OWNERSHIP_TYPES)],
             'document_category_id' => $this->documentCategoryValidationRulesForCustomer($customerId),
             'document_topic_id' => $this->documentTopicValidationRulesForCustomer($customerId),
-            'is_active' => ['required', 'boolean'],
             'ai_usage_enabled' => ['sometimes', 'boolean'],
             'document_status' => ['sometimes', 'string', Rule::in(KnowledgeItem::DOCUMENT_STATUSES)],
             'document_theme_term_id' => $this->documentThemeValidationRulesForCustomer($customerId),
@@ -725,16 +724,17 @@ class KnowledgeBaseController extends Controller
         ]);
 
         $catalogPayload = $this->validatedDocumentCatalogSelection($request, $customerId, $knowledgeDocument);
+        $documentStatus = array_key_exists('document_status', $validated)
+            ? (string) $validated['document_status']
+            : (string) ($knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE);
         $payload = [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'ownership_type' => Str::lower(trim((string) $validated['ownership_type'])),
-            'is_active' => (bool) $validated['is_active'],
+            'is_active' => $documentStatus === KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
                 ? (bool) $validated['ai_usage_enabled']
                 : (bool) $knowledgeDocument->ai_usage_enabled,
-            'document_status' => array_key_exists('document_status', $validated)
-                ? (string) $validated['document_status']
-                : (string) ($knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE),
+            'document_status' => $documentStatus,
         ];
 
         if (array_key_exists('document_category_id', $catalogPayload)) {

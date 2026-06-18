@@ -1253,7 +1253,7 @@ return [
         'filter_expired' => 'Expired',
         'filter_archived' => 'Archived',
         'document_status_help' => 'Status shows where the document is in its lifecycle. Only active documents can be used as knowledge sources.',
-        'document_status_label' => 'Lifecycle status',
+        'document_status_label' => 'Status',
     ],
     'saved_notice' => [
         'archived' => 'Archived',

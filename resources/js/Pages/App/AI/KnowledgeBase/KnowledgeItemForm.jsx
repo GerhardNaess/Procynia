@@ -316,20 +316,6 @@ export default function KnowledgeItemForm({
                                 {documentTopicSelect}
 
                                 {ownershipSelect}
-
-                                <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">Status</span>
-                                    <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={form.data.is_active}
-                                            onChange={(event) => form.setData('is_active', event.target.checked)}
-                                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                                        />
-                                        <span>{form.data.is_active ? 'Aktiv' : 'Inaktiv'}</span>
-                                    </label>
-                                    {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
-                                </label>
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-4">
@@ -440,20 +426,6 @@ export default function KnowledgeItemForm({
                     {documentCategorySelect}
 
                     {documentTopicSelect}
-
-                    <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">Status</span>
-                        <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
-                            <input
-                                type="checkbox"
-                                checked={form.data.is_active}
-                                onChange={(event) => form.setData('is_active', event.target.checked)}
-                                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                            />
-                            <span>{form.data.is_active ? 'Aktiv' : 'Inaktiv'}</span>
-                        </label>
-                        {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
-                    </label>
 
                     <label className="space-y-2">
                         <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>

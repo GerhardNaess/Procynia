@@ -2707,7 +2707,6 @@ class KnowledgeBaseControllerTest extends TestCase
         $updateResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'ownership_type' => $document->ownership_type,
-            'is_active' => false,
             'document_category_id' => $replacementCategory->id,
             'document_topic_id' => $replacementTopic->id,
         ]);
@@ -2723,7 +2722,6 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($replacementCategory->name, $updatedDocument->documentCategory?->name);
         $this->assertSame($replacementTopic->id, $updatedDocument->document_topic_id);
         $this->assertSame($replacementTopic->name, $updatedDocument->documentTopic?->name);
-        $this->assertFalse((bool) $updatedDocument->is_active);
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
         $indexResponse->assertOk();
@@ -3533,7 +3531,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'ownership_type' => $document->ownership_type,
-            'is_active' => false,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
         ]);
 
         $response->assertRedirect(route('app.ai.knowledge-base.index'));
@@ -3546,6 +3544,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
         $this->assertFalse((bool) $updatedDocument->is_active);
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $updatedDocument->extracted_text));
         $this->assertSame($initialChunkCount, $updatedChunkCount);
@@ -3655,7 +3654,6 @@ class KnowledgeBaseControllerTest extends TestCase
         $updateWithThemeResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'ownership_type' => $document->ownership_type,
-            'is_active' => false,
             'document_theme_term_id' => $replacementThemeTerm->id,
         ]);
 
@@ -3665,7 +3663,6 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
-        $this->assertFalse((bool) $updatedDocument->is_active);
         $this->assertSame($replacementThemeTerm->id, $updatedDocument->document_theme_term_id);
         $this->assertSame($replacementThemeTerm->id, $updatedDocument->documentThemeTerm?->id);
 

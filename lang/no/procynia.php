@@ -1253,7 +1253,7 @@ return [
         'filter_expired' => 'Utløpt',
         'filter_archived' => 'Arkivert',
         'document_status_help' => 'Status viser hvor dokumentet er i livsløpet. Kun aktive dokumenter kan brukes som aktivt kunnskapsgrunnlag.',
-        'document_status_label' => 'Livsløpstatus',
+        'document_status_label' => 'Status',
     ],
     'saved_notice' => [
         'archived' => 'Arkivert',
