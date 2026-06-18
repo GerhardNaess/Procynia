@@ -3,10 +3,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
 const DOCUMENT_STATUS_CLASS = {
-    review: 'bg-amber-100 text-amber-800 ring-amber-200',
-    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
-    approved: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     failed: 'bg-rose-100 text-rose-700 ring-rose-200',
+    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
+    draft: 'bg-slate-100 text-slate-600 ring-slate-200',
+    pending_review: 'bg-amber-100 text-amber-800 ring-amber-200',
+    active: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    expired: 'bg-orange-100 text-orange-700 ring-orange-200',
+    archived: 'bg-slate-100 text-slate-400 ring-slate-200',
 };
 
 const CHUNK_REVIEW_STATUS_CLASS = {
@@ -144,11 +147,7 @@ function getDocumentStatus(item) {
         return 'processing';
     }
 
-    if (item?.extraction_status === 'completed' && !item?.is_active) {
-        return 'review';
-    }
-
-    return 'approved';
+    return item?.document_status ?? 'active';
 }
 
 function isChunkMetadataPending(chunk) {
@@ -610,10 +609,13 @@ export default function KnowledgeBaseShow({
     };
 
     const DOCUMENT_STATUS_LABEL = {
-        review: tks.doc_status_review,
-        processing: tks.doc_status_processing,
-        approved: tks.doc_status_approved,
         failed: tks.doc_status_failed,
+        processing: tks.doc_status_processing,
+        draft: tks.doc_status_draft,
+        pending_review: tks.doc_status_pending_review,
+        active: tks.doc_status_active,
+        expired: tks.doc_status_expired,
+        archived: tks.doc_status_archived,
     };
 
     const CHUNK_REVIEW_STATUS_META = {
@@ -652,8 +654,8 @@ export default function KnowledgeBaseShow({
     const documentTitle = knowledgeItem?.original_filename ?? knowledgeItem?.title ?? knowledgeShowLabels.documentFallbackTitle;
     const documentStatus = getDocumentStatus(knowledgeItem);
     const documentStatusMeta = {
-        className: DOCUMENT_STATUS_CLASS[documentStatus] ?? DOCUMENT_STATUS_CLASS.review,
-        label: DOCUMENT_STATUS_LABEL[documentStatus] ?? DOCUMENT_STATUS_LABEL.review,
+        className: DOCUMENT_STATUS_CLASS[documentStatus] ?? DOCUMENT_STATUS_CLASS.active,
+        label: DOCUMENT_STATUS_LABEL[documentStatus] ?? DOCUMENT_STATUS_LABEL.active,
     };
     const chunks = Array.isArray(knowledgeItem?.chunks) ? knowledgeItem.chunks : [];
     const totalChunksCount = Number(knowledgeItem?.chunk_count ?? chunks.length);
@@ -1227,6 +1229,10 @@ export default function KnowledgeBaseShow({
                                         ? (knowledgeText.ai_usage_yes ?? 'Ja')
                                         : (knowledgeText.ai_usage_no ?? 'Nei')}
                                 </dd>
+                            </div>
+                            <div className="flex items-start justify-between gap-4">
+                                <dt className="text-slate-500">{knowledgeText.document_status_label ?? 'Livsløpstatus'}</dt>
+                                <dd className="text-right font-medium text-slate-950">{knowledgeItem?.document_status_label ?? documentStatusMeta.label}</dd>
                             </div>
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_file_size}</dt>

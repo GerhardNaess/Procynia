@@ -5,10 +5,13 @@ import PageHelpButton from '../../../../Components/App/PageHelpButton';
 import { KNOWLEDGE_DOCUMENT_TYPE_OPTIONS } from './KnowledgeItemForm';
 
 const DOCUMENT_STATUS_CLASS = {
-    review: 'bg-amber-100 text-amber-800 ring-amber-200',
-    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
-    approved: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
     failed: 'bg-rose-100 text-rose-700 ring-rose-200',
+    processing: 'bg-sky-100 text-sky-700 ring-sky-200',
+    draft: 'bg-slate-100 text-slate-600 ring-slate-200',
+    pending_review: 'bg-amber-100 text-amber-800 ring-amber-200',
+    active: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+    expired: 'bg-orange-100 text-orange-700 ring-orange-200',
+    archived: 'bg-slate-100 text-slate-400 ring-slate-200',
 };
 
 function classNames(...values) {
@@ -70,11 +73,7 @@ function getKnowledgeDocumentStatus(item) {
         return 'processing';
     }
 
-    if (item?.extraction_status === 'completed' && !item?.is_active) {
-        return 'review';
-    }
-
-    return 'approved';
+    return item?.document_status ?? 'active';
 }
 
 function getOwnerInitials(name, emptyLabel = '') {
@@ -299,9 +298,12 @@ export default function KnowledgeBaseIndex({
 
     const DOCUMENT_STATUS_OPTIONS = [
         { value: 'all', label: tk.filter_all },
-        { value: 'review', label: tk.filter_review },
+        { value: 'active', label: tk.filter_active },
+        { value: 'pending_review', label: tk.filter_pending_review },
+        { value: 'draft', label: tk.filter_draft },
+        { value: 'expired', label: tk.filter_expired },
+        { value: 'archived', label: tk.filter_archived },
         { value: 'processing', label: tk.filter_processing },
-        { value: 'approved', label: tk.filter_approved },
         { value: 'failed', label: tk.filter_failed },
     ];
     const DOCUMENT_TYPE_FILTER_OPTIONS = [
@@ -358,10 +360,13 @@ export default function KnowledgeBaseIndex({
         { value: 'personal', label: 'Personlig' },
     ];
     const DOCUMENT_STATUS_LABEL = {
-        review: tk.filter_review,
-        processing: tk.filter_processing,
-        approved: tk.filter_approved,
         failed: tk.filter_failed,
+        processing: tk.filter_processing,
+        draft: tk.filter_draft,
+        pending_review: tk.filter_pending_review,
+        active: tk.filter_active,
+        expired: tk.filter_expired,
+        archived: tk.filter_archived,
     };
     const DOCUMENT_OWNER_FILTER_OPTIONS = (() => {
         const options = new Map();

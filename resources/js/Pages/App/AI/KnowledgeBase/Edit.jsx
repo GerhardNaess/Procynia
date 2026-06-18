@@ -23,6 +23,7 @@ export default function KnowledgeBaseEdit({
         owner_user_id: knowledgeItem.owner_user_id ?? '',
         is_active: knowledgeItem.is_active,
         ai_usage_enabled: knowledgeItem.ai_usage_enabled ?? true,
+        document_status: knowledgeItem.document_status ?? 'active',
     });
 
     const submit = (event) => {

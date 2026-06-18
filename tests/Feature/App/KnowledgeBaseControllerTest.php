@@ -5778,6 +5778,131 @@ XML;
         });
     }
 
+    public function test_knowledge_document_store_defaults_document_status_to_active_when_not_provided(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Status Default Store AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-status-default.docx', 'Document content for document status default test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-status-default.docx')
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ACTIVE, $document->document_status);
+    }
+
+    public function test_knowledge_document_store_persists_explicit_document_status(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Status Explicit Draft AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-status-draft.docx', 'Document content for document status draft test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_DRAFT,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-status-draft.docx')
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_DRAFT, $document->document_status);
+    }
+
+    public function test_knowledge_document_store_rejects_invalid_document_status(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Status Invalid AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-status-invalid.docx', 'Document content for invalid document status test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_status' => 'invalid_status',
+        ])->assertSessionHasErrors(['document_status']);
+    }
+
+    public function test_knowledge_document_update_persists_document_status_and_index_payload_exposes_it(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Status Update AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-status-update.docx', 'Document content for document status update test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-status-update.docx')
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ACTIVE, $document->document_status);
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'ownership_type' => $document->ownership_type,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $document->fresh()->document_status);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))
+                ->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'document_status') === KnowledgeItem::DOCUMENT_STATUS_ARCHIVED
+                && data_get($item, 'document_status_label') === KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ARCHIVED];
+        });
+    }
+
+    public function test_knowledge_document_form_payload_exposes_document_status_and_label(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Status Form Payload AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-status-form.docx', 'Document content for form payload test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_PENDING_REVIEW,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-status-form.docx')
+            ->firstOrFail();
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'document_status') === KnowledgeItem::DOCUMENT_STATUS_PENDING_REVIEW
+                && data_get($item, 'document_status_label') === KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_PENDING_REVIEW];
+        });
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

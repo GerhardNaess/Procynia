@@ -99,6 +99,15 @@ export default function KnowledgeItemForm({
     const selectableOwnershipOptions = (Array.isArray(documentOwnershipOptions) ? documentOwnershipOptions : [])
         .filter((option) => option?.selectable !== false || option?.value === selectedOwnershipType);
     const notSetLabel = commonText.not_set ?? 'Ikke satt';
+    const documentStatusLabel = knowledgeText.document_status_label ?? 'Livsløpstatus';
+    const documentStatusHelpText = knowledgeText.document_status_help ?? 'Status viser hvor dokumentet er i livsløpet. Kun aktive dokumenter kan brukes som aktivt kunnskapsgrunnlag.';
+    const documentStatusOptions = [
+        { value: 'draft', label: knowledgeText.filter_draft ?? 'Utkast' },
+        { value: 'pending_review', label: knowledgeText.filter_pending_review ?? 'Til vurdering' },
+        { value: 'active', label: knowledgeText.filter_active ?? 'Aktiv' },
+        { value: 'expired', label: knowledgeText.filter_expired ?? 'Utløpt' },
+        { value: 'archived', label: knowledgeText.filter_archived ?? 'Arkivert' },
+    ];
 
     const selectedCategoryId = form.data.document_category_id
         ? Number(form.data.document_category_id)
@@ -182,6 +191,25 @@ export default function KnowledgeItemForm({
             {form.errors.owner_user_id ? <p className="text-sm text-rose-600">{form.errors.owner_user_id}</p> : null}
         </label>
     ) : null;
+
+    const documentStatusSelect = (
+        <label className="space-y-2">
+            <span className="text-sm font-medium text-slate-700">{documentStatusLabel}</span>
+            <select
+                value={form.data.document_status ?? 'active'}
+                onChange={(event) => form.setData('document_status', event.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+            >
+                {documentStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                        {option.label}
+                    </option>
+                ))}
+            </select>
+            <p className="text-[12px] leading-5 text-slate-400">{documentStatusHelpText}</p>
+            {form.errors.document_status ? <p className="text-sm text-rose-600">{form.errors.document_status}</p> : null}
+        </label>
+    );
 
     const documentCategorySelect = (
         <label className="space-y-2">
@@ -318,6 +346,8 @@ export default function KnowledgeItemForm({
                                     </label>
                                     <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                                 </label>
+
+                                {documentStatusSelect}
                             </div>
                         </div>
 
@@ -438,6 +468,10 @@ export default function KnowledgeItemForm({
                         </label>
                         <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                     </label>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-4">
+                    {documentStatusSelect}
                 </div>
 
                 <div className={classNames(

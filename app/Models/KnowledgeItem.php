@@ -23,6 +23,7 @@ class KnowledgeItem extends Model
     protected $attributes = [
         'ownership_type' => self::OWNERSHIP_TYPE_COMPANY,
         'ai_usage_enabled' => true,
+        'document_status' => self::DOCUMENT_STATUS_ACTIVE,
     ];
 
     public const DOCUMENT_TYPE_COMPANY = 'company';
@@ -71,6 +72,32 @@ class KnowledgeItem extends Model
 
     public const CONTENT_TYPE_LABELS = self::DOCUMENT_TYPE_LABELS;
 
+    public const DOCUMENT_STATUS_DRAFT = 'draft';
+
+    public const DOCUMENT_STATUS_PENDING_REVIEW = 'pending_review';
+
+    public const DOCUMENT_STATUS_ACTIVE = 'active';
+
+    public const DOCUMENT_STATUS_EXPIRED = 'expired';
+
+    public const DOCUMENT_STATUS_ARCHIVED = 'archived';
+
+    public const DOCUMENT_STATUSES = [
+        self::DOCUMENT_STATUS_DRAFT,
+        self::DOCUMENT_STATUS_PENDING_REVIEW,
+        self::DOCUMENT_STATUS_ACTIVE,
+        self::DOCUMENT_STATUS_EXPIRED,
+        self::DOCUMENT_STATUS_ARCHIVED,
+    ];
+
+    public const DOCUMENT_STATUS_LABELS = [
+        self::DOCUMENT_STATUS_DRAFT => 'Utkast',
+        self::DOCUMENT_STATUS_PENDING_REVIEW => 'Til vurdering',
+        self::DOCUMENT_STATUS_ACTIVE => 'Aktiv',
+        self::DOCUMENT_STATUS_EXPIRED => 'Utløpt',
+        self::DOCUMENT_STATUS_ARCHIVED => 'Arkivert',
+    ];
+
     public const EXTRACTION_STATUS_PENDING = 'pending';
 
     public const EXTRACTION_STATUS_COMPLETED = 'completed';
@@ -112,6 +139,7 @@ class KnowledgeItem extends Model
         'uploaded_by_user_id',
         'is_active',
         'ai_usage_enabled',
+        'document_status',
     ];
 
     protected function casts(): array

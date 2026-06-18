@@ -79,6 +79,7 @@ class KnowledgeMetadataMapService
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.is_active', true)
             ->where('knowledge_items.ai_usage_enabled', true)
+            ->where('knowledge_items.document_status', KnowledgeItem::DOCUMENT_STATUS_ACTIVE)
             ->whereNotNull('knowledge_items.storage_path')
             ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->orderByDesc('knowledge_items.updated_at')

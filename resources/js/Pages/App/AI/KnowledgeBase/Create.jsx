@@ -21,6 +21,7 @@ export default function KnowledgeBaseCreate({
         document_theme_term_id: '',
         is_active: true,
         ai_usage_enabled: true,
+        document_status: 'active',
     });
 
     const submit = (event) => {
