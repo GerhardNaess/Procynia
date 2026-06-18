@@ -484,7 +484,7 @@ export default function KnowledgeBaseIndex({
                                 </h1>
                                 <PageHelpButton
                                     buttonLabel={tk.page_help_button ?? 'Hjelp'}
-                                    title={tk.page_help_title ?? 'Kunnskapsdokumenter'}
+                                    title={tk.page_help_title ?? 'Kunnskapsbase'}
                                     intro={tk.page_help_intro}
                                     sections={[
                                         {

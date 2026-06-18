@@ -3,7 +3,7 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import KnowledgeItemForm, { KNOWLEDGE_DOCUMENT_TYPE_OPTIONS } from './KnowledgeItemForm';
 
 export default function KnowledgeBaseCreate({
-    pageTitle = 'Kunnskapsdokumenter · Last opp',
+    pageTitle = 'Kunnskapsbase · Last opp',
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
     documentCategoryOptions = [],
     documentOwnershipOptions = [],
@@ -37,10 +37,10 @@ export default function KnowledgeBaseCreate({
                 <section className="space-y-4">
                     <div className="space-y-2">
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                            Kunnskapsdokumenter
+                            Kunnskapsbase
                         </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                            Kunnskapsdokumenter
+                            Kunnskapsbase
                         </h1>
                         <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
                             Last opp dokumenter som senere kan brukes som grunnlag for AI-forslag til besvarelse.

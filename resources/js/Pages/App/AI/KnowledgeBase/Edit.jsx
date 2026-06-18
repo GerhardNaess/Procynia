@@ -3,7 +3,7 @@ import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 import KnowledgeItemForm from './KnowledgeItemForm';
 
 export default function KnowledgeBaseEdit({
-    pageTitle = 'Kunnskapsdokumenter · Rediger',
+    pageTitle = 'Kunnskapsbase · Rediger',
     knowledgeItem,
     documentTypeOptions,
     documentCategoryOptions = [],
@@ -37,7 +37,7 @@ export default function KnowledgeBaseEdit({
                 <section className="space-y-4">
                     <div className="space-y-2">
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                            Kunnskapsdokumenter
+                            Kunnskapsbase
                         </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             Rediger kunnskapsdokument
