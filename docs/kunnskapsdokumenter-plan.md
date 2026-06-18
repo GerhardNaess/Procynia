@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-AI-policy per dokument er implementert som del av fase 2.1. Det som gjenstår er dokumentstatus, revisjon og gyldighet, og versjonering av dokumentinnhold. Disse er beskrevet i §28.
+AI-policy per dokument og dokumentstatus er implementert som del av fase 2.1 og 2.2. Det som gjenstår er revisjon og gyldighet, og versjonering av dokumentinnhold. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -786,7 +786,7 @@ Verdiene er strengt kundescoped. Tilhørighet er fortsatt systemstyrt og ikke ko
 
 - `KnowledgeItem` og `SavedNoticeAiDocument` er to separate modeller og to separate flater
 - Retrieval bruker kun `KnowledgeItemChunk` via `knowledge_items` — ingen `SavedNoticeAiDocument` involveres
-- Retrieval filtrerer i dag på `customer_id`, `ownership_type = company`, `is_active = true` og `extraction_status = completed`
+- Retrieval filtrerer i dag på `customer_id`, `ownership_type = company`, `is_active = true`, `ai_usage_enabled = true`, `document_status = active` og `extraction_status = completed`
 - `case`- og `personal`-dokumenter eksisterer i modellen, men brukes ikke av retrieval
 
 ### Tester
@@ -808,6 +808,24 @@ Verdiene er strengt kundescoped. Tilhørighet er fortsatt systemstyrt og ikke ko
 - Detaljsiden viser «Kan brukes av AI: Ja / Nei» i dokumentinfo-kortet
 - 3 nye feature-tester dekker store-default, eksplisitt false ved store, og update/payload-eksponering (totalt 71 tester, 800 assertions)
 
+### Dokumentstatus (fullført juni 2026)
+
+`document_status` (string, default `active`) er lagt til på `knowledge_items`. Feltet styrer dokumentets livsløp og er den eneste brukerrettede statusen.
+
+Gyldige verdier:
+
+- `draft` — Utkast
+- `pending_review` — Til vurdering
+- `active` — Aktiv
+- `expired` — Utløpt
+- `archived` — Arkivert
+
+- `is_active` er ikke lenger brukerrettet status. Det avledes automatisk: `document_status = active` gir `is_active = true`; alle andre verdier gir `is_active = false`.
+- Retrieval filtrerer nå på `document_status = active` i tillegg til `is_active = true` og `ai_usage_enabled = true`.
+- Status vises i listevisning og på detaljside med fargekoder.
+- Opplastings- og redigeringsskjema har ett statusfelt med label «Status» — det gamle synlige `is_active`-checkboxen er fjernet.
+- 5 nye feature-tester dekker store-default, eksplisitt verdi, ugyldig verdi, update/payload-eksponering og skjema-payload (totalt 76 tester, 819 assertions).
+
 ---
 
 ## 28. Fase 2: Neste prioriteringer
@@ -818,17 +836,9 @@ Fase 2 kan ikke starte før fase 1 er stabilt i produksjon. Elementene nedenfor 
 
 Implementert. `ai_usage_enabled` er lagt til på `knowledge_items` og respekteres av retrieval. Se §27 for fullstendig beskrivelse.
 
-### 28.2 Dokumentstatus
+### 28.2 Dokumentstatus ✓ Fullført juni 2026
 
-Kunnskapsbase trenger en tydeligere status enn bare `is_active`. En enkel statusmodell kan være:
-
-- `draft` — Utkast: under utarbeidelse, ikke aktivt
-- `pending_review` — Til vurdering: klar for gjennomgang
-- `active` — Aktiv: godkjent og aktivt
-- `expired` — Utløpt: har passert revisjonsdato
-- `archived` — Arkivert: tas ut av aktiv bruk
-
-Statusmodellen bør vurderes i sammenheng med AI-policy, fordi status og AI-tilgang henger tett sammen. En beslutning her setter også rammene for en eventuell fremtidig godkjenningsflyt.
+Implementert. `document_status` er lagt til på `knowledge_items` og respekteres av retrieval. Se §27 for fullstendig beskrivelse.
 
 ### 28.3 Revisjon og gyldighet
 
@@ -928,8 +938,10 @@ Fase 1 — begrepsmodell, kundestyrte katalogverdier, frontend-integrasjon og va
 
 Fase 2.1 — AI-policy per dokument (`ai_usage_enabled`) — er fullført per juni 2026. Retrieval respekterer feltet, og det er synlig i listevisning, detaljside og skjema.
 
-Neste prioritet er dokumentstatus. En tydelig statusmodell er forutsetning for mer presis AI-retrieval og for å bygge videre på revisjonsdatoer, godkjenningsflyt og kvalitetskontroll.
+Fase 2.2 — Dokumentstatus (`document_status`) — er fullført per juni 2026. Feltet styrer dokumentets livsløp, er den eneste brukerrettede statusen, og respekteres av retrieval. `is_active` avledes automatisk og er ikke lenger brukerrettet.
+
+Neste prioritet er revisjon og gyldighet. Det hindrer at utdaterte dokumenter stille forblir aktive og påvirker AI-svar.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det.
 
-Procynia er nå et sted der kunden styrer hva AI har lov til å bruke, per dokument. Det neste steget er å gjøre statusmodellen presis nok til at den gir mening som grunnlag for videre styring.
+Procynia er nå et sted der kunden styrer hva AI har lov til å bruke, per dokument, og der dokumentets livsløpsstatus kontrollerer retrieval. Det neste steget er å gi dokumenter revisjonsdatoer og utløpsstyring.
