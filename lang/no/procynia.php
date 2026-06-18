@@ -1817,6 +1817,10 @@ return [
         'empty_categories_text' => 'Opprett den første dokumentkategorien for å begynne å styre kunnskapsdokumentene.',
         'empty_topics_title' => 'Ingen temaer ennå',
         'empty_topics_text' => 'Opprett det første temaet for å samle faglige emner i kunnskapsbasen.',
+        'allowed_topics' => 'Lovlige temaer',
+        'select_topics' => 'Velg temaer',
+        'topics_for_category' => 'Temaer for dokumentkategori',
+        'no_topics_selected' => 'Ingen temaer valgt',
         'modal_create_category_title' => 'Opprett dokumentkategori',
         'modal_edit_category_title' => 'Rediger dokumentkategori',
         'modal_create_topic_title' => 'Opprett tema',
@@ -1832,6 +1836,7 @@ return [
         'validation' => [
             'duplicate_category_name' => 'Denne dokumentkategorien finnes allerede for kunden.',
             'duplicate_topic_name' => 'Dette temaet finnes allerede for kunden.',
+            'invalid_topic_selection' => 'Valgte temaer må tilhøre samme kunde og være aktive.',
         ],
     ],
     'notice' => [

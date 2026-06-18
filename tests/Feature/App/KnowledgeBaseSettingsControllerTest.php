@@ -46,7 +46,7 @@ class KnowledgeBaseSettingsControllerTest extends TestCase
             'updated_by_user_id' => $primary['owner']->id,
         ]);
 
-        KnowledgeDocumentCategory::query()->create([
+        $analysisCategory = KnowledgeDocumentCategory::query()->create([
             'customer_id' => $primary['customer']->id,
             'name' => 'Analyse',
             'description' => 'Skal komme først alfabetisk',
@@ -91,13 +91,28 @@ class KnowledgeBaseSettingsControllerTest extends TestCase
             'updated_by_user_id' => $secondary['owner']->id,
         ]);
 
+        $analysisCategory->topics()->sync([
+            KnowledgeDocumentTopic::query()
+                ->where('customer_id', $primary['customer']->id)
+                ->where('name', 'Anskaffelse')
+                ->value('id'),
+            KnowledgeDocumentTopic::query()
+                ->where('customer_id', $primary['customer']->id)
+                ->where('name', 'Konkurransegrunnlag')
+                ->value('id'),
+        ]);
+
         $response = $this->actingAs($primary['owner'])->get('/app/customer-environment/knowledge-base');
 
         $response->assertOk();
         $response->assertViewHas('page', function ($page): bool {
+            $documentCategories = collect(data_get($page, 'props.documentCategories', []));
+            $analysisCategory = $documentCategories->firstWhere('name', 'Analyse');
+
             return data_get($page, 'component') === 'App/CustomerEnvironment/KnowledgeBase'
-                && collect(data_get($page, 'props.documentCategories', []))->pluck('name')->all() === ['Analyse', 'Strategi']
-                && ! collect(data_get($page, 'props.documentCategories', []))->contains(fn (array $category): bool => $category['name'] === 'Fremmed kategori')
+                && $documentCategories->pluck('name')->all() === ['Analyse', 'Strategi']
+                && ! $documentCategories->contains(fn (array $category): bool => $category['name'] === 'Fremmed kategori')
+                && collect(data_get($analysisCategory, 'topics', []))->pluck('name')->all() === ['Anskaffelse', 'Konkurransegrunnlag']
                 && collect(data_get($page, 'props.documentTopics', []))->pluck('name')->all() === ['Anskaffelse', 'Konkurransegrunnlag']
                 && ! collect(data_get($page, 'props.documentTopics', []))->contains(fn (array $topic): bool => $topic['name'] === 'Fremmed tema');
         });
@@ -177,6 +192,83 @@ class KnowledgeBaseSettingsControllerTest extends TestCase
 
         $this->assertSoftDeleted('knowledge_document_categories', ['id' => $category->id]);
         $this->assertSoftDeleted('knowledge_document_topics', ['id' => $topic->id]);
+    }
+
+    public function test_system_owner_can_set_and_clear_allowed_topics_for_a_category(): void
+    {
+        $context = $this->systemOwnerContext();
+        $foreignContext = $this->systemOwnerContext('Annen Kunde AS');
+
+        $category = KnowledgeDocumentCategory::query()->create([
+            'customer_id' => $context['customer']->id,
+            'name' => 'Metode',
+            'description' => 'Kategori for test',
+            'is_active' => true,
+            'created_by_user_id' => $context['owner']->id,
+            'updated_by_user_id' => $context['owner']->id,
+        ]);
+
+        $firstTopic = KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $context['customer']->id,
+            'name' => 'Applikasjon',
+            'description' => null,
+            'is_active' => true,
+            'created_by_user_id' => $context['owner']->id,
+            'updated_by_user_id' => $context['owner']->id,
+        ]);
+
+        $secondTopic = KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $context['customer']->id,
+            'name' => 'Sikkerhet',
+            'description' => null,
+            'is_active' => true,
+            'created_by_user_id' => $context['owner']->id,
+            'updated_by_user_id' => $context['owner']->id,
+        ]);
+
+        $foreignTopic = KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $foreignContext['customer']->id,
+            'name' => 'Fremmed tema',
+            'description' => null,
+            'is_active' => true,
+            'created_by_user_id' => $foreignContext['owner']->id,
+            'updated_by_user_id' => $foreignContext['owner']->id,
+        ]);
+
+        $this->actingAs($context['owner'])->patch(route('app.customer-environment.knowledge-base.categories.update', ['category' => $category->id]), [
+            'name' => 'Metode',
+            'description' => 'Kategori for test',
+            'is_active' => true,
+            'topic_ids' => [$secondTopic->id, $firstTopic->id],
+        ])->assertRedirect('/app/customer-environment/knowledge-base');
+
+        $this->assertSame(
+            [$firstTopic->id, $secondTopic->id],
+            $category->fresh()->topics()
+                ->orderByRaw('LOWER(knowledge_document_topics.name)')
+                ->orderBy('knowledge_document_topics.id')
+                ->pluck('knowledge_document_topics.id')
+                ->all(),
+        );
+
+        $this->actingAs($context['owner'])->patch(route('app.customer-environment.knowledge-base.categories.update', ['category' => $category->id]), [
+            'name' => 'Metode',
+            'description' => 'Kategori for test',
+            'is_active' => true,
+            'topic_ids' => [],
+        ])->assertRedirect('/app/customer-environment/knowledge-base');
+
+        $this->assertSame(
+            [],
+            $category->fresh()->topics()->pluck('knowledge_document_topics.id')->all(),
+        );
+
+        $this->actingAs($context['owner'])->patch(route('app.customer-environment.knowledge-base.categories.update', ['category' => $category->id]), [
+            'name' => 'Metode',
+            'description' => 'Kategori for test',
+            'is_active' => true,
+            'topic_ids' => [$foreignTopic->id],
+        ])->assertSessionHasErrors('topic_ids');
     }
 
     public function test_system_owner_cannot_manage_foreign_customer_catalog_items(): void

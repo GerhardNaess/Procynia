@@ -9,6 +9,11 @@ function CatalogModal({
     form,
     onClose,
     onSubmit,
+    topicOptions = [],
+    showTopicSelector = false,
+    allowedTopicsLabel,
+    selectTopicsLabel,
+    noTopicsSelectedLabel,
     saveLabel,
     cancelLabel,
     nameLabel,
@@ -20,6 +25,17 @@ function CatalogModal({
     if (!isOpen) {
         return null;
     }
+
+    const selectedTopicIds = Array.isArray(form.data.topic_ids) ? form.data.topic_ids.map((topicId) => Number(topicId)) : [];
+
+    const toggleTopic = (topicId) => {
+        const normalizedTopicId = Number(topicId);
+        const nextTopicIds = selectedTopicIds.includes(normalizedTopicId)
+            ? selectedTopicIds.filter((id) => id !== normalizedTopicId)
+            : [...selectedTopicIds, normalizedTopicId];
+
+        form.setData('topic_ids', nextTopicIds);
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4">
@@ -75,6 +91,44 @@ function CatalogModal({
                             </label>
                             {form.errors.is_active ? <p className="text-sm text-rose-600">{form.errors.is_active}</p> : null}
                         </label>
+
+                        {showTopicSelector ? (
+                            <div className="space-y-2">
+                                <span className="text-sm font-medium text-slate-700">{allowedTopicsLabel}</span>
+                                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                                    <p className="text-xs leading-5 text-slate-500">{selectTopicsLabel}</p>
+
+                                    {topicOptions.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {topicOptions.map((topic) => {
+                                                const topicId = Number(topic.id);
+                                                const checked = selectedTopicIds.includes(topicId);
+
+                                                return (
+                                                    <label
+                                                        key={topicId}
+                                                        className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 transition hover:border-violet-300"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={() => toggleTopic(topicId)}
+                                                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                                                        />
+                                                        <span className="min-w-0">
+                                                            <span className="block font-medium text-slate-900">{topic.name}</span>
+                                                            {topic.description ? <span className="block text-xs leading-5 text-slate-500">{topic.description}</span> : null}
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm leading-6 text-slate-500">{noTopicsSelectedLabel}</p>
+                                    )}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
 
                     <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -106,6 +160,9 @@ function CatalogSection({
     createLabel,
     emptyTitle,
     emptyDescription,
+    showTopicsSummary = false,
+    topicsForCategoryLabel,
+    noTopicsSelectedLabel,
     nameLabel,
     descriptionLabel,
     statusLabel,
@@ -157,7 +214,21 @@ function CatalogSection({
                                     return (
                                         <tr key={item.id} className="align-top text-sm text-slate-700">
                                             <td className="px-4 py-3.5 font-medium text-slate-950">{item.name}</td>
-                                            <td className="px-4 py-3.5 text-slate-500">{item.description || '—'}</td>
+                                            <td className="px-4 py-3.5 text-slate-500">
+                                                <div className="space-y-1.5">
+                                                    <div>{item.description || '—'}</div>
+                                                    {showTopicsSummary ? (
+                                                        item.topics?.length > 0 ? (
+                                                            <div className="text-xs leading-5 text-slate-500">
+                                                                <span className="font-medium text-slate-600">{topicsForCategoryLabel}:</span>{' '}
+                                                                {item.topics.map((topic) => topic.name).join(', ')}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="text-xs leading-5 text-slate-400">{noTopicsSelectedLabel}</div>
+                                                        )
+                                                    ) : null}
+                                                </div>
+                                            </td>
                                             <td className="px-4 py-3.5">
                                                 <span
                                                     className={
@@ -216,12 +287,14 @@ export default function KnowledgeBaseSettings({
     const { translations = {} } = usePage().props;
     const commonText = translations?.common ?? {};
     const knowledgeBaseText = translations?.knowledge_base_settings ?? {};
+    const activeTopicOptions = useMemo(() => documentTopics.filter((topic) => topic.is_active), [documentTopics]);
     const [modalState, setModalState] = useState(null);
     const [busyAction, setBusyAction] = useState(null);
     const form = useForm({
         name: '',
         description: '',
         is_active: true,
+        topic_ids: [],
     });
 
     const activeCatalog = useMemo(() => {
@@ -250,6 +323,7 @@ export default function KnowledgeBaseSettings({
             name: '',
             description: '',
             is_active: true,
+            topic_ids: [],
         });
         setModalState({ type, mode: 'create', record: null });
     };
@@ -260,6 +334,7 @@ export default function KnowledgeBaseSettings({
             name: record.name ?? '',
             description: record.description ?? '',
             is_active: Boolean(record.is_active),
+            topic_ids: type === 'category' ? (record.topic_ids ?? record.topics?.map((topic) => topic.id) ?? []) : [],
         });
         setModalState({ type, mode: 'edit', record });
     };
@@ -340,6 +415,9 @@ export default function KnowledgeBaseSettings({
                     createLabel={knowledgeBaseText.create_category ?? 'Opprett dokumentkategori'}
                     emptyTitle={knowledgeBaseText.empty_categories_title ?? 'Ingen dokumentkategorier ennå'}
                     emptyDescription={knowledgeBaseText.empty_categories_text ?? 'Opprett den første dokumentkategorien for å begynne å styre kunnskapsdokumentene.'}
+                    showTopicsSummary
+                    topicsForCategoryLabel={knowledgeBaseText.topics_for_category ?? 'Temaer for dokumentkategori'}
+                    noTopicsSelectedLabel={knowledgeBaseText.no_topics_selected ?? 'Ingen temaer valgt'}
                     nameLabel={commonText.name ?? 'Navn'}
                     descriptionLabel={commonText.description ?? 'Beskrivelse'}
                     statusLabel={commonText.status ?? 'Status'}
@@ -362,6 +440,7 @@ export default function KnowledgeBaseSettings({
                     createLabel={knowledgeBaseText.create_topic ?? 'Opprett tema'}
                     emptyTitle={knowledgeBaseText.empty_topics_title ?? 'Ingen temaer ennå'}
                     emptyDescription={knowledgeBaseText.empty_topics_text ?? 'Opprett det første temaet for å samle faglige emner i kunnskapsbasen.'}
+                    showTopicsSummary={false}
                     nameLabel={commonText.name ?? 'Navn'}
                     descriptionLabel={commonText.description ?? 'Beskrivelse'}
                     statusLabel={commonText.status ?? 'Status'}
@@ -386,6 +465,11 @@ export default function KnowledgeBaseSettings({
                     form={form}
                     onClose={closeModal}
                     onSubmit={submitModal}
+                    topicOptions={activeTopicOptions}
+                    showTopicSelector={modalState.type === 'category'}
+                    allowedTopicsLabel={knowledgeBaseText.allowed_topics ?? 'Lovlige temaer'}
+                    selectTopicsLabel={knowledgeBaseText.select_topics ?? 'Velg temaer'}
+                    noTopicsSelectedLabel={knowledgeBaseText.no_topics_selected ?? 'Ingen temaer valgt'}
                     saveLabel={commonText.save ?? 'Lagre'}
                     cancelLabel={commonText.cancel ?? 'Avbryt'}
                     nameLabel={commonText.name ?? 'Navn'}

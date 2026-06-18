@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class KnowledgeDocumentCategory extends Model
@@ -45,6 +46,12 @@ class KnowledgeDocumentCategory extends Model
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by_user_id');
+    }
+
+    public function topics(): BelongsToMany
+    {
+        return $this->belongsToMany(KnowledgeDocumentTopic::class, 'knowledge_document_category_topic')
+            ->withTimestamps();
     }
 
     public function scopeForCustomer(Builder $query, Customer|int $customer): Builder

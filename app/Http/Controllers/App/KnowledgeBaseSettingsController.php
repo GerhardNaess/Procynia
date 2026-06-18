@@ -43,8 +43,9 @@ class KnowledgeBaseSettingsController extends Controller
     {
         [$actor, $customerId] = $this->systemOwnerContext($request);
         $payload = $this->validatedCatalogPayload($request, $customerId, 'category');
+        $topicIds = $this->validatedTopicIds($request, $customerId);
 
-        KnowledgeDocumentCategory::query()->create([
+        $record = KnowledgeDocumentCategory::query()->create([
             'customer_id' => $customerId,
             'name' => $payload['name'],
             'description' => $payload['description'],
@@ -53,6 +54,10 @@ class KnowledgeBaseSettingsController extends Controller
             'created_by_user_id' => $actor->id,
             'updated_by_user_id' => $actor->id,
         ]);
+
+        if ($topicIds !== null) {
+            $record->topics()->sync($topicIds);
+        }
 
         return redirect()
             ->route('app.customer-environment.knowledge-base.index')
@@ -64,6 +69,7 @@ class KnowledgeBaseSettingsController extends Controller
         [$actor, $customerId] = $this->systemOwnerContext($request);
         $record = $this->scopedCategory($customerId, $category);
         $payload = $this->validatedCatalogPayload($request, $customerId, 'category', $record->id);
+        $topicIds = $this->validatedTopicIds($request, $customerId);
 
         $record->forceFill([
             'name' => $payload['name'],
@@ -71,6 +77,10 @@ class KnowledgeBaseSettingsController extends Controller
             'is_active' => $payload['is_active'],
             'updated_by_user_id' => $actor->id,
         ])->save();
+
+        if ($topicIds !== null) {
+            $record->topics()->sync($topicIds);
+        }
 
         return redirect()
             ->route('app.customer-environment.knowledge-base.index')
@@ -177,6 +187,11 @@ class KnowledgeBaseSettingsController extends Controller
     {
         return KnowledgeDocumentCategory::query()
             ->forCustomer($customerId)
+            ->with([
+                'topics' => fn ($query) => $query
+                    ->orderByRaw('LOWER(knowledge_document_topics.name)')
+                    ->orderBy('knowledge_document_topics.id'),
+            ])
             ->ordered()
             ->get()
             ->map(fn (KnowledgeDocumentCategory $category): array => $this->categoryPayload($category))
@@ -209,12 +224,22 @@ class KnowledgeBaseSettingsController extends Controller
      */
     private function categoryPayload(KnowledgeDocumentCategory $category): array
     {
+        $topics = $category->topics
+            ->map(static fn (KnowledgeDocumentTopic $topic): array => [
+                'id' => $topic->id,
+                'name' => $topic->name,
+            ])
+            ->values()
+            ->all();
+
         return [
             'id' => $category->id,
             'name' => $category->name,
             'description' => $category->description,
             'is_active' => (bool) $category->is_active,
             'status_label' => $category->is_active ? __('procynia.knowledge_base_settings.active') : __('procynia.knowledge_base_settings.inactive'),
+            'topic_ids' => $category->topics->pluck('id')->values()->all(),
+            'topics' => $topics,
             'update_url' => route('app.customer-environment.knowledge-base.categories.update', ['category' => $category->id]),
             'destroy_url' => route('app.customer-environment.knowledge-base.categories.destroy', ['category' => $category->id]),
             'created_at' => optional($category->created_at)?->toIso8601String(),
@@ -281,6 +306,49 @@ class KnowledgeBaseSettingsController extends Controller
             'description' => $description,
             'is_active' => $isActive,
         ];
+    }
+
+    /**
+     * Purpose: Validate topic links for a category when the request includes them.
+     * Inputs: The current request and customer id.
+     * Returns: The approved topic ids, or null when the request does not touch topic links.
+     * Side effects: Throws validation errors when topic links are invalid or cross-customer.
+     */
+    private function validatedTopicIds(Request $request, int $customerId): ?array
+    {
+        if (! $request->exists('topic_ids')) {
+            return null;
+        }
+
+        $validated = $request->validate([
+            'topic_ids' => ['nullable', 'array'],
+            'topic_ids.*' => ['integer'],
+        ]);
+
+        $topicIds = collect($validated['topic_ids'] ?? [])
+            ->filter(static fn ($value): bool => $value !== null && $value !== '')
+            ->map(static fn ($value): int => (int) $value)
+            ->unique()
+            ->values()
+            ->all();
+
+        $approvedTopicIds = KnowledgeDocumentTopic::query()
+            ->forCustomer($customerId)
+            ->active()
+            ->whereIn('id', $topicIds)
+            ->pluck('id')
+            ->all();
+
+        sort($topicIds);
+        sort($approvedTopicIds);
+
+        if ($topicIds !== $approvedTopicIds) {
+            throw ValidationException::withMessages([
+                'topic_ids' => __('procynia.knowledge_base_settings.validation.invalid_topic_selection'),
+            ]);
+        }
+
+        return $topicIds;
     }
 
     /**

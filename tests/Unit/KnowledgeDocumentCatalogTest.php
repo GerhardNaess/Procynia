@@ -220,6 +220,73 @@ class KnowledgeDocumentCatalogTest extends TestCase
         ]);
     }
 
+    public function test_document_categories_and_topics_support_many_to_many_relationships(): void
+    {
+        $customer = $this->createCustomer('Catalog Pivot Customer AS');
+
+        $firstCategory = KnowledgeDocumentCategory::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Anskaffelse',
+            'description' => 'Første kategori.',
+            'sort_order' => 0,
+            'is_active' => true,
+        ]);
+
+        $secondCategory = KnowledgeDocumentCategory::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Strategi',
+            'description' => 'Andre kategori.',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $firstTopic = KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Applikasjoner',
+            'description' => 'Første tema.',
+            'sort_order' => 0,
+            'is_active' => true,
+        ]);
+
+        $secondTopic = KnowledgeDocumentTopic::query()->create([
+            'customer_id' => $customer->id,
+            'name' => 'Sikkerhet',
+            'description' => 'Andre tema.',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $firstCategory->topics()->sync([$secondTopic->id, $firstTopic->id]);
+        $secondCategory->topics()->sync([$firstTopic->id]);
+
+        $this->assertSame(
+            ['Applikasjoner', 'Sikkerhet'],
+            $firstCategory->fresh()->topics()
+                ->orderByRaw('LOWER(knowledge_document_topics.name)')
+                ->orderBy('knowledge_document_topics.id')
+                ->pluck('name')
+                ->all(),
+        );
+
+        $this->assertSame(
+            ['Anskaffelse', 'Strategi'],
+            $firstTopic->fresh()->categories()
+                ->orderByRaw('LOWER(knowledge_document_categories.name)')
+                ->orderBy('knowledge_document_categories.id')
+                ->pluck('name')
+                ->all(),
+        );
+
+        $this->assertSame(
+            ['Anskaffelse'],
+            $secondTopic->fresh()->categories()
+                ->orderByRaw('LOWER(knowledge_document_categories.name)')
+                ->orderBy('knowledge_document_categories.id')
+                ->pluck('name')
+                ->all(),
+        );
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(

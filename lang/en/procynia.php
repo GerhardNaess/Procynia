@@ -1817,6 +1817,10 @@ return [
         'empty_categories_text' => 'Create the first document category to start governing knowledge documents.',
         'empty_topics_title' => 'No topics yet',
         'empty_topics_text' => 'Create the first topic to group knowledge documents by subject matter.',
+        'allowed_topics' => 'Allowed topics',
+        'select_topics' => 'Select topics',
+        'topics_for_category' => 'Topics for document category',
+        'no_topics_selected' => 'No topics selected',
         'modal_create_category_title' => 'Create document category',
         'modal_edit_category_title' => 'Edit document category',
         'modal_create_topic_title' => 'Create topic',
@@ -1832,6 +1836,7 @@ return [
         'validation' => [
             'duplicate_category_name' => 'This document category already exists for the customer.',
             'duplicate_topic_name' => 'This topic already exists for the customer.',
+            'invalid_topic_selection' => 'Selected topics must belong to the same customer and be active.',
         ],
     ],
     'notice' => [
