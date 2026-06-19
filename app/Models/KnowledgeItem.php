@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class KnowledgeItem extends Model
 {
@@ -219,6 +220,18 @@ class KnowledgeItem extends Model
         return $this->hasMany(KnowledgeItemRevision::class)
             ->orderBy('revision_no')
             ->orderBy('id');
+    }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(KnowledgeItemVersion::class);
+    }
+
+    public function currentVersion(): HasOne
+    {
+        return $this->hasOne(KnowledgeItemVersion::class)
+            ->where('is_current', true)
+            ->latestOfMany('version_no');
     }
 
     public function isCompanyOwned(): bool
