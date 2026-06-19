@@ -11,6 +11,7 @@ use App\Models\KnowledgeDocumentTopic;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItemRevision;
+use App\Models\KnowledgeItemVersion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
@@ -375,9 +376,26 @@ class KnowledgeBaseController extends Controller
                     (int) $user->id,
                 );
 
+                $knowledgeVersion = KnowledgeItemVersion::query()->create([
+                    'knowledge_item_id' => $knowledgeDocument->id,
+                    'customer_id' => $customerId,
+                    'version_no' => 1,
+                    'is_current' => true,
+                    'original_filename' => $knowledgeDocument->original_filename,
+                    'storage_path' => $storedPath,
+                    'mime_type' => $knowledgeDocument->mime_type,
+                    'file_size_bytes' => $knowledgeDocument->file_size_bytes,
+                    'extracted_text' => $extractedText,
+                    'extraction_status' => $knowledgeDocument->extraction_status,
+                    'extraction_error' => $knowledgeDocument->extraction_error,
+                    'uploaded_by_user_id' => $request->user()?->id,
+                    'uploaded_at' => $knowledgeDocument->created_at,
+                ]);
+
                 return [
                     'knowledge_document' => $knowledgeDocument,
-                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads, $absolutePath),
+                    'knowledge_version' => $knowledgeVersion,
+                    'chunks' => $this->syncChunks($knowledgeDocument, $chunkPayloads, $absolutePath, $knowledgeVersion),
                 ];
             });
 
@@ -3974,7 +3992,7 @@ class KnowledgeBaseController extends Controller
      * Returns: None.
      * Side effects: Deletes old chunks and inserts the current chunk set.
      */
-    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads, ?string $sourceDocumentPath = null): Collection
+    private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads, ?string $sourceDocumentPath = null, ?KnowledgeItemVersion $version = null): Collection
     {
         $knowledgeDocument->chunks()->delete();
 
@@ -3983,9 +4001,10 @@ class KnowledgeBaseController extends Controller
         }
 
         $chunkAttributes = array_map(
-            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument, $sourceDocumentPath): array {
+            function (array $chunkPayload, int $chunkIndex) use ($knowledgeDocument, $sourceDocumentPath, $version): array {
                 $chunkType = (string) ($chunkPayload['chunk_type'] ?? '');
                 $attributes = [
+                    'knowledge_item_version_id' => $version?->id,
                     'chunk_index' => $chunkIndex,
                     'content' => (string) ($chunkPayload['content'] ?? ''),
                     'start_offset' => (int) ($chunkPayload['start_offset'] ?? 0),

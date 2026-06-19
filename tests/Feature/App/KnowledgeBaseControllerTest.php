@@ -7,9 +7,10 @@ use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
-use App\Models\KnowledgeItemRevision;
-use App\Services\Ai\AiUsageGuard;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeItemRevision;
+use App\Models\KnowledgeItemVersion;
+use App\Services\Ai\AiUsageGuard;
 use App\Models\KnowledgeDocumentCategory;
 use App\Models\KnowledgeDocumentTopic;
 use App\Models\KnowledgeMetadataTermSuggestion;
@@ -463,6 +464,104 @@ class KnowledgeBaseControllerTest extends TestCase
             array_fill(0, $chunks->count(), KnowledgeItemChunk::REVIEW_STATUS_PENDING_REVIEW),
             $chunks->pluck('review_status')->all(),
         );
+    }
+
+    public function test_knowledge_document_upload_creates_chunks_with_version_id(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Version Chunk AS');
+        $content = str_repeat('Version chunk test content with sufficient length for deterministic chunking. ', 26);
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('version-chunk.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $response->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'version-chunk.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->first();
+
+        $this->assertNotNull($version, 'A KnowledgeItemVersion should be created on upload.');
+        $this->assertTrue($version->is_current);
+        $this->assertSame($document->storage_path, $version->storage_path);
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->get();
+
+        $this->assertGreaterThan(0, $chunks->count());
+
+        foreach ($chunks as $chunk) {
+            $this->assertSame(
+                $version->id,
+                $chunk->knowledge_item_version_id,
+                "Chunk {$chunk->chunk_index} should reference the created version.",
+            );
+        }
+
+        $this->assertCount($chunks->count(), $version->chunks);
+    }
+
+    public function test_metadata_update_does_not_create_new_version(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Metadata Update AS');
+        $content = str_repeat('Metadata update test content with sufficient length for chunking. ', 26);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('metadata-no-version.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+        ]);
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'metadata-no-version.docx')
+            ->firstOrFail();
+
+        $versionsBefore = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->count();
+
+        $this->assertSame(1, $versionsBefore, 'Upload should create exactly one version.');
+
+        $chunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->get();
+
+        $versionIdBefore = $chunks->first()?->knowledge_item_version_id;
+
+        // Update metadata only (no new file upload).
+        $this->actingAs($context['user'])->patch(
+            route('app.ai.knowledge-base.update', $document),
+            [
+                'title' => 'Updated Title',
+                'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+                'is_active' => true,
+            ],
+        );
+
+        $versionsAfter = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->count();
+
+        $this->assertSame(1, $versionsAfter, 'Metadata update must not create a new version.');
+
+        // Chunks still point to the same version.
+        foreach ($chunks->fresh() as $chunk) {
+            $this->assertSame($versionIdBefore, $chunk->knowledge_item_version_id);
+        }
     }
 
     public function test_knowledge_document_upload_uses_structural_chunking_and_persists_heading_paths_and_offsets(): void

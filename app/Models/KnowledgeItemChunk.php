@@ -40,6 +40,7 @@ class KnowledgeItemChunk extends Model
 
     protected $fillable = [
         'knowledge_item_id',
+        'knowledge_item_version_id',
         'chunk_index',
         'content',
         'start_offset',
@@ -115,6 +116,11 @@ class KnowledgeItemChunk extends Model
     public function knowledgeItem(): BelongsTo
     {
         return $this->belongsTo(KnowledgeItem::class);
+    }
+
+    public function version(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeItemVersion::class, 'knowledge_item_version_id');
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItemVersion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\Language;
@@ -98,6 +99,104 @@ class KnowledgeItemOwnershipTest extends TestCase
         $this->assertNull($freshDocument->document_theme_term_id);
         $this->assertFalse($freshDocument->hasDocumentTheme());
         $this->assertNull($freshDocument->documentThemeTerm);
+    }
+
+    public function test_chunk_can_belong_to_a_version(): void
+    {
+        $customer = $this->createCustomer('Chunk Version Customer AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+        ]);
+
+        $chunk = KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_version_id' => $version->id,
+            'chunk_index' => 0,
+            'content' => 'Chunk content for version test.',
+            'start_offset' => 0,
+            'end_offset' => 30,
+        ]);
+
+        $this->assertSame($version->id, $chunk->version?->id);
+        $this->assertSame($version->version_no, $chunk->version?->version_no);
+    }
+
+    public function test_knowledge_item_version_has_chunks_relation(): void
+    {
+        $customer = $this->createCustomer('Version Chunks Customer AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_version_id' => $version->id,
+            'chunk_index' => 0,
+            'content' => 'First chunk.',
+            'start_offset' => 0,
+            'end_offset' => 12,
+        ]);
+
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_version_id' => $version->id,
+            'chunk_index' => 1,
+            'content' => 'Second chunk.',
+            'start_offset' => 12,
+            'end_offset' => 25,
+        ]);
+
+        $this->assertCount(2, $version->chunks);
+    }
+
+    public function test_backfill_assigns_existing_chunk_to_version(): void
+    {
+        $customer = $this->createCustomer('Backfill Chunk Customer AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+        ]);
+
+        // Simulate a chunk that existed before backfill (no version_id set).
+        $chunk = KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $document->id,
+            'knowledge_item_version_id' => null,
+            'chunk_index' => 0,
+            'content' => 'Pre-backfill chunk content.',
+            'start_offset' => 0,
+            'end_offset' => 26,
+        ]);
+
+        $this->assertNull($chunk->knowledge_item_version_id);
+
+        // Apply the same backfill logic used in the migration.
+        \Illuminate\Support\Facades\DB::statement("
+            UPDATE knowledge_item_chunks kic
+            SET knowledge_item_version_id = kiv.id
+            FROM knowledge_item_versions kiv
+            WHERE kiv.knowledge_item_id = kic.knowledge_item_id
+              AND kiv.version_no = 1
+              AND kic.knowledge_item_version_id IS NULL
+        ");
+
+        $chunk->refresh();
+
+        $this->assertSame($version->id, $chunk->knowledge_item_version_id);
+        $this->assertSame($version->id, $chunk->version?->id);
     }
 
     public function test_knowledge_item_versions_relation_returns_all_versions(): void
