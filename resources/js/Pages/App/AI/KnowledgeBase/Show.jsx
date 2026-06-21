@@ -604,6 +604,7 @@ export default function KnowledgeBaseShow({
     indexUrl = '/app/ai/knowledge-base',
     summaryUpdateUrl = '/app/ai/knowledge-base',
     editUrl = '/app/ai/knowledge-base',
+    replaceFileUrl = null,
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tks = translations?.knowledge_show ?? {};
@@ -644,6 +645,14 @@ export default function KnowledgeBaseShow({
         versionUploadedAt: tks.version_uploaded_at ?? 'Opplastet',
         versionChunksCount: tks.version_chunks_count ?? 'Chunks',
         versionEmptyState: tks.version_empty_state ?? 'Ingen dokumentversjoner er registrert ennå.',
+        uploadNewVersionButton: tks.upload_new_version_button ?? 'Last opp ny versjon',
+        uploadNewVersionTitle: tks.upload_new_version_title ?? 'Ny dokumentversjon',
+        uploadNewVersionHelp: tks.upload_new_version_help ?? 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',
+        uploadNewVersionChooseFile: tks.upload_new_version_choose_file ?? 'Velg fil',
+        uploadNewVersionAllowedTypes: tks.upload_new_version_allowed_types ?? 'Tillatte filtyper: PDF, DOCX og XLSX. Maks 20 MB.',
+        uploadNewVersionSubmit: tks.upload_new_version_submit ?? 'Last opp versjon',
+        uploadNewVersionSubmitting: tks.upload_new_version_submitting ?? 'Laster opp...',
+        uploadNewVersionCancel: tks.upload_new_version_cancel ?? 'Avbryt',
         activeLabel: tks.active_label,
         inactiveLabel: tks.inactive_label,
         documentFallbackTitle: tks.document_fallback_title,
@@ -685,6 +694,7 @@ export default function KnowledgeBaseShow({
     const [isChunkContentSaving, setIsChunkContentSaving] = useState(false);
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
     const [chunkSearchQuery, setChunkSearchQuery] = useState('');
+    const [isReplaceFileOpen, setIsReplaceFileOpen] = useState(false);
     const tabsRef = useRef(null);
 
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
@@ -795,6 +805,9 @@ export default function KnowledgeBaseShow({
     const summaryForm = useForm({
         summary: summaryInitialText,
     });
+    const replaceFileForm = useForm({
+        file: null,
+    });
     const chunkMetadataForm = useForm({
         title: '',
         ai_summary: '',
@@ -892,6 +905,22 @@ export default function KnowledgeBaseShow({
 
         summaryForm.patch(summaryUpdateUrl, {
             preserveScroll: true,
+        });
+    };
+
+    const submitReplaceFile = (event) => {
+        event.preventDefault();
+
+        if (!replaceFileUrl) {
+            return;
+        }
+
+        replaceFileForm.post(replaceFileUrl, {
+            forceFormData: true,
+            onSuccess: () => {
+                setIsReplaceFileOpen(false);
+                replaceFileForm.reset();
+            },
         });
     };
 
@@ -2195,14 +2224,83 @@ export default function KnowledgeBaseShow({
                     {activeTab === 'history' ? (
                         <div className="space-y-6">
                             <section className="space-y-3">
-                                <div>
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                                        {knowledgeShowLabels.versionsSection}
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                            {knowledgeShowLabels.versionsSection}
+                                        </div>
+                                        <p className="mt-1 text-sm text-slate-500">
+                                            {knowledgeShowLabels.versionsSectionDescription}
+                                        </p>
                                     </div>
-                                    <p className="mt-1 text-sm text-slate-500">
-                                        {knowledgeShowLabels.versionsSectionDescription}
-                                    </p>
+                                    {replaceFileUrl && !isReplaceFileOpen ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsReplaceFileOpen(true)}
+                                            className="shrink-0 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                        >
+                                            {knowledgeShowLabels.uploadNewVersionButton}
+                                        </button>
+                                    ) : null}
                                 </div>
+
+                                {isReplaceFileOpen ? (
+                                    <form
+                                        onSubmit={submitReplaceFile}
+                                        className="rounded-[20px] border border-violet-200 bg-violet-50/60 px-5 py-4 space-y-4"
+                                    >
+                                        <div>
+                                            <div className="text-sm font-semibold text-slate-900">
+                                                {knowledgeShowLabels.uploadNewVersionTitle}
+                                            </div>
+                                            <p className="mt-1 text-sm text-slate-600">
+                                                {knowledgeShowLabels.uploadNewVersionHelp}
+                                            </p>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="block text-xs font-medium text-slate-700">
+                                                {knowledgeShowLabels.uploadNewVersionChooseFile}
+                                            </label>
+                                            <input
+                                                type="file"
+                                                accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                                onChange={(event) => replaceFileForm.setData('file', event.target.files?.[0] ?? null)}
+                                                className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-50 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-violet-700 hover:file:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                disabled={replaceFileForm.processing}
+                                            />
+                                            <p className="text-xs text-slate-500">
+                                                {knowledgeShowLabels.uploadNewVersionAllowedTypes}
+                                            </p>
+                                            {replaceFileForm.errors.file ? (
+                                                <p className="text-xs text-rose-600">{replaceFileForm.errors.file}</p>
+                                            ) : null}
+                                        </div>
+
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                type="submit"
+                                                disabled={replaceFileForm.processing || !replaceFileForm.data.file}
+                                                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                            >
+                                                {replaceFileForm.processing
+                                                    ? knowledgeShowLabels.uploadNewVersionSubmitting
+                                                    : knowledgeShowLabels.uploadNewVersionSubmit}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsReplaceFileOpen(false);
+                                                    replaceFileForm.reset();
+                                                }}
+                                                disabled={replaceFileForm.processing}
+                                                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                                            >
+                                                {knowledgeShowLabels.uploadNewVersionCancel}
+                                            </button>
+                                        </div>
+                                    </form>
+                                ) : null}
 
                                 {versionEntries.length > 0 ? (
                                     <div className="space-y-3">

@@ -156,6 +156,7 @@ class KnowledgeBaseController extends Controller
             'indexUrl' => route('app.ai.knowledge-base.index'),
             'summaryUpdateUrl' => route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $record->id]),
             'editUrl' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $record->id]),
+            'replaceFileUrl' => route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $record->id]),
         ]);
     }
 
