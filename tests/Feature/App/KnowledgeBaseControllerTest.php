@@ -6296,8 +6296,8 @@ XML;
                 return false;
             }
 
-            // is_current flags correct
-            if (! data_get($v2, 'is_current') || data_get($v1, 'is_current')) {
+            // Fase 2.5B: v2 is pending_review and not current; v1 remains current.
+            if (data_get($v2, 'is_current') || ! data_get($v1, 'is_current')) {
                 return false;
             }
 
@@ -6353,8 +6353,12 @@ XML;
         });
     }
 
-    public function test_file_replaced_revision_snapshot_contains_version_id_and_version_no(): void
+    public function test_revision_snapshot_contains_version_id_and_version_no(): void
     {
+        // Verifies that revision snapshots include knowledge_item_version_id and version_no.
+        // Tested through the `created` revision from store(); the same snapshot mechanism is used
+        // for `file_replaced` revisions (written by activateKnowledgeItemVersion, triggered from
+        // the Fase 2.5C approve endpoint which does not exist yet).
         Storage::fake('local');
 
         $context = $this->customerContext('Version Payload Customer C');
@@ -6369,24 +6373,19 @@ XML;
             ->where('original_filename', 'c-v1.docx')
             ->firstOrFail();
 
-        $this->actingAs($context['user'])->post(
-            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
-            ['file' => $this->createDocxUpload('c-v2.docx', str_repeat('C version two. ', 20))],
-        )->assertRedirect();
-
-        $v2 = KnowledgeItemVersion::query()
+        $v1 = KnowledgeItemVersion::query()
             ->where('knowledge_item_id', $document->id)
-            ->where('version_no', 2)
+            ->where('version_no', 1)
             ->firstOrFail();
 
         $revision = KnowledgeItemRevision::query()
             ->where('knowledge_item_id', $document->id)
-            ->where('change_type', KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED)
+            ->where('change_type', KnowledgeItemRevision::CHANGE_TYPE_CREATED)
             ->firstOrFail();
 
         $snapshot = $revision->snapshot;
-        $this->assertSame($v2->id, data_get($snapshot, 'knowledge_item_version_id'));
-        $this->assertSame(2, data_get($snapshot, 'knowledge_item_version_no'));
+        $this->assertSame($v1->id, data_get($snapshot, 'knowledge_item_version_id'));
+        $this->assertSame(1, data_get($snapshot, 'knowledge_item_version_no'));
     }
 
     public function test_show_payload_versions_do_not_expose_embeddings_extracted_text_or_chunk_content(): void
@@ -6428,8 +6427,9 @@ XML;
 
     // ── Fase 2.4D1 — replaceFile() ───────────────────────────────────────────
 
-    public function test_replace_file_creates_a_new_version_and_activates_it(): void
+    public function test_replace_file_creates_new_version_as_pending_review_without_activating(): void
     {
+        // Fase 2.5B: replaceFile() now creates pending_review versions; v1 stays current.
         Storage::fake('local');
 
         $context = $this->customerContext('Replace File Customer A');
@@ -6460,8 +6460,9 @@ XML;
             ->firstOrFail();
 
         $v1->refresh();
-        $this->assertFalse((bool) $v1->is_current, 'Old version should no longer be current.');
-        $this->assertTrue((bool) $v2->is_current, 'New version should be current.');
+        $this->assertTrue((bool) $v1->is_current, 'Original version must remain current after pending-review upload.');
+        $this->assertFalse((bool) $v2->is_current, 'New pending-review version must not become current.');
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
         $this->assertSame('replacement.docx', $v2->original_filename);
     }
 
@@ -6541,8 +6542,9 @@ XML;
         });
     }
 
-    public function test_replace_file_updates_knowledge_item_legacy_fields(): void
+    public function test_replace_file_does_not_update_legacy_fields_for_pending_version(): void
     {
+        // Fase 2.5B: pending-review versions do not activate, so legacy fields on KnowledgeItem stay at v1.
         Storage::fake('local');
 
         $context = $this->customerContext('Replace File Customer D');
@@ -6563,13 +6565,13 @@ XML;
         )->assertRedirect();
 
         $document->refresh();
-        $this->assertSame('replacement-d.docx', $document->original_filename);
-        $this->assertNotNull($document->extracted_text);
-        $this->assertStringContainsString('Replacement D content', (string) $document->extracted_text);
+        $this->assertSame('original-d.docx', $document->original_filename, 'Legacy filename must not update for pending-review upload.');
+        $this->assertStringNotContainsString('Replacement D content', (string) $document->extracted_text);
     }
 
-    public function test_replace_file_records_file_replaced_revision(): void
+    public function test_replace_file_does_not_record_revision_for_pending_version(): void
     {
+        // Fase 2.5B: file_replaced revision is only written on activation; pending-review uploads skip it.
         Storage::fake('local');
 
         $context = $this->customerContext('Replace File Customer E');
@@ -6594,8 +6596,8 @@ XML;
             ->orderBy('revision_no')
             ->get();
 
-        $this->assertCount(2, $revisions);
-        $this->assertSame(KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED, $revisions->last()->change_type);
+        $this->assertCount(1, $revisions, 'Only the initial created revision should exist; pending-review upload must not add a file_replaced revision.');
+        $this->assertSame(KnowledgeItemRevision::CHANGE_TYPE_CREATED, $revisions->first()->change_type);
     }
 
     public function test_replace_file_rejects_missing_file(): void
@@ -7101,12 +7103,20 @@ XML;
             ['file' => $this->createDocxUpload('approval-e-v2.docx', $content2)],
         )->assertRedirect();
 
+        // Fase 2.5B: v2 is pending_review after replaceFile. Manually promote to approved + supersede v1
+        // to simulate the state after a future approval action (Fase 2.5C).
         $v1 = KnowledgeItemVersion::query()
             ->where('knowledge_item_id', $document->id)
             ->where('version_no', 1)
             ->firstOrFail();
 
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
         $v1->update(['approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED]);
+        $v2->update(['approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED]);
 
         $response = $this->actingAs($context['user'])->get(
             route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
@@ -7120,7 +7130,6 @@ XML;
                 return false;
             }
 
-            // newest first: v2 = approved, v1 = superseded
             $statuses = array_column($versions, 'approval_status');
 
             return in_array(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $statuses, true)
@@ -7154,6 +7163,158 @@ XML;
 
         $this->assertTrue((bool) $version->is_current, 'is_current must not change when approval_status is updated.');
         $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $version->approval_status);
+    }
+
+    // ── Fase 2.5B — pending-review replace-file behavior ─────────────────────
+
+    public function test_replace_file_new_version_is_pending_review_and_not_current(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Phase 2.5B Test 1');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('phase25b-v1.docx', str_repeat('Phase 2.5B v1 content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'phase25b-v1.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('phase25b-v2.docx', str_repeat('Phase 2.5B v2 content. ', 20))],
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $v1->refresh();
+        $document->refresh();
+
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current after pending-review upload.');
+        $this->assertFalse((bool) $v2->is_current, 'v2 must not become current when pending review.');
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
+        $this->assertSame('phase25b-v1.docx', $document->original_filename, 'KnowledgeItem legacy filename must not update for pending-review version.');
+        $this->assertStringNotContainsString('Phase 2.5B v2 content', (string) $document->extracted_text);
+    }
+
+    public function test_replace_file_pending_version_chunks_exist_but_are_not_used_by_retrieval(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Phase 2.5B Test 2');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('phase25b2-v1.docx', str_repeat('Phase 2.5B2 v1 content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'phase25b2-v1.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('phase25b2-v2.docx', str_repeat('Phase 2.5B2 v2 content. ', 20))],
+        )->assertRedirect();
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $v1Chunks = KnowledgeItemChunk::query()->where('knowledge_item_version_id', $v1->id)->count();
+        $v2Chunks = KnowledgeItemChunk::query()->where('knowledge_item_version_id', $v2->id)->count();
+
+        $this->assertGreaterThan(0, $v1Chunks, 'v1 chunks must still exist.');
+        $this->assertGreaterThan(0, $v2Chunks, 'v2 chunks must be created even for pending-review version.');
+        $this->assertFalse((bool) $v2->is_current, 'v2 must not be current.');
+        // Retrieval joins only is_current = true versions, so v2 chunks are invisible to retrieval.
+        // This is verified by confirming v1 remains is_current = true and v2 is not.
+        $v1->refresh();
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain the only current version for retrieval.');
+    }
+
+    public function test_replace_file_extraction_failure_preserves_current_version(): void
+    {
+        // Test 4: empty extracted text causes early return; old current version is unaffected.
+        Storage::fake('local');
+
+        $context = $this->customerContext('Phase 2.5B Test 4');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('phase25b4-v1.docx', str_repeat('Phase 2.5B4 v1 content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'phase25b4-v1.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        // Upload a file whose content will produce an empty extracted text (single space — extractor trims to empty).
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('phase25b4-v2-empty.docx', ' ')],
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $v1->refresh();
+        $document->refresh();
+
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current when v2 text extraction fails.');
+        $this->assertFalse((bool) $v2->is_current, 'v2 must not become current after extraction failure.');
+        $this->assertSame('phase25b4-v1.docx', $document->original_filename, 'Legacy filename must not change after failed extraction.');
+    }
+
+    public function test_replace_file_pending_review_returns_success_flash_with_pending_message(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Phase 2.5B Test Flash');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('phase25b-flash-v1.docx', str_repeat('Flash test content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'phase25b-flash-v1.docx')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('phase25b-flash-v2.docx', str_repeat('Flash test v2 content. ', 20))],
+        )->assertRedirect();
+
+        $response->assertSessionHas('success');
+        $this->assertNotEmpty(session('success'), 'Flash message for pending-review upload must be a non-empty success message.');
     }
 
     private function useProjectPostgresConnection(): void

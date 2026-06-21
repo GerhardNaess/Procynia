@@ -1713,6 +1713,7 @@ return [
         'version_rejected_at' => 'Avvist dato',
         'version_rejection_reason' => 'Avvisningsgrunn',
         'revision_change_type_file_replaced' => 'Fil erstattet',
+        'replace_file_pending_review' => 'Ny dokumentversjon er lastet opp og venter på godkjenning før den tas i bruk av AI.',
         'upload_new_version_button' => 'Last opp ny versjon',
         'upload_new_version_title' => 'Ny dokumentversjon',
         'upload_new_version_help' => 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',

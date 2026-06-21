@@ -629,6 +629,7 @@ class KnowledgeBaseController extends Controller
                 'uploaded_by_user_id' => $request->user()?->id,
                 'uploaded_at' => now(),
                 'file_hash_sha256' => $fileHash,
+                'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW,
             ]);
 
             if ($extractionFailed) {
@@ -646,32 +647,13 @@ class KnowledgeBaseController extends Controller
 
             $this->syncChunkEmbeddingsWithoutMetadata($record, $newChunks);
 
-            DB::transaction(function () use ($record, $newVersion, $user, $extractedText): void {
-                KnowledgeItemVersion::query()
-                    ->where('knowledge_item_id', $record->id)
-                    ->where('id', '!=', $newVersion->id)
-                    ->update(['is_current' => false]);
+            if ($newVersion->isPendingReview()) {
+                return redirect()
+                    ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+                    ->with('success', __('procynia.knowledge_show.replace_file_pending_review'));
+            }
 
-                $newVersion->forceFill(['is_current' => true])->save();
-
-                $record->forceFill([
-                    'original_filename' => $newVersion->original_filename,
-                    'storage_path' => $newVersion->storage_path,
-                    'mime_type' => $newVersion->mime_type,
-                    'file_size_bytes' => $newVersion->file_size_bytes,
-                    'extracted_text' => $extractedText,
-                    'extraction_status' => $newVersion->extraction_status,
-                    'extraction_error' => $newVersion->extraction_error,
-                    'uploaded_by_user_id' => $newVersion->uploaded_by_user_id,
-                ])->save();
-
-                $this->recordKnowledgeItemRevision(
-                    $record,
-                    KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED,
-                    (int) $user->id,
-                    $newVersion,
-                );
-            });
+            $this->activateKnowledgeItemVersion($record, $newVersion, $user);
 
             GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $record->id, (int) $newVersion->id);
 
@@ -686,6 +668,42 @@ class KnowledgeBaseController extends Controller
         return redirect()
             ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
             ->with('success', 'Ny filversjon lastet opp og aktivert.');
+    }
+
+    /**
+     * Promotes the given version to the active version of the document within a single transaction.
+     * Sets all other versions for the document to is_current = false, marks the given version as
+     * is_current = true, syncs the legacy file fields on KnowledgeItem, and records a
+     * file_replaced revision entry. Must only be called for approved versions.
+     */
+    private function activateKnowledgeItemVersion(KnowledgeItem $document, KnowledgeItemVersion $version, User $user): void
+    {
+        DB::transaction(function () use ($document, $version, $user): void {
+            KnowledgeItemVersion::query()
+                ->where('knowledge_item_id', $document->id)
+                ->where('id', '!=', $version->id)
+                ->update(['is_current' => false]);
+
+            $version->forceFill(['is_current' => true])->save();
+
+            $document->forceFill([
+                'original_filename' => $version->original_filename,
+                'storage_path' => $version->storage_path,
+                'mime_type' => $version->mime_type,
+                'file_size_bytes' => $version->file_size_bytes,
+                'extracted_text' => $version->extracted_text,
+                'extraction_status' => $version->extraction_status,
+                'extraction_error' => $version->extraction_error,
+                'uploaded_by_user_id' => $version->uploaded_by_user_id,
+            ])->save();
+
+            $this->recordKnowledgeItemRevision(
+                $document,
+                KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED,
+                (int) $user->id,
+                $version,
+            );
+        });
     }
 
     /**

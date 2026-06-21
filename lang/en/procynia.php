@@ -1713,6 +1713,7 @@ return [
         'version_rejected_at' => 'Rejection date',
         'version_rejection_reason' => 'Rejection reason',
         'revision_change_type_file_replaced' => 'File replaced',
+        'replace_file_pending_review' => 'The new document version has been uploaded and is waiting for approval before it is used by AI.',
         'upload_new_version_button' => 'Upload new version',
         'upload_new_version_title' => 'New document version',
         'upload_new_version_help' => 'The new file becomes the active version after successful text extraction. Previous versions are kept in the history.',
