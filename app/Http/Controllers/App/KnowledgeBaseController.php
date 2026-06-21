@@ -316,6 +316,7 @@ class KnowledgeBaseController extends Controller
         if ($existingVersion !== null) {
             throw ValidationException::withMessages([
                 'document' => __('procynia.knowledge_base.validation.duplicate_file_new_document'),
+                'duplicate_file' => 'new_document',
             ]);
         }
 
@@ -579,11 +580,13 @@ class KnowledgeBaseController extends Controller
         if (KnowledgeItemVersion::query()->where('knowledge_item_id', $record->id)->where('file_hash_sha256', $fileHash)->exists()) {
             throw ValidationException::withMessages([
                 'file' => __('procynia.knowledge_base.validation.duplicate_file_same_document'),
+                'duplicate_file' => 'same_document',
             ]);
         }
         if (KnowledgeItemVersion::query()->where('customer_id', $customerId)->where('knowledge_item_id', '!=', $record->id)->where('file_hash_sha256', $fileHash)->exists()) {
             throw ValidationException::withMessages([
                 'file' => __('procynia.knowledge_base.validation.duplicate_file_other_document'),
+                'duplicate_file' => 'other_document',
             ]);
         }
 

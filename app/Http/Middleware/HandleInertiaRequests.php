@@ -354,6 +354,7 @@ class HandleInertiaRequests extends Middleware
                     ],
                 ],
                 'knowledge_show' => __('procynia.knowledge_show'),
+                'knowledge_duplicate' => __('procynia.knowledge_duplicate'),
                 'users_form' => [
                     'no_departments' => __('procynia.users_form.no_departments'),
                     'create_title' => __('procynia.users_form.create_title'),

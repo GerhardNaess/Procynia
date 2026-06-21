@@ -1509,6 +1509,15 @@ return [
     'unknown_user' => 'Ukjent bruker',
     'updating' => 'Oppdaterer...',
     ],
+    'knowledge_duplicate' => [
+        'new_document_title' => 'Dokumentet finnes allerede',
+        'new_document_body' => 'Denne filen finnes allerede i Kunnskapsbase. Åpne eksisterende dokument og bruk «Last opp ny versjon» dersom du vil erstatte innholdet.',
+        'same_document_title' => 'Filen finnes allerede som versjon',
+        'same_document_body' => 'Denne filen finnes allerede som en versjon av dette dokumentet. Velg en annen fil dersom du vil opprette en ny dokumentversjon.',
+        'other_document_title' => 'Filen finnes allerede i Kunnskapsbase',
+        'other_document_body' => 'Denne filen finnes allerede som et annet kunnskapsdokument. Åpne det eksisterende dokumentet dersom du vil se eller oppdatere det.',
+        'close' => 'Lukk',
+    ],
     'knowledge_show' => [
         'doc_status_review' => 'Trenger review',
         'doc_status_processing' => 'Under prosessering',

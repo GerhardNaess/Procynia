@@ -1509,6 +1509,15 @@ return [
     'unknown_user' => 'Unknown user',
     'updating' => 'Updating...',
     ],
+    'knowledge_duplicate' => [
+        'new_document_title' => 'Document already exists',
+        'new_document_body' => 'This file already exists in the knowledge base. Open the existing document and use "Upload new version" if you want to replace the content.',
+        'same_document_title' => 'File already exists as a version',
+        'same_document_body' => 'This file already exists as a version of this document. Choose another file if you want to create a new document version.',
+        'other_document_title' => 'File already exists in the knowledge base',
+        'other_document_body' => 'This file already exists as another knowledge document. Open the existing document if you want to view or update it.',
+        'close' => 'Close',
+    ],
     'knowledge_show' => [
         'doc_status_review' => 'Needs review',
         'doc_status_processing' => 'Processing',

@@ -608,6 +608,7 @@ export default function KnowledgeBaseShow({
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tks = translations?.knowledge_show ?? {};
+    const td = translations?.knowledge_duplicate ?? {};
     const knowledgeText = translations?.knowledge ?? {};
     const commonText = translations?.common ?? {};
     const knowledgeShowLabels = {
@@ -695,6 +696,7 @@ export default function KnowledgeBaseShow({
     const [showChunkSystemMetadata, setShowChunkSystemMetadata] = useState(false);
     const [chunkSearchQuery, setChunkSearchQuery] = useState('');
     const [isReplaceFileOpen, setIsReplaceFileOpen] = useState(false);
+    const [duplicateDialogType, setDuplicateDialogType] = useState(null);
     const tabsRef = useRef(null);
 
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
@@ -921,6 +923,11 @@ export default function KnowledgeBaseShow({
                 setIsReplaceFileOpen(false);
                 replaceFileForm.reset();
             },
+            onError: (errors) => {
+                if (errors.duplicate_file) {
+                    setDuplicateDialogType(errors.duplicate_file);
+                }
+            },
         });
     };
 
@@ -1115,6 +1122,7 @@ export default function KnowledgeBaseShow({
     ] : [];
 
     return (
+        <>
         <CustomerAppLayout title={resolvedPageTitle} showPageTitle={false}>
             <div className="space-y-7">
                 <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
@@ -2272,7 +2280,7 @@ export default function KnowledgeBaseShow({
                                             <p className="text-xs text-slate-500">
                                                 {knowledgeShowLabels.uploadNewVersionAllowedTypes}
                                             </p>
-                                            {replaceFileForm.errors.file ? (
+                                            {replaceFileForm.errors.file && !replaceFileForm.errors.duplicate_file ? (
                                                 <p className="text-xs text-rose-600">{replaceFileForm.errors.file}</p>
                                             ) : null}
                                         </div>
@@ -2531,5 +2539,52 @@ export default function KnowledgeBaseShow({
 
             </div>
         </CustomerAppLayout>
+
+        {duplicateDialogType ? (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4"
+                onClick={(event) => {
+                    if (event.target === event.currentTarget) {
+                        setDuplicateDialogType(null);
+                    }
+                }}
+            >
+                <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
+                    <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                        <div className="space-y-1">
+                            <h2 className="text-xl font-semibold text-slate-950">
+                                {duplicateDialogType === 'same_document'
+                                    ? (td.same_document_title ?? 'Filen finnes allerede som versjon')
+                                    : (td.other_document_title ?? 'Filen finnes allerede i Kunnskapsbase')}
+                            </h2>
+                            <p className="text-sm leading-6 text-slate-500">
+                                {duplicateDialogType === 'same_document'
+                                    ? (td.same_document_body ?? 'Denne filen finnes allerede som en versjon av dette dokumentet. Velg en annen fil dersom du vil opprette en ny dokumentversjon.')
+                                    : (td.other_document_body ?? 'Denne filen finnes allerede som et annet kunnskapsdokument. Åpne det eksisterende dokumentet dersom du vil se eller oppdatere det.')}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setDuplicateDialogType(null)}
+                            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+                        >
+                            ×
+                        </button>
+                    </div>
+                    <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-5">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setDuplicateDialogType(null)}
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            >
+                                {td.close ?? 'Lukk'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        ) : null}
+        </>
     );
 }

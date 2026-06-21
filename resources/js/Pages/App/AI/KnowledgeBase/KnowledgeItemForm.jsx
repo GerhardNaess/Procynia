@@ -334,7 +334,7 @@ export default function KnowledgeItemForm({
                                 <p className="text-xs leading-5 text-slate-500">
                                     Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
                                 </p>
-                                {form.errors.document ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
+                                {form.errors.document && !form.errors.duplicate_file ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-4">
