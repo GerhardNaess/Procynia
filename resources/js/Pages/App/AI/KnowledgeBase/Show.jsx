@@ -641,6 +641,7 @@ function DocumentIcon(props) {
 export default function KnowledgeBaseShow({
     pageTitle = null,
     knowledgeItem = null,
+    canApproveVersions = false,
     indexUrl = '/app/ai/knowledge-base',
     summaryUpdateUrl = '/app/ai/knowledge-base',
     editUrl = '/app/ai/knowledge-base',
@@ -696,6 +697,8 @@ export default function KnowledgeBaseShow({
         versionRejectedBy: tks.version_rejected_by ?? 'Avvist av',
         versionRejectedAt: tks.version_rejected_at ?? 'Avvist dato',
         versionRejectionReason: tks.version_rejection_reason ?? 'Avvisningsgrunn',
+        versionApproveButton: tks.version_approve_button ?? 'Godkjenn og aktiver',
+        versionApproveSubmitting: tks.version_approve_submitting ?? 'Godkjenner...',
         uploadNewVersionButton: tks.upload_new_version_button ?? 'Last opp ny versjon',
         uploadNewVersionTitle: tks.upload_new_version_title ?? 'Ny dokumentversjon',
         uploadNewVersionHelp: tks.upload_new_version_help ?? 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',
@@ -747,6 +750,7 @@ export default function KnowledgeBaseShow({
     const [chunkSearchQuery, setChunkSearchQuery] = useState('');
     const [isReplaceFileOpen, setIsReplaceFileOpen] = useState(false);
     const [duplicateDialogType, setDuplicateDialogType] = useState(null);
+    const [approvingVersionId, setApprovingVersionId] = useState(null);
     const tabsRef = useRef(null);
 
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
@@ -978,6 +982,18 @@ export default function KnowledgeBaseShow({
                     setDuplicateDialogType(errors.duplicate_file);
                 }
             },
+        });
+    };
+
+    const submitApproveVersion = (approveUrl, versionId) => {
+        if (!approveUrl || approvingVersionId !== null) {
+            return;
+        }
+
+        setApprovingVersionId(versionId);
+
+        router.post(approveUrl, {}, {
+            onFinish: () => setApprovingVersionId(null),
         });
     };
 
@@ -2523,8 +2539,22 @@ export default function KnowledgeBaseShow({
                                                     </dl>
                                                 </div>
 
-                                                <div className="shrink-0 text-sm font-medium text-slate-400">
-                                                    #{version.version_no}
+                                                <div className="flex shrink-0 flex-col items-end gap-2">
+                                                    <span className="text-sm font-medium text-slate-400">
+                                                        #{version.version_no}
+                                                    </span>
+                                                    {version.approve_url ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={approvingVersionId !== null}
+                                                            onClick={() => submitApproveVersion(version.approve_url, version.id)}
+                                                            className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            {approvingVersionId === version.id
+                                                                ? knowledgeShowLabels.versionApproveSubmitting
+                                                                : knowledgeShowLabels.versionApproveButton}
+                                                        </button>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                         ))}

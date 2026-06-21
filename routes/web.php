@@ -178,6 +178,7 @@ Route::prefix('app')
             Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
             Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
             Route::post('/{knowledgeItem}/file', [KnowledgeBaseController::class, 'replaceFile'])->name('file.replace');
+            Route::post('/{knowledgeItem}/versions/{version}/approve', [KnowledgeBaseController::class, 'approveVersion'])->name('versions.approve');
             Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
         });
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');

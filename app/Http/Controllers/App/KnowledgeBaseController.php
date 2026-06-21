@@ -150,9 +150,12 @@ class KnowledgeBaseController extends Controller
 
         $this->ensureDocumentSummaryWithGuard($record, $user);
 
+        $canApproveVersions = $user->resolvedBidRole() !== User::BID_ROLE_VIEWER;
+
         return Inertia::render('App/AI/KnowledgeBase/Show', [
             'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
-            'knowledgeItem' => $this->documentDetailPayload($record),
+            'knowledgeItem' => $this->documentDetailPayload($record, $canApproveVersions),
+            'canApproveVersions' => $canApproveVersions,
             'indexUrl' => route('app.ai.knowledge-base.index'),
             'summaryUpdateUrl' => route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $record->id]),
             'editUrl' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $record->id]),
@@ -668,6 +671,77 @@ class KnowledgeBaseController extends Controller
         return redirect()
             ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
             ->with('success', 'Ny filversjon lastet opp og aktivert.');
+    }
+
+    /**
+     * Purpose: Approve a pending knowledge document version and activate it as the current version.
+     * Inputs: The current frontend request, the route-bound knowledge document, and the version to approve.
+     * Returns: A redirect back to the document show page.
+     * Side effects: Sets the version to approved/current, supersedes the previous current version,
+     *               updates KnowledgeItem legacy fields, writes a revision entry, and dispatches
+     *               the metadata generation job.
+     */
+    public function approveVersion(Request $request, KnowledgeItem $knowledgeItem, KnowledgeItemVersion $version): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+
+        // Viewers cannot approve knowledge document versions.
+        abort_if($user->resolvedBidRole() === User::BID_ROLE_VIEWER, 403);
+
+        $customer = Customer::query()->findOrFail($customerId);
+        $this->assertAiAccess($customer);
+
+        // Version must belong to this document.
+        abort_unless((int) $version->knowledge_item_id === (int) $record->id, 404);
+
+        // Version must be pending review with completed extraction and at least one chunk.
+        abort_unless(
+            $version->isPendingReview()
+            && ! (bool) $version->is_current
+            && $version->extraction_status === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
+            && KnowledgeItemChunk::query()->where('knowledge_item_version_id', $version->id)->exists(),
+            422,
+        );
+
+        DB::transaction(function () use ($record, $version, $user): void {
+            $version->refresh();
+            abort_unless($version->isPendingReview(), 422);
+
+            // Find the current version to supersede.
+            $previousCurrentVersion = KnowledgeItemVersion::query()
+                ->where('knowledge_item_id', $record->id)
+                ->where('is_current', true)
+                ->where('id', '!=', $version->id)
+                ->first();
+
+            // Mark the new version as approved and clear any stale rejection data.
+            $version->forceFill([
+                'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+                'approved_at' => now(),
+                'approved_by_user_id' => $user->id,
+                'rejected_at' => null,
+                'rejected_by_user_id' => null,
+                'rejection_reason' => null,
+            ])->save();
+
+            // Supersede the previous current version when it was in an approved state.
+            if ($previousCurrentVersion !== null && $previousCurrentVersion->isApproved()) {
+                $previousCurrentVersion->forceFill([
+                    'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED,
+                ])->save();
+            }
+
+            // Activate the version: flips is_current, updates KnowledgeItem legacy fields,
+            // and writes a file_replaced revision entry. Safe to call inside a transaction.
+            $this->activateKnowledgeItemVersion($record, $version, $user);
+        });
+
+        GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $record->id, (int) $version->id);
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', __('procynia.knowledge_show.version_approved'));
     }
 
     /**
@@ -1814,7 +1888,7 @@ class KnowledgeBaseController extends Controller
      * Returns: A frontend-ready array for the detail page.
      * Side effects: None.
      */
-    private function documentDetailPayload(KnowledgeItem $knowledgeDocument): array
+    private function documentDetailPayload(KnowledgeItem $knowledgeDocument, bool $canApproveVersions = false): array
     {
         return array_merge(
             $this->documentFormPayload($knowledgeDocument),
@@ -1900,7 +1974,7 @@ class KnowledgeBaseController extends Controller
                     ->values()
                     ->all(),
                 'versions' => $knowledgeDocument->versions
-                    ->map(static fn (KnowledgeItemVersion $version): array => [
+                    ->map(fn (KnowledgeItemVersion $version): array => [
                         'id' => $version->id,
                         'version_no' => (int) $version->version_no,
                         'is_current' => (bool) $version->is_current,
@@ -1927,6 +2001,9 @@ class KnowledgeBaseController extends Controller
                         'rejected_by_user_id' => $version->rejected_by_user_id,
                         'rejected_by_name' => $version->rejectedBy?->name,
                         'rejection_reason' => $version->rejection_reason,
+                        'approve_url' => $canApproveVersions && $version->isPendingReview()
+                            ? route('app.ai.knowledge-base.versions.approve', [$knowledgeDocument, $version])
+                            : null,
                     ])
                     ->values()
                     ->all(),

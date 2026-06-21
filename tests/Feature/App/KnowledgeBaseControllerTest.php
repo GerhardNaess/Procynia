@@ -7317,6 +7317,301 @@ XML;
         $this->assertNotEmpty(session('success'), 'Flash message for pending-review upload must be a non-empty success message.');
     }
 
+    // ── Fase 2.5C — approveVersion ────────────────────────────────────────────
+
+    private function createPendingVersionScenario(string $customerName): array
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext($customerName);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approve-v1.docx', str_repeat('Approve scenario v1 content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approve-v1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('approve-v2.docx', str_repeat('Approve scenario v2 content. ', 20))],
+        )->assertRedirect();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)->where('version_no', 1)->firstOrFail();
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)->where('version_no', 2)->firstOrFail();
+
+        return ['context' => $context, 'document' => $document, 'v1' => $v1, 'v2' => $v2];
+    }
+
+    public function test_approve_version_activates_pending_version(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C1');
+        ['context' => $context, 'document' => $document, 'v1' => $v1, 'v2' => $v2] = $scenario;
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $v1->refresh();
+        $v2->refresh();
+        $document->refresh();
+
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $v2->approval_status);
+        $this->assertNotNull($v2->approved_at);
+        $this->assertSame($context['user']->id, $v2->approved_by_user_id);
+        $this->assertTrue((bool) $v2->is_current, 'v2 must be current after approval.');
+        $this->assertFalse((bool) $v1->is_current, 'v1 must no longer be current after approval.');
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED, $v1->approval_status);
+        $this->assertSame('approve-v2.docx', $document->original_filename, 'Legacy filename must update to v2.');
+    }
+
+    public function test_approve_version_retrieval_uses_new_version_after_approval(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C2');
+        ['context' => $context, 'document' => $document, 'v1' => $v1, 'v2' => $v2] = $scenario;
+
+        $v1ChunksCount = KnowledgeItemChunk::query()->where('knowledge_item_version_id', $v1->id)->count();
+        $v2ChunksCount = KnowledgeItemChunk::query()->where('knowledge_item_version_id', $v2->id)->count();
+
+        $this->assertGreaterThan(0, $v1ChunksCount, 'v1 must have chunks before approval.');
+        $this->assertGreaterThan(0, $v2ChunksCount, 'v2 must have chunks before approval.');
+
+        // Before approval: v1 is current, only v1 chunks visible to retrieval via is_current join.
+        $this->assertTrue((bool) $v1->is_current);
+        $this->assertFalse((bool) $v2->is_current);
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertRedirect();
+
+        $v1->refresh();
+        $v2->refresh();
+
+        // After approval: v2 is current, v1 is not. Retrieval (is_current = true join) now uses v2.
+        $this->assertTrue((bool) $v2->is_current, 'v2 must be current after approval — retrieval will use it.');
+        $this->assertFalse((bool) $v1->is_current, 'v1 must not be current after approval.');
+    }
+
+    public function test_approve_version_rejects_already_approved_version(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C3');
+        ['context' => $context, 'document' => $document, 'v1' => $v1] = $scenario;
+
+        // v1 is already approved (it was the original current version).
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $v1->approval_status);
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v1->id]),
+        )->assertStatus(422);
+
+        $v1->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $v1->approval_status);
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current when approval is rejected.');
+    }
+
+    public function test_approve_version_rejects_superseded_version(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C3b');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $v2->update(['approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED]);
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertStatus(422);
+    }
+
+    public function test_approve_version_rejects_version_belonging_to_different_document(): void
+    {
+        $scenarioA = $this->createPendingVersionScenario('Approve C4A');
+        $scenarioB = $this->createPendingVersionScenario('Approve C4B');
+
+        $v2B = $scenarioB['v2'];
+
+        // Post to document A but use a version from document B.
+        $this->actingAs($scenarioA['context']['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', [
+                'knowledgeItem' => $scenarioA['document']->id,
+                'version' => $v2B->id,
+            ]),
+        )->assertNotFound();
+
+        $v2B->refresh();
+        $this->assertFalse((bool) $v2B->is_current, 'v2B must not have been activated.');
+    }
+
+    public function test_approve_version_rejects_viewer_user(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C5');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $viewer = User::factory()->create([
+            'name' => 'Viewer User',
+            'email' => 'viewer-approve-c5@example.test',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($viewer)->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertForbidden();
+
+        $v2->refresh();
+        $this->assertFalse((bool) $v2->is_current, 'v2 must not have been activated by the viewer.');
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
+    }
+
+    public function test_approve_version_writes_file_replaced_revision(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C6');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $revisionsBeforeApproval = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->count();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertRedirect();
+
+        $revision = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('change_type', KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED)
+            ->firstOrFail();
+
+        $this->assertSame($context['user']->id, $revision->changed_by_user_id);
+        $this->assertSame($v2->id, data_get($revision->snapshot, 'knowledge_item_version_id'));
+        $this->assertSame(2, data_get($revision->snapshot, 'knowledge_item_version_no'));
+        $this->assertGreaterThan($revisionsBeforeApproval, KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)->count());
+    }
+
+    public function test_show_payload_contains_approve_url_only_for_pending_versions(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C7');
+        ['context' => $context, 'document' => $document] = $scenario;
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) !== 2) {
+                return false;
+            }
+
+            $pending = null;
+            $approved = null;
+            foreach ($versions as $v) {
+                if (data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW) {
+                    $pending = $v;
+                } elseif (data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_APPROVED) {
+                    $approved = $v;
+                }
+            }
+
+            return $pending !== null
+                && $approved !== null
+                && data_get($pending, 'approve_url') !== null
+                && data_get($approved, 'approve_url') === null;
+        });
+    }
+
+    public function test_show_payload_approve_url_is_null_for_viewer(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Approve C7b');
+        ['context' => $context, 'document' => $document] = $scenario;
+
+        $viewer = User::factory()->create([
+            'name' => 'Viewer C7b',
+            'email' => 'viewer-c7b@example.test',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($viewer)->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            foreach ($versions as $v) {
+                if (data_get($v, 'approve_url') !== null) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    public function test_approve_version_rejects_version_without_chunks(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approve C8');
+
+        // Store a document to create v1.
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approve-c8-v1.docx', str_repeat('Approve C8 v1 content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approve-c8-v1.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)->where('version_no', 1)->firstOrFail();
+
+        // Manually create a pending version with no chunks to simulate a failed extraction scenario.
+        $v2 = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 2,
+            'is_current' => false,
+            'original_filename' => 'approve-c8-v2.docx',
+            'storage_path' => $v1->storage_path,
+            'mime_type' => $v1->mime_type,
+            'file_size_bytes' => $v1->file_size_bytes,
+            'extracted_text' => 'Some text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'fake-content-c8'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW,
+        ]);
+
+        // v2 has no chunks — approval must be rejected.
+        $this->assertSame(0, KnowledgeItemChunk::query()->where('knowledge_item_version_id', $v2->id)->count());
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.approve', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+        )->assertStatus(422);
+
+        $v2->refresh();
+        $v1->refresh();
+        $this->assertFalse((bool) $v2->is_current, 'v2 must not become current without chunks.');
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current.');
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([
