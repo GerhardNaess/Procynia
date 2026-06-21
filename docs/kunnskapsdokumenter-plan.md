@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-AI-policy per dokument, dokumentstatus og revisjon og gyldighet er implementert som del av fase 2.1, 2.2 og 2.3. Det som gjenstår av fase 2 er versjonering av dokumentinnhold. Disse er beskrevet i §28.
+Fase 2.1, 2.2, 2.3 og 2.4 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, og versjonering av dokumentinnhold er alle implementert. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -866,21 +866,59 @@ Implementert. `document_status` er lagt til på `knowledge_items` og respekteres
 
 Implementert. `last_reviewed_at` og `review_due_at` er lagt til på `knowledge_items` som nullable datofelt. `review_state` beregnes i alle payloads. Se §27 for fullstendig beskrivelse.
 
-### 28.4 Versjonering av dokumentinnhold
+### 28.4 Versjonering av dokumentinnhold ✓ Fullført juni 2026
 
-Det er viktig å skille mellom to ulike konsepter:
+Fullstendig dokumentversjonering er implementert for Kunnskapsbase / `KnowledgeItem`. Det er viktig å skille mellom to konsepter som begge nå er på plass:
 
-**Revisjonshistorikk (finnes nå):**
-`knowledge_item_revisions` er en append-only logg over metadataendringer. Den gir sporbarhet for hvem som endret hva og når, men erstatter ikke dokumentinnholdet.
+**Revisjonshistorikk:**
+`knowledge_item_revisions` er en append-only logg over metadataendringer og filbytter. `file_replaced`-revisjoner inkluderer `knowledge_item_version_id` og `knowledge_item_version_no` i snapshot.
 
-**Dokumentversjonering (fremtidig behov):**
-Fullstendig versjonering innebærer at en bruker kan laste opp en ny fil på et eksisterende dokument uten å miste den forrige versjonen. Systemet skal da:
+**Dokumentversjonering:**
+`knowledge_item_versions` er en egen tabell med én rad per filversjon. Hvert `KnowledgeItem` har én `is_current = true`-versjon til enhver tid.
 
-- Oppbevare alle versjoner med egne filer, chunks og embeddings
-- Kun aktivere chunks fra gjeldende versjon i AI-retrieval
-- Støtte en trygg «last opp ny versjon»-flyt med statusovergang
+Følgende er nå på plass:
 
-Dette er en vesentlig utvidelse av datamodellen og bør planlegges som et eget arbeid, ikke som en del av fase 2.
+- `knowledge_item_versions` som egen versjonstabell med id, version_no, is_current, original_filename, storage_path, mime_type, file_size_bytes, extracted_text, extraction_status, uploaded_by_user_id og uploaded_at
+- Eksisterende filer ble backfyllt til versjon 1 ved migrering
+- `knowledge_item_chunks` peker på `knowledge_item_version_id` (nullbar for bakoverkompatibilitet, men alltid satt for nye chunks)
+- Retrieval henter bare chunks fra current version via INNER JOIN mot `knowledge_item_versions.is_current = true` — chunks fra gamle versjoner ekskluderes automatisk
+- Ny fil på eksisterende `KnowledgeItem` oppretter ny `KnowledgeItemVersion` med `is_current = false`; gammel versjon, gammel filreferanse og gamle chunks beholdes
+- Ny versjon aktiveres atomisk kun etter vellykket tekstuttrekk, chunking og embedding — ved mislykket tekstuttrekk beholdes eksisterende versjon som aktiv
+- `KnowledgeItem` legacy-felter (original_filename, storage_path, mime_type osv.) oppdateres alltid til å reflektere gjeldende versjon
+- `GenerateKnowledgeChunkMetadataForDocument` kan scopes til en spesifikk `knowledge_item_version_id` slik at metadatajobb ikke prosesserer gamle versjoners chunks
+- Backend detail payload eksponerer en read-only `versions`-liste sortert nyeste først, med versjonsnummer, is_current, filnavn, filtype, filstørrelse, ekstraksjonsstatus, opplastingsinfo og chunk-antall — uten extracted_text, embeddings eller chunk-innhold
+- UI viser dokumentversjoner read-only i historikk-fanen på detaljsiden
+- UI lar bruker laste opp ny dokumentversjon fra detaljsiden via eksisterende `replaceFile()`-backend
+
+**Avgrensning i denne fasen:**
+
+- `SavedNoticeAiDocument` er ikke endret — versjonering gjelder kun Kunnskapsbase / `KnowledgeItem`
+- Rollback til gammel versjon er ikke bygget
+- Sletting av enkeltversjoner er ikke bygget
+- Sammenligning av versjoner er ikke bygget
+- Extracted_text, chunk-innhold og embeddings vises ikke i vanlig UI
+- `document_type` og `document_theme_term_id` er beholdt som legacy-felter
+- Standardvokabular er ikke endret
+- Retrieval-kriteriene er beholdt, men er nå versjonsbevisste (INNER JOIN mot gjeldende versjon)
+- pgvector-oppsettet er ikke endret
+
+### 28.5 Kontroll og godkjenning av kunnskapsdokumenter (foreløpig neste fase)
+
+*Ikke låst plan. Mulig neste prioritet etter at 2.4 er stabilt i produksjon.*
+
+En godkjenningsflyt vil innebære at nye versjoner krever eksplisitt godkjenning før de aktiveres i AI-retrieval. I dag aktiveres ny versjon automatisk etter vellykket tekstuttrekk — en mer kontrollert flyt vil legge til et mellomsteg der dokumenteier eller godkjenner må bekrefte aktivering.
+
+### 28.6 Innsyn i hva AI bruker fra Kunnskapsbase (foreløpig neste fase)
+
+*Ikke låst plan. Mulig neste prioritet.*
+
+Brukere bør kunne se hvilke kunnskapsdokumenter og versjoner som faktisk ble brukt som grunnlag i et AI-svar. Dette krever utvidet sporbarhet i retrieval-svaret og synliggjøring i kravbesvarer-UI.
+
+### 28.7 Opprydding av legacy-felter i Kunnskapsbase (foreløpig neste fase)
+
+*Ikke låst plan. Bør planlegges som et eget avviklingssteg etter at katalogverdier og versjonering er stabile.*
+
+`document_type` og `document_theme_term_id` er beholdt som required backend-felt og fallback i UI. Disse kan på sikt erstattes fullt ut av `document_category_id` og `document_topic_id`. Avvikling krever datamigrering, validering av at ingen aktive integrasjoner er avhengige av legacy-feltene, og en kontrollert utfasingsplan.
 
 ---
 
@@ -962,12 +1000,15 @@ Fase 2.2 — Dokumentstatus (`document_status`) — er fullført per juni 2026. 
 
 Fase 2.3 — Revisjon og gyldighet (`last_reviewed_at`, `review_due_at`, `review_state`) — er fullført per juni 2026. Datoene gir kontroll og synlighet for dokumenters faglige gyldighet. Revisjonsstatus er en synlighetsmekanisme — den endrer ikke automatisk status eller AI-bruk.
 
+Fase 2.4 — Versjonering av dokumentinnhold — er fullført per juni 2026. `knowledge_item_versions` gir fullstendig versjonssporing per `KnowledgeItem`. Retrieval henter bare chunks fra gjeldende versjon. Ny fil oppretter ny versjon uten at gamle versjoner eller chunks slettes. UI viser versjonshistorikk read-only og lar brukeren laste opp ny versjon fra detaljsiden. Rollback, sletting av enkeltversjoner og sammenligning er ikke bygget i denne fasen.
+
 Kunnskapsbase har nå:
 - Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
 - AI-policy per dokument — `ai_usage_enabled` gir eksplisitt AI-tillatelse per dokument
 - Dokumentstatus — `document_status` styrer livsløpet og respekteres av retrieval
 - Revisjon og gyldighet — `review_due_at` og `last_reviewed_at` gir synlighet for faglig oppdatering
+- Versjonering av dokumentinnhold — `knowledge_item_versions` med versjonsbevisst retrieval og UI for opplasting av ny versjon
 
-Neste prioritet er versjonering av dokumentinnhold — muligheten til å laste opp en ny fil på et eksisterende dokument uten å miste den forrige versjonen.
+Foreløpige neste faser (ikke låst plan): 2.5 kontroll og godkjenning av dokumentversjoner, 2.6 innsyn i hva AI bruker fra Kunnskapsbase, 2.7 opprydding av legacy-felter.
 
-Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det.
+Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
