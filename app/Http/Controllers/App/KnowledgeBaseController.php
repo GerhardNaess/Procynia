@@ -140,7 +140,7 @@ class KnowledgeBaseController extends Controller
                     ->orderBy('id'),
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
                 'versions' => static fn ($query) => $query
-                    ->with('uploadedBy')
+                    ->with('uploadedBy', 'approvedBy', 'rejectedBy', 'submittedForReviewBy')
                     ->withCount('chunks')
                     ->orderByDesc('version_no'),
             ])
@@ -1898,6 +1898,17 @@ class KnowledgeBaseController extends Controller
                         'created_at' => optional($version->created_at)?->toIso8601String(),
                         'updated_at' => optional($version->updated_at)?->toIso8601String(),
                         'chunks_count' => (int) ($version->chunks_count ?? 0),
+                        'approval_status' => $version->approval_status,
+                        'submitted_for_review_at' => optional($version->submitted_for_review_at)?->toIso8601String(),
+                        'submitted_for_review_by_user_id' => $version->submitted_for_review_by_user_id,
+                        'submitted_for_review_by_name' => $version->submittedForReviewBy?->name,
+                        'approved_at' => optional($version->approved_at)?->toIso8601String(),
+                        'approved_by_user_id' => $version->approved_by_user_id,
+                        'approved_by_name' => $version->approvedBy?->name,
+                        'rejected_at' => optional($version->rejected_at)?->toIso8601String(),
+                        'rejected_by_user_id' => $version->rejected_by_user_id,
+                        'rejected_by_name' => $version->rejectedBy?->name,
+                        'rejection_reason' => $version->rejection_reason,
                     ])
                     ->values()
                     ->all(),

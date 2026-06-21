@@ -6303,7 +6303,8 @@ XML;
 
             // required fields present
             $requiredFields = ['id', 'version_no', 'is_current', 'original_filename', 'storage_path', 'mime_type',
-                'file_size_bytes', 'extraction_status', 'uploaded_by_user_id', 'uploaded_at', 'chunks_count'];
+                'file_size_bytes', 'extraction_status', 'uploaded_by_user_id', 'uploaded_at', 'chunks_count',
+                'approval_status'];
             foreach ($requiredFields as $field) {
                 if (! array_key_exists($field, $v2)) {
                     return false;
@@ -6661,7 +6662,7 @@ XML;
         $this->actingAs($attackerContext['user'])->post(
             route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
             ['file' => $this->createDocxUpload('attack-h.docx', str_repeat('Attacker H content. ', 20))],
-        )->assertForbidden();
+        )->assertNotFound();
     }
 
     public function test_replace_file_requires_authentication(): void
@@ -6679,6 +6680,8 @@ XML;
             ->where('customer_id', $context['customer']->id)
             ->where('original_filename', 'original-i.docx')
             ->firstOrFail();
+
+        \Illuminate\Support\Facades\Auth::logout();
 
         $this->post(
             route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
@@ -6909,6 +6912,248 @@ XML;
             ->values();
 
         $this->assertSame(2, $versions->count(), 'Two different files should produce two distinct hashes.');
+    }
+
+    // ── Fase 2.5 — approval fields on KnowledgeItemVersion ───────────────────
+
+    public function test_new_knowledge_item_version_has_default_approval_status_approved(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Default A');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-a.docx', str_repeat('Approval A content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-a.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $version->approval_status);
+        $this->assertTrue($version->isApproved());
+        $this->assertFalse($version->isPendingReview());
+        $this->assertFalse($version->isRejected());
+        $this->assertFalse($version->isSuperseded());
+    }
+
+    public function test_show_payload_versions_contain_approval_fields(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Payload B');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-b.docx', str_repeat('Approval B content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-b.docx')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) === 0) {
+                return false;
+            }
+
+            $v = $versions[0];
+
+            $approvalFields = [
+                'approval_status', 'submitted_for_review_at', 'submitted_for_review_by_user_id',
+                'submitted_for_review_by_name', 'approved_at', 'approved_by_user_id', 'approved_by_name',
+                'rejected_at', 'rejected_by_user_id', 'rejected_by_name', 'rejection_reason',
+            ];
+
+            foreach ($approvalFields as $field) {
+                if (! array_key_exists($field, $v)) {
+                    return false;
+                }
+            }
+
+            return data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_APPROVED;
+        });
+    }
+
+    public function test_show_payload_versions_include_approved_by_name_when_set(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Name C');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-c.docx', str_repeat('Approval C content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-c.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $version->update([
+            'approved_by_user_id' => $context['user']->id,
+            'approved_at' => now(),
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($context): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) === 0) {
+                return false;
+            }
+
+            return data_get($versions[0], 'approved_by_name') === $context['user']->name;
+        });
+    }
+
+    public function test_show_payload_versions_include_rejection_data_when_version_is_rejected(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Rejected D');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-d.docx', str_repeat('Approval D content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-d.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $version->update([
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_REJECTED,
+            'rejected_by_user_id' => $context['user']->id,
+            'rejected_at' => now(),
+            'rejection_reason' => 'Innholdet er utdatert.',
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($context): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) === 0) {
+                return false;
+            }
+
+            $v = $versions[0];
+
+            return data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_REJECTED
+                && data_get($v, 'rejected_by_name') === $context['user']->name
+                && data_get($v, 'rejection_reason') === 'Innholdet er utdatert.';
+        });
+    }
+
+    public function test_show_payload_distinguishes_versions_with_different_approval_status(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Multi E');
+        $content1 = str_repeat('Multi E v1 content. ', 20);
+        $content2 = str_repeat('Multi E v2 content. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-e-v1.docx', $content1),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-e-v1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('approval-e-v2.docx', $content2)],
+        )->assertRedirect();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $v1->update(['approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED]);
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) !== 2) {
+                return false;
+            }
+
+            // newest first: v2 = approved, v1 = superseded
+            $statuses = array_column($versions, 'approval_status');
+
+            return in_array(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $statuses, true)
+                && in_array(KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED, $statuses, true);
+        });
+    }
+
+    public function test_approval_fields_do_not_affect_current_version_or_retrieval_behavior(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Approval Retrieval F');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('approval-f.docx', str_repeat('Approval F content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'approval-f.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        // Changing approval_status must not alter is_current
+        $version->update(['approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW]);
+        $version->refresh();
+
+        $this->assertTrue((bool) $version->is_current, 'is_current must not change when approval_status is updated.');
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $version->approval_status);
     }
 
     private function useProjectPostgresConnection(): void

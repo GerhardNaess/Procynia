@@ -577,6 +577,46 @@ function getVersionExtractionLabel(status, labels = {}) {
     return labels.versionExtractionPending ?? 'Venter på tekstuttrekk';
 }
 
+function getApprovalStatusLabel(status, labels = {}) {
+    if (status === 'pending_review') {
+        return labels.versionApprovalPendingReview ?? 'Til vurdering';
+    }
+
+    if (status === 'approved') {
+        return labels.versionApprovalApproved ?? 'Godkjent';
+    }
+
+    if (status === 'rejected') {
+        return labels.versionApprovalRejected ?? 'Avvist';
+    }
+
+    if (status === 'superseded') {
+        return labels.versionApprovalSuperseded ?? 'Erstattet';
+    }
+
+    return status ?? '—';
+}
+
+function getApprovalStatusClasses(status) {
+    if (status === 'pending_review') {
+        return 'border-amber-200 bg-amber-50 text-amber-800';
+    }
+
+    if (status === 'approved') {
+        return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    }
+
+    if (status === 'rejected') {
+        return 'border-rose-200 bg-rose-50 text-rose-700';
+    }
+
+    if (status === 'superseded') {
+        return 'border-slate-200 bg-slate-50 text-slate-500';
+    }
+
+    return 'border-slate-200 bg-slate-50 text-slate-600';
+}
+
 function getChunkRangeLabel(chunk) {
     const startOffset = Number(chunk?.start_offset ?? 0);
     const endOffset = Number(chunk?.end_offset ?? 0);
@@ -646,6 +686,16 @@ export default function KnowledgeBaseShow({
         versionUploadedAt: tks.version_uploaded_at ?? 'Opplastet',
         versionChunksCount: tks.version_chunks_count ?? 'Chunks',
         versionEmptyState: tks.version_empty_state ?? 'Ingen dokumentversjoner er registrert ennå.',
+        versionApprovalStatus: tks.version_approval_status ?? 'Godkjenningsstatus',
+        versionApprovalPendingReview: tks.version_approval_pending_review ?? 'Til vurdering',
+        versionApprovalApproved: tks.version_approval_approved ?? 'Godkjent',
+        versionApprovalRejected: tks.version_approval_rejected ?? 'Avvist',
+        versionApprovalSuperseded: tks.version_approval_superseded ?? 'Erstattet',
+        versionApprovedBy: tks.version_approved_by ?? 'Godkjent av',
+        versionApprovedAt: tks.version_approved_at ?? 'Godkjent dato',
+        versionRejectedBy: tks.version_rejected_by ?? 'Avvist av',
+        versionRejectedAt: tks.version_rejected_at ?? 'Avvist dato',
+        versionRejectionReason: tks.version_rejection_reason ?? 'Avvisningsgrunn',
         uploadNewVersionButton: tks.upload_new_version_button ?? 'Last opp ny versjon',
         uploadNewVersionTitle: tks.upload_new_version_title ?? 'Ny dokumentversjon',
         uploadNewVersionHelp: tks.upload_new_version_help ?? 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',
@@ -2332,6 +2382,11 @@ export default function KnowledgeBaseShow({
                                                                 {knowledgeShowLabels.versionExtractionFailed}
                                                             </span>
                                                         ) : null}
+                                                        {version.approval_status ? (
+                                                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getApprovalStatusClasses(version.approval_status)}`}>
+                                                                {getApprovalStatusLabel(version.approval_status, knowledgeShowLabels)}
+                                                            </span>
+                                                        ) : null}
                                                     </div>
 
                                                     <dl className="grid gap-x-6 gap-y-2 text-sm text-slate-600 sm:grid-cols-2">
@@ -2407,6 +2462,61 @@ export default function KnowledgeBaseShow({
                                                                 </dt>
                                                                 <dd className="text-rose-700">
                                                                     {version.extraction_error}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.approval_status === 'approved' && version.approved_by_name ? (
+                                                            <div className="space-y-0.5">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                    {knowledgeShowLabels.versionApprovedBy}
+                                                                </dt>
+                                                                <dd className="font-medium text-slate-900">
+                                                                    {version.approved_by_name}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.approval_status === 'approved' && version.approved_at ? (
+                                                            <div className="space-y-0.5">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                    {knowledgeShowLabels.versionApprovedAt}
+                                                                </dt>
+                                                                <dd className="font-medium text-slate-900">
+                                                                    {formatDateTime(version.approved_at, locale)}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.approval_status === 'rejected' && version.rejected_by_name ? (
+                                                            <div className="space-y-0.5">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                    {knowledgeShowLabels.versionRejectedBy}
+                                                                </dt>
+                                                                <dd className="font-medium text-slate-900">
+                                                                    {version.rejected_by_name}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.approval_status === 'rejected' && version.rejected_at ? (
+                                                            <div className="space-y-0.5">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                    {knowledgeShowLabels.versionRejectedAt}
+                                                                </dt>
+                                                                <dd className="font-medium text-slate-900">
+                                                                    {formatDateTime(version.rejected_at, locale)}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.approval_status === 'rejected' && version.rejection_reason ? (
+                                                            <div className="space-y-0.5 sm:col-span-2">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-rose-500">
+                                                                    {knowledgeShowLabels.versionRejectionReason}
+                                                                </dt>
+                                                                <dd className="text-rose-700">
+                                                                    {version.rejection_reason}
                                                                 </dd>
                                                             </div>
                                                         ) : null}
