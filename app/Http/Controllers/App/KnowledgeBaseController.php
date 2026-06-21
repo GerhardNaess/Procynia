@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Jobs\GenerateKnowledgeChunkMetadataBatch;
+use App\Jobs\GenerateKnowledgeChunkMetadataForDocument;
 use App\Models\Customer;
 use App\Models\KnowledgeDocumentCategory;
 use App\Models\KnowledgeDocumentTopic;
@@ -16,40 +16,42 @@ use App\Models\KnowledgeMetadataTerm;
 use App\Models\User;
 use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
 use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
+use App\Services\Billing\BillingEntitlementService;
 use App\Services\DocumentTextExtractor;
 use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\KnowledgeChunkBoundaryValidator;
 use App\Services\Knowledge\KnowledgeChunkBuilder;
 use App\Services\Knowledge\KnowledgeDocumentStructureParser;
 use App\Services\Knowledge\PdfFigurePreviewRenderer;
-use App\Services\Ai\Knowledge\KnowledgeChunkVocabularyCandidateService;
-use App\Services\Billing\BillingEntitlementService;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Support\CustomerContext;
-use App\Support\CosineSimilarity;
 use App\Support\PgVector;
-use Illuminate\Support\Collection;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
-use Throwable;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Throwable;
 
 class KnowledgeBaseController extends Controller
 {
     private const RULE_BASED_CHUNK_MAX_WORDS = 800;
+
     private const RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS = 40;
 
     public function __construct(
@@ -66,8 +68,7 @@ class KnowledgeBaseController extends Controller
         private readonly KnowledgeMetadataVocabularyService $knowledgeMetadataVocabularyService,
         private readonly PdfFigurePreviewRenderer $pdfFigurePreviewRenderer,
         private readonly AiUsageGuard $aiUsageGuard,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Render the customer knowledge document index within the AI area.
@@ -745,6 +746,60 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Reject a pending knowledge document version without changing the active version.
+     * Inputs: The current frontend request, the route-bound knowledge document, the version to reject.
+     * Returns: A redirect back to the document show page.
+     * Side effects: Sets the version to rejected with the provided reason and writes a revision entry.
+     *               The current active version is not changed and no metadata job is dispatched.
+     */
+    public function rejectVersion(Request $request, KnowledgeItem $knowledgeItem, KnowledgeItemVersion $version): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+
+        // Viewers cannot reject knowledge document versions.
+        abort_if($user->resolvedBidRole() === User::BID_ROLE_VIEWER, 403);
+
+        $customer = Customer::query()->findOrFail($customerId);
+        $this->assertAiAccess($customer);
+
+        // Version must belong to this document.
+        abort_unless((int) $version->knowledge_item_id === (int) $record->id, 404);
+
+        // Version must be pending review.
+        abort_unless($version->isPendingReview() && ! (bool) $version->is_current, 422);
+
+        $validated = $request->validate([
+            'rejection_reason' => ['required', 'string', 'min:3', 'max:2000'],
+        ]);
+
+        DB::transaction(function () use ($record, $version, $user, $validated): void {
+            $version->refresh();
+            abort_unless($version->isPendingReview(), 422);
+
+            $version->forceFill([
+                'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_REJECTED,
+                'rejected_at' => now(),
+                'rejected_by_user_id' => $user->id,
+                'rejection_reason' => $validated['rejection_reason'],
+                'approved_at' => null,
+                'approved_by_user_id' => null,
+            ])->save();
+
+            $this->recordKnowledgeItemRevision(
+                $record,
+                KnowledgeItemRevision::CHANGE_TYPE_VERSION_REJECTED,
+                (int) $user->id,
+                $version,
+            );
+        });
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', __('procynia.knowledge_show.version_rejected'));
+    }
+
+    /**
      * Promotes the given version to the active version of the document within a single transaction.
      * Sets all other versions for the document to is_current = false, marks the given version as
      * is_current = true, syncs the legacy file fields on KnowledgeItem, and records a
@@ -1332,7 +1387,7 @@ class KnowledgeBaseController extends Controller
      * Returns: A validation rule accepting only active customer-owned categories.
      * Side effects: None.
      */
-    private function documentCategoryValidationRuleForCustomer(int $customerId): \Illuminate\Validation\Rules\Exists
+    private function documentCategoryValidationRuleForCustomer(int $customerId): Exists
     {
         return Rule::exists(KnowledgeDocumentCategory::class, 'id')->where(fn ($query) => $query
             ->where('customer_id', $customerId)
@@ -1364,7 +1419,7 @@ class KnowledgeBaseController extends Controller
      * Returns: A validation rule accepting only active customer-owned topics.
      * Side effects: None.
      */
-    private function documentTopicValidationRuleForCustomer(int $customerId): \Illuminate\Validation\Rules\Exists
+    private function documentTopicValidationRuleForCustomer(int $customerId): Exists
     {
         return Rule::exists(KnowledgeDocumentTopic::class, 'id')->where(fn ($query) => $query
             ->where('customer_id', $customerId)
@@ -1629,7 +1684,7 @@ class KnowledgeBaseController extends Controller
             return null;
         }
 
-        return \Carbon\Carbon::parse($value)->toDateString();
+        return Carbon::parse($value)->toDateString();
     }
 
     private function resolveReviewStateForDocument(KnowledgeItem $knowledgeDocument): string
@@ -2003,6 +2058,9 @@ class KnowledgeBaseController extends Controller
                         'rejection_reason' => $version->rejection_reason,
                         'approve_url' => $canApproveVersions && $version->isPendingReview()
                             ? route('app.ai.knowledge-base.versions.approve', [$knowledgeDocument, $version])
+                            : null,
+                        'reject_url' => $canApproveVersions && $version->isPendingReview()
+                            ? route('app.ai.knowledge-base.versions.reject', [$knowledgeDocument, $version])
                             : null,
                     ])
                     ->values()
@@ -2719,6 +2777,7 @@ class KnowledgeBaseController extends Controller
 
                 if ($endOffset <= $startOffset) {
                     $skippedOrEmptyRangesCount++;
+
                     continue;
                 }
 
@@ -2726,6 +2785,7 @@ class KnowledgeBaseController extends Controller
 
                 if (isset($seenRanges[$rangeSignature])) {
                     $duplicateRangeCount++;
+
                     continue;
                 }
 
@@ -2740,6 +2800,7 @@ class KnowledgeBaseController extends Controller
 
                 if ($content === '') {
                     $skippedOrEmptyRangesCount++;
+
                     continue;
                 }
 
@@ -2891,6 +2952,7 @@ class KnowledgeBaseController extends Controller
 
                 if ($wordCount < self::RULE_BASED_MIN_SEMANTIC_CHUNK_WORDS) {
                     $skippedOrEmptyRangesCount++;
+
                     continue;
                 }
 
@@ -2950,7 +3012,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Ordered element groups where each group belongs to one primary heading.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $elements
+     * @param  array<int, array<string, mixed>>  $elements
      * @return array<int, array{
      *     primary_heading: ?string,
      *     elements: array<int, array<string, mixed>>
@@ -3174,7 +3236,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Ordered chunk ranges where text runs are semantic chunks and structural elements are dedicated chunks.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $groupElements
+     * @param  array<int, array<string, mixed>>  $groupElements
      * @return array<int, array<string, mixed>>
      */
     private function buildRuleBasedChunkRangesForH1GroupWithTables(array $groupElements, string $primaryHeading): array
@@ -3275,7 +3337,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Ordered fallback text ranges for uncovered paragraph and list content outside generated H2 sections.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $groupElements
+     * @param  array<int, array<string, mixed>>  $groupElements
      * @return array<int, array{start_offset: int, end_offset: int, heading_path: ?string, section_title: ?string, section_path: ?string, chunk_kind: string}>
      */
     private function buildRuleBasedLooseTextChunkRanges(array $groupElements, string $primaryHeading): array
@@ -3393,11 +3455,13 @@ class KnowledgeBaseController extends Controller
 
             if ($isCovered) {
                 $flushCurrentRange();
+
                 continue;
             }
 
             if ($currentStart !== null && $currentEnd !== null && $startOffset <= ($currentEnd + 2)) {
                 $currentEnd = max($currentEnd, $endOffset);
+
                 continue;
             }
 
@@ -3417,7 +3481,7 @@ class KnowledgeBaseController extends Controller
      * Returns: One ordered table chunk range that preserves the entire table structure.
      * Side effects: None.
      *
-     * @param array<string, mixed> $tableElement
+     * @param  array<string, mixed>  $tableElement
      * @return array<int, array<string, mixed>>
      */
     private function buildTableChunkRangesFromElement(array $tableElement): array
@@ -3516,7 +3580,7 @@ class KnowledgeBaseController extends Controller
      * Returns: One ordered image chunk range that preserves the image context and file reference.
      * Side effects: None.
      *
-     * @param array<string, mixed> $imageElement
+     * @param  array<string, mixed>  $imageElement
      * @return array<int, array<string, mixed>>
      */
     private function buildImageChunkRangesFromElement(array $imageElement): array
@@ -3590,7 +3654,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Additional image chunk ranges for gaps that resemble embedded figures or diagrams.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $chunkRanges
+     * @param  array<int, array<string, mixed>>  $chunkRanges
      * @return array<int, array<string, mixed>>
      */
     private function buildFigureChunkRangesFromGaps(array $chunkRanges, string $sourceText): array
@@ -3844,7 +3908,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Chunk ranges where semantic ranges have been split around structural ranges.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $chunkRanges
+     * @param  array<int, array<string, mixed>>  $chunkRanges
      * @return array<int, array<string, mixed>>
      */
     private function subtractTableRangesFromSemanticRanges(array $chunkRanges): array
@@ -3933,7 +3997,7 @@ class KnowledgeBaseController extends Controller
      * Returns: The title row text or null when no title row exists.
      * Side effects: None.
      *
-     * @param array<string, mixed> $tableJson
+     * @param  array<string, mixed>  $tableJson
      */
     private function tableTitleFromJson(array $tableJson): ?string
     {
@@ -3959,7 +4023,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Ordered row parts where each part repeats the header row.
      * Side effects: None.
      *
-     * @param array<int, array<int, string>> $rows
+     * @param  array<int, array<int, string>>  $rows
      * @return array<int, array{
      *     rows: array<int, array<int, string>>
      * }>
@@ -4017,7 +4081,7 @@ class KnowledgeBaseController extends Controller
      * Returns: A newline-separated flat text table.
      * Side effects: None.
      *
-     * @param array<int, array<int, string>> $rows
+     * @param  array<int, array<int, string>>  $rows
      */
     private function tableRowsToText(array $rows): string
     {
@@ -4039,7 +4103,7 @@ class KnowledgeBaseController extends Controller
      * Returns: A simple markdown table string.
      * Side effects: None.
      *
-     * @param array<int, array<int, string>> $rows
+     * @param  array<int, array<int, string>>  $rows
      */
     private function tableRowsToMarkdown(array $rows): string
     {
@@ -4096,7 +4160,7 @@ class KnowledgeBaseController extends Controller
      * Returns: The approximate total word count.
      * Side effects: None.
      *
-     * @param array<int, array<int, string>> $rows
+     * @param  array<int, array<int, string>>  $rows
      */
     private function tableRowsWordCount(array $rows): int
     {
@@ -4109,7 +4173,7 @@ class KnowledgeBaseController extends Controller
      * Returns: The maximum number of cells found in any row.
      * Side effects: None.
      *
-     * @param array<int, array<int, string>> $rows
+     * @param  array<int, array<int, string>>  $rows
      */
     private function tableColumnCount(array $rows): int
     {
@@ -4128,7 +4192,7 @@ class KnowledgeBaseController extends Controller
      * Returns: Ordered chunk ranges derived from the block boundaries.
      * Side effects: None.
      *
-     * @param array<string, mixed> $candidate
+     * @param  array<string, mixed>  $candidate
      * @param array<int, array{
      *     block_index: int,
      *     relative_start: int,

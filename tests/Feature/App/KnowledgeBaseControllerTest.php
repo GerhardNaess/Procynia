@@ -6,33 +6,33 @@ use App\Http\Controllers\App\KnowledgeBaseController;
 use App\Models\AiTokenEvent;
 use App\Models\AiUsageEvent;
 use App\Models\Customer;
+use App\Models\KnowledgeDocumentCategory;
+use App\Models\KnowledgeDocumentTopic;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\KnowledgeItemRevision;
 use App\Models\KnowledgeItemVersion;
-use App\Services\Ai\AiUsageGuard;
-use App\Models\KnowledgeDocumentCategory;
-use App\Models\KnowledgeDocumentTopic;
-use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeMetadataTerm;
+use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\SavedNotice;
 use App\Models\User;
-use App\Services\Billing\BillingEntitlementService;
-use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
-use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
+use App\Services\Ai\AiTokenLogger;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataGenerationService;
 use App\Services\Ai\Knowledge\KnowledgeChunkMetadataValidator;
 use App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService;
+use App\Services\Ai\Knowledge\KnowledgeMetadataVocabularyService;
 use App\Services\Ai\Knowledge\KnowledgeVocabularySuggestionEnrichmentService;
+use App\Services\Billing\BillingEntitlementService;
+use App\Services\Knowledge\AiKnowledgeChunkBoundaryService;
 use App\Services\Knowledge\PdfFigurePreviewRenderer;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\OpenAi\OpenAiClient;
-use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -617,7 +617,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
-        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $showResponse->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
                 && data_get($page, 'props.knowledgeItem.chunks.0.heading_path') === null
                 && data_get($page, 'props.knowledgeItem.chunks.0.chunk_type') === 'document'
@@ -1376,7 +1376,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
-        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $showResponse->assertViewHas('page', function (array $page): bool {
             $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
             $tableChunk = $chunks->firstWhere('chunk_type', 'table');
 
@@ -1685,6 +1685,7 @@ class KnowledgeBaseControllerTest extends TestCase
                         'new_term_suggestions' => [],
                     ];
                 }
+
                 return $result;
             });
         $this->app->instance(KnowledgeChunkMetadataGenerationService::class, $metadataService);
@@ -3196,7 +3197,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
-        $showResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $showResponse->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
                 && data_get($page, 'props.knowledgeItem.chunks.0.review_status') === KnowledgeItemChunk::REVIEW_STATUS_APPROVED;
         });
@@ -4186,25 +4187,25 @@ class KnowledgeBaseControllerTest extends TestCase
         ]);
 
         $fakeResponse = [
-            'id'          => 'fake-summary-id',
+            'id' => 'fake-summary-id',
             'output_text' => json_encode(['summary' => 'AI-oppsummering: Koordinering og samhandling.']),
-            'usage'       => ['input_tokens' => 120, 'output_tokens' => 45, 'total_tokens' => 165],
-            '_meta'       => ['request_id' => 'req_service_test'],
+            'usage' => ['input_tokens' => 120, 'output_tokens' => 45, 'total_tokens' => 165],
+            '_meta' => ['request_id' => 'req_service_test'],
         ];
 
-        $client = Mockery::mock(\App\Services\OpenAi\OpenAiClient::class);
+        $client = Mockery::mock(OpenAiClient::class);
         $client->shouldReceive('createResponse')->once()->andReturn($fakeResponse);
 
         $recorded = [];
-        $logger = Mockery::mock(\App\Services\Ai\AiTokenLogger::class);
+        $logger = Mockery::mock(AiTokenLogger::class);
         $logger->shouldReceive('record')
             ->once()
             ->andReturnUsing(function (array $data) use (&$recorded): void {
                 $recorded = $data;
             });
 
-        $service = new \App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService($client, $logger);
-        $result  = $service->generateForDocument($document, (int) $context['user']->id);
+        $service = new KnowledgeDocumentSummaryGenerationService($client, $logger);
+        $result = $service->generateForDocument($document, (int) $context['user']->id);
 
         $this->assertStringStartsWith('AI-oppsummering:', (string) $result);
         $this->assertSame((int) $document->customer_id, $recorded['customer_id']);
@@ -4238,14 +4239,14 @@ class KnowledgeBaseControllerTest extends TestCase
             'is_active' => true,
         ]);
 
-        $client = Mockery::mock(\App\Services\OpenAi\OpenAiClient::class);
-        $client->shouldReceive('createResponse')->once()->andThrow(new \RuntimeException('OpenAI unreachable'));
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')->once()->andThrow(new RuntimeException('OpenAI unreachable'));
 
-        $logger = Mockery::mock(\App\Services\Ai\AiTokenLogger::class);
+        $logger = Mockery::mock(AiTokenLogger::class);
         $logger->shouldNotReceive('record');
 
-        $service = new \App\Services\Ai\Knowledge\KnowledgeDocumentSummaryGenerationService($client, $logger);
-        $result  = $service->generateForDocument($document, (int) $context['user']->id);
+        $service = new KnowledgeDocumentSummaryGenerationService($client, $logger);
+        $result = $service->generateForDocument($document, (int) $context['user']->id);
 
         $this->assertNull($result, 'generateForDocument must return null when OpenAI call fails.');
     }
@@ -4298,23 +4299,23 @@ class KnowledgeBaseControllerTest extends TestCase
         $json = json_encode(['summary' => $summaryText], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         return [
-            'id'          => 'fake-summary-id',
-            'object'      => 'response',
-            'status'      => 'completed',
+            'id' => 'fake-summary-id',
+            'object' => 'response',
+            'status' => 'completed',
             'output_text' => $json,
-            'output'      => [
+            'output' => [
                 [
-                    'id'      => 'fake-msg-id',
-                    'type'    => 'message',
-                    'role'    => 'assistant',
-                    'status'  => 'completed',
+                    'id' => 'fake-msg-id',
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'status' => 'completed',
                     'content' => [['type' => 'output_text', 'text' => $json]],
                 ],
             ],
             'usage' => [
-                'input_tokens'  => $inputTokens,
+                'input_tokens' => $inputTokens,
                 'output_tokens' => $outputTokens,
-                'total_tokens'  => $inputTokens + $outputTokens,
+                'total_tokens' => $inputTokens + $outputTokens,
             ],
         ];
     }
@@ -4428,7 +4429,7 @@ class KnowledgeBaseControllerTest extends TestCase
      * Returns: A persisted knowledge item.
      * Side effects: Persists one knowledge item row.
      *
-     * @param array<string, mixed> $overrides
+     * @param  array<string, mixed>  $overrides
      */
     private function createKnowledgeItemPayloadFixture(Customer $customer, User $uploadedBy, array $overrides = []): KnowledgeItem
     {
@@ -4483,7 +4484,7 @@ class KnowledgeBaseControllerTest extends TestCase
      * Returns: A test uploaded file backed by a real DOCX archive.
      * Side effects: Writes a temporary ZIP file to the system temp directory.
      *
-     * @param array<int, array<string, mixed>> $blocks
+     * @param  array<int, array<string, mixed>>  $blocks
      */
     private function createDocxUploadWithBlocks(string $filename, array $blocks): UploadedFile
     {
@@ -4493,7 +4494,7 @@ class KnowledgeBaseControllerTest extends TestCase
             throw new RuntimeException('Unable to create a temporary DOCX file.');
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $opened = $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
         if ($opened !== true) {
@@ -4751,8 +4752,8 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedPreH2TableStructureFixture(): array
     {
-        $preH2Text = 'Tekst før tabell. ' . $this->repeatedWords('forklaring', 40);
-        $h2Text = "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2. " . $this->repeatedWords('dokumentasjon', 35);
+        $preH2Text = 'Tekst før tabell. '.$this->repeatedWords('forklaring', 40);
+        $h2Text = "1.1 Dokumentasjonskrav for drift\n\nTekst etter H2. ".$this->repeatedWords('dokumentasjon', 35);
 
         return $this->buildRuleBasedStructureFixture([
             [
@@ -4946,9 +4947,9 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function ruleBasedTableChunkStructureFixture(): array
     {
-        $h1Text = 'Kapittel 2 tekst. ' . $this->repeatedWords('kapitteltekst', 40);
-        $preTableText = 'Innledning før tabell. ' . $this->repeatedWords('innledningsord', 40);
-        $postTableText = 'Etter tabell. ' . $this->repeatedWords('avslutningsord', 40);
+        $h1Text = 'Kapittel 2 tekst. '.$this->repeatedWords('kapitteltekst', 40);
+        $preTableText = 'Innledning før tabell. '.$this->repeatedWords('innledningsord', 40);
+        $postTableText = 'Etter tabell. '.$this->repeatedWords('avslutningsord', 40);
 
         return $this->buildRuleBasedStructureFixture([
             [
@@ -5255,7 +5256,7 @@ class KnowledgeBaseControllerTest extends TestCase
      * Returns: A source_text plus offset-aware elements array.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $sections
+     * @param  array<int, array<string, mixed>>  $sections
      * @return array{
      *     source_text: string,
      *     elements: array<int, array<string, mixed>>
@@ -5332,7 +5333,7 @@ class KnowledgeBaseControllerTest extends TestCase
      * Returns: The generated chunk payloads.
      * Side effects: None.
      *
-     * @param array<string, mixed> $structure
+     * @param  array<string, mixed>  $structure
      * @return array<int, array<string, mixed>>
      */
     private function invokeBuildRuleBasedH2ChunkPayloads(array $structure): array
@@ -5698,7 +5699,7 @@ XML;
      * Returns: Ordered element groups where H2 content stays inside the enclosing H1 group.
      * Side effects: None.
      *
-     * @param array<int, array<string, mixed>> $elements
+     * @param  array<int, array<string, mixed>>  $elements
      * @return array<int, array<int, array<string, mixed>>>
      */
     private function groupKnowledgeElementsByPrimaryHeading(array $elements): array
@@ -5990,7 +5991,7 @@ XML;
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
         $editResponse->assertOk();
-        $editResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $editResponse->assertViewHas('page', function (array $page): bool {
             $item = data_get($page, 'props.knowledgeItem');
 
             return $item !== null
@@ -6242,7 +6243,7 @@ XML;
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
         $editResponse->assertOk();
-        $editResponse->assertViewHas('page', function (array $page) use ($document): bool {
+        $editResponse->assertViewHas('page', function (array $page): bool {
             $item = data_get($page, 'props.knowledgeItem');
 
             return $item !== null
@@ -6280,7 +6281,7 @@ XML;
         );
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($document): bool {
+        $response->assertViewHas('page', function (array $page): bool {
             $item = data_get($page, 'props.knowledgeItem', []);
             $versions = data_get($item, 'versions', null);
 
@@ -6640,7 +6641,7 @@ XML;
 
         $this->actingAs($context['user'])->post(
             route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
-            ['file' => \Illuminate\Http\UploadedFile::fake()->create('bad.txt', 5, 'text/plain')],
+            ['file' => UploadedFile::fake()->create('bad.txt', 5, 'text/plain')],
         )->assertSessionHasErrors(['file']);
     }
 
@@ -6683,7 +6684,7 @@ XML;
             ->where('original_filename', 'original-i.docx')
             ->firstOrFail();
 
-        \Illuminate\Support\Facades\Auth::logout();
+        Auth::logout();
 
         $this->post(
             route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
@@ -7504,7 +7505,7 @@ XML;
         );
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($document): bool {
+        $response->assertViewHas('page', function (array $page): bool {
             $versions = data_get($page, 'props.knowledgeItem.versions', []);
 
             if (count($versions) !== 2) {
@@ -7610,6 +7611,177 @@ XML;
         $v1->refresh();
         $this->assertFalse((bool) $v2->is_current, 'v2 must not become current without chunks.');
         $this->assertTrue((bool) $v1->is_current, 'v1 must remain current.');
+    }
+
+    public function test_reject_version_sets_rejected_status_and_preserves_current_version(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D1');
+        ['context' => $context, 'document' => $document, 'v1' => $v1, 'v2' => $v2] = $scenario;
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+            ['rejection_reason' => 'Filen inneholder feil informasjon og må korrigeres.'],
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $v1->refresh();
+        $v2->refresh();
+        $document->refresh();
+
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_REJECTED, $v2->approval_status);
+        $this->assertNotNull($v2->rejected_at);
+        $this->assertSame($context['user']->id, $v2->rejected_by_user_id);
+        $this->assertSame('Filen inneholder feil informasjon og må korrigeres.', $v2->rejection_reason);
+        $this->assertNull($v2->approved_at);
+        $this->assertNull($v2->approved_by_user_id);
+        $this->assertFalse((bool) $v2->is_current, 'v2 must remain not current after rejection.');
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current after rejection.');
+        $this->assertSame('approve-v1.docx', $document->original_filename, 'Legacy filename must not change after rejection.');
+    }
+
+    public function test_reject_version_fails_without_rejection_reason(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D2');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+            [],
+        )->assertSessionHasErrors(['rejection_reason']);
+
+        $v2->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
+    }
+
+    public function test_reject_version_fails_with_too_short_reason(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D3');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+            ['rejection_reason' => 'ab'],
+        )->assertSessionHasErrors(['rejection_reason']);
+
+        $v2->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
+    }
+
+    public function test_reject_version_fails_for_already_approved_version(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D4');
+        ['context' => $context, 'document' => $document, 'v1' => $v1] = $scenario;
+
+        // v1 is already approved (the original current version).
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $v1->approval_status);
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v1->id]),
+            ['rejection_reason' => 'Denne versjonen er allerede godkjent.'],
+        )->assertStatus(422);
+
+        $v1->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_APPROVED, $v1->approval_status);
+        $this->assertTrue((bool) $v1->is_current, 'v1 must remain current.');
+    }
+
+    public function test_reject_version_fails_for_version_belonging_to_different_document(): void
+    {
+        $scenarioA = $this->createPendingVersionScenario('Reject D5A');
+        $scenarioB = $this->createPendingVersionScenario('Reject D5B');
+
+        ['context' => $contextA, 'document' => $documentA] = $scenarioA;
+        ['v2' => $v2B] = $scenarioB;
+
+        $this->actingAs($contextA['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $documentA->id, 'version' => $v2B->id]),
+            ['rejection_reason' => 'Forsøk på tvers av dokumenter.'],
+        )->assertNotFound();
+
+        $v2B->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2B->approval_status);
+    }
+
+    public function test_reject_version_fails_for_viewer_user(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D6');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $viewer = User::factory()->create([
+            'name' => 'Viewer User',
+            'email' => 'viewer-reject-d6@example.test',
+            'role' => User::ROLE_CUSTOMER_ADMIN,
+            'bid_role' => User::BID_ROLE_VIEWER,
+            'customer_id' => $context['customer']->id,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($viewer)->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+            ['rejection_reason' => 'Viewer forsøker å avvise.'],
+        )->assertForbidden();
+
+        $v2->refresh();
+        $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
+    }
+
+    public function test_reject_version_writes_version_rejected_revision(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D7');
+        ['context' => $context, 'document' => $document, 'v2' => $v2] = $scenario;
+
+        $revisionsBeforeRejection = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->count();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.versions.reject', ['knowledgeItem' => $document->id, 'version' => $v2->id]),
+            ['rejection_reason' => 'Dokumentet inneholder utdatert informasjon.'],
+        )->assertRedirect();
+
+        $revision = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('change_type', KnowledgeItemRevision::CHANGE_TYPE_VERSION_REJECTED)
+            ->firstOrFail();
+
+        $this->assertSame($context['user']->id, $revision->changed_by_user_id);
+        $this->assertSame($v2->id, data_get($revision->snapshot, 'knowledge_item_version_id'));
+        $this->assertSame(2, data_get($revision->snapshot, 'knowledge_item_version_no'));
+        $this->assertGreaterThan($revisionsBeforeRejection, KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)->count());
+    }
+
+    public function test_show_payload_contains_reject_url_only_for_pending_versions(): void
+    {
+        $scenario = $this->createPendingVersionScenario('Reject D8');
+        ['context' => $context, 'document' => $document] = $scenario;
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            if (count($versions) !== 2) {
+                return false;
+            }
+
+            $pending = null;
+            $approved = null;
+            foreach ($versions as $v) {
+                if (data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW) {
+                    $pending = $v;
+                } elseif (data_get($v, 'approval_status') === KnowledgeItemVersion::APPROVAL_STATUS_APPROVED) {
+                    $approved = $v;
+                }
+            }
+
+            return $pending !== null
+                && $approved !== null
+                && data_get($pending, 'reject_url') !== null
+                && data_get($approved, 'reject_url') === null;
+        });
     }
 
     private function useProjectPostgresConnection(): void

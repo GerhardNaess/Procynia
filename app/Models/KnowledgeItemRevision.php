@@ -15,11 +15,14 @@ class KnowledgeItemRevision extends Model
 
     public const CHANGE_TYPE_DELETED = 'deleted';
 
+    public const CHANGE_TYPE_VERSION_REJECTED = 'version_rejected';
+
     public const CHANGE_TYPES = [
         self::CHANGE_TYPE_CREATED,
         self::CHANGE_TYPE_METADATA_UPDATED,
         self::CHANGE_TYPE_FILE_REPLACED,
         self::CHANGE_TYPE_DELETED,
+        self::CHANGE_TYPE_VERSION_REJECTED,
     ];
 
     public const CHANGE_TYPE_LABELS = [
@@ -27,6 +30,7 @@ class KnowledgeItemRevision extends Model
         self::CHANGE_TYPE_METADATA_UPDATED => 'Metadata oppdatert',
         self::CHANGE_TYPE_FILE_REPLACED => 'Fil erstattet',
         self::CHANGE_TYPE_DELETED => 'Slettet',
+        self::CHANGE_TYPE_VERSION_REJECTED => 'Versjon avvist',
     ];
 
     protected $fillable = [

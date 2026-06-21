@@ -699,6 +699,13 @@ export default function KnowledgeBaseShow({
         versionRejectionReason: tks.version_rejection_reason ?? 'Avvisningsgrunn',
         versionApproveButton: tks.version_approve_button ?? 'Godkjenn og aktiver',
         versionApproveSubmitting: tks.version_approve_submitting ?? 'Godkjenner...',
+        versionRejectButton: tks.version_reject_button ?? 'Avvis versjon',
+        versionRejectSubmitting: tks.version_reject_submitting ?? 'Avviser...',
+        versionRejectModalTitle: tks.version_reject_modal_title ?? 'Avvis dokumentversjon',
+        versionRejectReasonLabel: tks.version_reject_reason_label ?? 'Begrunnelse for avvisning',
+        versionRejectReasonPlaceholder: tks.version_reject_reason_placeholder ?? 'Beskriv hvorfor denne versjonen avvises...',
+        versionRejectCancel: tks.version_reject_cancel ?? 'Avbryt',
+        versionRejectConfirm: tks.version_reject_confirm ?? 'Avvis versjon',
         uploadNewVersionButton: tks.upload_new_version_button ?? 'Last opp ny versjon',
         uploadNewVersionTitle: tks.upload_new_version_title ?? 'Ny dokumentversjon',
         uploadNewVersionHelp: tks.upload_new_version_help ?? 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',
@@ -751,6 +758,9 @@ export default function KnowledgeBaseShow({
     const [isReplaceFileOpen, setIsReplaceFileOpen] = useState(false);
     const [duplicateDialogType, setDuplicateDialogType] = useState(null);
     const [approvingVersionId, setApprovingVersionId] = useState(null);
+    const [rejectVersionDialogId, setRejectVersionDialogId] = useState(null);
+    const [rejectReasonInput, setRejectReasonInput] = useState('');
+    const [rejectingVersionId, setRejectingVersionId] = useState(null);
     const tabsRef = useRef(null);
 
     const resolvedPageTitle = pageTitle ?? tks.breadcrumb;
@@ -994,6 +1004,36 @@ export default function KnowledgeBaseShow({
 
         router.post(approveUrl, {}, {
             onFinish: () => setApprovingVersionId(null),
+        });
+    };
+
+    const openRejectDialog = (versionId) => {
+        setRejectVersionDialogId(versionId);
+        setRejectReasonInput('');
+    };
+
+    const closeRejectDialog = () => {
+        if (rejectingVersionId !== null) {
+            return;
+        }
+
+        setRejectVersionDialogId(null);
+        setRejectReasonInput('');
+    };
+
+    const submitRejectVersion = (rejectUrl) => {
+        if (!rejectUrl || rejectingVersionId !== null || rejectReasonInput.trim().length < 3) {
+            return;
+        }
+
+        setRejectingVersionId(rejectVersionDialogId);
+
+        router.post(rejectUrl, { rejection_reason: rejectReasonInput }, {
+            onFinish: () => {
+                setRejectingVersionId(null);
+                setRejectVersionDialogId(null);
+                setRejectReasonInput('');
+            },
         });
     };
 
@@ -2555,6 +2595,16 @@ export default function KnowledgeBaseShow({
                                                                 : knowledgeShowLabels.versionApproveButton}
                                                         </button>
                                                     ) : null}
+                                                    {version.reject_url ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={approvingVersionId !== null || rejectingVersionId !== null}
+                                                            onClick={() => openRejectDialog(version.id)}
+                                                            className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            {knowledgeShowLabels.versionRejectButton}
+                                                        </button>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                         ))}
@@ -2725,6 +2775,73 @@ export default function KnowledgeBaseShow({
                 </div>
             </div>
         ) : null}
+
+        {rejectVersionDialogId !== null ? (() => {
+            const targetVersion = knowledgeItem?.versions?.find((v) => v.id === rejectVersionDialogId);
+            const rejectUrl = targetVersion?.reject_url ?? null;
+
+            return (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-slate-950/45 px-4 py-4"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget) {
+                            closeRejectDialog();
+                        }
+                    }}
+                >
+                    <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.18)]">
+                        <div className="shrink-0 flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                            <h2 className="text-xl font-semibold text-slate-950">
+                                {knowledgeShowLabels.versionRejectModalTitle}
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={closeRejectDialog}
+                                disabled={rejectingVersionId !== null}
+                                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="px-6 py-5">
+                            <label className="block text-sm font-medium text-slate-700">
+                                {knowledgeShowLabels.versionRejectReasonLabel}
+                            </label>
+                            <textarea
+                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                rows={4}
+                                placeholder={knowledgeShowLabels.versionRejectReasonPlaceholder}
+                                value={rejectReasonInput}
+                                onChange={(e) => setRejectReasonInput(e.target.value)}
+                                disabled={rejectingVersionId !== null}
+                            />
+                        </div>
+                        <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-5">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={closeRejectDialog}
+                                    disabled={rejectingVersionId !== null}
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {knowledgeShowLabels.versionRejectCancel}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => submitRejectVersion(rejectUrl)}
+                                    disabled={rejectingVersionId !== null || rejectReasonInput.trim().length < 3}
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {rejectingVersionId !== null
+                                        ? knowledgeShowLabels.versionRejectSubmitting
+                                        : knowledgeShowLabels.versionRejectConfirm}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        })() : null}
         </>
     );
 }
