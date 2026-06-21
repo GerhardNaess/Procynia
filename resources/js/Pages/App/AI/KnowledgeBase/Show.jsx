@@ -674,6 +674,7 @@ export default function KnowledgeBaseShow({
         historyExtractionCompletedText: tks.history_extraction_completed_text,
         versionsSection: tks.versions_section ?? 'Dokumentversjoner',
         versionsSectionDescription: tks.versions_section_description ?? 'Faktiske fil- og innholdsversjoner for dokumentet.',
+        versionsAiNote: tks.versions_ai_note ?? 'Bare godkjent og aktiv versjon brukes som AI-grunnlag. Nye opplastede versjoner må godkjennes før de tas i bruk.',
         versionLabel: tks.version_label ?? 'Versjon',
         versionCurrentBadge: tks.version_current_badge ?? 'Nåværende versjon',
         versionFilename: tks.version_filename ?? 'Filnavn',
@@ -2345,6 +2346,9 @@ export default function KnowledgeBaseShow({
                                         </div>
                                         <p className="mt-1 text-sm text-slate-500">
                                             {knowledgeShowLabels.versionsSectionDescription}
+                                        </p>
+                                        <p className="mt-1 text-xs text-amber-700">
+                                            {knowledgeShowLabels.versionsAiNote}
                                         </p>
                                     </div>
                                     {replaceFileUrl && !isReplaceFileOpen ? (
