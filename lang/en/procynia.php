@@ -1901,6 +1901,9 @@ return [
             'invalid_document_category' => 'The selected document category is not valid.',
             'invalid_document_topic' => 'The selected document topic is not valid.',
             'document_topic_requires_category' => 'Choose a document category before choosing a document topic.',
+            'duplicate_file_new_document' => 'This file already exists in the Knowledge Base. Open the existing document and use "Upload new version" if you want to replace its content.',
+            'duplicate_file_same_document' => 'This file already exists as a version of this document.',
+            'duplicate_file_other_document' => 'This file already exists in the Knowledge Base as a different document.',
         ],
     ],
     'notice' => [

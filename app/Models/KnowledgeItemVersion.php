@@ -22,6 +22,7 @@ class KnowledgeItemVersion extends Model
         'extraction_error',
         'uploaded_by_user_id',
         'uploaded_at',
+        'file_hash_sha256',
     ];
 
     protected function casts(): array

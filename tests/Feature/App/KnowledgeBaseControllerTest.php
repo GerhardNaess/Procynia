@@ -6686,6 +6686,231 @@ XML;
         )->assertRedirect(route('login'));
     }
 
+    // ── Duplikatvern — duplicate file protection ──────────────────────────────
+
+    public function test_store_rejects_duplicate_file_when_same_hash_exists_for_customer(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat A');
+        $content = str_repeat('Unique content for test A. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-dup-a.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-dup-a2.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertSessionHasErrors(['document']);
+    }
+
+    public function test_store_stores_file_hash_on_version(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat B');
+        $content = str_repeat('Unique content for test B. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-dup-b.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-dup-b.docx')
+            ->firstOrFail();
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->firstOrFail();
+
+        $this->assertNotNull($version->file_hash_sha256);
+        $this->assertSame(64, strlen((string) $version->file_hash_sha256));
+    }
+
+    public function test_store_allows_same_file_content_for_different_customers(): void
+    {
+        Storage::fake('local');
+
+        $content = str_repeat('Shared content for test C. ', 20);
+
+        $contextA = $this->customerContext('Duplikat C1');
+        $this->actingAs($contextA['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('shared-c1.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $contextB = $this->customerContext('Duplikat C2');
+        $this->actingAs($contextB['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('shared-c2.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $this->assertSame(1, KnowledgeItem::query()->where('customer_id', $contextA['customer']->id)->count());
+        $this->assertSame(1, KnowledgeItem::query()->where('customer_id', $contextB['customer']->id)->count());
+    }
+
+    public function test_replace_file_rejects_when_same_hash_exists_on_same_document(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat D');
+        $content = str_repeat('Shared content for test D. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-dup-d.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-dup-d.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('same-dup-d.docx', $content)],
+        )->assertSessionHasErrors(['file']);
+    }
+
+    public function test_replace_file_rejects_when_same_hash_exists_on_different_document_same_customer(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat E');
+        $contentA = str_repeat('Document E original. ', 20);
+        $contentB = str_repeat('Document E other. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-e-1.docx', $contentA),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-e-2.docx', $contentB),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $docA = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-e-1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $docA->id]),
+            ['file' => $this->createDocxUpload('replacement-e.docx', $contentB)],
+        )->assertSessionHasErrors(['file']);
+    }
+
+    public function test_replace_file_stores_file_hash_on_new_version(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat F');
+        $contentOriginal = str_repeat('Original F content. ', 20);
+        $contentReplacement = str_repeat('Replacement F content. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-f2.docx', $contentOriginal),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-f2.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-f2.docx', $contentReplacement)],
+        )->assertRedirect();
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $this->assertNotNull($v2->file_hash_sha256);
+        $this->assertSame(64, strlen((string) $v2->file_hash_sha256));
+    }
+
+    public function test_replace_file_allows_same_file_on_different_customer_document(): void
+    {
+        Storage::fake('local');
+
+        $content = str_repeat('Shared content test G. ', 20);
+
+        $contextA = $this->customerContext('Duplikat G1');
+        $contextB = $this->customerContext('Duplikat G2');
+
+        $this->actingAs($contextA['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-g-a.docx', $content),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $this->actingAs($contextB['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-g-b.docx', str_repeat('Unique content G2. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $docB = KnowledgeItem::query()
+            ->where('customer_id', $contextB['customer']->id)
+            ->where('original_filename', 'doc-g-b.docx')
+            ->firstOrFail();
+
+        $this->actingAs($contextB['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $docB->id]),
+            ['file' => $this->createDocxUpload('replacement-g-b.docx', $content)],
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $docB->id]));
+    }
+
+    public function test_store_hashes_differ_for_different_content(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Duplikat H');
+        $contentA = str_repeat('Content alpha H. ', 20);
+        $contentB = str_repeat('Content beta H. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-h-a.docx', $contentA),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-h-b.docx', $contentB),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $versions = KnowledgeItemVersion::query()
+            ->whereIn(
+                'knowledge_item_id',
+                KnowledgeItem::query()->where('customer_id', $context['customer']->id)->pluck('id'),
+            )
+            ->pluck('file_hash_sha256')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $this->assertSame(2, $versions->count(), 'Two different files should produce two distinct hashes.');
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

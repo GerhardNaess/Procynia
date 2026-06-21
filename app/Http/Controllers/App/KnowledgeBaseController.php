@@ -307,6 +307,18 @@ class KnowledgeBaseController extends Controller
         if ($usageWarning !== null) {
             session()->flash('warning', $usageWarning);
         }
+
+        $fileHash = $this->calculateFileHash($payload['document']);
+        $existingVersion = KnowledgeItemVersion::query()
+            ->where('customer_id', $customerId)
+            ->where('file_hash_sha256', $fileHash)
+            ->first();
+        if ($existingVersion !== null) {
+            throw ValidationException::withMessages([
+                'document' => __('procynia.knowledge_base.validation.duplicate_file_new_document'),
+            ]);
+        }
+
         $storedPath = null;
 
         try {
@@ -389,6 +401,7 @@ class KnowledgeBaseController extends Controller
                     'extraction_error' => $knowledgeDocument->extraction_error,
                     'uploaded_by_user_id' => $request->user()?->id,
                     'uploaded_at' => $knowledgeDocument->created_at,
+                    'file_hash_sha256' => $fileHash,
                 ]);
 
                 $this->recordKnowledgeItemRevision(
@@ -560,6 +573,19 @@ class KnowledgeBaseController extends Controller
         ]);
 
         $file = $validated['file'];
+
+        $fileHash = $this->calculateFileHash($file);
+        if (KnowledgeItemVersion::query()->where('knowledge_item_id', $record->id)->where('file_hash_sha256', $fileHash)->exists()) {
+            throw ValidationException::withMessages([
+                'file' => __('procynia.knowledge_base.validation.duplicate_file_same_document'),
+            ]);
+        }
+        if (KnowledgeItemVersion::query()->where('customer_id', $customerId)->where('knowledge_item_id', '!=', $record->id)->where('file_hash_sha256', $fileHash)->exists()) {
+            throw ValidationException::withMessages([
+                'file' => __('procynia.knowledge_base.validation.duplicate_file_other_document'),
+            ]);
+        }
+
         $newStoredPath = null;
 
         try {
@@ -598,6 +624,7 @@ class KnowledgeBaseController extends Controller
                     : null,
                 'uploaded_by_user_id' => $request->user()?->id,
                 'uploaded_at' => now(),
+                'file_hash_sha256' => $fileHash,
             ]);
 
             if ($extractionFailed) {
@@ -4725,5 +4752,10 @@ class KnowledgeBaseController extends Controller
         }
 
         return Str::ulid().'.'.$normalizedExtension;
+    }
+
+    private function calculateFileHash(UploadedFile $file): string
+    {
+        return (string) hash_file('sha256', $file->getRealPath());
     }
 }

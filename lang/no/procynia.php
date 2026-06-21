@@ -1901,6 +1901,9 @@ return [
             'invalid_document_category' => 'Valgt dokumentkategori er ikke gyldig.',
             'invalid_document_topic' => 'Valgt dokumenttema er ikke gyldig.',
             'document_topic_requires_category' => 'Velg dokumentkategori før du velger dokumenttema.',
+            'duplicate_file_new_document' => 'Denne filen finnes allerede i Kunnskapsbase. Åpne eksisterende dokument og bruk «Last opp ny versjon» dersom du vil erstatte innholdet.',
+            'duplicate_file_same_document' => 'Denne filen finnes allerede som en versjon av dette dokumentet.',
+            'duplicate_file_other_document' => 'Denne filen finnes allerede i Kunnskapsbase som et annet dokument.',
         ],
     ],
     'notice' => [
