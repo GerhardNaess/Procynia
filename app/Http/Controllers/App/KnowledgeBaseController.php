@@ -354,6 +354,7 @@ class KnowledgeBaseController extends Controller
                 $extractedText,
                 $chunkPayloads,
                 $extractionFailed,
+                $fileHash,
             ): array {
                 $knowledgeDocument = KnowledgeItem::query()->create([
                     'customer_id' => $customerId,
