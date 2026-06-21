@@ -177,6 +177,7 @@ Route::prefix('app')
                 ->name('chunks.image');
             Route::get('/{knowledgeItem}/edit', [KnowledgeBaseController::class, 'edit'])->name('edit');
             Route::put('/{knowledgeItem}', [KnowledgeBaseController::class, 'update'])->name('update');
+            Route::post('/{knowledgeItem}/file', [KnowledgeBaseController::class, 'replaceFile'])->name('file.replace');
             Route::delete('/{knowledgeItem}', [KnowledgeBaseController::class, 'destroy'])->name('destroy');
         });
         Route::get('/ai/{savedNotice}', [AiController::class, 'show'])->name('ai.show');

@@ -6252,6 +6252,267 @@ XML;
         });
     }
 
+    // ── Fase 2.4D1 — replaceFile() ───────────────────────────────────────────
+
+    public function test_replace_file_creates_a_new_version_and_activates_it(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer A');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original.docx', str_repeat('Original content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement.docx', str_repeat('Replacement content. ', 20))],
+        )->assertRedirect(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $v1->refresh();
+        $this->assertFalse((bool) $v1->is_current, 'Old version should no longer be current.');
+        $this->assertTrue((bool) $v2->is_current, 'New version should be current.');
+        $this->assertSame('replacement.docx', $v2->original_filename);
+    }
+
+    public function test_replace_file_old_version_chunks_are_preserved(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer B');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-b.docx', str_repeat('Original B content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-b.docx')
+            ->firstOrFail();
+
+        $v1 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $v1ChunksBefore = KnowledgeItemChunk::query()
+            ->where('knowledge_item_version_id', $v1->id)
+            ->count();
+
+        $this->assertGreaterThan(0, $v1ChunksBefore);
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-b.docx', str_repeat('Replacement B content. ', 20))],
+        )->assertRedirect();
+
+        $v1ChunksAfter = KnowledgeItemChunk::query()
+            ->where('knowledge_item_version_id', $v1->id)
+            ->count();
+
+        $this->assertSame($v1ChunksBefore, $v1ChunksAfter, 'Old version chunks must not be deleted on file replacement.');
+    }
+
+    public function test_replace_file_new_version_chunks_are_linked_to_new_version(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer C');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-c.docx', str_repeat('Original C content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-c.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-c.docx', str_repeat('Replacement C content. ', 20))],
+        )->assertRedirect();
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $newChunks = KnowledgeItemChunk::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('knowledge_item_version_id', $v2->id)
+            ->get();
+
+        $this->assertGreaterThan(0, $newChunks->count());
+        $newChunks->each(function (KnowledgeItemChunk $chunk) use ($v2): void {
+            $this->assertSame($v2->id, $chunk->knowledge_item_version_id);
+        });
+    }
+
+    public function test_replace_file_updates_knowledge_item_legacy_fields(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer D');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-d.docx', str_repeat('Original D content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-d.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-d.docx', str_repeat('Replacement D content. ', 20))],
+        )->assertRedirect();
+
+        $document->refresh();
+        $this->assertSame('replacement-d.docx', $document->original_filename);
+        $this->assertNotNull($document->extracted_text);
+        $this->assertStringContainsString('Replacement D content', (string) $document->extracted_text);
+    }
+
+    public function test_replace_file_records_file_replaced_revision(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer E');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-e.docx', str_repeat('Original E content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-e.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-e.docx', str_repeat('Replacement E content. ', 20))],
+        )->assertRedirect();
+
+        $revisions = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->orderBy('revision_no')
+            ->get();
+
+        $this->assertCount(2, $revisions);
+        $this->assertSame(KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED, $revisions->last()->change_type);
+    }
+
+    public function test_replace_file_rejects_missing_file(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer F');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-f.docx', 'Original F content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-f.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            [],
+        )->assertSessionHasErrors(['file']);
+    }
+
+    public function test_replace_file_rejects_invalid_mime_type(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer G');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-g.docx', 'Original G content.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-g.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => \Illuminate\Http\UploadedFile::fake()->create('bad.txt', 5, 'text/plain')],
+        )->assertSessionHasErrors(['file']);
+    }
+
+    public function test_replace_file_is_rejected_for_another_customers_document(): void
+    {
+        Storage::fake('local');
+
+        $ownerContext = $this->customerContext('Replace File Owner H');
+        $this->actingAs($ownerContext['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('owner-h.docx', str_repeat('Owner H content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $ownerContext['customer']->id)
+            ->where('original_filename', 'owner-h.docx')
+            ->firstOrFail();
+
+        $attackerContext = $this->customerContext('Replace File Attacker H');
+        $this->actingAs($attackerContext['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('attack-h.docx', str_repeat('Attacker H content. ', 20))],
+        )->assertForbidden();
+    }
+
+    public function test_replace_file_requires_authentication(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Replace File Customer I');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('original-i.docx', str_repeat('Original I content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'original-i.docx')
+            ->firstOrFail();
+
+        $this->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('replacement-i.docx', str_repeat('Replacement I. ', 20))],
+        )->assertRedirect(route('login'));
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

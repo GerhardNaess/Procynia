@@ -536,6 +536,121 @@ class KnowledgeBaseController extends Controller
     }
 
     /**
+     * Purpose: Replace the file on an existing knowledge document with a new upload.
+     * Inputs: The current frontend request and the route-bound knowledge document.
+     * Returns: A redirect back to the document show page.
+     * Side effects: Stores a new file, creates a new KnowledgeItemVersion, regenerates chunks
+     *               and embeddings for the new version, activates it, and updates legacy fields.
+     */
+    public function replaceFile(Request $request, KnowledgeItem $knowledgeItem): RedirectResponse
+    {
+        [$user, $customerId] = $this->frontendContext($request);
+        $record = $this->scopedDocument($customerId, $knowledgeItem->id);
+        $customer = Customer::query()->findOrFail($customerId);
+        $this->assertAiAccess($customer);
+
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf,docx,xlsx', 'max:20480'],
+        ]);
+
+        $file = $validated['file'];
+        $newStoredPath = null;
+
+        try {
+            $storedFilename = $this->storedFilename($file->getClientOriginalExtension());
+            $newStoredPath = Storage::disk('local')->putFileAs(
+                sprintf('customers/%d/knowledge-documents', $customerId),
+                $file,
+                $storedFilename,
+            );
+
+            abort_unless(is_string($newStoredPath) && $newStoredPath !== '', 500, 'Failed to store the replacement file.');
+
+            $absolutePath = Storage::disk('local')->path($newStoredPath);
+            $extractedText = $this->documentTextExtractor->extractText($absolutePath);
+            $extractionFailed = trim($extractedText) === '';
+
+            $nextVersionNo = ((int) KnowledgeItemVersion::query()
+                ->where('knowledge_item_id', $record->id)
+                ->max('version_no')) + 1;
+
+            $newVersion = KnowledgeItemVersion::query()->create([
+                'knowledge_item_id' => $record->id,
+                'customer_id' => $customerId,
+                'version_no' => $nextVersionNo,
+                'is_current' => false,
+                'original_filename' => $file->getClientOriginalName(),
+                'storage_path' => $newStoredPath,
+                'mime_type' => $file->getClientMimeType(),
+                'file_size_bytes' => (int) $file->getSize(),
+                'extracted_text' => $extractedText,
+                'extraction_status' => $extractionFailed
+                    ? KnowledgeItem::EXTRACTION_STATUS_FAILED
+                    : KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+                'extraction_error' => $extractionFailed
+                    ? 'Tekst kunne ikke trekkes ut fra dokumentet.'
+                    : null,
+                'uploaded_by_user_id' => $request->user()?->id,
+                'uploaded_at' => now(),
+            ]);
+
+            if ($extractionFailed) {
+                return redirect()
+                    ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+                    ->with('error', 'Tekstuttrekk feilet for ny fil. Eksisterende versjon er beholdt som aktiv.');
+            }
+
+            $structure = $this->knowledgeDocumentStructureParser->parse($absolutePath);
+            $chunkPayloads = $this->buildRuleBasedH2ChunkPayloads($structure);
+
+            $newChunks = DB::transaction(function () use ($record, $chunkPayloads, $absolutePath, $newVersion): Collection {
+                return $this->syncChunks($record, $chunkPayloads, $absolutePath, $newVersion);
+            });
+
+            $this->syncChunkEmbeddingsWithoutMetadata($record, $newChunks);
+
+            DB::transaction(function () use ($record, $newVersion, $user, $extractedText): void {
+                KnowledgeItemVersion::query()
+                    ->where('knowledge_item_id', $record->id)
+                    ->where('id', '!=', $newVersion->id)
+                    ->update(['is_current' => false]);
+
+                $newVersion->forceFill(['is_current' => true])->save();
+
+                $record->forceFill([
+                    'original_filename' => $newVersion->original_filename,
+                    'storage_path' => $newVersion->storage_path,
+                    'mime_type' => $newVersion->mime_type,
+                    'file_size_bytes' => $newVersion->file_size_bytes,
+                    'extracted_text' => $extractedText,
+                    'extraction_status' => $newVersion->extraction_status,
+                    'extraction_error' => $newVersion->extraction_error,
+                    'uploaded_by_user_id' => $newVersion->uploaded_by_user_id,
+                ])->save();
+
+                $this->recordKnowledgeItemRevision(
+                    $record,
+                    KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED,
+                    (int) $user->id,
+                );
+            });
+
+            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $record->id);
+
+        } catch (Throwable $throwable) {
+            if (is_string($newStoredPath) && $newStoredPath !== '') {
+                Storage::disk('local')->delete($newStoredPath);
+            }
+
+            throw $throwable;
+        }
+
+        return redirect()
+            ->route('app.ai.knowledge-base.show', ['knowledgeItem' => $record->id])
+            ->with('success', 'Ny filversjon lastet opp og aktivert.');
+    }
+
+    /**
      * Purpose: Resolve the authenticated customer context for knowledge document access.
      * Inputs: Incoming request carrying the current authenticated user.
      * Returns: The current user and customer id.
@@ -3994,7 +4109,16 @@ class KnowledgeBaseController extends Controller
      */
     private function syncChunks(KnowledgeItem $knowledgeDocument, array $chunkPayloads, ?string $sourceDocumentPath = null, ?KnowledgeItemVersion $version = null): Collection
     {
-        $knowledgeDocument->chunks()->delete();
+        // When a specific version is provided, delete only that version's chunks so that
+        // older versions' chunks are preserved (required for file replacement in 2.4D+).
+        if ($version !== null) {
+            KnowledgeItemChunk::query()
+                ->where('knowledge_item_id', $knowledgeDocument->id)
+                ->where('knowledge_item_version_id', $version->id)
+                ->delete();
+        } else {
+            $knowledgeDocument->chunks()->delete();
+        }
 
         if ($chunkPayloads === []) {
             return collect();

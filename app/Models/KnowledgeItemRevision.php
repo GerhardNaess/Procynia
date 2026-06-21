@@ -11,17 +11,21 @@ class KnowledgeItemRevision extends Model
 
     public const CHANGE_TYPE_METADATA_UPDATED = 'metadata_updated';
 
+    public const CHANGE_TYPE_FILE_REPLACED = 'file_replaced';
+
     public const CHANGE_TYPE_DELETED = 'deleted';
 
     public const CHANGE_TYPES = [
         self::CHANGE_TYPE_CREATED,
         self::CHANGE_TYPE_METADATA_UPDATED,
+        self::CHANGE_TYPE_FILE_REPLACED,
         self::CHANGE_TYPE_DELETED,
     ];
 
     public const CHANGE_TYPE_LABELS = [
         self::CHANGE_TYPE_CREATED => 'Opprettet',
         self::CHANGE_TYPE_METADATA_UPDATED => 'Metadata oppdatert',
+        self::CHANGE_TYPE_FILE_REPLACED => 'Fil erstattet',
         self::CHANGE_TYPE_DELETED => 'Slettet',
     ];
 
