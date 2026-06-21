@@ -6252,6 +6252,179 @@ XML;
         });
     }
 
+    // ── Fase 2.4D2 — version history payload + snapshot + metadata job scoping ─
+
+    public function test_show_payload_contains_versions_list_with_correct_fields(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Version Payload Customer A');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('v1.docx', str_repeat('Version one content. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'v1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('v2.docx', str_repeat('Version two content. ', 20))],
+        )->assertRedirect();
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = data_get($page, 'props.knowledgeItem', []);
+            $versions = data_get($item, 'versions', null);
+
+            if (! is_array($versions) || count($versions) !== 2) {
+                return false;
+            }
+
+            $v2 = $versions[0];
+            $v1 = $versions[1];
+
+            // sorted newest first
+            if (data_get($v2, 'version_no') !== 2 || data_get($v1, 'version_no') !== 1) {
+                return false;
+            }
+
+            // is_current flags correct
+            if (! data_get($v2, 'is_current') || data_get($v1, 'is_current')) {
+                return false;
+            }
+
+            // required fields present
+            $requiredFields = ['id', 'version_no', 'is_current', 'original_filename', 'storage_path', 'mime_type',
+                'file_size_bytes', 'extraction_status', 'uploaded_by_user_id', 'uploaded_at', 'chunks_count'];
+            foreach ($requiredFields as $field) {
+                if (! array_key_exists($field, $v2)) {
+                    return false;
+                }
+            }
+
+            // sensitive fields absent
+            return ! array_key_exists('extracted_text', $v2)
+                && ! array_key_exists('embedding_vector', $v2)
+                && ! array_key_exists('content', $v2);
+        });
+    }
+
+    public function test_show_payload_versions_are_sorted_newest_first(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Version Payload Customer B');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('b-v1.docx', str_repeat('B version one. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'b-v1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('b-v2.docx', str_repeat('B version two. ', 20))],
+        )->assertRedirect();
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            return count($versions) === 2
+                && (int) data_get($versions[0], 'version_no') === 2
+                && (int) data_get($versions[1], 'version_no') === 1;
+        });
+    }
+
+    public function test_file_replaced_revision_snapshot_contains_version_id_and_version_no(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Version Payload Customer C');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('c-v1.docx', str_repeat('C version one. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'c-v1.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->post(
+            route('app.ai.knowledge-base.file.replace', ['knowledgeItem' => $document->id]),
+            ['file' => $this->createDocxUpload('c-v2.docx', str_repeat('C version two. ', 20))],
+        )->assertRedirect();
+
+        $v2 = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 2)
+            ->firstOrFail();
+
+        $revision = KnowledgeItemRevision::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('change_type', KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED)
+            ->firstOrFail();
+
+        $snapshot = $revision->snapshot;
+        $this->assertSame($v2->id, data_get($snapshot, 'knowledge_item_version_id'));
+        $this->assertSame(2, data_get($snapshot, 'knowledge_item_version_no'));
+    }
+
+    public function test_show_payload_versions_do_not_expose_embeddings_extracted_text_or_chunk_content(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Version Payload Customer D');
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('d-v1.docx', str_repeat('D version one. ', 20)),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'is_active' => true,
+        ])->assertRedirect();
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'd-v1.docx')
+            ->firstOrFail();
+
+        $response = $this->actingAs($context['user'])->get(
+            route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]),
+        );
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $versions = data_get($page, 'props.knowledgeItem.versions', []);
+
+            foreach ($versions as $version) {
+                if (array_key_exists('extracted_text', $version)
+                    || array_key_exists('embedding_vector', $version)
+                    || array_key_exists('content', $version)
+                    || array_key_exists('chunks', $version)) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
     // ── Fase 2.4D1 — replaceFile() ───────────────────────────────────────────
 
     public function test_replace_file_creates_a_new_version_and_activates_it(): void

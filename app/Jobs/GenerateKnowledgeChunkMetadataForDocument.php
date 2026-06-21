@@ -25,6 +25,7 @@ class GenerateKnowledgeChunkMetadataForDocument implements ShouldQueue
 
     public function __construct(
         public readonly int $knowledgeItemId,
+        public readonly ?int $knowledgeItemVersionId = null,
     ) {
     }
 
@@ -36,8 +37,14 @@ class GenerateKnowledgeChunkMetadataForDocument implements ShouldQueue
      */
     public function handle(): void
     {
+        $versionId = $this->knowledgeItemVersionId;
         $knowledgeDocument = KnowledgeItem::query()
-            ->with(['chunks' => static fn ($query) => $query->orderBy('chunk_index')])
+            ->with(['chunks' => static function ($query) use ($versionId): void {
+                $query->orderBy('chunk_index');
+                if ($versionId !== null) {
+                    $query->where('knowledge_item_version_id', $versionId);
+                }
+            }])
             ->find($this->knowledgeItemId);
 
         if (! $knowledgeDocument instanceof KnowledgeItem) {

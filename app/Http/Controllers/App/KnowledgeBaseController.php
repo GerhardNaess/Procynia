@@ -139,6 +139,10 @@ class KnowledgeBaseController extends Controller
                     ->orderBy('revision_no')
                     ->orderBy('id'),
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
+                'versions' => static fn ($query) => $query
+                    ->with('uploadedBy')
+                    ->withCount('chunks')
+                    ->orderByDesc('version_no'),
             ])
             ->withCount('chunks')
             ->whereKey($knowledgeItem->id)
@@ -370,12 +374,6 @@ class KnowledgeBaseController extends Controller
                     'is_active' => $payload['is_active'],
                 ]);
 
-                $this->recordKnowledgeItemRevision(
-                    $knowledgeDocument,
-                    KnowledgeItemRevision::CHANGE_TYPE_CREATED,
-                    (int) $user->id,
-                );
-
                 $knowledgeVersion = KnowledgeItemVersion::query()->create([
                     'knowledge_item_id' => $knowledgeDocument->id,
                     'customer_id' => $customerId,
@@ -392,6 +390,13 @@ class KnowledgeBaseController extends Controller
                     'uploaded_at' => $knowledgeDocument->created_at,
                 ]);
 
+                $this->recordKnowledgeItemRevision(
+                    $knowledgeDocument,
+                    KnowledgeItemRevision::CHANGE_TYPE_CREATED,
+                    (int) $user->id,
+                    $knowledgeVersion,
+                );
+
                 return [
                     'knowledge_document' => $knowledgeDocument,
                     'knowledge_version' => $knowledgeVersion,
@@ -401,7 +406,7 @@ class KnowledgeBaseController extends Controller
 
             $this->syncChunkEmbeddingsWithoutMetadata($result['knowledge_document'], $result['chunks']);
             $this->ensureDocumentSummary($result['knowledge_document'], (int) $user->id);
-            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id);
+            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $result['knowledge_document']->id, (int) $result['knowledge_version']->id);
         } catch (Throwable $throwable) {
             if (is_string($storedPath) && $storedPath !== '') {
                 Storage::disk('local')->delete($storedPath);
@@ -632,10 +637,11 @@ class KnowledgeBaseController extends Controller
                     $record,
                     KnowledgeItemRevision::CHANGE_TYPE_FILE_REPLACED,
                     (int) $user->id,
+                    $newVersion,
                 );
             });
 
-            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $record->id);
+            GenerateKnowledgeChunkMetadataForDocument::dispatch((int) $record->id, (int) $newVersion->id);
 
         } catch (Throwable $throwable) {
             if (is_string($newStoredPath) && $newStoredPath !== '') {
@@ -1588,7 +1594,7 @@ class KnowledgeBaseController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function knowledgeItemRevisionSnapshot(KnowledgeItem $knowledgeDocument): array
+    private function knowledgeItemRevisionSnapshot(KnowledgeItem $knowledgeDocument, ?KnowledgeItemVersion $activeVersion = null): array
     {
         return [
             'knowledge_item_id' => $knowledgeDocument->id,
@@ -1619,6 +1625,8 @@ class KnowledgeBaseController extends Controller
             'uploaded_by_user_id' => $knowledgeDocument->uploaded_by_user_id,
             'created_at' => $knowledgeDocument->created_at?->toIso8601String(),
             'updated_at' => $knowledgeDocument->updated_at?->toIso8601String(),
+            'knowledge_item_version_id' => $activeVersion?->id,
+            'knowledge_item_version_no' => $activeVersion?->version_no,
         ];
     }
 
@@ -1632,6 +1640,7 @@ class KnowledgeBaseController extends Controller
         KnowledgeItem $knowledgeDocument,
         string $changeType,
         ?int $changedByUserId,
+        ?KnowledgeItemVersion $activeVersion = null,
     ): KnowledgeItemRevision {
         return KnowledgeItemRevision::query()->create([
             'knowledge_item_id' => $knowledgeDocument->id,
@@ -1639,7 +1648,7 @@ class KnowledgeBaseController extends Controller
             'revision_no' => $this->nextKnowledgeItemRevisionNo($knowledgeDocument),
             'change_type' => $changeType,
             'changed_by_user_id' => $changedByUserId,
-            'snapshot' => $this->knowledgeItemRevisionSnapshot($knowledgeDocument),
+            'snapshot' => $this->knowledgeItemRevisionSnapshot($knowledgeDocument, $activeVersion),
         ]);
     }
 
@@ -1838,6 +1847,26 @@ class KnowledgeBaseController extends Controller
                     ->all(),
                 'revisions' => $knowledgeDocument->revisions
                     ->map(fn (KnowledgeItemRevision $revision): array => $this->documentRevisionPayload($revision))
+                    ->values()
+                    ->all(),
+                'versions' => $knowledgeDocument->versions
+                    ->map(static fn (KnowledgeItemVersion $version): array => [
+                        'id' => $version->id,
+                        'version_no' => (int) $version->version_no,
+                        'is_current' => (bool) $version->is_current,
+                        'original_filename' => $version->original_filename,
+                        'storage_path' => $version->storage_path,
+                        'mime_type' => $version->mime_type,
+                        'file_size_bytes' => (int) $version->file_size_bytes,
+                        'extraction_status' => $version->extraction_status,
+                        'extraction_error' => $version->extraction_error,
+                        'uploaded_by_user_id' => $version->uploaded_by_user_id,
+                        'uploaded_by_name' => $version->uploadedBy?->name,
+                        'uploaded_at' => optional($version->uploaded_at)?->toIso8601String(),
+                        'created_at' => optional($version->created_at)?->toIso8601String(),
+                        'updated_at' => optional($version->updated_at)?->toIso8601String(),
+                        'chunks_count' => (int) ($version->chunks_count ?? 0),
+                    ])
                     ->values()
                     ->all(),
             ],
