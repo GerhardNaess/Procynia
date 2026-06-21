@@ -554,11 +554,27 @@ function getRevisionChangeTypeLabel(changeType) {
         return 'Metadata endret';
     }
 
+    if (normalized === 'file_replaced') {
+        return 'Fil erstattet';
+    }
+
     if (normalized === 'deleted') {
         return 'Slettet';
     }
 
     return normalized !== '' ? normalized : '—';
+}
+
+function getVersionExtractionLabel(status, labels = {}) {
+    if (status === 'completed') {
+        return labels.versionExtractionCompleted ?? 'Tekstuttrekk fullført';
+    }
+
+    if (status === 'failed') {
+        return labels.versionExtractionFailed ?? 'Tekstuttrekk feilet';
+    }
+
+    return labels.versionExtractionPending ?? 'Venter på tekstuttrekk';
 }
 
 function getChunkRangeLabel(chunk) {
@@ -613,6 +629,21 @@ export default function KnowledgeBaseShow({
         historyExtractionFailedText: tks.history_extraction_failed_text,
         historyExtractionProcessingText: tks.history_extraction_processing_text,
         historyExtractionCompletedText: tks.history_extraction_completed_text,
+        versionsSection: tks.versions_section ?? 'Dokumentversjoner',
+        versionsSectionDescription: tks.versions_section_description ?? 'Faktiske fil- og innholdsversjoner for dokumentet.',
+        versionLabel: tks.version_label ?? 'Versjon',
+        versionCurrentBadge: tks.version_current_badge ?? 'Nåværende versjon',
+        versionFilename: tks.version_filename ?? 'Filnavn',
+        versionFiletype: tks.version_filetype ?? 'Filtype',
+        versionFilesize: tks.version_filesize ?? 'Filstørrelse',
+        versionExtractionStatus: tks.version_extraction_status ?? 'Tekstuttrekk',
+        versionExtractionCompleted: tks.version_extraction_completed ?? 'Tekstuttrekk fullført',
+        versionExtractionFailed: tks.version_extraction_failed ?? 'Tekstuttrekk feilet',
+        versionExtractionPending: tks.version_extraction_pending ?? 'Venter på tekstuttrekk',
+        versionUploadedBy: tks.version_uploaded_by ?? 'Opplastet av',
+        versionUploadedAt: tks.version_uploaded_at ?? 'Opplastet',
+        versionChunksCount: tks.version_chunks_count ?? 'Chunks',
+        versionEmptyState: tks.version_empty_state ?? 'Ingen dokumentversjoner er registrert ennå.',
         activeLabel: tks.active_label,
         inactiveLabel: tks.inactive_label,
         documentFallbackTitle: tks.document_fallback_title,
@@ -787,6 +818,7 @@ export default function KnowledgeBaseShow({
     const summaryHasOverflow = normalizeSearchText(summaryForm.data.summary).length > 180 || summaryForm.data.summary.includes('\n');
     const revisionEntries = Array.isArray(knowledgeItem?.revisions) ? knowledgeItem.revisions : [];
     const processHistoryEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus, knowledgeShowLabels);
+    const versionEntries = Array.isArray(knowledgeItem?.versions) ? knowledgeItem.versions : [];
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -2162,6 +2194,132 @@ export default function KnowledgeBaseShow({
 
                     {activeTab === 'history' ? (
                         <div className="space-y-6">
+                            <section className="space-y-3">
+                                <div>
+                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        {knowledgeShowLabels.versionsSection}
+                                    </div>
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {knowledgeShowLabels.versionsSectionDescription}
+                                    </p>
+                                </div>
+
+                                {versionEntries.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {versionEntries.map((version) => (
+                                            <div
+                                                key={version.id}
+                                                className="flex flex-col gap-4 rounded-[20px] border border-slate-200 bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-start sm:justify-between"
+                                            >
+                                                <div className="min-w-0 flex-1 space-y-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                                                            {knowledgeShowLabels.versionLabel} {version.version_no}
+                                                        </span>
+                                                        {version.is_current ? (
+                                                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                                                                {knowledgeShowLabels.versionCurrentBadge}
+                                                            </span>
+                                                        ) : null}
+                                                        {version.extraction_status === 'failed' ? (
+                                                            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
+                                                                {knowledgeShowLabels.versionExtractionFailed}
+                                                            </span>
+                                                        ) : null}
+                                                    </div>
+
+                                                    <dl className="grid gap-x-6 gap-y-2 text-sm text-slate-600 sm:grid-cols-2">
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionFilename}
+                                                            </dt>
+                                                            <dd className="truncate font-medium text-slate-900" title={version.original_filename}>
+                                                                {version.original_filename || '—'}
+                                                            </dd>
+                                                        </div>
+
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionFiletype}
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {formatFileTypeLabel(version.mime_type, knowledgeShowLabels)}
+                                                            </dd>
+                                                        </div>
+
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionFilesize}
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {formatFileSize(version.file_size_bytes)}
+                                                            </dd>
+                                                        </div>
+
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionChunksCount}
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {version.chunks_count ?? 0}
+                                                            </dd>
+                                                        </div>
+
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionExtractionStatus}
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {getVersionExtractionLabel(version.extraction_status, knowledgeShowLabels)}
+                                                            </dd>
+                                                        </div>
+
+                                                        <div className="space-y-0.5">
+                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                {knowledgeShowLabels.versionUploadedAt}
+                                                            </dt>
+                                                            <dd className="font-medium text-slate-900">
+                                                                {formatDateTime(version.uploaded_at ?? version.created_at, locale)}
+                                                            </dd>
+                                                        </div>
+
+                                                        {version.uploaded_by_name ? (
+                                                            <div className="space-y-0.5 sm:col-span-2">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                    {knowledgeShowLabels.versionUploadedBy}
+                                                                </dt>
+                                                                <dd className="font-medium text-slate-900">
+                                                                    {version.uploaded_by_name}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+
+                                                        {version.extraction_status === 'failed' && version.extraction_error ? (
+                                                            <div className="space-y-0.5 sm:col-span-2">
+                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-rose-500">
+                                                                    {knowledgeShowLabels.versionExtractionStatus}
+                                                                </dt>
+                                                                <dd className="text-rose-700">
+                                                                    {version.extraction_error}
+                                                                </dd>
+                                                            </div>
+                                                        ) : null}
+                                                    </dl>
+                                                </div>
+
+                                                <div className="shrink-0 text-sm font-medium text-slate-400">
+                                                    #{version.version_no}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-sm text-slate-500">
+                                        {knowledgeShowLabels.versionEmptyState}
+                                    </div>
+                                )}
+                            </section>
+
                             <section className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
