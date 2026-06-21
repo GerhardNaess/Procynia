@@ -5,6 +5,7 @@ namespace Tests\Unit\Services;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
@@ -252,6 +253,171 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertNull($result->first()['embedding_similarity']);
     }
 
+    public function test_retrieval_includes_chunk_from_current_version(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Version Include AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        $chunk = $this->createChunk($document, 0, [
+            'topic' => 'Versjonert tema',
+            'content' => 'Innhold med versjonert tema for gjeldende versjon.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Versjonert tema']],
+            'search_text' => 'versjonert tema',
+            'intent_summary' => 'Henter chunk fra aktiv versjon.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame($chunk->id, $result->first()['chunk_id']);
+    }
+
+    public function test_retrieval_excludes_chunk_from_old_version(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Version Exclude AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        // createKnowledgeItem already created version 1 as current. Mark it as not current.
+        $oldVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
+
+        $oldVersion->update(['is_current' => false]);
+
+        $newVersion = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 2,
+            'is_current' => true,
+            'storage_path' => $oldVersion->storage_path,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        // Chunk on old (inactive) version — must not appear in retrieval.
+        $this->createChunk($document, 0, [
+            'knowledge_item_version_id' => $oldVersion->id,
+            'topic' => 'Utdatert versjon',
+            'content' => 'Innhold fra utdatert versjon.',
+        ]);
+
+        // Chunk on new (current) version — must appear in retrieval.
+        $currentChunk = $this->createChunk($document, 1, [
+            'knowledge_item_version_id' => $newVersion->id,
+            'topic' => 'Utdatert versjon',
+            'content' => 'Innhold fra gjeldende versjon.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Utdatert versjon']],
+            'search_text' => 'utdatert versjon',
+            'intent_summary' => 'Skal bare hente fra aktiv versjon.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame($currentChunk->id, $result->first()['chunk_id']);
+    }
+
+    public function test_retrieval_excludes_chunk_without_version_id(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('No Version AS');
+        $document = $this->createKnowledgeItem($customer);
+
+        // Explicitly create chunk with null version_id — simulates pre-backfill state.
+        $this->createChunk($document, 0, [
+            'knowledge_item_version_id' => null,
+            'topic' => 'Uversjonert chunk',
+            'content' => 'Innhold uten versjonspeker.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Uversjonert chunk']],
+            'search_text' => 'uversjonert chunk',
+            'intent_summary' => 'Chunk uten versjon skal ikke hentes.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(0, $result);
+    }
+
+    public function test_retrieval_excludes_document_with_ai_usage_disabled(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('AI Usage AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'ai-disabled.docx',
+            'ai_usage_enabled' => false,
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'AI deaktivert',
+            'content' => 'Innhold fra AI-deaktivert dokument.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['AI deaktivert']],
+            'search_text' => 'ai deaktivert',
+            'intent_summary' => 'AI-deaktivert dokument skal ekskluderes.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(0, $result);
+    }
+
+    public function test_retrieval_excludes_document_with_inactive_document_status(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Status AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'archived-doc.docx',
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Arkivert dokument',
+            'content' => 'Innhold fra arkivert dokument.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Arkivert dokument']],
+            'search_text' => 'arkivert dokument',
+            'intent_summary' => 'Arkivert dokument skal ekskluderes.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(0, $result);
+    }
+
+    public function test_retrieval_excludes_inactive_document(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Inactive AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'inactive-doc.docx',
+            'is_active' => false,
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Inaktivt dokument',
+            'content' => 'Innhold fra inaktivt dokument.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Inaktivt dokument']],
+            'search_text' => 'inaktivt dokument',
+            'intent_summary' => 'Inaktivt dokument skal ekskluderes.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(0, $result);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -278,24 +444,38 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $title = $overrides['title'] ?? 'Metadata document';
         $filename = $overrides['original_filename'] ?? 'metadata-document.docx';
         $content = $overrides['content'] ?? 'Metadata document content.';
+        $storagePath = $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx';
+        $extractionStatus = $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
 
-        return KnowledgeItem::query()->create(array_merge([
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $content,
             'original_filename' => $filename,
-            'storage_path' => $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx',
+            'storage_path' => $storagePath,
             'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
             'summary' => $overrides['summary'] ?? 'Oppsummering',
-            'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
+
+        // Every knowledge item needs a current version so retrieval can find its chunks.
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => $storagePath,
+            'extraction_status' => $extractionStatus,
+        ]);
+
+        return $item;
     }
 
     private function createChunk(KnowledgeItem $knowledgeItem, int $chunkIndex, array $overrides = []): KnowledgeItemChunk
@@ -304,8 +484,20 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $pgvector = isset($overrides['embedding_vector_pgvector']) ? $overrides['embedding_vector_pgvector'] : null;
         unset($overrides['embedding_vector_pgvector']);
 
+        // Automatically assign the current version unless explicitly overridden (including explicit null).
+        if (array_key_exists('knowledge_item_version_id', $overrides)) {
+            $versionId = $overrides['knowledge_item_version_id'];
+            unset($overrides['knowledge_item_version_id']);
+        } else {
+            $versionId = KnowledgeItemVersion::query()
+                ->where('knowledge_item_id', $knowledgeItem->id)
+                ->where('is_current', true)
+                ->value('id');
+        }
+
         $chunk = KnowledgeItemChunk::query()->create(array_merge([
             'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_version_id' => $versionId,
             'chunk_index' => $chunkIndex,
             'content' => $content,
             'start_offset' => $overrides['start_offset'] ?? ($chunkIndex * 100),

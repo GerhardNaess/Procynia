@@ -7,6 +7,7 @@ use App\Models\KnowledgeItemChunk;
 use App\Services\KnowledgeChunkCoverageService;
 use App\Support\PgVector;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -265,6 +266,11 @@ class MetadataCandidateRetrievalService
     {
         return KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
+            ->join('knowledge_item_versions', function (JoinClause $join): void {
+                $join->on('knowledge_item_versions.id', '=', 'knowledge_item_chunks.knowledge_item_version_id')
+                    ->on('knowledge_item_versions.knowledge_item_id', '=', 'knowledge_items.id')
+                    ->where('knowledge_item_versions.is_current', true);
+            })
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.is_active', true)
