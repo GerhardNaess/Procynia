@@ -4776,6 +4776,53 @@ export default function AiShow({
                                             </p>
                                         </div>
                                     )}
+                                    {(activeRequirement?.knowledge_sources_sent_to_ai?.length ?? 0) > 0 ? (
+                                        <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3">
+                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                {tai.sources_sent_to_ai_title ?? 'Kilder sendt til AI'}
+                                            </div>
+                                            <p className="text-[11px] leading-5 text-slate-500">
+                                                {tai.sources_sent_to_ai_help ?? 'Disse kunnskapskildene ble sendt til AI som grunnlag for svaret.'}
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                {activeRequirement.knowledge_sources_sent_to_ai.map((source, index) => (
+                                                    <div key={source.evidence_id ?? index} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                            <span className="text-xs font-semibold text-slate-800">
+                                                                {source.original_filename ?? '—'}
+                                                            </span>
+                                                            {source.knowledge_item_version_no != null ? (
+                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                                                    v{source.knowledge_item_version_no}
+                                                                </span>
+                                                            ) : null}
+                                                            {source.document_type_label ? (
+                                                                <span className="inline-flex items-center rounded-full border border-violet-100 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                                                                    {source.document_type_label}
+                                                                </span>
+                                                            ) : null}
+                                                            {source.version_is_current_now === false ? (
+                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                                                    {tai.sources_sent_to_ai_outdated_version ?? 'Tidligere dokumentversjon'}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+                                                            {source.chunk_index != null ? (
+                                                                <span>{tai.sources_sent_to_ai_excerpt_label ?? 'Utdrag'} {source.chunk_index + 1}</span>
+                                                            ) : null}
+                                                            {source.match_rank != null ? (
+                                                                <span>{tai.sources_sent_to_ai_rank_label ?? 'Rangering'} {source.match_rank}</span>
+                                                            ) : null}
+                                                            {source.section_title ? (
+                                                                <span className="max-w-[18rem] truncate">{source.section_title}</span>
+                                                            ) : null}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : null}
                                 </div>
                             )}
                         </div>

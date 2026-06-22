@@ -1156,6 +1156,13 @@ return [
         'knowledge_grounding_judge_partial' => 'Delvis kunnskapsgrunnlag',
         'knowledge_grounding_judge_unsupported' => 'Svakt kunnskapsgrunnlag',
         'knowledge_grounding_judge_failed' => 'Kunne ikke vurderes sikkert',
+        'sources_sent_to_ai_title' => 'Kilder sendt til AI',
+        'sources_sent_to_ai_help' => 'Disse kunnskapskildene ble sendt til AI som grunnlag for svaret. Det betyr ikke nødvendigvis at alle er brukt direkte i teksten.',
+        'sources_sent_to_ai_outdated_version' => 'Tidligere dokumentversjon',
+        'sources_sent_to_ai_version_label' => 'Dokumentversjon',
+        'sources_sent_to_ai_excerpt_label' => 'Utdrag',
+        'sources_sent_to_ai_rank_label' => 'Rangering',
+        'sources_sent_to_ai_score_label' => 'Score',
     ],
     'knowledge' => [
         'title' => 'Kunnskapsbase',

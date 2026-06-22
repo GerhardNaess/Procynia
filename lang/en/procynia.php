@@ -1156,6 +1156,13 @@ return [
         'knowledge_grounding_judge_partial' => 'Partial knowledge basis',
         'knowledge_grounding_judge_unsupported' => 'Weak knowledge basis',
         'knowledge_grounding_judge_failed' => 'Could not be assessed safely',
+        'sources_sent_to_ai_title' => 'Sources sent to AI',
+        'sources_sent_to_ai_help' => 'These knowledge sources were sent to AI as context for the answer. This does not necessarily mean that all of them were used directly in the text.',
+        'sources_sent_to_ai_outdated_version' => 'Previous document version',
+        'sources_sent_to_ai_version_label' => 'Document version',
+        'sources_sent_to_ai_excerpt_label' => 'Excerpt',
+        'sources_sent_to_ai_rank_label' => 'Rank',
+        'sources_sent_to_ai_score_label' => 'Score',
     ],
     'knowledge' => [
         'title' => 'Knowledge base',
