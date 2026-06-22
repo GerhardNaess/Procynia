@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-Fase 2.1, 2.2, 2.3, 2.4 og 2.5 er fullført. Første leveranse av fase 2.6 er fullført per juni 2026. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, versjonering av dokumentinnhold, kontroll og godkjenning av kunnskapsdokumenter, og innsyn i Kunnskapsbase-kilder sendt til AI er alle implementert. Disse er beskrevet i §28.
+Fase 2.1, 2.2, 2.3, 2.4, 2.5 og 2.6 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, versjonering av dokumentinnhold, kontroll og godkjenning av kunnskapsdokumenter, og innsyn i Kunnskapsbase-kilder sendt til AI er alle implementert. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -961,9 +961,9 @@ Versjonsbasert kontroll og godkjenning er implementert for Kunnskapsbase / `Know
 
 26 nye feature-tester i `KnowledgeBaseControllerTest` dekker approve-flyt (C1–C8), reject-flyt (D1–D8), retrieval-konsekvenser, payload-eksponering, viewer-sperring og revisjonsspor (totalt 137 tester, 1104 assertions).
 
-### 28.6 Innsyn i Kunnskapsbase-kilder sendt til AI ✓ Første leveranse fullført juni 2026
+### 28.6 Innsyn i Kunnskapsbase-kilder sendt til AI ✓ Fullført juni 2026
 
-Første leveranse av fase 2.6 er implementert. Brukere kan nå se hvilke Kunnskapsbase-kilder som ble sendt til AI som grunnlag for et krav-svar.
+Fase 2.6 er fullstendig implementert (2.6B–E). Brukere kan se hvilke Kunnskapsbase-kilder som ble sendt til AI som grunnlag for et krav-svar, og navigere direkte til riktig Kunnskapsbase-dokument fra innsynsvisningen.
 
 **Viktig begrepsavklaring:**
 Dette innsynet viser hvilke kilder som ble sendt inn som kontekst ved AI-kallet. Det er ikke en garanti for at alle kildene faktisk ble brukt av modellen internt. Begrepet «sendt til AI som grunnlag» brukes gjennomgående — ikke «faktisk brukt av AI» eller «AI brukte disse kildene».
@@ -979,9 +979,9 @@ Dette innsynet viser hvilke kilder som ble sendt inn som kontekst ved AI-kallet.
 **2.6C — Backend-payload per krav:**
 
 - `aiRequirementPayload()` inkluderer et `knowledge_sources_sent_to_ai`-felt — en array med én rad per evidence-kobling
-- Hvert element inkluderer: `evidence_id`, `knowledge_item_id`, `knowledge_item_version_id`, `knowledge_item_version_no`, `original_filename`, `document_type`, `document_type_label`, `chunk_id`, `chunk_index`, `chunk_type`, `section_title`, `heading_path`, `match_score`, `match_rank`, `match_type`, `is_primary`, `selection_status`, `version_approval_status`, `version_is_current_now`
-- Feltet er tom array `[]` når ingen Kunnskapsbase-kilder er tilknyttet kravet
-- Full chunk content, embeddings og storage paths er ikke inkludert i payload
+- Hvert element inkluderer: `evidence_id`, `knowledge_item_id`, `knowledge_item_show_url`, `knowledge_item_version_id`, `knowledge_item_version_no`, `original_filename`, `document_type`, `document_type_label`, `chunk_id`, `chunk_index`, `chunk_type`, `section_title`, `heading_path`, `match_score`, `match_rank`, `match_type`, `is_primary`, `selection_status`, `version_approval_status`, `version_is_current_now`
+- Feltet er tom array `[]` når ingen Kunnskapsbase-kilder er tilknyttet kravet — aldri `null`
+- Full chunk content, embeddings og raw storage paths er ikke inkludert i payload
 
 **2.6D — Frontend-visning:**
 
@@ -990,6 +990,14 @@ Dette innsynet viser hvilke kilder som ble sendt inn som kontekst ved AI-kallet.
 - Kilde med `version_is_current_now = false` markeres med en diskret amber-advarsel «Tidligere dokumentversjon»
 - Seksjonen er usynlig dersom ingen Kunnskapsbase-kilder er tilknyttet kravet
 - Alle UI-strenger er i18n-nøkler i `lang/no/procynia.php` og `lang/en/procynia.php` under `ai.sources_sent_to_ai_*`
+
+**2.6E — Lenke til Kunnskapsbase-dokument:**
+
+- Filnavnet i «Kilder sendt til AI» er en klikkbar lenke til `KnowledgeItem`-detaljsiden når `knowledge_item_show_url` finnes
+- Backend genererer URL med `route('app.ai.knowledge-base.show', ...)` — samme mønster som `KnowledgeBaseController`
+- URL er `null` dersom `KnowledgeItem` ikke finnes (edge case) — frontend viser da plain text
+- Lenken peker alltid til `KnowledgeItem`-detaljsiden, ikke til en versjonside og ikke til Saksdokumenter
+- Lenken er diskret: hover-effekt til violet, ingen handling for godkjenning, redigering eller opplasting
 
 **Retrieval er ikke endret:**
 `MetadataCandidateRetrievalService` og retrieval-logikken er uendret. Det eneste som er tilføyd er at `knowledge_item_version_id` og `knowledge_item_version_no` eksponeres som sporbarhetsinformasjon i select-kolonner og `chunkRowFromModel()` — ikke som filter, men for å videreføre versjonspeker til evidence-raden.
@@ -1005,7 +1013,7 @@ Malen for krav-svar-generering (`RequirementAnswerDraftService`) er ikke endret.
 - 6 nye feature-tester i `AiControllerTest` dekker 2.6B/2.6C: versjonssporing på evidence (2 tester) og payload-eksponering av `knowledge_sources_sent_to_ai` (4 tester) — alle passerer
 - 2 nye unit-tester i `MetadataCandidateRetrievalServiceTest` bekrefter at `knowledge_item_version_id` og `knowledge_item_version_no` videreføres fra retrieval-query — begge passerer
 - 3 pre-existing failures i metadata ordering-tester er urelatert til dette arbeidet
-- `npm run build` kjørt uten feil for 2.6D
+- `npm run build` kjørt uten feil for 2.6D og 2.6E
 
 ### 28.7 Opprydding av legacy-felter i Kunnskapsbase (foreløpig neste fase)
 
@@ -1097,7 +1105,7 @@ Fase 2.4 — Versjonering av dokumentinnhold — er fullført per juni 2026. `kn
 
 Fase 2.5 — Kontroll og godkjenning av kunnskapsdokumenter — er fullført per juni 2026. Nye dokumentversjoner aktiveres ikke lenger automatisk etter tekstuttrekk. De opprettes som `pending_review` og krever eksplisitt godkjenning før de settes som `is_current` og tas i bruk av AI. Avvisning er mulig med obligatorisk begrunnelse. Retrieval er ikke endret — det henter fortsatt kun chunks fra gjeldende versjon (`is_current = true`) etter eksisterende kriterier. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt.
 
-Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — første leveranse er fullført per juni 2026. Brukere kan se hvilke Kunnskapsbase-kilder som ble sendt til AI som grunnlag for et krav-svar. Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon. Retrieval og prompt er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt.
+Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — er fullført per juni 2026 (2.6B–E). Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon og lenke til riktig KnowledgeItem-detaljside. Retrieval, prompt og AI-modellkall er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Dette innsynet viser hva som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
 
 Kunnskapsbase har nå:
 - Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
@@ -1106,7 +1114,7 @@ Kunnskapsbase har nå:
 - Revisjon og gyldighet — `review_due_at` og `last_reviewed_at` gir synlighet for faglig oppdatering
 - Versjonering av dokumentinnhold — `knowledge_item_versions` med versjonsbevisst retrieval og UI for opplasting av ny versjon
 - Kontroll og godkjenning — versjonsgodkjenning med pending/approved/rejected/superseded-flyt, revisjonslogg og synlig AI-statusboks på detaljsiden
-- Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav og UI-visning i krav-svar-panelet
+- Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav, UI-visning i krav-svar-panelet og lenke til riktig Kunnskapsbase-dokument
 
 Foreløpige neste faser (ikke låst plan): 2.7 opprydding av legacy-felter.
 
