@@ -4788,9 +4788,18 @@ export default function AiShow({
                                                 {activeRequirement.knowledge_sources_sent_to_ai.map((source, index) => (
                                                     <div key={source.evidence_id ?? index} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
                                                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                                            <span className="text-xs font-semibold text-slate-800">
-                                                                {source.original_filename ?? '—'}
-                                                            </span>
+                                                            {source.knowledge_item_show_url ? (
+                                                                <Link
+                                                                    href={source.knowledge_item_show_url}
+                                                                    className="text-xs font-semibold text-slate-800 hover:text-violet-700 hover:underline"
+                                                                >
+                                                                    {source.original_filename ?? '—'}
+                                                                </Link>
+                                                            ) : (
+                                                                <span className="text-xs font-semibold text-slate-800">
+                                                                    {source.original_filename ?? '—'}
+                                                                </span>
+                                                            )}
                                                             {source.knowledge_item_version_no != null ? (
                                                                 <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
                                                                     v{source.knowledge_item_version_no}

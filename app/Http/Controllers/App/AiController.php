@@ -1934,6 +1934,9 @@ class AiController extends Controller
                 return [
                     'evidence_id' => $evidence->id,
                     'knowledge_item_id' => $knowledgeItem?->id,
+                    'knowledge_item_show_url' => $knowledgeItem !== null
+                        ? route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeItem->id])
+                        : null,
                     'knowledge_item_version_id' => $evidence->knowledge_item_version_id,
                     'knowledge_item_version_no' => $version?->version_no,
                     'original_filename' => $knowledgeItem?->original_filename,
