@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-Fase 2.1, 2.2, 2.3 og 2.4 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, og versjonering av dokumentinnhold er alle implementert. Disse er beskrevet i §28.
+Fase 2.1, 2.2, 2.3, 2.4 og 2.5 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, versjonering av dokumentinnhold og kontroll og godkjenning av kunnskapsdokumenter er alle implementert. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -902,11 +902,64 @@ Følgende er nå på plass:
 - Retrieval-kriteriene er beholdt, men er nå versjonsbevisste (INNER JOIN mot gjeldende versjon)
 - pgvector-oppsettet er ikke endret
 
-### 28.5 Kontroll og godkjenning av kunnskapsdokumenter (foreløpig neste fase)
+### 28.5 Kontroll og godkjenning av kunnskapsdokumenter ✓ Fullført juni 2026
 
-*Ikke låst plan. Mulig neste prioritet etter at 2.4 er stabilt i produksjon.*
+Versjonsbasert kontroll og godkjenning er implementert for Kunnskapsbase / `KnowledgeItem`. Nye dokumentversjoner aktiveres ikke lenger automatisk — de krever eksplisitt godkjenning før de brukes av AI.
 
-En godkjenningsflyt vil innebære at nye versjoner krever eksplisitt godkjenning før de aktiveres i AI-retrieval. I dag aktiveres ny versjon automatisk etter vellykket tekstuttrekk — en mer kontrollert flyt vil legge til et mellomsteg der dokumenteier eller godkjenner må bekrefte aktivering.
+**Hva som er levert:**
+
+- `approval_status` er lagt til på `knowledge_item_versions` med verdiene `pending_review`, `approved`, `rejected` og `superseded`
+- Tilhørende felt: `approved_at`, `approved_by_user_id`, `rejected_at`, `rejected_by_user_id`, `rejection_reason`, `submitted_for_review_at`, `submitted_for_review_by_user_id`
+- Read-only visning av approval-status per versjon er synlig i UI under Historikk → Dokumentversjoner
+
+**Opplasting av ny filversjon (`replaceFile()`):**
+
+- Ny erstatningsversjon opprettes med `approval_status = pending_review`
+- Ny versjon får ikke `is_current = true` automatisk
+- Gammel current-versjon forblir `is_current = true` og brukes av AI mens ny versjon venter
+- Metadatajobb dispatches ikke for pending-versjoner — kun ved godkjenning
+
+**Godkjenning (`approveVersion()`):**
+
+- Autorisert bruker kan godkjenne en pending-versjon
+- Godkjent versjon aktiveres og settes til `is_current = true`
+- Gammel current-versjon settes til `approval_status = superseded`
+- `KnowledgeItem` legacy-felter (original_filename, storage_path, mime_type osv.) oppdateres ved godkjenning
+- `GenerateKnowledgeChunkMetadataForDocument` dispatches etter godkjenning
+- Revisjonsspor skrives med `change_type = file_replaced`
+
+**Avvisning (`rejectVersion()`):**
+
+- Autorisert bruker kan avvise en pending-versjon med obligatorisk begrunnelse (min. 3 tegn, maks. 2000)
+- Avvist versjon settes til `approval_status = rejected` med `rejected_at`, `rejected_by_user_id` og `rejection_reason`
+- Avvisning endrer ikke current-versjon — gammel current-versjon forblir aktiv og brukes av AI
+- Ingen metadatajobb dispatches ved avvisning
+- Revisjonsspor skrives med `change_type = version_rejected`
+
+**Tilgangsstyring:**
+
+- Viewers (`bid_role = viewer`) kan ikke godkjenne eller avvise versjoner
+- `approve_url` og `reject_url` settes kun i payload for autoriserte brukere og kun for pending-versjoner
+- Backend håndhever autorisering uavhengig av frontend
+
+**UI:**
+
+- Show-siden har en tydelig statusboks over fanene som viser aktiv versjon, AI-status og eventuelle pending-versjoner
+- Godkjenn/avvis-handlinger er tilgjengelige under Historikk → Dokumentversjoner
+- Avvisning krever begrunnelse via modal med textarea
+- Pending, rejected og superseded versjoner fremstår tydelig som ikke aktive
+
+**Retrieval er ikke endret:**
+
+`MetadataCandidateRetrievalService` er uendret. Retrieval henter fortsatt kun chunks fra current version via INNER JOIN mot `knowledge_item_versions.is_current = true`, og filtrerer på `customer_id`, `ownership_type = company`, `is_active = true`, `document_status = active`, `ai_usage_enabled = true` og `extraction_status = completed`. Pending, rejected og superseded versjoner ekskluderes automatisk fordi de ikke har `is_current = true`.
+
+**Skille mot Saksdokumenter:**
+
+`SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Godkjenningsflyten gjelder utelukkende `KnowledgeItem` og `KnowledgeItemVersion` i Kunnskapsbase. `KnowledgeItem` og `SavedNoticeAiDocument` er separate modeller, separate flater og separate retrieval-stier.
+
+**Tester:**
+
+26 nye feature-tester i `KnowledgeBaseControllerTest` dekker approve-flyt (C1–C8), reject-flyt (D1–D8), retrieval-konsekvenser, payload-eksponering, viewer-sperring og revisjonsspor (totalt 137 tester, 1104 assertions).
 
 ### 28.6 Innsyn i hva AI bruker fra Kunnskapsbase (foreløpig neste fase)
 
@@ -936,7 +989,7 @@ Temaer er i dag flate. En hierarkisk modell med `parent_id` gir mer presis kateg
 
 ### Godkjenningsflyt
 
-En godkjenn-/avvis-flyt krever en godkjenner-rolle, statusoverganger og varsling. Forutsetter at statusmodellen fra fase 2 er på plass.
+Versjonsbasert godkjenning (pending_review → approved/rejected) er implementert i fase 2.5. Det som gjenstår for Fase 3 er dokument-nivå godkjenning: dedikert godkjenner-rolle, varslingsflyt og statusoverganger for selve `KnowledgeItem` (ikke bare `KnowledgeItemVersion`).
 
 ### Kvalitetsscore
 
@@ -1002,13 +1055,16 @@ Fase 2.3 — Revisjon og gyldighet (`last_reviewed_at`, `review_due_at`, `review
 
 Fase 2.4 — Versjonering av dokumentinnhold — er fullført per juni 2026. `knowledge_item_versions` gir fullstendig versjonssporing per `KnowledgeItem`. Retrieval henter bare chunks fra gjeldende versjon. Ny fil oppretter ny versjon uten at gamle versjoner eller chunks slettes. UI viser versjonshistorikk read-only og lar brukeren laste opp ny versjon fra detaljsiden. Rollback, sletting av enkeltversjoner og sammenligning er ikke bygget i denne fasen.
 
+Fase 2.5 — Kontroll og godkjenning av kunnskapsdokumenter — er fullført per juni 2026. Nye dokumentversjoner aktiveres ikke lenger automatisk etter tekstuttrekk. De opprettes som `pending_review` og krever eksplisitt godkjenning før de settes som `is_current` og tas i bruk av AI. Avvisning er mulig med obligatorisk begrunnelse. Retrieval er ikke endret — det henter fortsatt kun chunks fra gjeldende versjon (`is_current = true`) etter eksisterende kriterier. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt.
+
 Kunnskapsbase har nå:
 - Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
 - AI-policy per dokument — `ai_usage_enabled` gir eksplisitt AI-tillatelse per dokument
 - Dokumentstatus — `document_status` styrer livsløpet og respekteres av retrieval
 - Revisjon og gyldighet — `review_due_at` og `last_reviewed_at` gir synlighet for faglig oppdatering
 - Versjonering av dokumentinnhold — `knowledge_item_versions` med versjonsbevisst retrieval og UI for opplasting av ny versjon
+- Kontroll og godkjenning — versjonsgodkjenning med pending/approved/rejected/superseded-flyt, revisjonslogg og synlig AI-statusboks på detaljsiden
 
-Foreløpige neste faser (ikke låst plan): 2.5 kontroll og godkjenning av dokumentversjoner, 2.6 innsyn i hva AI bruker fra Kunnskapsbase, 2.7 opprydding av legacy-felter.
+Foreløpige neste faser (ikke låst plan): 2.6 innsyn i hva AI bruker fra Kunnskapsbase, 2.7 opprydding av legacy-felter.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
