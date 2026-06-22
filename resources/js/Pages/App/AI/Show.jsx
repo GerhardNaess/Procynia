@@ -2662,6 +2662,16 @@ export default function AiShow({
                     isDirty: false,
                 },
             }));
+
+            if (Object.prototype.hasOwnProperty.call(response.data, 'knowledge_sources_sent_to_ai')) {
+                setRequirementRows((currentRows) =>
+                    currentRows.map((row) =>
+                        row.id === requirement.id
+                            ? { ...row, knowledge_sources_sent_to_ai: response.data.knowledge_sources_sent_to_ai ?? [] }
+                            : row
+                    )
+                );
+            }
         } catch (error) {
             setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke generere svarutkast.'));
         } finally {

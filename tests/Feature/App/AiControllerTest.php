@@ -8690,6 +8690,153 @@ class AiControllerTest extends TestCase
             'Evidence row should still point to version 1 when no refresh has been triggered.');
     }
 
+    public function test_draft_generation_syncs_evidence_and_returns_knowledge_sources_in_response(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-GEN-001', 'Evidence sync test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-06-22 10:00:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'krav.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/krav.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive løsningen.',
+            'text_extracted_at' => '2026-06-22 10:01:00',
+        ]);
+
+        $sourceChunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive løsningen.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Leverandøren skal beskrive løsningen.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        [$knowledgeItem] = $this->createGroundedKnowledgeFixture(
+            $context['customer'],
+            'Leverandøren beskriver løsningen i detalj.',
+            'losningsbeskrivelse.docx',
+        );
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/losningsbeskrivelse.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $knowledgeItem->chunks()->update(['knowledge_item_version_id' => $version->id]);
+
+        $this->bindEmbeddingService(function (string $text): array {
+            return [
+                'ok' => true,
+                'embedding' => [1.0, 0.0],
+                'model' => 'text-embedding-3-small',
+                'usage' => [],
+                'error_type' => null,
+                'error_message' => null,
+                'upstream_status' => 200,
+                'request_id' => 'test-embed-evidence',
+                'response_body_excerpt' => null,
+            ];
+        });
+
+        Http::fake(function () {
+            return Http::response(
+                $this->openAiStructuredResponse([
+                    'answer_draft_text' => 'Leverandøren skal beskrive løsningen i henhold til dokumentasjonen.',
+                ], 40, 16),
+                200,
+                ['x-request-id' => 'req_evidence_sync_test'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonStructure(['knowledge_sources_sent_to_ai']);
+
+        $sources = $response->json('knowledge_sources_sent_to_ai');
+        $this->assertIsArray($sources);
+        $this->assertNotEmpty($sources, 'knowledge_sources_sent_to_ai must contain at least one row after draft generation.');
+
+        $firstSource = $sources[0];
+        $this->assertNotNull($firstSource['knowledge_item_show_url'] ?? null, 'knowledge_item_show_url must be set.');
+
+        $evidenceRow = SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $requirement->id)
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->first();
+
+        $this->assertNotNull($evidenceRow, 'An evidence row must be created after draft generation.');
+        $this->assertSame($knowledgeItem->id, (int) $evidenceRow->knowledge_item_id);
+        $this->assertSame($version->id, (int) $evidenceRow->knowledge_item_version_id);
+    }
+
+    public function test_draft_generation_returns_empty_knowledge_sources_when_no_chunks_retrieved(): void
+    {
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-GEN-002', 'Empty sources test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $this->touchSavedNotice($savedNotice, '2026-06-22 10:10:00');
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'krav-no-kb.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/krav-no-kb.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal dokumentere erfaring.',
+            'text_extracted_at' => '2026-06-22 10:11:00',
+        ]);
+
+        $sourceChunk = $this->createAiDocumentChunk($document, 'Leverandøren skal dokumentere erfaring.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere erfaring.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'red',
+                'max_score' => 0.0,
+                'sources_count' => 0,
+            ];
+        });
+
+        Http::fake();
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('knowledge_sources_sent_to_ai', []);
+
+        $evidenceCount = SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $requirement->id)
+            ->count();
+
+        $this->assertSame(0, $evidenceCount, 'No evidence rows should be created when draft generation is blocked.');
+    }
+
     private function useProjectPostgresConnection(): void
     {
         config([

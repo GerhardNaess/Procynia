@@ -940,6 +940,7 @@ class AiController extends Controller
                     'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
                     'retrieval_sources' => $retrievedKnowledgeChunks->all(),
                     'knowledge_grounding' => $knowledgeGrounding,
+                    'knowledge_sources_sent_to_ai' => [],
                 ],
             ));
         }
@@ -1002,6 +1003,7 @@ class AiController extends Controller
                     'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
                     'retrieval_sources' => $retrievedKnowledgeChunks->all(),
                     'knowledge_grounding' => $knowledgeGrounding,
+                    'knowledge_sources_sent_to_ai' => [],
                 ],
             ));
         }
@@ -1074,6 +1076,19 @@ class AiController extends Controller
             ]);
         $persistedRequirement->refresh();
 
+        $this->syncRequirementEvidence(
+            $ownedRequirement,
+            $retrievedKnowledgeChunks,
+            $request->user()?->id,
+            null,
+        );
+
+        $persistedRequirement->load([
+            'evidence.knowledgeItem',
+            'evidence.knowledgeItemChunk',
+            'evidence.knowledgeItemVersion',
+        ]);
+
         Log::info('[PROCYNIA][AI_GROUNDING_JUDGE] Grounding judge allowed answer generation.', [
             'saved_notice_id' => $record->id,
             'requirement_id' => $ownedRequirement->id,
@@ -1099,6 +1114,7 @@ class AiController extends Controller
                 'answer_basis_items' => $this->aiAnswerBasisItemsPayload($selectedAnswerBasisItems),
                 'retrieval_sources' => $retrievedKnowledgeChunks->all(),
                 'knowledge_grounding' => $knowledgeGrounding,
+                'knowledge_sources_sent_to_ai' => $this->aiRequirementKnowledgeSourcesPayload($persistedRequirement),
             ],
         ));
     }
@@ -2264,6 +2280,9 @@ class AiController extends Controller
                     'section_path' => (string) data_get($candidate, 'section_path', ''),
                     'content' => $content,
                     'content_preview' => Str::limit(Str::squish($content), 1200, '...'),
+                    'knowledge_item_version_id' => is_numeric(data_get($match, 'knowledge_item_version_id'))
+                        ? (int) data_get($match, 'knowledge_item_version_id')
+                        : null,
                     'image_url' => (string) data_get($candidate, 'chunk_type', 'semantic') === 'image'
                         && (int) data_get($candidate, 'knowledge_item_id', 0) > 0
                         && (int) data_get($candidate, 'chunk_id', 0) > 0
