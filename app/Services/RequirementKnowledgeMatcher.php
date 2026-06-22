@@ -63,8 +63,7 @@ class RequirementKnowledgeMatcher
 
     public function __construct(
         private readonly CosineSimilarity $cosineSimilarity,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Match one requirement text against a scoped set of knowledge chunks.
@@ -157,6 +156,9 @@ class RequirementKnowledgeMatcher
                         : null,
                     'final_score' => (float) $score,
                     'knowledge_item_updated_at' => (string) data_get($chunk, 'knowledge_item_updated_at', ''),
+                    'knowledge_item_version_id' => is_numeric(data_get($chunk, 'knowledge_item_version_id'))
+                        ? (int) data_get($chunk, 'knowledge_item_version_id')
+                        : null,
                 ];
             })
             ->filter()

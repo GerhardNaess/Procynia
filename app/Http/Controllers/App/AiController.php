@@ -5,57 +5,58 @@ namespace App\Http\Controllers\App;
 use App\Data\Ai\Requirements\RequirementEditData;
 use App\Data\Ai\Requirements\RequirementViewData;
 use App\Http\Controllers\Controller;
-use App\Models\SavedNoticeAiEvidence;
-use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Models\RequirementExtractionCall;
 use App\Models\SavedNotice;
+use App\Models\SavedNoticeAiAnswerBasisItem;
 use App\Models\SavedNoticeAiDocument;
-use App\Models\SavedNoticeAiRequirementAssessment;
+use App\Models\SavedNoticeAiEvidence;
 use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementAssessment;
 use App\Models\User;
-use App\Services\DocumentChunker;
-use App\Services\DocumentTextExtractor;
+use App\Services\Ai\AiUsageGuard;
 use App\Services\Ai\DocumentPreviewService;
-use App\Services\Ai\Requirements\RequirementExtractionPipeline;
-use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementAnswerBasisService;
 use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\Ai\Requirements\RequirementEditorService;
+use App\Services\Ai\Requirements\RequirementExtractionPipeline;
+use App\Services\Ai\Requirements\RequirementExtractionRunService;
 use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
+use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\Ai\Requirements\RequirementWordExportService;
 use App\Services\Ai\Retrieval\KnowledgeMetadataMapService;
 use App\Services\Ai\Retrieval\MetadataCandidateRetrievalService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
 use App\Services\Ai\Retrieval\MetadataRetrievalPlanValidator;
-use App\Services\Ai\Requirements\RequirementKnowledgeDocumentRecommendationService;
-use App\Services\Ai\Requirements\RequirementEditorService;
-use App\Services\Ai\Requirements\RequirementWordExportService;
-use App\Services\Ai\Requirements\RequirementLoader;
-use App\Services\Ai\AiUsageGuard;
 use App\Services\Billing\BillingEntitlementService;
-use App\Services\KnowledgeChunkCoverageService;
+use App\Services\DocumentChunker;
+use App\Services\DocumentTextExtractor;
 use App\Services\InfoCenter\RequirementResponsibilityTaskService;
+use App\Services\KnowledgeChunkCoverageService;
 use App\Services\OpenAi\EmbeddingService;
 use App\Services\RequirementAssessmentService;
 use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use App\Support\PgVector;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Illuminate\Support\Collection;
-use Throwable;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\ResponseHeaderBag;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 class AiController extends Controller
 {
@@ -98,8 +99,7 @@ class AiController extends Controller
         private readonly RequirementResponsibilityTaskService $requirementResponsibilityTaskService,
         private readonly AiUsageGuard $aiUsageGuard,
         private readonly RequirementWordExportService $requirementWordExportService,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Render the AI workspace landing page for customer case work.
@@ -614,7 +614,7 @@ class AiController extends Controller
     public function exportRequirementsToDocx(
         Request $request,
         SavedNotice $savedNotice,
-    ): \Symfony\Component\HttpFoundation\StreamedResponse|\Illuminate\Http\Response {
+    ): StreamedResponse|\Illuminate\Http\Response {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
@@ -629,7 +629,7 @@ class AiController extends Controller
         }
 
         $docxContents = $this->requirementWordExportService->build($record, $requirements);
-        $filename = 'tilbudsbesvarelse-' . $record->id . '.docx';
+        $filename = 'tilbudsbesvarelse-'.$record->id.'.docx';
 
         return response()->streamDownload(
             function () use ($docxContents): void {
@@ -1610,10 +1610,10 @@ class AiController extends Controller
         $counts = DB::table('requirement_extraction_calls')
             ->where('requirement_extraction_run_id', $run->id)
             ->selectRaw(
-                'COUNT(*) as total_calls,' .
-                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as completed_calls,' .
-                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as running_calls,' .
-                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as queued_calls,' .
+                'COUNT(*) as total_calls,'.
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as completed_calls,'.
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as running_calls,'.
+                ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as queued_calls,'.
                 ' SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed_calls',
                 [
                     RequirementExtractionCall::STATUS_COMPLETED,
@@ -1646,8 +1646,7 @@ class AiController extends Controller
         SavedNoticeAiDocument $document,
         ?string $previewMode = null,
         ?string $previewFileUrl = null,
-    ): array
-    {
+    ): array {
         $storedPath = (string) $document->stored_path;
         $resolvedPreviewMode = $previewMode ?? $this->documentPreviewService->previewMode($document);
         $resolvedPreviewFileUrl = $previewFileUrl ?? $this->documentPreviewService->previewFileUrl($document);
@@ -2008,6 +2007,9 @@ class AiController extends Controller
                 'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
                 'embedding_error' => $chunk->embedding_error,
                 'knowledge_item_updated_at' => (string) $chunk->getAttribute('knowledge_item_updated_at'),
+                'knowledge_item_version_id' => is_numeric($chunk->knowledge_item_version_id)
+                    ? (int) $chunk->knowledge_item_version_id
+                    : null,
             ])
             ->values();
 
@@ -2024,8 +2026,7 @@ class AiController extends Controller
         Request $request,
         SavedNotice $record,
         SavedNoticeAiRequirement $requirement,
-    ): Collection
-    {
+    ): Collection {
         $requirementText = trim((string) $requirement->requirement_text);
 
         if ($requirementText === '') {
@@ -2320,8 +2321,7 @@ class AiController extends Controller
         SavedNoticeAiRequirement $requirement,
         array $groundingJudge,
         Collection $retrievedKnowledgeChunks,
-    ): array
-    {
+    ): array {
         $recommendation = $this->recommendationForGroundingJudge($requirement, $groundingJudge);
         $directlySupportedPoints = $this->normalizeGroundingPointList(
             data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
@@ -2558,6 +2558,7 @@ class AiController extends Controller
                 $bestScore = $score;
                 $bestSource = $retrievalSource;
                 $bestCount = 1;
+
                 continue;
             }
 
@@ -3123,6 +3124,9 @@ class AiController extends Controller
             $requirement->evidence()->create([
                 'knowledge_item_id' => (int) $match['knowledge_item_id'],
                 'knowledge_item_chunk_id' => $chunkId,
+                'knowledge_item_version_id' => isset($match['knowledge_item_version_id'])
+                    ? (int) $match['knowledge_item_version_id']
+                    : null,
                 'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
                 'match_score' => (int) $match['score'],
                 'match_rank' => $index + 1,
@@ -3207,5 +3211,4 @@ class AiController extends Controller
 
         return sprintf('%.1f MB', $bytes / (1024 * 1024));
     }
-
 }

@@ -418,6 +418,81 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertCount(0, $result);
     }
 
+    public function test_retrieval_chunk_row_includes_knowledge_item_version_id_and_version_no(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Version Row AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'version-row.docx',
+        ]);
+
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Versjonsrad test',
+            'content' => 'Innhold for versjonsrad test.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Versjonsrad test']],
+            'search_text' => 'versjonsrad test',
+            'intent_summary' => 'Sjekker at retrieval-rad inneholder versjonspeker.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+        $row = $result->first();
+        $this->assertArrayHasKey('knowledge_item_version_id', $row);
+        $this->assertArrayHasKey('knowledge_item_version_no', $row);
+        $this->assertSame($version->id, $row['knowledge_item_version_id']);
+        $this->assertSame(1, $row['knowledge_item_version_no']);
+    }
+
+    public function test_retrieval_chunk_row_version_id_belongs_to_customer_scope(): void
+    {
+        $service = app(MetadataCandidateRetrievalService::class);
+
+        $customerA = $this->createCustomer('Scope A AS');
+        $customerB = $this->createCustomer('Scope B AS');
+
+        $documentA = $this->createKnowledgeItem($customerA, [
+            'original_filename' => 'scope-a.docx',
+            'content' => 'Scope A innhold for scope test.',
+        ]);
+        $this->createChunk($documentA, 0, [
+            'topic' => 'Scope test',
+            'content' => 'Scope A innhold for scope test.',
+        ]);
+
+        $documentB = $this->createKnowledgeItem($customerB, [
+            'original_filename' => 'scope-b.docx',
+            'content' => 'Scope B innhold for scope test.',
+        ]);
+        $versionB = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $documentB->id)
+            ->where('is_current', true)
+            ->value('id');
+
+        $this->createChunk($documentB, 0, [
+            'topic' => 'Scope test',
+            'content' => 'Scope B innhold for scope test.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customerA->id, [
+            'selected_metadata' => ['topic' => ['Scope test']],
+            'search_text' => 'scope test',
+            'intent_summary' => 'Sjekker at versjonspeker ikke lekker på tvers av kunder.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame((int) $documentA->id, $result->first()['knowledge_item_id']);
+        $this->assertNotSame($versionB, $result->first()['knowledge_item_version_id']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(

@@ -45,6 +45,7 @@ class SavedNoticeAiEvidence extends Model
         'saved_notice_ai_requirement_id',
         'knowledge_item_id',
         'knowledge_item_chunk_id',
+        'knowledge_item_version_id',
         'match_type',
         'match_score',
         'match_rank',

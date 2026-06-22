@@ -89,8 +89,7 @@ class MetadataCandidateRetrievalService
 
     public function __construct(
         private readonly KnowledgeChunkCoverageService $knowledgeChunkCoverageService,
-    ) {
-    }
+    ) {}
 
     /**
      * Purpose: Retrieve a deterministic metadata-anchored candidate set for one customer.
@@ -298,6 +297,8 @@ class MetadataCandidateRetrievalService
             'knowledge_items.document_type as content_type',
             'knowledge_items.summary as knowledge_item_summary',
             'knowledge_items.updated_at as knowledge_item_updated_at',
+            'knowledge_item_versions.id as knowledge_item_version_id',
+            'knowledge_item_versions.version_no as knowledge_item_version_no',
         ];
     }
 
@@ -354,6 +355,12 @@ class MetadataCandidateRetrievalService
             'embedding_generated_at' => optional($chunk->embedding_generated_at)?->toIso8601String(),
             'embedding_error' => $chunk->embedding_error,
             'knowledge_item_updated_at' => (string) $chunk->getAttribute('knowledge_item_updated_at'),
+            'knowledge_item_version_id' => is_numeric($chunk->getAttribute('knowledge_item_version_id'))
+                ? (int) $chunk->getAttribute('knowledge_item_version_id')
+                : null,
+            'knowledge_item_version_no' => is_numeric($chunk->getAttribute('knowledge_item_version_no'))
+                ? (int) $chunk->getAttribute('knowledge_item_version_no')
+                : null,
         ];
     }
 

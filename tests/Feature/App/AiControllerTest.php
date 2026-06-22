@@ -3,58 +3,61 @@
 namespace Tests\Feature\App;
 
 use App\Http\Controllers\App\AiController;
+use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
+use App\Models\AiTokenEvent;
+use App\Models\AiUsageEvent;
+use App\Models\BidSubmission;
 use App\Models\Customer;
 use App\Models\CustomerAiCaseUsage;
-use App\Models\Language;
 use App\Models\KnowledgeItem;
-use App\Models\SavedNotice;
-use App\Models\SavedNoticeInfoItem;
-use App\Models\SavedNoticeUserAccess;
-use App\Models\SavedNoticePhaseComment;
-use App\Models\BidSubmission;
-use App\Models\AiUsageEvent;
-use App\Models\Nationality;
 use App\Models\KnowledgeItemChunk;
-use App\Models\SavedNoticeAiDocument;
-use App\Models\SavedNoticeAiDocumentChunk;
-use App\Models\SavedNoticeAiAnswerBasisItem;
-use App\Models\SavedNoticeAiEvidence;
-use App\Models\SavedNoticeAiRequirementAssessment;
-use App\Models\SavedNoticeAiRequirement;
-use App\Models\SavedNoticeAiRequirementRevision;
-use App\Models\AiTokenEvent;
+use App\Models\KnowledgeItemVersion;
+use App\Models\Language;
+use App\Models\Nationality;
 use App\Models\RequirementExtractionCall;
 use App\Models\RequirementExtractionRun;
-use App\Services\Ai\AiTokenLogger;
-use App\Jobs\Ai\Requirements\ProcessRequirementExtractionRun;
-use App\Services\Ai\Requirements\RequirementExtractionRunService;
-use App\Services\OpenAi\EmbeddingService;
-use App\Services\Ai\Requirements\RequirementExtractionPipeline;
-use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
-use App\Services\Ai\Requirements\RequirementLoader;
-use App\Services\Ai\Requirements\RequirementAnswerDraftService;
-use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
-use App\Services\Ai\AiUsageGuard;
-use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
-use App\Services\RequirementExtractor;
-use App\Services\KnowledgeChunkCoverageService;
+use App\Models\SavedNotice;
+use App\Models\SavedNoticeAiAnswerBasisItem;
+use App\Models\SavedNoticeAiDocument;
+use App\Models\SavedNoticeAiDocumentChunk;
+use App\Models\SavedNoticeAiEvidence;
+use App\Models\SavedNoticeAiRequirement;
+use App\Models\SavedNoticeAiRequirementAssessment;
+use App\Models\SavedNoticeAiRequirementRevision;
+use App\Models\SavedNoticeInfoItem;
+use App\Models\SavedNoticePhaseComment;
+use App\Models\SavedNoticeUserAccess;
 use App\Models\User;
+use App\Services\Ai\AiTokenLogger;
+use App\Services\Ai\AiUsageGuard;
+use App\Services\Ai\Requirements\FullDocumentRequirementExtractionPrompt;
+use App\Services\Ai\Requirements\RequirementAnswerDraftService;
+use App\Services\Ai\Requirements\RequirementExtractionPipeline;
+use App\Services\Ai\Requirements\RequirementExtractionRunService;
+use App\Services\Ai\Requirements\RequirementGroundingJudgeService;
+use App\Services\Ai\Requirements\RequirementLoader;
+use App\Services\Ai\Retrieval\MetadataRetrievalPlanService;
+use App\Services\DocumentChunker;
+use App\Services\KnowledgeChunkCoverageService;
+use App\Services\OpenAi\EmbeddingService;
+use App\Services\RequirementExtractor;
 use Carbon\Carbon;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Support\Collection;
+use Illuminate\Testing\TestResponse;
 use Mockery;
 use RuntimeException;
-use ZipArchive;
 use Tests\TestCase;
+use ZipArchive;
 
 class AiControllerTest extends TestCase
 {
@@ -890,7 +893,7 @@ class AiControllerTest extends TestCase
                     && $draftRequirement->id === $requirement->id
                     && $forceGenerate === false
                     && $caseInstructions === null
-                    && $retrievedKnowledgeChunks instanceof \Illuminate\Support\Collection
+                    && $retrievedKnowledgeChunks instanceof Collection
                     && is_array($groundingJudge)
                     && data_get($groundingJudge, 'status') === 'supported';
             })
@@ -1610,7 +1613,7 @@ class AiControllerTest extends TestCase
             ];
         });
 
-        Http::fake(function (Request $request) use ($requirement, $retrievalKnowledge, $retrievalChunk) {
+        Http::fake(function (Request $request) use ($requirement, $retrievalKnowledge) {
             $requestPayload = json_decode((string) $request->body(), true);
 
             if (! is_array($requestPayload)) {
@@ -2104,7 +2107,7 @@ class AiControllerTest extends TestCase
             ];
         });
 
-        Http::fake(function (Request $request) use ($requirement, $tableChunk, $semanticChunk, $tableKnowledge, $semanticKnowledge) {
+        Http::fake(function (Request $request) use ($requirement, $tableChunk, $semanticChunk, $tableKnowledge) {
             $requestPayload = json_decode((string) $request->body(), true);
 
             if (! is_array($requestPayload)) {
@@ -2390,7 +2393,7 @@ class AiControllerTest extends TestCase
             ];
         });
 
-        Http::fake(function (Request $request) use ($requirement, $imageChunk, $knowledgeItem) {
+        Http::fake(function (Request $request) use ($requirement, $imageChunk) {
             $requestPayload = json_decode((string) $request->body(), true);
 
             if (! is_array($requestPayload)) {
@@ -7081,8 +7084,7 @@ class AiControllerTest extends TestCase
         int $createdByUserId,
         string $subject,
         array $overrides = [],
-    ): SavedNoticeInfoItem
-    {
+    ): SavedNoticeInfoItem {
         $attributes = [
             'saved_notice_id' => $savedNoticeId,
             'type' => $overrides['type'] ?? SavedNoticeInfoItem::TYPE_NOTE,
@@ -7689,7 +7691,7 @@ class AiControllerTest extends TestCase
     {
         $knowledgeItem->chunks()->delete();
 
-        $chunkPayloads = app(\App\Services\DocumentChunker::class)->chunkText((string) $knowledgeItem->extracted_text);
+        $chunkPayloads = app(DocumentChunker::class)->chunkText((string) $knowledgeItem->extracted_text);
 
         $knowledgeItem->chunks()->createMany(array_map(
             static fn (array $chunk, int $chunkIndex): array => [
@@ -7709,7 +7711,7 @@ class AiControllerTest extends TestCase
      * Returns: The decoded Inertia page array.
      * Side effects: Throws when the response does not contain a readable Inertia payload.
      */
-    private function inertiaPageFromResponse(\Illuminate\Testing\TestResponse $response): array
+    private function inertiaPageFromResponse(TestResponse $response): array
     {
         try {
             $page = $response->viewData('page');
@@ -7751,7 +7753,7 @@ class AiControllerTest extends TestCase
             throw new RuntimeException('Unable to create a temporary DOCX file.');
         }
 
-        $zip = new ZipArchive();
+        $zip = new ZipArchive;
         $opened = $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
         if ($opened !== true) {
@@ -7960,7 +7962,7 @@ class AiControllerTest extends TestCase
         $response = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($requirement, $olderDocument, $newerDocument, $savedNotice): bool {
+        $response->assertViewHas('page', function (array $page) use ($olderDocument, $newerDocument, $savedNotice): bool {
             $documents = collect(data_get($page, 'props.documents', []));
             $requirements = collect(data_get($page, 'props.requirements', []));
             $requirementRow = $requirements->firstWhere('saved_notice_ai_document_id', $olderDocument->id);
@@ -8176,6 +8178,190 @@ class AiControllerTest extends TestCase
         $this->actingAs($context['user'])
             ->get(route('app.ai.show', ['savedNotice' => $activeNotice->id]))
             ->assertOk();
+    }
+
+    public function test_evidence_row_stores_knowledge_item_version_id(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-VER-001', 'Version evidence test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'version-evidence.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/version-evidence.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'erfaring metode versjonspeker.',
+            'text_extracted_at' => '2026-06-22 10:00:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'erfaring metode versjonspeker.',
+            'char_start' => 0,
+            'char_end' => 30,
+            'word_count' => 4,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'erfaring metode versjonspeker.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Versjonert kunnskapsbase',
+            'content' => 'erfaring metode versjonspeker.',
+            'is_active' => true,
+        ]);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/versjonert.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $knowledgeItem->chunks()->create([
+            'knowledge_item_version_id' => $version->id,
+            'chunk_index' => 0,
+            'content' => 'erfaring metode versjonspeker.',
+            'start_offset' => 0,
+            'end_offset' => 30,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+
+        $this->bindEmbeddingService(fn () => [
+            'ok' => false,
+            'embedding' => null,
+            'model' => 'text-embedding-3-small',
+            'usage' => [],
+            'error_type' => 'upstream_unavailable',
+            'error_message' => 'Embedding request failed.',
+            'upstream_status' => 503,
+            'request_id' => 'test-request-id',
+            'response_body_excerpt' => null,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidence = SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $requirement->id)
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->first();
+
+        $this->assertNotNull($evidence, 'Expected evidence row for knowledge item.');
+        $this->assertSame($version->id, (int) $evidence->knowledge_item_version_id);
+    }
+
+    public function test_evidence_row_version_id_is_stable_without_refresh(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'EV-VER-002', 'Version stability test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'version-stability.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/version-stability.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'erfaring metode stabilitet.',
+            'text_extracted_at' => '2026-06-22 10:05:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'erfaring metode stabilitet.',
+            'char_start' => 0,
+            'char_end' => 26,
+            'word_count' => 4,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'erfaring metode stabilitet.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Stabilitetstest dokument',
+            'content' => 'erfaring metode stabilitet.',
+            'is_active' => true,
+        ]);
+
+        $versionOne = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stabilitetstest.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $knowledgeItem->chunks()->create([
+            'knowledge_item_version_id' => $versionOne->id,
+            'chunk_index' => 0,
+            'content' => 'erfaring metode stabilitet.',
+            'start_offset' => 0,
+            'end_offset' => 26,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+
+        $this->bindEmbeddingService(fn () => [
+            'ok' => false,
+            'embedding' => null,
+            'model' => 'text-embedding-3-small',
+            'usage' => [],
+            'error_type' => 'upstream_unavailable',
+            'error_message' => 'Embedding request failed.',
+            'upstream_status' => 503,
+            'request_id' => 'test-request-id',
+            'response_body_excerpt' => null,
+        ]);
+
+        $this->actingAs($context['user'])
+            ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
+            ->post(route('app.ai.evidence.refresh', ['savedNotice' => $savedNotice->id]))
+            ->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $evidenceBefore = SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $requirement->id)
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->firstOrFail();
+
+        $this->assertSame($versionOne->id, (int) $evidenceBefore->knowledge_item_version_id);
+
+        // Simulate a new current version — do NOT refresh evidence.
+        $versionOne->update(['is_current' => false]);
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 2,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stabilitetstest-v2.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $evidenceAfter = SavedNoticeAiEvidence::query()
+            ->where('saved_notice_ai_requirement_id', $requirement->id)
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->firstOrFail();
+
+        $this->assertSame($versionOne->id, (int) $evidenceAfter->knowledge_item_version_id,
+            'Evidence row should still point to version 1 when no refresh has been triggered.');
     }
 
     private function useProjectPostgresConnection(): void
