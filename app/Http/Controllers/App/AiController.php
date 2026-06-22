@@ -791,6 +791,7 @@ class AiController extends Controller
             'assessment.assessedBy',
             'evidence.knowledgeItem',
             'evidence.knowledgeItemChunk',
+            'evidence.knowledgeItemVersion',
             'revisions.changedBy',
         ])->loadCount('revisions');
 
@@ -1764,6 +1765,7 @@ class AiController extends Controller
                 ]),
                 'assessment' => $this->aiRequirementAssessmentPayload($requirement->assessment),
                 'evidence' => $this->aiRequirementEvidencePayload($requirement),
+                'knowledge_sources_sent_to_ai' => $this->aiRequirementKnowledgeSourcesPayload($requirement),
             ],
         );
     }
@@ -1908,6 +1910,49 @@ class AiController extends Controller
                         'start_offset' => $knowledgeChunk?->start_offset,
                         'end_offset' => $knowledgeChunk?->end_offset,
                     ],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Purpose: Build the Kunnskapsbase source list sent to AI as grounding for one requirement.
+     * Inputs: A requirement with evidence, knowledgeItem, knowledgeItemChunk, and knowledgeItemVersion loaded.
+     * Returns: An ordered array of source entries; empty array when no evidence exists.
+     * Side effects: None.
+     */
+    private function aiRequirementKnowledgeSourcesPayload(SavedNoticeAiRequirement $requirement): array
+    {
+        return $requirement->evidence
+            ->map(function (SavedNoticeAiEvidence $evidence): array {
+                $knowledgeItem = $evidence->knowledgeItem;
+                $knowledgeChunk = $evidence->knowledgeItemChunk;
+                $version = $evidence->knowledgeItemVersion;
+                $documentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+
+                return [
+                    'evidence_id' => $evidence->id,
+                    'knowledge_item_id' => $knowledgeItem?->id,
+                    'knowledge_item_version_id' => $evidence->knowledge_item_version_id,
+                    'knowledge_item_version_no' => $version?->version_no,
+                    'original_filename' => $knowledgeItem?->original_filename,
+                    'document_type' => $documentType,
+                    'document_type_label' => filled($documentType)
+                        ? (KnowledgeItem::DOCUMENT_TYPE_LABELS[$documentType] ?? $documentType)
+                        : null,
+                    'chunk_id' => $knowledgeChunk?->id,
+                    'chunk_index' => $knowledgeChunk?->chunk_index,
+                    'chunk_type' => $knowledgeChunk?->chunk_type,
+                    'section_title' => $knowledgeChunk?->section_title,
+                    'heading_path' => $knowledgeChunk?->heading_path ?? $knowledgeChunk?->section_path,
+                    'match_score' => $evidence->match_score,
+                    'match_rank' => $evidence->match_rank,
+                    'match_type' => $evidence->match_type,
+                    'is_primary' => $evidence->is_primary,
+                    'selection_status' => $evidence->selection_status,
+                    'version_approval_status' => $version?->approval_status,
+                    'version_is_current_now' => $version !== null && (bool) $version->is_current,
                 ];
             })
             ->values()

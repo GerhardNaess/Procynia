@@ -36,6 +36,7 @@ class RequirementLoader
                 'assessment.assessedBy',
                 'evidence.knowledgeItem',
                 'evidence.knowledgeItemChunk',
+                'evidence.knowledgeItemVersion',
                 'answerBasisItems',
                 'revisions.changedBy',
             ])
@@ -72,6 +73,7 @@ class RequirementLoader
                 'assessment.assessedBy',
                 'evidence.knowledgeItem',
                 'evidence.knowledgeItemChunk',
+                'evidence.knowledgeItemVersion',
                 'answerBasisItems',
             ])
             ->orderByRaw('CASE WHEN saved_notice_ai_document_id IS NULL THEN 1 ELSE 0 END')

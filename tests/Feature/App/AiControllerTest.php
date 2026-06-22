@@ -8180,6 +8180,332 @@ class AiControllerTest extends TestCase
             ->assertOk();
     }
 
+    public function test_knowledge_sources_payload_contains_source_with_version_info(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'KS-001', 'Kunnskapskilder test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'ks-source.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/ks-source.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Krav om metode og erfaring.',
+            'text_extracted_at' => '2026-06-22 12:00:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Krav om metode og erfaring.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 5,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Krav om metode og erfaring.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Metode og erfaring',
+            'content' => 'Metode og erfaring dokumentasjon.',
+            'is_active' => true,
+        ]);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/metode.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $chunk = $knowledgeItem->chunks()->create([
+            'knowledge_item_version_id' => $version->id,
+            'chunk_index' => 0,
+            'content' => 'Metode og erfaring dokumentasjon.',
+            'start_offset' => 0,
+            'end_offset' => 32,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_chunk_id' => $chunk->id,
+            'knowledge_item_version_id' => $version->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 5,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $sources = collect(data_get($requirements->get($requirement->id), 'knowledge_sources_sent_to_ai', null));
+
+        $this->assertIsArray(data_get($requirements->get($requirement->id), 'knowledge_sources_sent_to_ai'));
+        $this->assertCount(1, $sources);
+
+        $source = $sources->first();
+        $this->assertSame($knowledgeItem->id, $source['knowledge_item_id']);
+        $this->assertSame($version->id, $source['knowledge_item_version_id']);
+        $this->assertSame(1, $source['knowledge_item_version_no']);
+        $this->assertSame($knowledgeItem->original_filename, $source['original_filename']);
+        $this->assertSame($chunk->id, $source['chunk_id']);
+        $this->assertSame(5, $source['match_score']);
+        $this->assertSame(1, $source['match_rank']);
+        $this->assertTrue($source['version_is_current_now']);
+    }
+
+    public function test_knowledge_sources_payload_is_empty_array_when_no_evidence(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'KS-002', 'Tom kildeliste test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'ks-empty.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/ks-empty.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Krav uten kunnskapskilder.',
+            'text_extracted_at' => '2026-06-22 12:05:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Krav uten kunnskapskilder.',
+            'char_start' => 0,
+            'char_end' => 25,
+            'word_count' => 4,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Krav uten kunnskapskilder.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $sources = data_get($requirements->get($requirement->id), 'knowledge_sources_sent_to_ai');
+
+        $this->assertIsArray($sources);
+        $this->assertSame([], $sources);
+    }
+
+    public function test_knowledge_sources_payload_shows_version_not_current_when_superseded(): void
+    {
+        $context = $this->customerAdminContext();
+
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'KS-003', 'Versjonsstabilitet test', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $context['user']->id,
+            'original_filename' => 'ks-version.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/ks-version.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Krav for versjonsstabilitet.',
+            'text_extracted_at' => '2026-06-22 12:10:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Krav for versjonsstabilitet.',
+            'char_start' => 0,
+            'char_end' => 27,
+            'word_count' => 4,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Krav for versjonsstabilitet.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        $knowledgeItem = $this->createKnowledgeItem($context['customer'], [
+            'title' => 'Versjonsstabilitet dokument',
+            'content' => 'Versjonsstabilitet dokumentasjon.',
+            'is_active' => true,
+        ]);
+
+        $versionOne = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/versjonsstabilitet.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $chunkOne = $knowledgeItem->chunks()->create([
+            'knowledge_item_version_id' => $versionOne->id,
+            'chunk_index' => 0,
+            'content' => 'Versjonsstabilitet dokumentasjon.',
+            'start_offset' => 0,
+            'end_offset' => 32,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_chunk_id' => $chunkOne->id,
+            'knowledge_item_version_id' => $versionOne->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 3,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => $context['user']->id,
+        ]);
+
+        // Simulate v1 being superseded by v2 — evidence still points to v1.
+        $versionOne->update(['is_current' => false]);
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItem->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 2,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/versjonsstabilitet-v2.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $response = $this->actingAs($context['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $sources = collect(data_get($requirements->get($requirement->id), 'knowledge_sources_sent_to_ai', []));
+
+        $this->assertCount(1, $sources);
+        $source = $sources->first();
+        $this->assertSame($versionOne->id, $source['knowledge_item_version_id']);
+        $this->assertSame(1, $source['knowledge_item_version_no']);
+        $this->assertFalse($source['version_is_current_now'],
+            'Evidence pointing to the superseded version should show version_is_current_now = false.');
+    }
+
+    public function test_knowledge_sources_payload_respects_customer_scope(): void
+    {
+        $contextA = $this->customerAdminContext('Scope Kunde A AS');
+        $contextB = $this->customerAdminContext('Scope Kunde B AS');
+
+        $savedNotice = $this->createSavedNotice($contextA['customer']->id, 'KS-005', 'Kundeskopetest', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+
+        $document = $this->createAiDocument($savedNotice, [
+            'uploaded_by_user_id' => $contextA['user']->id,
+            'original_filename' => 'ks-scope.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/ks-scope.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Krav for kundescoping.',
+            'text_extracted_at' => '2026-06-22 12:20:00',
+        ]);
+
+        $sourceChunk = $document->chunks()->create([
+            'chunk_index' => 0,
+            'content' => 'Krav for kundescoping.',
+            'char_start' => 0,
+            'char_end' => 22,
+            'word_count' => 4,
+        ]);
+
+        $requirement = $this->createAiRequirement($savedNotice, $document, $sourceChunk, [
+            'requirement_text' => 'Krav for kundescoping.',
+            'requirement_type' => SavedNoticeAiRequirement::REQUIREMENT_TYPE_DOCUMENTATION,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_CONFIRMED,
+            'work_status' => SavedNoticeAiRequirement::WORK_STATUS_NOT_STARTED,
+        ]);
+
+        // Customer A's knowledge item with evidence.
+        $knowledgeItemA = $this->createKnowledgeItem($contextA['customer'], [
+            'title' => 'Kundescopetest A',
+            'content' => 'Kundescoping dokumentasjon A.',
+            'is_active' => true,
+        ]);
+        $versionA = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $knowledgeItemA->id,
+            'customer_id' => $contextA['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$contextA['customer']->id.'/knowledge-items/scope-a.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+        $chunkA = $knowledgeItemA->chunks()->create([
+            'knowledge_item_version_id' => $versionA->id,
+            'chunk_index' => 0,
+            'content' => 'Kundescoping dokumentasjon A.',
+            'start_offset' => 0,
+            'end_offset' => 28,
+            'review_status' => KnowledgeItemChunk::REVIEW_STATUS_APPROVED,
+        ]);
+        SavedNoticeAiEvidence::query()->create([
+            'saved_notice_ai_requirement_id' => $requirement->id,
+            'knowledge_item_id' => $knowledgeItemA->id,
+            'knowledge_item_chunk_id' => $chunkA->id,
+            'knowledge_item_version_id' => $versionA->id,
+            'match_type' => SavedNoticeAiEvidence::MATCH_TYPE_AUTO_MATCH,
+            'match_score' => 4,
+            'match_rank' => 1,
+            'selection_status' => SavedNoticeAiEvidence::SELECTION_STATUS_SUGGESTED,
+            'is_primary' => false,
+            'created_by_user_id' => $contextA['user']->id,
+        ]);
+
+        // Customer B's knowledge item — must NOT appear in Customer A's payload.
+        $knowledgeItemB = $this->createKnowledgeItem($contextB['customer'], [
+            'title' => 'Kundescopetest B',
+            'content' => 'Kundescoping dokumentasjon B.',
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($contextA['user'])
+            ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+
+        $response->assertOk();
+        $page = $this->inertiaPageFromResponse($response);
+        $requirements = collect(data_get($page, 'props.requirements', []))->keyBy('id');
+        $sources = collect(data_get($requirements->get($requirement->id), 'knowledge_sources_sent_to_ai', []));
+
+        $this->assertCount(1, $sources);
+        $this->assertSame($knowledgeItemA->id, $sources->first()['knowledge_item_id']);
+        $this->assertFalse(
+            $sources->contains(fn (array $s): bool => $s['knowledge_item_id'] === $knowledgeItemB->id),
+            'Customer B knowledge item must not appear in Customer A\'s sources payload.'
+        );
+    }
+
     public function test_evidence_row_stores_knowledge_item_version_id(): void
     {
         $context = $this->customerAdminContext();
