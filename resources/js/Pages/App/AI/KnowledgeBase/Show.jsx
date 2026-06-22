@@ -707,6 +707,15 @@ export default function KnowledgeBaseShow({
         versionRejectReasonPlaceholder: tks.version_reject_reason_placeholder ?? 'Beskriv hvorfor denne versjonen avvises...',
         versionRejectCancel: tks.version_reject_cancel ?? 'Avbryt',
         versionRejectConfirm: tks.version_reject_confirm ?? 'Avvis versjon',
+        aiStatusTitle: tks.ai_status_title ?? 'AI-grunnlag',
+        aiStatusActiveVersion: tks.ai_status_active_version ?? 'Aktiv versjon',
+        aiStatusActiveUsed: tks.ai_status_active_used ?? 'Denne versjonen er godkjent og brukes som AI-grunnlag.',
+        aiStatusActiveNotUsed: tks.ai_status_active_not_used ?? 'Denne versjonen er aktiv, men dokumentet brukes ikke av AI akkurat nå.',
+        aiStatusNoActive: tks.ai_status_no_active ?? 'Ingen aktiv dokumentversjon er satt.',
+        aiStatusPendingVersions: tks.ai_status_pending_versions ?? 'Versjoner til vurdering',
+        aiStatusPendingNote: tks.ai_status_pending_note ?? 'Nye versjoner brukes ikke av AI før de er godkjent.',
+        aiStatusPendingWhere: tks.ai_status_pending_where ?? 'Du kan godkjenne eller avvise dem under Historikk → Dokumentversjoner.',
+        aiStatusNoPending: tks.ai_status_no_pending ?? 'Ingen versjoner venter på godkjenning.',
         uploadNewVersionButton: tks.upload_new_version_button ?? 'Last opp ny versjon',
         uploadNewVersionTitle: tks.upload_new_version_title ?? 'Ny dokumentversjon',
         uploadNewVersionHelp: tks.upload_new_version_help ?? 'Ny fil blir aktiv versjon etter vellykket tekstuttrekk. Tidligere versjoner beholdes i historikken.',
@@ -899,6 +908,9 @@ export default function KnowledgeBaseShow({
     const revisionEntries = Array.isArray(knowledgeItem?.revisions) ? knowledgeItem.revisions : [];
     const processHistoryEntries = buildHistoryEntries(knowledgeItem, locale, documentStatus, knowledgeShowLabels);
     const versionEntries = Array.isArray(knowledgeItem?.versions) ? knowledgeItem.versions : [];
+    const currentVersion = versionEntries.find((v) => v.is_current) ?? null;
+    const pendingVersions = versionEntries.filter((v) => v.approval_status === 'pending_review');
+    const isDocumentAiActive = knowledgeItem?.is_active === true && knowledgeItem?.ai_usage_enabled !== false;
 
     useEffect(() => {
         if (chunks.length === 0) {
@@ -1455,6 +1467,59 @@ export default function KnowledgeBaseShow({
                         </dl>
                     </article>
                 </section>
+
+                {versionEntries.length > 0 ? (
+                    <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                            {knowledgeShowLabels.aiStatusTitle}
+                        </div>
+
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-6">
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                    {knowledgeShowLabels.aiStatusActiveVersion}
+                                </div>
+                                {currentVersion ? (
+                                    <div className="flex flex-wrap items-baseline gap-2">
+                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">
+                                            {knowledgeShowLabels.versionLabel} {currentVersion.version_no}
+                                        </span>
+                                        <span className={`text-sm ${isDocumentAiActive ? 'text-emerald-700' : 'text-slate-500'}`}>
+                                            {isDocumentAiActive
+                                                ? knowledgeShowLabels.aiStatusActiveUsed
+                                                : knowledgeShowLabels.aiStatusActiveNotUsed}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-slate-500">{knowledgeShowLabels.aiStatusNoActive}</p>
+                                )}
+                            </div>
+
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                    {knowledgeShowLabels.aiStatusPendingVersions}
+                                </div>
+                                {pendingVersions.length > 0 ? (
+                                    <div className="space-y-1">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                            {pendingVersions.map((v) => (
+                                                <span key={v.id} className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                    {knowledgeShowLabels.versionLabel} {v.version_no}
+                                                </span>
+                                            ))}
+                                        </div>
+                                        <p className="text-sm text-slate-600">
+                                            {knowledgeShowLabels.aiStatusPendingNote}{' '}
+                                            {knowledgeShowLabels.aiStatusPendingWhere}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-slate-400">{knowledgeShowLabels.aiStatusNoPending}</p>
+                                )}
+                            </div>
+                        </div>
+                    </section>
+                ) : null}
 
                 <section
                     ref={tabsRef}
