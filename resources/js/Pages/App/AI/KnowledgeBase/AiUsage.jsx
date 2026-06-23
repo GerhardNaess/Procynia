@@ -900,15 +900,18 @@ function DocumentUsageRow({
 
     const supersededCount = Number(row?.evidence_on_superseded_version_count ?? 0);
     const hasSuperseded = supersededCount > 0;
-
     return (
-        <tr className={`align-top transition ${isSelected ? 'bg-violet-50/60' : 'hover:bg-slate-50/40'}`}>
+        <tr
+            className={`align-top transition ${isSelected ? 'bg-violet-50/60' : 'hover:bg-slate-50/40'} ${onSelectDocument ? 'cursor-pointer' : ''}`}
+            onClick={() => onSelectDocument?.(getDocumentRowKey(row))}
+        >
             <td className="px-4 py-3.5">
                 <div className="max-w-55">
                     {showUrl ? (
                         <Link
                             href={showUrl}
                             className="font-medium text-violet-700 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
                         >
                             {displayName || '–'}
                         </Link>
@@ -924,7 +927,7 @@ function DocumentUsageRow({
                             <button
                                 type="button"
                                 className="text-xs font-medium text-violet-700 transition hover:underline"
-                                onClick={() => onSelectDocument?.(row)}
+                                onClick={(e) => { e.stopPropagation(); onSelectDocument?.(getDocumentRowKey(row)); }}
                             >
                                 {selectDocumentLabel}
                             </button>
