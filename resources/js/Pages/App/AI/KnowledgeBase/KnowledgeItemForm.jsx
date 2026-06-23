@@ -316,13 +316,15 @@ export default function KnowledgeItemForm({
                                 <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
                                     <label
                                         htmlFor="knowledge-document"
-                                        className="inline-flex shrink-0 cursor-pointer items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
+                                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
                                     >
-                                        Velg fil
+                                        <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700">
+                                            Velg fil
+                                        </span>
+                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                            {selectedDocumentLabel}
+                                        </span>
                                     </label>
-                                    <span className="min-w-0 flex-1 text-sm text-slate-500">
-                                        {selectedDocumentLabel}
-                                    </span>
                                     <input
                                         id="knowledge-document"
                                         type="file"
