@@ -24,14 +24,12 @@ function parseDateValue(value) {
         return null;
     }
 
-    const match = text.match(
-        /^(?<date>\d{4}-\d{2}-\d{2})[ T](?<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?<tz>Z|[+-]\d{2}(?::?\d{2})?)?$/,
-    );
+    const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)(Z|[+-]\d{2}(?::?\d{2})?)?$/);
 
     let normalized = text;
 
-    if (match?.groups) {
-        const { date, time, tz } = match.groups;
+    if (match) {
+        const [, date, time, tz = ''] = match;
 
         if (tz === undefined || tz === '') {
             normalized = `${date}T${time}Z`;
@@ -64,8 +62,12 @@ export default function KnowledgeBaseAiUsage({
     chunkUsageRows = [],
     summary = { document_count: 0, chunk_count: 0, evidence_count: 0 },
 }) {
-    const { locale = 'nb-NO', translations = {} } = usePage().props;
+    const pageProps = usePage().props ?? {};
+    const { locale = 'nb-NO', translations = {} } = pageProps;
     const tk = translations?.knowledge ?? {};
+    const safeDocumentUsageRows = Array.isArray(documentUsageRows) ? documentUsageRows : [];
+    const safeChunkUsageRows = Array.isArray(chunkUsageRows) ? chunkUsageRows : [];
+    const safeSummary = summary && typeof summary === 'object' ? summary : {};
 
     const pageTitle = tk.ai_usage_page_title ?? 'Bruk i AI';
     const subtitle = tk.ai_usage_subtitle ?? 'Oversikten viser Kunnskapsbase-kilder som er sendt til AI som grunnlag.';
@@ -78,9 +80,9 @@ export default function KnowledgeBaseAiUsage({
     const emptyTitle = tk.ai_usage_empty_title ?? 'Ingen loggede Kunnskapsbase-kilder er sendt til AI ennå.';
     const emptyNote = tk.ai_usage_empty_note ?? 'Eldre svarutkast kan mangle loggposter fra før brukslogging ble aktivert.';
 
-    const documentCount = summary?.document_count ?? 0;
-    const chunkCount = summary?.chunk_count ?? 0;
-    const evidenceCount = summary?.evidence_count ?? 0;
+    const documentCount = safeSummary?.document_count ?? 0;
+    const chunkCount = safeSummary?.chunk_count ?? 0;
+    const evidenceCount = safeSummary?.evidence_count ?? 0;
     const isEmpty = evidenceCount === 0;
 
     return (
@@ -99,7 +101,7 @@ export default function KnowledgeBaseAiUsage({
 
                         <div className="shrink-0">
                             <Link
-                                href={route('app.ai.knowledge-base.index')}
+                                href="/app/ai/knowledge-base"
                                 className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                             >
                                 ← {tk.title ?? 'Kunnskapsbase'}
@@ -129,13 +131,13 @@ export default function KnowledgeBaseAiUsage({
                     <>
                         <DocumentUsageSection
                             title={sectionDocuments}
-                            rows={documentUsageRows}
+                            rows={safeDocumentUsageRows}
                             tk={tk}
                             locale={locale}
                         />
                         <ChunkUsageSection
                             title={sectionChunks}
-                            rows={chunkUsageRows}
+                            rows={safeChunkUsageRows}
                             tk={tk}
                             locale={locale}
                         />
