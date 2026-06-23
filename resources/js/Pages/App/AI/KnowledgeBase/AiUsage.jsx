@@ -2,13 +2,55 @@ import { Link, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
 
 function formatDate(value, locale, emptyLabel = '–') {
-    if (!value) return emptyLabel;
+    const parsedDate = parseDateValue(value);
+
+    if (!parsedDate) return emptyLabel;
 
     return new Intl.DateTimeFormat(locale, {
         day: '2-digit',
         month: 'short',
         year: 'numeric',
-    }).format(new Date(value));
+    }).format(parsedDate);
+}
+
+function parseDateValue(value) {
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    const text = String(value ?? '').trim();
+
+    if (text === '') {
+        return null;
+    }
+
+    const match = text.match(
+        /^(?<date>\d{4}-\d{2}-\d{2})[ T](?<time>\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?<tz>Z|[+-]\d{2}(?::?\d{2})?)?$/,
+    );
+
+    let normalized = text;
+
+    if (match?.groups) {
+        const { date, time, tz } = match.groups;
+
+        if (tz === undefined || tz === '') {
+            normalized = `${date}T${time}Z`;
+        } else if (tz === 'Z') {
+            normalized = `${date}T${time}Z`;
+        } else if (/^[+-]\d{2}$/.test(tz)) {
+            normalized = `${date}T${time}${tz}:00`;
+        } else if (/^[+-]\d{4}$/.test(tz)) {
+            normalized = `${date}T${time}${tz.slice(0, 3)}:${tz.slice(3)}`;
+        } else {
+            normalized = `${date}T${time}${tz}`;
+        }
+    } else if (text.includes(' ') && !text.includes('T')) {
+        normalized = text.replace(' ', 'T');
+    }
+
+    const parsed = new Date(normalized);
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 const APPROVAL_STATUS_CLASSES = {
