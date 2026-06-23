@@ -52,7 +52,7 @@ class KnowledgeBaseAiUsageController extends Controller
 
         $evidenceCount = $documentRows->sum(fn (array $row): int => (int) ($row['evidence_count'] ?? 0));
 
-        return Inertia::render('AI/KnowledgeBase/AiUsage', [
+        return Inertia::render('App/AI/KnowledgeBase/AiUsage', [
             'documentUsageRows' => $documentRows->values()->all(),
             'chunkUsageRows' => $chunkRows->values()->all(),
             'filters' => $filters,

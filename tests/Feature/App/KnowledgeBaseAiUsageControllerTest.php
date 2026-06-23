@@ -68,7 +68,7 @@ class KnowledgeBaseAiUsageControllerTest extends TestCase
             ->get(route('app.ai.knowledge-base.ai-usage'));
 
         $response->assertViewHas('page', function (array $page): bool {
-            return data_get($page, 'component') === 'AI/KnowledgeBase/AiUsage';
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/AiUsage';
         });
     }
 
