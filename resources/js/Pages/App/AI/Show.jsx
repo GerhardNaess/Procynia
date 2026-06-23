@@ -2282,15 +2282,25 @@ export default function AiShow({
         ? requirementRows.find((requirement) => String(requirement.id) === String(activeRequirementId)) ?? null
         : null;
     const activeRequirementKey = activeRequirement !== null ? String(activeRequirement.id) : null;
-    const activeRequirementDraft = activeRequirementKey !== null
-        ? answerDraftsByRequirementId[activeRequirementKey] ?? buildRequirementAnswerDraftState(activeRequirement)
+    const activeRequirementServerDraft = activeRequirement !== null
+        ? buildRequirementAnswerDraftState(activeRequirement)
+        : null;
+    const activeRequirementLocalDraft = activeRequirementKey !== null
+        ? answerDraftsByRequirementId[activeRequirementKey] ?? null
+        : null;
+    const activeRequirementDraft = activeRequirement !== null
+        ? (activeRequirementLocalDraft?.isDirty
+            ? activeRequirementLocalDraft
+            : activeRequirementServerDraft ?? activeRequirementLocalDraft)
         : null;
     const activeRequirementBlockedMissingKnowledge = activeRequirementDraft?.generationState === 'blocked_missing_knowledge';
     const activeRequirementHasDraft = activeRequirementDraft !== null
         && !activeRequirementBlockedMissingKnowledge
         && (
-            activeRequirementDraft.generatedAt !== null
+            activeRequirementDraft.isDirty
+            || activeRequirementDraft.generatedAt !== null
             || normalizeAnswerDraftText(activeRequirementDraft.persistedText).trim() !== ''
+            || normalizeAnswerDraftText(activeRequirementDraft.text).trim() !== ''
         );
     const activeRequirementDisplayIdentifier = activeRequirement?.current_requirement_identifier
         ?? activeRequirement?.requirement_identifier
