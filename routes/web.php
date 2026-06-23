@@ -9,6 +9,7 @@ use App\Http\Controllers\App\AiController;
 use App\Http\Controllers\Ops\QueueSchedulerHealthController;
 use App\Http\Controllers\App\KnowledgeVocabularyController;
 use App\Http\Controllers\App\KnowledgeBaseController;
+use App\Http\Controllers\App\KnowledgeBaseAiUsageController;
 use App\Http\Controllers\App\KnowledgeBaseSettingsController;
 use App\Http\Controllers\App\CustomerEnvironmentController;
 use App\Http\Controllers\App\DepartmentController;
@@ -167,6 +168,7 @@ Route::prefix('app')
             Route::get('/', [KnowledgeBaseController::class, 'index'])->name('index');
             Route::get('/create', [KnowledgeBaseController::class, 'create'])->name('create');
             Route::post('/', [KnowledgeBaseController::class, 'store'])->name('store');
+            Route::get('/ai-usage', [KnowledgeBaseAiUsageController::class, 'index'])->name('ai-usage');
             Route::get('/{knowledgeItem}', [KnowledgeBaseController::class, 'show'])->name('show');
             Route::patch('/{knowledgeItem}/summary', [KnowledgeBaseController::class, 'updateSummary'])->name('summary.update');
             Route::patch('/{knowledgeItem}/chunks/{chunk}/review-status', [KnowledgeBaseController::class, 'updateChunkReviewStatus'])

@@ -115,6 +115,7 @@ class KnowledgeBaseController extends Controller
             'pageTitle' => 'Kunnskapsdokumenter',
             'knowledgeItems' => $knowledgeDocuments,
             'createUrl' => route('app.ai.knowledge-base.create'),
+            'aiUsageUrl' => route('app.ai.knowledge-base.ai-usage'),
         ]);
     }
 
