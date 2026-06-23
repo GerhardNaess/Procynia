@@ -1030,6 +1030,59 @@ Malen for krav-svar-generering (`RequirementAnswerDraftService`) er ikke endret.
 - 3 pre-existing failures i metadata ordering-tester er urelatert til dette arbeidet
 - `npm run build` kjørt uten feil for 2.6D og 2.6E
 
+**Videreføring — Master-detail-funksjon, sortering og interaksjonskvalitet (commits `bf96e71`, `eed8e03`, `cea1dbd`, `46674fb`):**
+
+Etter den innledende implementeringen ble `Kunnskapsbase → Bruk i AI`-siden videreutviklet med fullt master-detail-grensesnitt, sorterbarhet i begge tabeller og rettinger av kritiske rendering-feil. Dette er en videreføring av 2.6F — ikke en ny fase.
+
+Teknisk URL: `/app/ai/knowledge-base/ai-usage`  
+Rutenavn: `app.ai.knowledge-base.ai-usage`
+
+*Master-detail-grensesnitt (commit `bf96e71`):*
+
+- Dokumenttabellen fungerer som masterliste. Én rad er alltid valgt.
+- Første dokument velges automatisk ved sidelast (sortert på «Sendt til AI» synkende som standard).
+- Valgt rad markeres visuelt med violet bakgrunn og «Valgt»-badge.
+- Utdragstabellen fungerer som detaljvisning og viser bare utdrag for valgt dokument.
+- Begge tabeller er sorterbare etter alle kolonner. Sortering nullstiller ikke valgt dokument dersom det fortsatt finnes i listen.
+- Utdragstabellen filtreres på `knowledge_item_id` fra valgt dokument — samme nøkkel som dokumenttabellen.
+- Summary-kort viser antall dokumenter, utdrag og ganger sendt til AI på tvers av alle tilgjengelige rader.
+
+*Radklikk (commit `eed8e03`):*
+
+- Hele dokumentraden er klikkbar — ikke bare «Vis utdrag»-knappen.
+- `onClick` på `<tr>` kaller `setSelectedDocumentKey` med stabil `knowledge_item_id` via `getDocumentRowKey(row)`.
+- «Vis utdrag»-knappen brukte tidligere hele row-objektet som nøkkel — rettet til `getDocumentRowKey(row)`.
+- `<Link>` til Kunnskapsbase-detaljsiden har `e.stopPropagation()` slik at klikk på dokumentnavnet bare navigerer — radvalg utløses ikke.
+- «Vis utdrag»-knappen har tilsvarende `e.stopPropagation()` for å forhindre dobbel state-oppdatering.
+- Navigasjon til dokumentdetaljer og radvalg er dermed to adskilte handlinger.
+
+*Inertia-komponentnavn (commit `cea1dbd`):*
+
+- Controlleren rendret feilaktig `AI/KnowledgeBase/AiUsage`.
+- Riktig komponent er `App/AI/KnowledgeBase/AiUsage`, som tilsvarer `resources/js/Pages/App/AI/KnowledgeBase/AiUsage.jsx`.
+- Uten denne rettingen lastet siden ikke i det hele tatt.
+
+*Svarutkast-rendering (commit `46674fb`):*
+
+- Valgt requirement kunne ende med tom lokal draft-state som skjulte backend-payload-feltet `answer_draft.text`.
+- Rettingen er i `resources/js/Pages/App/AI/Show.jsx`.
+- Requirement med både `answer_draft_text` og `SavedNoticeAiEvidence` viser nå lagret svarutkast korrekt, samtidig som «Kilder sendt til AI» vises i samme panel.
+- Diagnosen ble verifisert på kravlabel `1-1.S.1`, `saved_notice_ai_requirements.id = 5974`, `saved_notice_id = 8153`, med 5 evidence-rader og eksisterende svarutkast i DB og payload.
+
+*Avgrensning — ikke endret:*
+
+Retrieval, promptbygging, AI-modellkall, chunking, embeddings, pgvector, `SavedNoticeAiDocument`, Saksdokumenter og datamodellen er ikke endret. AI Usage-siden viser hvilke kilder som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
+
+*Skille mot Saksdokumenter:*
+
+Kunnskapsbase og Saksdokumenter er fortsatt to adskilte flyter:
+
+- Kunnskapsbase bruker `KnowledgeItem` → `KnowledgeItemVersion` → `KnowledgeItemChunk` → `SavedNoticeAiEvidence`
+- Saksdokumenter bruker `SavedNoticeAiDocument`, er knyttet til én konkret `SavedNotice` og ligger i AI-arbeidsflaten for den saken
+- AI Usage-oversikten leser fra `saved_notice_ai_evidence` — den leser ikke fra `SavedNoticeAiDocument`
+- Oversikten er dobbelt tenant-scopet: via `knowledge_items.customer_id` og via `saved_notices.customer_id`
+- Rejected evidence telles ikke
+
 ### 28.7 Opprydding av legacy-felter i Kunnskapsbase (foreløpig neste fase)
 
 *Ikke låst plan. Bør planlegges som et eget avviklingssteg etter at katalogverdier og versjonering er stabile.*
@@ -1120,7 +1173,7 @@ Fase 2.4 — Versjonering av dokumentinnhold — er fullført per juni 2026. `kn
 
 Fase 2.5 — Kontroll og godkjenning av kunnskapsdokumenter — er fullført per juni 2026. Nye dokumentversjoner aktiveres ikke lenger automatisk etter tekstuttrekk. De opprettes som `pending_review` og krever eksplisitt godkjenning før de settes som `is_current` og tas i bruk av AI. Avvisning er mulig med obligatorisk begrunnelse. Retrieval er ikke endret — det henter fortsatt kun chunks fra gjeldende versjon (`is_current = true`) etter eksisterende kriterier. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt.
 
-Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — er fullført per juni 2026 (2.6B–F). Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon og lenke til riktig KnowledgeItem-detaljside. I tillegg finnes den globale oversikten `Kunnskapsbase → Bruk i AI`, som viser dokument- og chunkbruk på tvers av saker. Retrieval, prompt og AI-modellkall er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Dette innsynet viser hva som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
+Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — er fullført per juni 2026 (2.6B–F). Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon og lenke til riktig KnowledgeItem-detaljside. I tillegg finnes den globale oversikten `Kunnskapsbase → Bruk i AI` (`/app/ai/knowledge-base/ai-usage`), som viser dokument- og chunkbruk på tvers av saker. Oversikten er videreutviklet som en videreføring av 2.6F med fullt master-detail-grensesnitt: dokumenttabellen er masterliste med automatisk radvalg, utdragstabellen filtreres på valgt dokument, begge tabeller er sorterbare, og hele dokumentraden er klikkbar. En Inertia-komponentfeil som hindret lasting av siden er rettet, og en draft-rendering-feil som skjulte lagrede svarutkast ved siden av evidence-visningen er rettet. Retrieval, prompt og AI-modellkall er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Dette innsynet viser hva som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
 
 Kunnskapsbase har nå:
 - Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
@@ -1129,7 +1182,7 @@ Kunnskapsbase har nå:
 - Revisjon og gyldighet — `review_due_at` og `last_reviewed_at` gir synlighet for faglig oppdatering
 - Versjonering av dokumentinnhold — `knowledge_item_versions` med versjonsbevisst retrieval og UI for opplasting av ny versjon
 - Kontroll og godkjenning — versjonsgodkjenning med pending/approved/rejected/superseded-flyt, revisjonslogg og synlig AI-statusboks på detaljsiden
-- Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav, UI-visning i krav-svar-panelet og lenke til riktig Kunnskapsbase-dokument
+- Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav, UI-visning i krav-svar-panelet og lenke til riktig Kunnskapsbase-dokument; global oversikt med master-detail-funksjon, sorterbare tabeller og klikkbare dokumentrader
 
 Foreløpige neste faser (ikke låst plan): 2.7 opprydding av legacy-felter.
 
