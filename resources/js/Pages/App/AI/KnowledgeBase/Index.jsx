@@ -277,7 +277,6 @@ export default function KnowledgeBaseIndex({
     pageTitle = null,
     knowledgeItems = [],
     createUrl = '/app/ai/knowledge-base/create',
-    aiUsageUrl = null,
 }) {
     const { locale = 'nb-NO', translations = {} } = usePage().props;
     const tk = translations?.knowledge ?? {};
@@ -588,14 +587,6 @@ export default function KnowledgeBaseIndex({
                         </div>
 
                         <div className="flex flex-wrap gap-3 lg:justify-end">
-                            {aiUsageUrl ? (
-                                <Link
-                                    href={aiUsageUrl}
-                                    className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                                >
-                                    {tk.ai_usage_nav_label ?? 'Bruk i AI'}
-                                </Link>
-                            ) : null}
                             <Link
                                 href={newDocumentUrl}
                                 className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"

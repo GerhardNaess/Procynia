@@ -99,6 +99,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         : rememberedAiCaseId !== null
             ? `/app/ai/${rememberedAiCaseId}/instructions`
             : null;
+    const aiUsageHref = '/app/ai/knowledge-base/ai-usage';
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
     const billingHref = user?.is_system_owner ? '/app/billing' : null;
@@ -181,6 +182,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
                 { key: 'ai-instructions', label: navigation.ai_instructions, href: aiInstructionsHref },
                 { key: 'knowledge-vocabulary', label: navigation.company_vocabulary, href: '/app/ai/knowledge-vocabulary' },
                 { key: 'knowledge-docs', label: navigation.knowledge_documents, href: '/app/ai/knowledge-base' },
+                { key: 'knowledge-ai-usage', label: translations.knowledge_base?.ai_usage_nav_label ?? 'Bruk i AI', href: aiUsageHref },
             ];
         }
 
@@ -231,6 +233,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
 
             if (pathname === '/app/ai') {
                 return 'ai-overview';
+            }
+
+            if (pathname.startsWith('/app/ai/knowledge-base/ai-usage')) {
+                return 'knowledge-ai-usage';
             }
 
             if (pathname.startsWith('/app/ai/knowledge-base')) {

@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import CustomerAppLayout from '../../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../../Components/App/PageHelpButton';
 
 function formatDate(value, locale, emptyLabel = '–') {
     const parsedDate = parseDateValue(value);
@@ -71,7 +72,70 @@ export default function KnowledgeBaseAiUsage({
 
     const pageTitle = tk.ai_usage_page_title ?? 'Bruk i AI';
     const subtitle = tk.ai_usage_subtitle ?? 'Oversikten viser Kunnskapsbase-kilder som er sendt til AI som grunnlag.';
-    const infoBox = tk.ai_usage_info_box ?? 'Dette viser hva Procynia sendte til AI som kontekst/grunnlag. Det er ikke et bevis på hva modellen faktisk brukte internt i svaret.';
+    const helpTitle = tk.ai_usage_page_help_title ?? pageTitle;
+    const helpIntro = tk.ai_usage_page_help_intro ?? 'Denne siden viser hvilke kilder fra Kunnskapsbase som er sendt til AI som grunnlag i kravarbeid og svarutkast.';
+    const helpSections = [
+        {
+            title: tk.ai_usage_page_help_section_overview ?? 'Hva siden viser',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_overview
+                        ?? 'Oversikten viser hvilke kunnskapsdokumenter og kildeutdrag Procynia har sendt til AI som grunnlag. Dokumenttabellen viser samlet bruk per dokument, mens utdragstabellen viser de konkrete kildeutdragene som ble sendt med.',
+                },
+            ],
+        },
+        {
+            title: tk.ai_usage_page_help_section_limits ?? 'Viktig avgrensning',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_limits
+                        ?? 'Siden dokumenterer hva Procynia sendte til AI som kontekst. Den viser ikke hva AI-modellen faktisk brukte, vektla eller resonnerte med internt, og den viser ikke tokenforbruk eller kostnad.',
+                },
+            ],
+        },
+        {
+            title: tk.ai_usage_page_help_section_data ?? 'Datagrunnlag',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_data
+                        ?? 'Datagrunnlaget er SavedNoticeAiEvidence. Rejected evidence telles ikke. Oversikten leser ikke fra SavedNoticeAiDocument.',
+                },
+            ],
+        },
+        {
+            title: tk.ai_usage_page_help_section_case_docs ?? 'Skillet mot Saksdokumenter',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_case_docs
+                        ?? 'Saksdokumenter fra konkrete anbudssaker håndteres separat i AI-arbeidsflaten for saken. De vises ikke her og er ikke en del av Kunnskapsbase-modellen.',
+                },
+            ],
+        },
+        {
+            title: tk.ai_usage_page_help_section_columns ?? 'Hvordan lese kolonnene',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_columns
+                        ?? 'Saker viser antall saker der dokumentet eller utdraget er sendt til AI. Krav viser antall krav. Sendt til AI viser registrerte kildehendelser. Primærkilder viser hvor mange kilder som er markert som primærkilde. Snitt score viser gjennomsnittlig relevansscore. Sist brukt viser siste registrerte tidspunkt. Eldre versjon brukt markerer om en tidligere dokumentversjon er brukt.',
+                },
+            ],
+        },
+        {
+            title: tk.ai_usage_page_help_section_empty ?? 'Tom side',
+            items: [
+                {
+                    text:
+                        tk.ai_usage_page_help_item_empty
+                        ?? 'Hvis oversikten er tom, finnes det ikke registrerte Kunnskapsbase-kilder sendt til AI ennå. Det betyr ikke nødvendigvis at AI aldri er brukt, men at denne typen Kunnskapsbase-bruk ikke er logget for perioden.',
+                },
+            ],
+        },
+    ];
     const summaryDocumentsLabel = tk.ai_usage_summary_documents ?? 'Dokumenter';
     const summaryChunksLabel = tk.ai_usage_summary_chunks ?? 'Utdrag';
     const summaryEvidenceLabel = tk.ai_usage_summary_evidence ?? 'Ganger sendt til AI';
@@ -86,33 +150,32 @@ export default function KnowledgeBaseAiUsage({
     const isEmpty = evidenceCount === 0;
 
     return (
-        <CustomerAppLayout title={pageTitle}>
-            <div className="space-y-6">
-                <section className="rounded-[22px] border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+        <CustomerAppLayout title={pageTitle} showPageTitle={false}>
+            <div className="space-y-7">
+                <section className="space-y-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="space-y-1.5">
-                            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
-                                {pageTitle}
-                            </h1>
+                        <div className="space-y-2">
+                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                {tk.ai_usage_nav_label ?? 'Bruk i AI'}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                                    {pageTitle}
+                                </h1>
+                                <PageHelpButton
+                                    buttonLabel={tk.page_help_button ?? 'Hjelp'}
+                                    title={helpTitle}
+                                    intro={helpIntro}
+                                    sections={helpSections}
+                                />
+                            </div>
                             <p className="max-w-2xl text-[15px] leading-7 text-slate-500">
                                 {subtitle}
                             </p>
                         </div>
 
-                        <div className="shrink-0">
-                            <Link
-                                href="/app/ai/knowledge-base"
-                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
-                            >
-                                ← {tk.title ?? 'Kunnskapsbase'}
-                            </Link>
-                        </div>
                     </div>
                 </section>
-
-                <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-5 py-4 text-[14px] leading-6 text-amber-800">
-                    {infoBox}
-                </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <SummaryCard label={summaryDocumentsLabel} value={documentCount} />
