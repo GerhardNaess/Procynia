@@ -14,7 +14,7 @@ Procynia har en teknisk kunnskapsmotor med støtte for opplasting av dokumenter,
 
 Per juni 2026 er grunnstrukturen på plass. Fase 1 — begrepsmodell, kundestyrte katalogverdier, eierskap og sporbarhet — er fullført. Se §27 for detaljert statusoversikt.
 
-Fase 2.1, 2.2, 2.3, 2.4, 2.5 og 2.6 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, versjonering av dokumentinnhold, kontroll og godkjenning av kunnskapsdokumenter, og innsyn i Kunnskapsbase-kilder sendt til AI er alle implementert. Disse er beskrevet i §28.
+Fase 2.1, 2.2, 2.3, 2.4, 2.5 og 2.6 er fullført. AI-policy per dokument, dokumentstatus, revisjon og gyldighet, versjonering av dokumentinnhold, kontroll og godkjenning av kunnskapsdokumenter, og innsyn i Kunnskapsbase-kilder sendt til AI, inkludert global oversikt i Kunnskapsbase → Bruk i AI, er alle implementert. Disse er beskrevet i §28.
 
 ## 3. Grunnprinsipp
 
@@ -963,7 +963,7 @@ Versjonsbasert kontroll og godkjenning er implementert for Kunnskapsbase / `Know
 
 ### 28.6 Innsyn i Kunnskapsbase-kilder sendt til AI ✓ Fullført juni 2026
 
-Fase 2.6 er fullstendig implementert (2.6B–E). Brukere kan se hvilke Kunnskapsbase-kilder som ble sendt til AI som grunnlag for et krav-svar, og navigere direkte til riktig Kunnskapsbase-dokument fra innsynsvisningen.
+Fase 2.6 er fullstendig implementert (2.6B–F). Brukere kan se hvilke Kunnskapsbase-kilder som ble sendt til AI som grunnlag for et krav-svar, og navigere direkte til riktig Kunnskapsbase-dokument fra innsynsvisningen. I tillegg finnes en global oversikt på `Kunnskapsbase → Bruk i AI` som viser hvordan Kunnskapsbase-kilder er sendt til AI som grunnlag på tvers av saker.
 
 **Viktig begrepsavklaring:**
 Dette innsynet viser hvilke kilder som ble sendt inn som kontekst ved AI-kallet. Det er ikke en garanti for at alle kildene faktisk ble brukt av modellen internt. Begrepet «sendt til AI som grunnlag» brukes gjennomgående — ikke «faktisk brukt av AI» eller «AI brukte disse kildene».
@@ -998,6 +998,21 @@ Dette innsynet viser hvilke kilder som ble sendt inn som kontekst ved AI-kallet.
 - URL er `null` dersom `KnowledgeItem` ikke finnes (edge case) — frontend viser da plain text
 - Lenken peker alltid til `KnowledgeItem`-detaljsiden, ikke til en versjonside og ikke til Saksdokumenter
 - Lenken er diskret: hover-effekt til violet, ingen handling for godkjenning, redigering eller opplasting
+
+**2.6F — Global oversikt over Kunnskapsbase-kilder sendt til AI:**
+
+- Ny app-side finnes under `Kunnskapsbase → Bruk i AI`
+- Siden viser en global oversikt over Kunnskapsbase-kilder sendt til AI som grunnlag, på tvers av saker
+- Oversikten bygger på `saved_notice_ai_evidence` og presenterer to hovedaggregater:
+  - dokumentaggregat per kunnskapsdokument og versjon
+  - chunkaggregat per chunk / kildeutdrag
+- Brukeren kan filtrere oversikten på `version_status`, `primary_only`, `date_from` og `date_to`
+- Dokumentnavn lenker til Kunnskapsbase-detaljsiden der det er mulig
+- Full chunktekst, embeddings og storage path vises ikke
+- Dette viser hvilke kilder som ble sendt som grunnlag til AI, ikke hva modellen faktisk brukte internt
+- `SavedNoticeAiEvidence` fungerer her som brukslogg for Kunnskapsbase-kilder sendt til AI
+- `SavedNoticeAiDocument` brukes ikke av denne oversikten
+- Saksdokumenter og Kunnskapsbase er fortsatt adskilt
 
 **Retrieval er ikke endret:**
 `MetadataCandidateRetrievalService` og retrieval-logikken er uendret. Det eneste som er tilføyd er at `knowledge_item_version_id` og `knowledge_item_version_no` eksponeres som sporbarhetsinformasjon i select-kolonner og `chunkRowFromModel()` — ikke som filter, men for å videreføre versjonspeker til evidence-raden.
@@ -1105,7 +1120,7 @@ Fase 2.4 — Versjonering av dokumentinnhold — er fullført per juni 2026. `kn
 
 Fase 2.5 — Kontroll og godkjenning av kunnskapsdokumenter — er fullført per juni 2026. Nye dokumentversjoner aktiveres ikke lenger automatisk etter tekstuttrekk. De opprettes som `pending_review` og krever eksplisitt godkjenning før de settes som `is_current` og tas i bruk av AI. Avvisning er mulig med obligatorisk begrunnelse. Retrieval er ikke endret — det henter fortsatt kun chunks fra gjeldende versjon (`is_current = true`) etter eksisterende kriterier. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt.
 
-Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — er fullført per juni 2026 (2.6B–E). Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon og lenke til riktig KnowledgeItem-detaljside. Retrieval, prompt og AI-modellkall er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Dette innsynet viser hva som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
+Fase 2.6 — Innsyn i Kunnskapsbase-kilder sendt til AI — er fullført per juni 2026 (2.6B–F). Evidence-rader peker stabilt på dokumentversjonen som lå til grunn da svaret ble generert. Backend-payloaden eksponerer `knowledge_sources_sent_to_ai` per krav. UI viser kildene kompakt i krav-svar-panelet, med advarsel ved supersedert versjon og lenke til riktig KnowledgeItem-detaljside. I tillegg finnes den globale oversikten `Kunnskapsbase → Bruk i AI`, som viser dokument- og chunkbruk på tvers av saker. Retrieval, prompt og AI-modellkall er ikke endret. `SavedNoticeAiDocument` og Saksdokumenter er ikke berørt. Dette innsynet viser hva som ble sendt som kontekst — ikke hva modellen faktisk brukte internt.
 
 Kunnskapsbase har nå:
 - Dokumentkategori og tema — kundestyrte katalogverdier med cascading validering
