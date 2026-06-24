@@ -1186,4 +1186,10 @@ Kunnskapsbase har nå:
 
 Foreløpige neste faser (ikke låst plan): 2.7 opprydding av legacy-felter.
 
+2.7J presisering:
+- `KnowledgeBaseController` skriver ikke lenger `content_type` eller `is_active` direkte ved store/update.
+- `KnowledgeItem` holder fortsatt legacy-feltene synkronisert internt ved lagring som midlertidig kompatibilitet.
+- Autoritative felter er fortsatt `document_type` og `document_status`.
+- Det er ikke gjort databaseopprydding ennå.
+
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
