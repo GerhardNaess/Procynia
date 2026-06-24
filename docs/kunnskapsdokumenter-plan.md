@@ -1144,83 +1144,73 @@ Følgende resolver-metoder finnes nå på `KnowledgeItem`:
 
 Videre fysisk opprydding kan eventuelt vurderes som en senere egen fase. Da må det lages egen migrasjonsplan, datakontroll og avvikling av resterende fallback-/speilskriving før legacy-kolonnene eventuelt kan fjernes.
 
-### 28.8 Fysisk databaseopprydding av legacy-felter (planlagt)
+### 28.8 Drop-readiness for `content_type` og `is_active` (kontrollert juni 2026)
 
-Fase 2.8 er neste separate fase etter kontrollert legacy-isolering. Mens fase 2.7 dokumenterte og isolerte legacy-bruken, skal fase 2.8 planlegge og gjennomføre fysisk utfasing av legacy-speilfelter på `knowledge_items` på en kontrollert måte.
+Fase 2.8F er en readiness-kontroll, ikke en migrasjon. Målet er å avgjøre om `content_type` og `is_active` faktisk er klare for fysisk dropp fra `knowledge_items`.
 
-Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må være klart før kolonner eventuelt kan droppes.
+**Kort konklusjon: ikke klar ennå.**
 
-**Felt som skal vurderes i 2.8:**
+**Status for `content_type`:**
 
-- `content_type`
-- `is_active`
+- Ikke klar for fysisk dropp.
+- `KnowledgeItem` har fortsatt `content_type` som model-default i `$attributes`, så en ny modellinstans forventer fortsatt feltet som legacy-mirror.
+- `KnowledgeBaseController` eksponerer fortsatt `content_type` og `content_type_label` i payloads for liste, detalj og edit.
+- `AiController`, `RequirementAnswerDraftService`, `MetadataCandidateRetrievalService`, `KnowledgeChunkMetadataGenerationService` og `KnowledgeChunkBoundaryService` leser fortsatt `document_type ?? content_type` eller sender `content_type` videre som legacy-alias.
+- Audit-kommandoen leser fortsatt `content_type` for å rapportere legacy-driftsavvik.
+- Tester og testfixtures setter fortsatt `content_type` eksplisitt i legacy-/kompatibilitetsscenarier.
+
+**Status for `is_active`:**
+
+- Ikke klar for fysisk dropp.
+- `KnowledgeItem` har fortsatt en `is_active`-cast, og Kunnskapsbase-payloadene eksponerer fortsatt `is_active` som legacy-speil for dokumentstatus.
+- `KnowledgeBaseController` bruker fortsatt `is_active` i payloads og enkelte interne oppslag.
+- Audit-kommandoen leser fortsatt `is_active` for å rapportere legacy-avvik mot `document_status`.
+- Tester og testfixtures setter fortsatt `is_active` eksplisitt i legacy-/kompatibilitetsscenarier.
+
+**Legitime legacy-rester som kan bli stående frem til selve droppet:**
+
+- audit-kommandoen og audit-testene som dokumenterer legacy-drift
+- testfixtures som eksplisitt setter `content_type`/`is_active` for å simulere gammelt dataavvik
+- dokumentasjonen som beskriver overgang fra legacy-speil til autoritative felter
+
+**Hva som må bort før fysisk kolonnedropp kan være trygg:**
+
+- alle aktive lesere i Kunnskapsbase-/AI-kjeden som fortsatt bruker `content_type` eller `is_active`
+- model-default / modellkontrakt som fortsatt antar `content_type`
+- payloadfelt som fortsatt eksponerer legacy-speil til frontend
+- audit-kommandoen må bli schema-aware, slik at den tåler både overgangsform og fysisk droppet skjema
+- tester som fortsatt behandler feltene som relevante kompatibilitetsfelter må ryddes eller flyttes til rene legacy-/audit-tester
+
+**Anbefalt neste mikrostep:**
+
+- Fjern siste lesere og payload-speil for `content_type`/`is_active` i Kunnskapsbase og AI-kjeden.
+- Gjør `knowledge:legacy-audit` schema-aware før fysisk migrasjon.
+- Når ingen aktive konsumenter lenger trenger feltene, kan en egen migrasjon som dropper kolonnene vurderes som separat steg.
+
+**Ikke gjort i 2.8F:**
+
+- ingen migrasjon
+- ingen kolonnedropp
+- ingen produksjonsdataendring
+- ingen frontend-endring
+- ingen retrieval- eller AI-logikkendring
+
+### 28.9 Tilsvarende plan for filidentitetsfeltene
+
 - `storage_path`
 - `original_filename`
 - `mime_type`
 - `file_size_bytes`
+
+### 28.10 Tilsvarende plan for ekstraksjonsfeltene
+
 - `extraction_status`
 - `extraction_error`
 - `extracted_text`
-- `content`
 
-**Anbefalt risikorekkefølge:**
+### 28.11 Egen vurdering av `content`
 
-1. Lavere risiko
-   - `content_type`
-   - `is_active`
-   - Disse er allerede klare compatibility-speil for `document_type` og `document_status`.
-
-2. Høyere risiko
-   - `storage_path`
-   - `original_filename`
-   - `mime_type`
-   - `file_size_bytes`
-   - Disse påvirker filidentitet, filhandlinger og visning av gjeldende dokumentversjon.
-
-3. Høy risiko
-   - `extraction_status`
-   - `extraction_error`
-   - `extracted_text`
-   - Disse påvirker statusvisning, oppsummering, metadataflyt og AI-grunnlag.
-
-4. Svært høy risiko
-   - `content`
-   - Dette er siste fallback i `textForKnowledgeProcessing()` og må ikke fjernes før hele tekstkjeden er verifisert versjonsbasert.
-
-**Foreslåtte delsteg for 2.8:**
-
-- 2.8A — Plan og datakontroll
-  - Definere konkret omfang, risikonivå og rollback-strategi.
-- 2.8B — Kartlegg produksjonsdata
-  - Artisan-kommandoen `knowledge:legacy-audit` skal rapportere hvor ofte legacy-feltene fortsatt brukes i praksis, hvilke dokumenter som fortsatt er avhengige av fallback, og gi en read-only anbefaling før fysisk opprydding.
-- 2.8C — Stopp eventuell gjenværende speilskriving for lavrisikofelter
-  - `knowledge:legacy-audit` er kjørt og returnerte `OK_FOR_NEXT_STEP`.
-  - Blocking findings: ingen.
-  - Review findings: ingen.
-  - Expected legacy findings: `current_version_missing_extraction_error_on_success=2` for vellykkede current versions uten lagret feiltekst.
-  - Dette betyr at det foreløpig ikke er dataavvik som stopper fysisk opprydding, men at audit-kommandoen nå tydelig skiller mellom reelle blockers, vurderingspunkter og forventede legacy-avvik.
-  - Dette ble fulgt opp i 2.8E, der `content_type` og `is_active` ble fjernet fra `$fillable` i `KnowledgeItem`.
-- 2.8D — Fjern lesere/fallback for lavrisikofelter
-  - Modellens speilskriving for `content_type` og `is_active` er nå stoppet ved at feltene er fjernet fra `$fillable`.
-  - `document_type` og `document_status` er fortsatt autoritative.
-  - Legacy-kolonnene finnes fortsatt i databasen, men de vedlikeholdes ikke lenger som aktive speil.
-  - Avvik i `content_type` og `is_active` er nå forventede legacy-funn i audit.
-  - Ingen kolonner er droppet i dette steget.
-  - Neste konsumentsteg er å sikre at all lesing og all fremtidig opprydding tydelig behandler disse feltene som legacy-kompatibilitet, ikke som styrende felter.
-- 2.8E — Fjern `content_type` og `is_active` fra aktiv write-path
-  - `content_type` og `is_active` er ikke lenger mass-assignable via aktiv modellbasert write-path i `KnowledgeItem`.
-  - `document_type` og `document_status` er fortsatt autoritative.
-  - Legacy-kolonnene finnes fortsatt i databasen og er ikke droppet.
-  - Ingen migrasjon ble laget.
-  - `knowledge:legacy-audit` returnerte `OK_FOR_NEXT_STEP`.
-  - Audit leser fortsatt `content_type` og `is_active` som expected legacy-funn, ikke som blockers.
-  - Videre fysisk kolonnedropp må eventuelt være et separat senere steg.
-- 2.8F — Tilsvarende plan for filidentitetsfeltene
-  - `storage_path`, `original_filename`, `mime_type`, `file_size_bytes`.
-- 2.8G — Tilsvarende plan for ekstraksjonsfeltene
-  - `extraction_status`, `extraction_error`, `extracted_text`.
-- 2.8H — Egen vurdering av `content`
-  - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.
+- Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.
 
 **Datakontroller før eventuell migrasjon:**
 
