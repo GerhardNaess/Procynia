@@ -111,7 +111,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('current_version_missing_mime_type=1')
             ->expectsOutputToContain('current_version_missing_file_size_bytes=1')
             ->expectsOutputToContain('current_version_failed_extraction_status=1')
-            ->expectsOutputToContain('current_version_missing_extraction_error=1')
+            ->expectsOutputToContain('current_version_failed_without_extraction_error=1')
             ->expectsOutputToContain('current_version_missing_extracted_text=1')
             ->expectsOutputToContain('storage_path_mismatches=1')
             ->expectsOutputToContain('original_filename_mismatches=1')
@@ -122,7 +122,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('content_fallback_candidates=1')
             ->expectsOutputToContain('content_type_vs_document_type_mismatches=1')
             ->expectsOutputToContain('is_active_vs_document_status_mismatches=1')
-            ->expectsOutputToContain('NEEDS_REVIEW')
+            ->expectsOutputToContain('BLOCKED')
             ->assertSuccessful();
 
         $this->assertSame($itemUpdatedAtBefore, DB::table('knowledge_items')->where('id', $auditItem->id)->value('updated_at'));

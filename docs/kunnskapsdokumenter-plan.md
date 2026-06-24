@@ -1194,7 +1194,12 @@ Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må v
 - 2.8B — Kartlegg produksjonsdata
   - Artisan-kommandoen `knowledge:legacy-audit` skal rapportere hvor ofte legacy-feltene fortsatt brukes i praksis, hvilke dokumenter som fortsatt er avhengige av fallback, og gi en read-only anbefaling før fysisk opprydding.
 - 2.8C — Stopp eventuell gjenværende speilskriving for lavrisikofelter
-  - Vurdere å stoppe intern synkronisering av `content_type` og `is_active` etter at testene er oppdaterte.
+  - `knowledge:legacy-audit` er kjørt og returnerte `OK_FOR_NEXT_STEP`.
+  - Blocking findings: ingen.
+  - Review findings: ingen.
+  - Expected legacy findings: `current_version_missing_extraction_error_on_success=2` for vellykkede current versions uten lagret feiltekst.
+  - Dette betyr at det foreløpig ikke er dataavvik som stopper fysisk opprydding, men at audit-kommandoen nå tydelig skiller mellom reelle blockers, vurderingspunkter og forventede legacy-avvik.
+  - Tryggeste feltområde å starte med videre er fortsatt de lavrisiko speilfeltene `content_type` og `is_active`, fordi de allerede er hardt kontrollert av nåværende datamodell og payloader.
 - 2.8D — Fjern lesere/fallback for lavrisikofelter
   - Oppdatere konsumenter slik at de leser autoritativt fra `document_type` og `document_status`.
 - 2.8E — Vurder fysisk dropp av lavrisikofelter
