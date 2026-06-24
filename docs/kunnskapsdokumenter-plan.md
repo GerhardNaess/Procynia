@@ -1083,11 +1083,11 @@ Kunnskapsbase og Saksdokumenter er fortsatt to adskilte flyter:
 - Oversikten er dobbelt tenant-scopet: via `knowledge_items.customer_id` og via `saved_notices.customer_id`
 - Rejected evidence telles ikke
 
-### 28.7 Opprydding av legacy-felter i Kunnskapsbase (foreløpig neste fase)
+### 28.7 Kontrollert legacy-isolering i Kunnskapsbase ✓ Fullført juni 2026
 
-*Ikke låst plan. Bør planlegges som et eget avviklingssteg etter at katalogverdier og versjonering er stabile.*
+Fase 2.7 er fullført som en kontrollert legacy-isolering, ikke som fysisk databaseopprydding. Legacy-feltene er ikke fjernet, og kolonner er ikke droppet. I stedet er de autoritative kildene tydeliggjort og lesing er sentralisert slik at nye og gamle felt kan eksistere side om side med klarere ansvarslinjer.
 
-`document_type` og `document_theme_term_id` er beholdt som required backend-felt og fallback i UI. Disse kan på sikt erstattes fullt ut av `document_category_id` og `document_topic_id`. Avvikling krever datamigrering, validering av at ingen aktive integrasjoner er avhengige av legacy-feltene, og en kontrollert utfasingsplan.
+`document_type` er fortsatt den autoritative kilden for dokumentkategori/type, og `document_status` er fortsatt den autoritative kilden for aktiv/inaktiv-status. `KnowledgeItemVersion` er autoritativ kilde for gjeldende filidentitet, filmetadata og ekstraksjonsdata. `KnowledgeItem` beholder legacy-/fallbackfelter av kompatibilitetshensyn.
 
 ### 28.7L — Kartlegging av gjenværende legacy-speilfelter (2.7L)
 
@@ -1116,6 +1116,33 @@ Denne kartleggingen oppsummerer de feltene som fortsatt fungerer som legacy-spei
 - `document_type`/`document_status` er de autoritative styringsfeltene; `content_type` og `is_active` er kun kompatibilitetsspeil.
 - `content` er den svakeste delen av kjeden og bør ryddes sist, etter at all tekstbruk er versjonsbasert.
 - Ingen kolonner skal slettes før alle lesere, payloads og tester er flyttet over til de nye kildene.
+
+### 28.7M — Sentralisert filidentitetslesing (fullført)
+
+Fase 2.7M sentraliserte lesing av filidentitet og filmetadata via `KnowledgeItem`-resolvers uten å endre payload-formatet.
+
+Følgende resolver-metoder finnes nå på `KnowledgeItem`:
+
+- `resolvedStoragePath()`
+- `resolvedOriginalFilename()`
+- `resolvedMimeType()`
+- `resolvedFileSizeBytes()`
+
+Resolverne leser først fra gjeldende `currentVersion` og faller deretter tilbake til legacy-feltene på `KnowledgeItem` for bakoverkompatibilitet. Dette reduserte direkte bruk av legacy-speil i controlleren uten å endre kontrakten til frontend.
+
+### 28.7N — Sentralisert ekstraksjonsstatuslesing (fullført)
+
+Fase 2.7N sentraliserte lesing av ekstraksjonsstatus, ekstraksjonsfeil og extracted text via `KnowledgeItem`-resolvers uten å endre payload-format eller brukeropplevelse.
+
+Følgende resolver-metoder finnes nå på `KnowledgeItem`:
+
+- `resolvedExtractionStatus()`
+- `resolvedExtractionError()`
+- `resolvedExtractedText()`
+
+`resolvedExtractionError()` behandler `null` på current version som en meningsbærende verdi og faller derfor ikke tilbake til gammel legacy-feil når gjeldende versjon finnes uten feil. `textForKnowledgeProcessing()` bruker nå `resolvedExtractedText()` og beholder `content` som siste fallback.
+
+Videre fysisk opprydding kan eventuelt vurderes som en senere egen fase. Da må det lages egen migrasjonsplan, datakontroll og avvikling av resterende fallback-/speilskriving før legacy-kolonnene eventuelt kan fjernes.
 
 ---
 
@@ -1212,12 +1239,12 @@ Kunnskapsbase har nå:
 - Kontroll og godkjenning — versjonsgodkjenning med pending/approved/rejected/superseded-flyt, revisjonslogg og synlig AI-statusboks på detaljsiden
 - Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav, UI-visning i krav-svar-panelet og lenke til riktig Kunnskapsbase-dokument; global oversikt med master-detail-funksjon, sorterbare tabeller og klikkbare dokumentrader
 
-Foreløpige neste faser (ikke låst plan): 2.7 opprydding av legacy-felter.
+Fase 2.7 er nå dokumentert som fullført kontrollert legacy-isolering.
 
 2.7J presisering:
 - `KnowledgeBaseController` skriver ikke lenger `content_type` eller `is_active` direkte ved store/update.
 - `KnowledgeItem` holder fortsatt legacy-feltene synkronisert internt ved lagring som midlertidig kompatibilitet.
 - Autoritative felter er fortsatt `document_type` og `document_status`.
-- Det er ikke gjort databaseopprydding ennå.
+- Legacy-kolonnene er fortsatt til stede; det er ikke gjort databaseopprydding ennå.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
