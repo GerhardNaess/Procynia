@@ -1144,6 +1144,100 @@ Følgende resolver-metoder finnes nå på `KnowledgeItem`:
 
 Videre fysisk opprydding kan eventuelt vurderes som en senere egen fase. Da må det lages egen migrasjonsplan, datakontroll og avvikling av resterende fallback-/speilskriving før legacy-kolonnene eventuelt kan fjernes.
 
+### 28.8 Fysisk databaseopprydding av legacy-felter (planlagt)
+
+Fase 2.8 er neste separate fase etter kontrollert legacy-isolering. Mens fase 2.7 dokumenterte og isolerte legacy-bruken, skal fase 2.8 planlegge og gjennomføre fysisk utfasing av legacy-speilfelter på `knowledge_items` på en kontrollert måte.
+
+Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må være klart før kolonner eventuelt kan droppes.
+
+**Felt som skal vurderes i 2.8:**
+
+- `content_type`
+- `is_active`
+- `storage_path`
+- `original_filename`
+- `mime_type`
+- `file_size_bytes`
+- `extraction_status`
+- `extraction_error`
+- `extracted_text`
+- `content`
+
+**Anbefalt risikorekkefølge:**
+
+1. Lavere risiko
+   - `content_type`
+   - `is_active`
+   - Disse er allerede klare compatibility-speil for `document_type` og `document_status`.
+
+2. Høyere risiko
+   - `storage_path`
+   - `original_filename`
+   - `mime_type`
+   - `file_size_bytes`
+   - Disse påvirker filidentitet, filhandlinger og visning av gjeldende dokumentversjon.
+
+3. Høy risiko
+   - `extraction_status`
+   - `extraction_error`
+   - `extracted_text`
+   - Disse påvirker statusvisning, oppsummering, metadataflyt og AI-grunnlag.
+
+4. Svært høy risiko
+   - `content`
+   - Dette er siste fallback i `textForKnowledgeProcessing()` og må ikke fjernes før hele tekstkjeden er verifisert versjonsbasert.
+
+**Foreslåtte delsteg for 2.8:**
+
+- 2.8A — Plan og datakontroll
+  - Definere konkret omfang, risikonivå og rollback-strategi.
+- 2.8B — Kartlegg produksjonsdata
+  - Måle hvor ofte legacy-feltene fortsatt brukes i praksis, og hvilke dokumenter som fortsatt er avhengige av fallback.
+- 2.8C — Stopp eventuell gjenværende speilskriving for lavrisikofelter
+  - Vurdere å stoppe intern synkronisering av `content_type` og `is_active` etter at testene er oppdaterte.
+- 2.8D — Fjern lesere/fallback for lavrisikofelter
+  - Oppdatere konsumenter slik at de leser autoritativt fra `document_type` og `document_status`.
+- 2.8E — Vurder fysisk dropp av lavrisikofelter
+  - Bare etter at ingen lesere, payloads eller tester er avhengige av dem.
+- 2.8F — Tilsvarende plan for filidentitetsfeltene
+  - `storage_path`, `original_filename`, `mime_type`, `file_size_bytes`.
+- 2.8G — Tilsvarende plan for ekstraksjonsfeltene
+  - `extraction_status`, `extraction_error`, `extracted_text`.
+- 2.8H — Egen vurdering av `content`
+  - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.
+
+**Datakontroller før eventuell migrasjon:**
+
+- alle `KnowledgeItem`-rader har gyldig `currentVersion` når dokumentet faktisk har fil
+- current version har forventet filidentitet og filmetadata
+- current version har forventet ekstraksjonsstatus og eventuelle feilverdier
+- ingen aktiv payload, retrieval eller prosessering leser direkte fra legacyfeltet som skal fjernes
+- tester dekker gamle dokumenter, current-version-fallback og null-/tomverdier
+- rollback-plan er dokumentert før noen kolonne fjernes
+
+**Akseptansekriterier før fysisk kolonnedropp:**
+
+- feltet skrives ikke lenger
+- feltet leses ikke lenger
+- feltet brukes ikke som fallback
+- feltet finnes ikke lenger i payloadkontrakt eller UI
+- feltet brukes ikke av tester som legitim kompatibilitet
+- produksjonsdata er validert
+- migrasjonen er reversibel, eller risikoen er eksplisitt akseptert
+
+**Ikke gjort i 2.8-planen:**
+
+- ingen konkrete migrasjoner
+- ingen `Schema::table(... dropColumn ...)`
+- ingen modellendringer
+- ingen controller-endringer
+- ingen frontend-endringer
+- ingen payload- eller retrieval-endringer
+
+**Kort mål for fase 2.8:**
+
+- planlegge og gjennomføre fysisk opprydding først når legacy-bruken er dokumentert borte og alle konsumenter er flyttet over til autoritative kilder.
+
 ---
 
 ## 29. Fase 3 og videre: Utsatt til senere
