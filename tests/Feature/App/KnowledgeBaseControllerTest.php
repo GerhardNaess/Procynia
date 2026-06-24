@@ -6251,6 +6251,59 @@ XML;
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
                 && data_get($item, 'extraction_error') === null;
         });
+
+        // Check show payload (documentDetailPayload).
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
+                && data_get($item, 'extraction_error') === null;
+        });
+    }
+
+    public function test_payload_falls_back_to_legacy_extraction_state_when_current_version_is_missing(): void
+    {
+        $context = $this->customerContext('Legacy Extraction Fallback AS');
+
+        $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'legacy-extraction.docx',
+            'extracted_text' => 'Legacy document extracted text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
+            'extraction_error' => 'Legacy document-level error',
+        ]);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
+                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
+                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
+                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+        });
     }
 
     public function test_knowledge_document_store_defaults_review_dates_to_null_when_not_provided(): void

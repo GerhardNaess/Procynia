@@ -885,7 +885,7 @@ class KnowledgeBaseController extends Controller
             return $existingSummary;
         }
 
-        if ($knowledgeDocument->extraction_status !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
+        if ($knowledgeDocument->resolvedExtractionStatus() !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
             return null;
         }
 
@@ -916,7 +916,7 @@ class KnowledgeBaseController extends Controller
             return $existingSummary;
         }
 
-        if ($knowledgeDocument->extraction_status !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
+        if ($knowledgeDocument->resolvedExtractionStatus() !== KnowledgeItem::EXTRACTION_STATUS_COMPLETED) {
             return null;
         }
 
@@ -1794,8 +1794,8 @@ class KnowledgeBaseController extends Controller
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
             'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
-            'extraction_status' => $knowledgeDocument->extraction_status,
-            'extraction_error' => $knowledgeDocument->extraction_error,
+            'extraction_status' => $knowledgeDocument->resolvedExtractionStatus(),
+            'extraction_error' => $knowledgeDocument->resolvedExtractionError(),
             'summary' => $knowledgeDocument->summary,
             'uploaded_by_user_id' => $knowledgeDocument->uploaded_by_user_id,
             'created_at' => $knowledgeDocument->created_at?->toIso8601String(),
@@ -1848,8 +1848,8 @@ class KnowledgeBaseController extends Controller
      */
     private function documentListPayload(KnowledgeItem $knowledgeDocument): array
     {
-        $currentVersion = $knowledgeDocument->currentVersion;
-        $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
+        $extractionStatus = $knowledgeDocument->resolvedExtractionStatus();
+        $extractionError = $knowledgeDocument->resolvedExtractionError();
         $resolvedOriginalFilename = $knowledgeDocument->resolvedOriginalFilename();
         $resolvedMimeType = $knowledgeDocument->resolvedMimeType();
         $resolvedFileSizeBytes = $knowledgeDocument->resolvedFileSizeBytes();
@@ -1878,7 +1878,7 @@ class KnowledgeBaseController extends Controller
             'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
             'extraction_status' => $extractionStatus,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
-            'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
+            'extraction_error' => $extractionError,
             'chunk_count' => (int) ($knowledgeDocument->chunks_count ?? $knowledgeDocument->chunks->count()),
             'file_size_bytes' => $resolvedFileSizeBytes,
             'file_size_human' => $this->humanFileSize($resolvedFileSizeBytes),
@@ -1900,8 +1900,8 @@ class KnowledgeBaseController extends Controller
      */
     private function documentFormPayload(KnowledgeItem $knowledgeDocument): array
     {
-        $currentVersion = $knowledgeDocument->currentVersion;
-        $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
+        $extractionStatus = $knowledgeDocument->resolvedExtractionStatus();
+        $extractionError = $knowledgeDocument->resolvedExtractionError();
         $resolvedOriginalFilename = $knowledgeDocument->resolvedOriginalFilename();
         $resolvedMimeType = $knowledgeDocument->resolvedMimeType();
         $resolvedFileSizeBytes = $knowledgeDocument->resolvedFileSizeBytes();
@@ -1937,7 +1937,7 @@ class KnowledgeBaseController extends Controller
             'mime_type' => $resolvedMimeType,
             'extraction_status' => $extractionStatus,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
-            'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
+            'extraction_error' => $extractionError,
             'chunk_count' => $knowledgeDocument->chunks->count(),
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
         ]);
@@ -4725,11 +4725,11 @@ class KnowledgeBaseController extends Controller
             return Str::limit($summaryText, 360, '...');
         }
 
-        if ($knowledgeDocument->extraction_status === KnowledgeItem::EXTRACTION_STATUS_FAILED) {
+        if ($knowledgeDocument->resolvedExtractionStatus() === KnowledgeItem::EXTRACTION_STATUS_FAILED) {
             return 'Tekstuttrekk feilet.';
         }
 
-        return trim((string) $knowledgeDocument->extracted_text) !== '' ? '' : 'Ingen ekstrahert tekst.';
+        return trim((string) $knowledgeDocument->resolvedExtractedText()) !== '' ? '' : 'Ingen ekstrahert tekst.';
     }
 
     /**
@@ -4750,7 +4750,7 @@ class KnowledgeBaseController extends Controller
             }
         }
 
-        return $this->cleanDocumentSummaryText((string) $knowledgeDocument->extracted_text);
+        return $this->cleanDocumentSummaryText((string) $knowledgeDocument->resolvedExtractedText());
     }
 
     /**
