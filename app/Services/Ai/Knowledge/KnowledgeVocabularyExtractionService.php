@@ -180,8 +180,7 @@ class KnowledgeVocabularyExtractionService
     {
         return $documents
             ->map(function (KnowledgeItem $document): array {
-                $content = trim((string) ($document->extracted_text ?: $document->content));
-                $content = Str::squish($content);
+                $content = Str::squish($document->textForKnowledgeProcessing() ?? '');
 
                 $sectionTitles = $document->relationLoaded('chunks')
                     ? $document->chunks

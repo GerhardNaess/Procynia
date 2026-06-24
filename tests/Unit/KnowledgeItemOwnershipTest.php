@@ -363,4 +363,70 @@ class KnowledgeItemOwnershipTest extends TestCase
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
     }
+
+    public function test_text_for_knowledge_processing_prefers_current_version_extracted_text(): void
+    {
+        // currentVersion.extracted_text must win over legacy KnowledgeItem fields.
+        $customer = $this->createCustomer('Text Processing Priority AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'extracted_text' => 'Stale document extracted text',
+            'content' => 'Even older document content',
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => $document->original_filename,
+            'storage_path' => $document->storage_path,
+            'mime_type' => $document->mime_type,
+            'file_size_bytes' => $document->file_size_bytes,
+            'extracted_text' => 'Current version extracted text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'uploaded_by_user_id' => null,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'current-version-content'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $document->load('currentVersion');
+
+        $this->assertSame('Current version extracted text', $document->textForKnowledgeProcessing());
+    }
+
+    public function test_text_for_knowledge_processing_falls_back_to_document_extracted_text_when_no_version(): void
+    {
+        // Without a currentVersion, falls back to KnowledgeItem.extracted_text.
+        $customer = $this->createCustomer('Text Processing Fallback AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'extracted_text' => 'Legacy extracted text',
+            'content' => 'Legacy content',
+        ]);
+
+        $this->assertSame('Legacy extracted text', $document->textForKnowledgeProcessing());
+    }
+
+    public function test_text_for_knowledge_processing_falls_back_to_content_when_extracted_text_is_empty(): void
+    {
+        // Without extracted_text, falls back to KnowledgeItem.content.
+        $customer = $this->createCustomer('Text Processing Content Fallback AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'extracted_text' => '',
+            'content' => 'Only content is available',
+        ]);
+
+        $this->assertSame('Only content is available', $document->textForKnowledgeProcessing());
+    }
+
+    public function test_text_for_knowledge_processing_returns_null_when_all_sources_are_empty(): void
+    {
+        $customer = $this->createCustomer('Text Processing Null AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'extracted_text' => '',
+            'content' => '',
+        ]);
+
+        $this->assertNull($document->textForKnowledgeProcessing());
+    }
 }

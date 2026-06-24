@@ -35,6 +35,7 @@ class KnowledgeDocumentSummaryGenerationService
     {
         $document->loadMissing([
             'customer.language',
+            'currentVersion',
             'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
         ]);
 
@@ -43,7 +44,7 @@ class KnowledgeDocumentSummaryGenerationService
         $fallbackText = '';
 
         if ($contextRows === []) {
-            $fallbackText = $this->cleanRawTextForSummary((string) ($document->extracted_text ?: $document->content));
+            $fallbackText = $this->cleanRawTextForSummary($document->textForKnowledgeProcessing() ?? '');
 
             if ($fallbackText === '') {
                 Log::info('[PROCYNIA][KNOWLEDGE_SUMMARY] Document summary skipped because no usable document context was available.', [

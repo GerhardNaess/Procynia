@@ -234,6 +234,29 @@ class KnowledgeItem extends Model
             ->latestOfMany('version_no');
     }
 
+    /**
+     * Resolve the best available text body for knowledge processing (summarisation, vocabulary, metadata).
+     * Priority: currentVersion.extracted_text → KnowledgeItem.extracted_text → KnowledgeItem.content → null.
+     * Callers must eager-load currentVersion to avoid N+1 when iterating many documents.
+     */
+    public function textForKnowledgeProcessing(): ?string
+    {
+        $candidates = [
+            $this->currentVersion?->extracted_text,
+            $this->extracted_text,
+            $this->content,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $trimmed = trim((string) $candidate);
+            if ($trimmed !== '') {
+                return $trimmed;
+            }
+        }
+
+        return null;
+    }
+
     public function isCompanyOwned(): bool
     {
         return $this->ownership_type === self::OWNERSHIP_TYPE_COMPANY;

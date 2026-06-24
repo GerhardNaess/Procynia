@@ -230,13 +230,14 @@ class KnowledgeVocabularyAnalysisBatchService
             ->whereIn('id', $documentIds)
             ->whereNotNull('storage_path')
             ->with([
+                'currentVersion',
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),
             ])
             ->orderByDesc('updated_at')
             ->orderByDesc('id')
             ->get()
             ->filter(function (KnowledgeItem $document) use ($batch): bool {
-                $content = trim((string) ($document->extracted_text ?: $document->content));
+                $content = $document->textForKnowledgeProcessing() ?? '';
 
                 if ($content !== '') {
                     return true;
