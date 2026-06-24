@@ -6000,6 +6000,88 @@ XML;
         });
     }
 
+    public function test_index_payload_reads_file_identity_from_current_version_over_stale_document_fields(): void
+    {
+        // When KnowledgeItem fields have drifted from the current version, the payload must prefer
+        // the version's values for original_filename, mime_type, and file_size_bytes.
+        $context = $this->customerContext('Current Version File Identity Index AS');
+
+        $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'stale-document-name.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 999,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'current-version-name.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/v1.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 5120,
+            'extracted_text' => 'Version text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'version-content'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'original_filename') === 'current-version-name.pdf'
+                && data_get($item, 'mime_type') === 'application/pdf'
+                && data_get($item, 'file_size_bytes') === 5120;
+        });
+    }
+
+    public function test_edit_form_payload_reads_file_identity_from_current_version_over_stale_document_fields(): void
+    {
+        // When KnowledgeItem fields have drifted from the current version, the edit form payload must
+        // prefer the version's values for original_filename, mime_type, and file_size_bytes.
+        $context = $this->customerContext('Current Version File Identity Form AS');
+
+        $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'stale-form-name.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1111,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'current-form-version.pdf',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/form-v1.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 8192,
+            'extracted_text' => 'Form version text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'form-version-content'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'original_filename') === 'current-form-version.pdf'
+                && data_get($item, 'mime_type') === 'application/pdf'
+                && data_get($item, 'file_size_bytes') === 8192;
+        });
+    }
+
     public function test_knowledge_document_store_defaults_review_dates_to_null_when_not_provided(): void
     {
         Storage::fake('local');

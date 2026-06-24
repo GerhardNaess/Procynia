@@ -99,6 +99,7 @@ class KnowledgeBaseController extends Controller
                 'owningSavedNotice',
                 'documentThemeTerm',
                 'uploadedBy',
+                'currentVersion',
                 'chunks' => static fn ($query) => $query
                     ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
                     ->orderBy('chunk_index'),
@@ -136,6 +137,7 @@ class KnowledgeBaseController extends Controller
                 'owningSavedNotice',
                 'documentThemeTerm',
                 'uploadedBy',
+                'currentVersion',
                 'revisions' => static fn ($query) => $query
                     ->with('changedBy')
                     ->orderBy('revision_no')
@@ -155,7 +157,7 @@ class KnowledgeBaseController extends Controller
         $canApproveVersions = $user->resolvedBidRole() !== User::BID_ROLE_VIEWER;
 
         return Inertia::render('App/AI/KnowledgeBase/Show', [
-            'pageTitle' => 'Kunnskapsdokumenter · '.$record->original_filename,
+            'pageTitle' => 'Kunnskapsdokumenter · '.($record->currentVersion?->original_filename ?? $record->original_filename),
             'knowledgeItem' => $this->documentDetailPayload($record, $canApproveVersions),
             'canApproveVersions' => $canApproveVersions,
             'indexUrl' => route('app.ai.knowledge-base.index'),
@@ -458,6 +460,7 @@ class KnowledgeBaseController extends Controller
             'owningSavedNotice',
             'documentThemeTerm',
             'uploadedBy',
+            'currentVersion',
             'chunks' => static fn ($query) => $query
                 ->select(['id', 'knowledge_item_id', 'chunk_index', 'chunk_type', 'content'])
                 ->orderBy('chunk_index'),
@@ -1847,15 +1850,17 @@ class KnowledgeBaseController extends Controller
 
     /**
      * Purpose: Convert a knowledge document into a compact index payload.
-     * Inputs: A customer-scoped knowledge document with chunk counts loaded.
+     * Inputs: A customer-scoped knowledge document with chunk counts and currentVersion loaded.
      * Returns: An array ready for the index page.
      * Side effects: None.
      */
     private function documentListPayload(KnowledgeItem $knowledgeDocument): array
     {
+        $currentVersion = $knowledgeDocument->currentVersion;
+
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
-            'original_filename' => $knowledgeDocument->original_filename,
+            'original_filename' => $currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
             'document_category_id' => $knowledgeDocument->document_category_id,
             'document_category_name' => $this->documentCategoryName($knowledgeDocument),
             'document_topic_id' => $knowledgeDocument->document_topic_id,
@@ -1879,12 +1884,12 @@ class KnowledgeBaseController extends Controller
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
             'chunk_count' => (int) ($knowledgeDocument->chunks_count ?? $knowledgeDocument->chunks->count()),
-            'file_size_bytes' => $knowledgeDocument->file_size_bytes,
-            'file_size_human' => $this->humanFileSize($knowledgeDocument->file_size_bytes),
+            'file_size_bytes' => $currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes,
+            'file_size_human' => $this->humanFileSize($currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
-            'mime_type' => $knowledgeDocument->mime_type,
+            'mime_type' => $currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
             'edit_url' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $knowledgeDocument->id]),
             'delete_url' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $knowledgeDocument->id]),
@@ -1893,15 +1898,17 @@ class KnowledgeBaseController extends Controller
 
     /**
      * Purpose: Convert a knowledge document into the edit form payload.
-     * Inputs: A customer-scoped knowledge document.
+     * Inputs: A customer-scoped knowledge document with currentVersion loaded.
      * Returns: A frontend-ready array for the edit page.
      * Side effects: None.
      */
     private function documentFormPayload(KnowledgeItem $knowledgeDocument): array
     {
+        $currentVersion = $knowledgeDocument->currentVersion;
+
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
-            'original_filename' => $knowledgeDocument->original_filename,
+            'original_filename' => $currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
             'document_category_id' => $knowledgeDocument->document_category_id,
             'document_category_name' => $this->documentCategoryName($knowledgeDocument),
             'document_topic_id' => $knowledgeDocument->document_topic_id,
@@ -1922,12 +1929,12 @@ class KnowledgeBaseController extends Controller
             'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
             'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
             'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
-            'file_size_bytes' => $knowledgeDocument->file_size_bytes,
-            'file_size_human' => $this->humanFileSize($knowledgeDocument->file_size_bytes),
+            'file_size_bytes' => $currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes,
+            'file_size_human' => $this->humanFileSize($currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
-            'mime_type' => $knowledgeDocument->mime_type,
+            'mime_type' => $currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
             'extraction_status' => $knowledgeDocument->extraction_status,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
             'extraction_error' => $knowledgeDocument->extraction_error,
@@ -2017,8 +2024,8 @@ class KnowledgeBaseController extends Controller
                                 'v' => $chunk->image_hash ?: optional($chunk->updated_at)?->getTimestamp(),
                             ])
                             : null,
-                        'source_filename' => $knowledgeDocument->original_filename,
-                        'source_filetype' => $knowledgeDocument->mime_type,
+                        'source_filename' => $knowledgeDocument->currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
+                        'source_filetype' => $knowledgeDocument->currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
                         'knowledge_item_id' => $knowledgeDocument->id,
                     ])
                     ->values()
