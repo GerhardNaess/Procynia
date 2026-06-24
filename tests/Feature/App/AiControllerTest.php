@@ -7690,6 +7690,18 @@ class AiControllerTest extends TestCase
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
 
+        if (array_key_exists('content_type', $overrides)) {
+            $item->forceFill([
+                'content_type' => $overrides['content_type'],
+            ])->saveQuietly();
+        }
+
+        if (array_key_exists('is_active', $overrides)) {
+            $item->forceFill([
+                'is_active' => $overrides['is_active'],
+            ])->saveQuietly();
+        }
+
         // Every knowledge item needs a current version so retrieval guards can use version fields.
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $item->id,

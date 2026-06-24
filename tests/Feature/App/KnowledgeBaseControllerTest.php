@@ -4431,7 +4431,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $originalFilename = (string) ($overrides['original_filename'] ?? 'ownership-payload.docx');
         $content = (string) ($overrides['content'] ?? 'Ownership payload content.');
 
-        return KnowledgeItem::query()->create(array_merge([
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'uploaded_by_user_id' => $uploadedBy->id,
             'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
@@ -4454,6 +4454,20 @@ class KnowledgeBaseControllerTest extends TestCase
             'owning_saved_notice_id' => null,
             'is_active' => true,
         ], $overrides));
+
+        if (array_key_exists('content_type', $overrides)) {
+            $item->forceFill([
+                'content_type' => $overrides['content_type'],
+            ])->saveQuietly();
+        }
+
+        if (array_key_exists('is_active', $overrides)) {
+            $item->forceFill([
+                'is_active' => $overrides['is_active'],
+            ])->saveQuietly();
+        }
+
+        return $item;
     }
 
     /**
@@ -6022,6 +6036,14 @@ XML;
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
         $this->assertTrue((bool) $updatedDocument->is_active);
+    }
+
+    public function test_knowledge_document_legacy_mirror_fields_are_not_mass_assignable(): void
+    {
+        $knowledgeItem = new KnowledgeItem();
+
+        $this->assertFalse($knowledgeItem->isFillable('content_type'));
+        $this->assertFalse($knowledgeItem->isFillable('is_active'));
     }
 
     public function test_knowledge_document_form_payload_exposes_document_status_and_label(): void

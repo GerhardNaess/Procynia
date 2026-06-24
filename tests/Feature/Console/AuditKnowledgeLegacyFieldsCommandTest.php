@@ -197,7 +197,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
     {
         $content = $overrides['content'] ?? 'Legacy audit content.';
 
-        return KnowledgeItem::query()->create(array_merge([
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $overrides['title'] ?? 'Legacy audit document',
             'content' => $content,
@@ -213,6 +213,20 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
+
+        if (array_key_exists('content_type', $overrides)) {
+            $item->forceFill([
+                'content_type' => $overrides['content_type'],
+            ])->saveQuietly();
+        }
+
+        if (array_key_exists('is_active', $overrides)) {
+            $item->forceFill([
+                'is_active' => $overrides['is_active'],
+            ])->saveQuietly();
+        }
+
+        return $item;
     }
 
     private function createKnowledgeItemVersion(KnowledgeItem $knowledgeItem, array $overrides = []): KnowledgeItemVersion

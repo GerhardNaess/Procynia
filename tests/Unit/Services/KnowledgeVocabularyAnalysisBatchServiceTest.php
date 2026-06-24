@@ -207,7 +207,7 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
         $filename = $overrides['original_filename'] ?? 'metadata-document.docx';
         $content = $overrides['content'] ?? 'Metadata document content.';
 
-        return KnowledgeItem::query()->create(array_merge([
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $content,
@@ -224,5 +224,19 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
+
+        if (array_key_exists('content_type', $overrides)) {
+            $item->forceFill([
+                'content_type' => $overrides['content_type'],
+            ])->saveQuietly();
+        }
+
+        if (array_key_exists('is_active', $overrides)) {
+            $item->forceFill([
+                'is_active' => $overrides['is_active'],
+            ])->saveQuietly();
+        }
+
+        return $item;
     }
 }

@@ -130,7 +130,6 @@ class KnowledgeItem extends Model
         'storage_path',
         'mime_type',
         'file_size_bytes',
-        'content_type', // legacy mirror — document_type is authoritative; do not use as primary source
         'document_type',
         'extracted_text',
         'summary',
@@ -139,7 +138,6 @@ class KnowledgeItem extends Model
         'owner_user_id',
         'owning_saved_notice_id',
         'uploaded_by_user_id',
-        'is_active',
         'ai_usage_enabled',
         'document_status',
         'last_reviewed_at',
