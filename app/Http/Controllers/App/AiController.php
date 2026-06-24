@@ -41,6 +41,7 @@ use App\Services\RequirementKnowledgeMatcher;
 use App\Services\SavedNoticeAccessService;
 use App\Support\CustomerContext;
 use App\Support\PgVector;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -1983,16 +1984,25 @@ class AiController extends Controller
      * Inputs: The current customer id for the visible AI case.
      * Returns: A compact collection of active knowledge chunks limited to a safe V1 cap.
      * Side effects: None.
+     *
+     * Guards use knowledge_item_versions (not knowledge_items mirrors) as the authoritative source
+     * for storage_path and extraction_status. The join is through the document so all chunks
+     * belonging to documents with a valid current version are included regardless of whether the
+     * chunk itself carries a version pointer.
      */
     protected function knowledgeChunksForMatching(int $customerId, ?array $requirementEmbedding = null): Collection
     {
         $query = KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
+            ->join('knowledge_item_versions', function (JoinClause $join): void {
+                $join->on('knowledge_item_versions.knowledge_item_id', '=', 'knowledge_items.id')
+                    ->where('knowledge_item_versions.is_current', true);
+            })
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.document_status', KnowledgeItem::DOCUMENT_STATUS_ACTIVE)
-            ->whereNotNull('knowledge_items.storage_path')
-            ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
+            ->whereNotNull('knowledge_item_versions.storage_path')
+            ->where('knowledge_item_versions.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->select([
                 'knowledge_item_chunks.*',
                 'knowledge_items.original_filename as knowledge_item_title',

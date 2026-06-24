@@ -5,6 +5,7 @@ namespace App\Services\Ai\Retrieval;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
 use App\Services\KnowledgeChunkCoverageService;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -70,17 +71,26 @@ class KnowledgeMetadataMapService
      * Inputs: The customer id.
      * Returns: The current knowledge chunk rows that can participate in retrieval.
      * Side effects: None.
+     *
+     * Guards use knowledge_item_versions (not knowledge_items mirrors) as the authoritative source
+     * for storage_path and extraction_status. The join is through the document so all chunks
+     * belonging to documents with a valid current version are included regardless of whether the
+     * chunk itself carries a version pointer.
      */
     private function activeChunksForCustomer(int $customerId): Collection
     {
         return KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
+            ->join('knowledge_item_versions', function (JoinClause $join): void {
+                $join->on('knowledge_item_versions.knowledge_item_id', '=', 'knowledge_items.id')
+                    ->where('knowledge_item_versions.is_current', true);
+            })
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.ai_usage_enabled', true)
             ->where('knowledge_items.document_status', KnowledgeItem::DOCUMENT_STATUS_ACTIVE)
-            ->whereNotNull('knowledge_items.storage_path')
-            ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
+            ->whereNotNull('knowledge_item_versions.storage_path')
+            ->where('knowledge_item_versions.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->orderByDesc('knowledge_items.updated_at')
             ->orderByDesc('knowledge_items.id')
             ->orderBy('knowledge_item_chunks.chunk_index')

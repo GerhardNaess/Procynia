@@ -260,6 +260,10 @@ class MetadataCandidateRetrievalService
      * Inputs: The customer id.
      * Returns: A constrained query builder for active, completed knowledge chunks.
      * Side effects: None.
+     *
+     * Guards use knowledge_item_versions (not knowledge_items mirrors) as the authoritative source
+     * for storage_path and extraction_status. The join is through the chunk's version pointer so
+     * only chunks belonging to the current version are returned.
      */
     private function baseQuery(int $customerId): Builder
     {
@@ -274,8 +278,8 @@ class MetadataCandidateRetrievalService
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->where('knowledge_items.ai_usage_enabled', true)
             ->where('knowledge_items.document_status', KnowledgeItem::DOCUMENT_STATUS_ACTIVE)
-            ->whereNotNull('knowledge_items.storage_path')
-            ->where('knowledge_items.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
+            ->whereNotNull('knowledge_item_versions.storage_path')
+            ->where('knowledge_item_versions.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->orderByDesc('knowledge_items.updated_at')
             ->orderByDesc('knowledge_items.id')
             ->orderBy('knowledge_item_chunks.chunk_index')

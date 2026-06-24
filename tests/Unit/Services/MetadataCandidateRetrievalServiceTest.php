@@ -521,6 +521,100 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertNotSame($versionB, $result->first()['knowledge_item_version_id']);
     }
 
+    public function test_retrieval_uses_version_storage_path_over_stale_document_field(): void
+    {
+        // Scenario A: item has null storage_path but the current version is complete — retrieval must find the chunk.
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Version Storage Win AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Version Storage Win',
+            'original_filename' => 'version-storage-win.docx',
+            'content' => 'Stale item — no storage path.',
+            'storage_path' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_PENDING,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$customer->id.'/version-storage-win.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $chunk = $this->createChunk($item, 0, [
+            'knowledge_item_version_id' => $version->id,
+            'topic' => 'Versjon vinner',
+            'content' => 'Versjon vinner over tomt legacy-felt.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Versjon vinner']],
+            'search_text' => 'versjon vinner',
+            'intent_summary' => 'Versjon skal vinne over tomt legacy-felt.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame($chunk->id, $result->first()['chunk_id']);
+    }
+
+    public function test_retrieval_blocks_when_version_lacks_storage_path_despite_valid_document_fields(): void
+    {
+        // Scenario B: item has valid storage_path and completed extraction but the current version has null
+        // storage_path — retrieval must exclude the chunk even though the legacy document fields look eligible.
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Version Storage Block AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Version Storage Block',
+            'original_filename' => 'version-storage-block.docx',
+            'content' => 'Valid item — storage path set on item.',
+            'storage_path' => 'customers/'.$customer->id.'/version-storage-block.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_PENDING,
+        ]);
+
+        $this->createChunk($item, 0, [
+            'knowledge_item_version_id' => $version->id,
+            'topic' => 'Versjon blokkerer',
+            'content' => 'Versjon blokkerer selv om legacy-felt ser gyldig ut.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Versjon blokkerer']],
+            'search_text' => 'versjon blokkerer',
+            'intent_summary' => 'Versjon uten storage_path skal blokkere retrieval.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(0, $result);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(

@@ -5,6 +5,7 @@ namespace Tests\Unit\Services;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemChunk;
+use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Retrieval\KnowledgeMetadataMapService;
@@ -159,6 +160,98 @@ class KnowledgeMetadataMapServiceTest extends TestCase
         $this->assertSame(0, $map['chunk_count']);
     }
 
+    public function test_metadata_map_includes_chunk_when_version_has_storage_path_but_item_field_is_null(): void
+    {
+        // Scenario A: item has null storage_path but the current version is complete — map must include the chunk.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Map Version Win AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Map Version Win',
+            'original_filename' => 'map-version-win.docx',
+            'content' => 'Stale item.',
+            'storage_path' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_PENDING,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$customer->id.'/map-version-win.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        $this->createChunk($item, 0, [
+            'topic' => 'Versjonskontrollert tema',
+            'sub_topic' => 'Underemne',
+            'keywords' => ['nøkkelord'],
+            'service_product_tag' => 'Tag',
+            'theme_tag' => 'Tema-tag',
+            'section_title' => 'Del 1',
+            'section_path' => 'Del 1',
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(1, $map['chunk_count']);
+        $this->assertSame(['Versjonskontrollert tema'], $map['fields']['topic']);
+    }
+
+    public function test_metadata_map_excludes_chunk_when_version_lacks_storage_path_despite_valid_item_fields(): void
+    {
+        // Scenario B: item has valid storage_path and completed extraction but the current version
+        // has null storage_path — map must exclude the chunk even though legacy document fields look eligible.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Map Version Block AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Map Version Block',
+            'original_filename' => 'map-version-block.docx',
+            'content' => 'Valid item.',
+            'storage_path' => 'customers/'.$customer->id.'/map-version-block.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => null,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_PENDING,
+        ]);
+
+        $this->createChunk($item, 0, [
+            'topic' => 'Blokkert tema',
+            'sub_topic' => null,
+            'keywords' => [],
+            'service_product_tag' => null,
+            'theme_tag' => null,
+            'section_title' => null,
+            'section_path' => null,
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(0, $map['chunk_count']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -185,24 +278,38 @@ class KnowledgeMetadataMapServiceTest extends TestCase
         $title = $overrides['title'] ?? 'Metadata document';
         $filename = $overrides['original_filename'] ?? 'metadata-document.docx';
         $content = $overrides['content'] ?? 'Metadata document content.';
+        $storagePath = $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx';
+        $extractionStatus = $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
 
-        return KnowledgeItem::query()->create(array_merge([
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $content,
             'original_filename' => $filename,
-            'storage_path' => $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx',
+            'storage_path' => $storagePath,
             'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
             'summary' => $overrides['summary'] ?? 'Oppsummering',
-            'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
+
+        // Every knowledge item needs a current version so retrieval guards can use version fields.
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => $storagePath,
+            'extraction_status' => $extractionStatus,
+        ]);
+
+        return $item;
     }
 
     private function createChunk(KnowledgeItem $knowledgeItem, int $chunkIndex, array $overrides = []): KnowledgeItemChunk

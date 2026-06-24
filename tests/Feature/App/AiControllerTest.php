@@ -7664,22 +7664,37 @@ class AiControllerTest extends TestCase
             $slug = 'knowledge-document';
         }
 
-        return KnowledgeItem::query()->create(array_merge([
+        $storagePath = $overrides['storage_path'] ?? sprintf('customers/%d/knowledge-documents/%s', $customer->id, $slug.'.docx');
+        $extractionStatus = $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
+
+        $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $extractedText,
             'original_filename' => $originalFilename,
-            'storage_path' => $overrides['storage_path'] ?? sprintf('customers/%d/knowledge-documents/%s', $customer->id, $slug.'.docx'),
+            'storage_path' => $storagePath,
             'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'document_type' => $documentType,
             'content_type' => $documentType,
             'extracted_text' => $extractedText,
-            'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
+
+        // Every knowledge item needs a current version so retrieval guards can use version fields.
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => $storagePath,
+            'extraction_status' => $extractionStatus,
+        ]);
+
+        return $item;
     }
 
     /**
@@ -8220,14 +8235,10 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
 
-        $version = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/metode.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
 
         $chunk = $knowledgeItem->chunks()->create([
             'knowledge_item_version_id' => $version->id,
@@ -8357,14 +8368,10 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
 
-        $versionOne = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/versjonsstabilitet.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $versionOne = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
 
         $chunkOne = $knowledgeItem->chunks()->create([
             'knowledge_item_version_id' => $versionOne->id,
@@ -8455,14 +8462,10 @@ class AiControllerTest extends TestCase
             'content' => 'Kundescoping dokumentasjon A.',
             'is_active' => true,
         ]);
-        $versionA = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItemA->id,
-            'customer_id' => $contextA['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$contextA['customer']->id.'/knowledge-items/scope-a.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $versionA = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItemA->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
         $chunkA = $knowledgeItemA->chunks()->create([
             'knowledge_item_version_id' => $versionA->id,
             'chunk_index' => 0,
@@ -8546,14 +8549,10 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
 
-        $version = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/versjonert.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
 
         $knowledgeItem->chunks()->create([
             'knowledge_item_version_id' => $version->id,
@@ -8629,14 +8628,10 @@ class AiControllerTest extends TestCase
             'is_active' => true,
         ]);
 
-        $versionOne = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stabilitetstest.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $versionOne = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
 
         $knowledgeItem->chunks()->create([
             'knowledge_item_version_id' => $versionOne->id,
@@ -8723,14 +8718,10 @@ class AiControllerTest extends TestCase
             'losningsbeskrivelse.docx',
         );
 
-        $version = KnowledgeItemVersion::query()->create([
-            'knowledge_item_id' => $knowledgeItem->id,
-            'customer_id' => $context['customer']->id,
-            'version_no' => 1,
-            'is_current' => true,
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/losningsbeskrivelse.docx',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-        ]);
+        $version = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('version_no', 1)
+            ->firstOrFail();
 
         $knowledgeItem->chunks()->update(['knowledge_item_version_id' => $version->id]);
 
