@@ -81,7 +81,6 @@ export default function KnowledgeBaseCreate({
         document_category_id: null,
         document_topic_id: null,
         ownership_type: 'company',
-        document_theme_term_id: '',
         ai_usage_enabled: true,
         document_status: 'active',
         last_reviewed_at: null,

@@ -18,7 +18,6 @@ export default function KnowledgeBaseEdit({
         document_category_id: knowledgeItem.document_category_id ?? null,
         document_topic_id: knowledgeItem.document_topic_id ?? null,
         ownership_type: knowledgeItem.ownership_type ?? 'company',
-        document_theme_term_id: knowledgeItem.document_theme_term_id ?? '',
         owner_user_id: knowledgeItem.owner_user_id ?? '',
         ai_usage_enabled: knowledgeItem.ai_usage_enabled ?? true,
         document_status: knowledgeItem.document_status ?? 'active',
