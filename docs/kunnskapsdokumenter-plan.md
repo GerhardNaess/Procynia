@@ -1199,16 +1199,22 @@ Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må v
   - Review findings: ingen.
   - Expected legacy findings: `current_version_missing_extraction_error_on_success=2` for vellykkede current versions uten lagret feiltekst.
   - Dette betyr at det foreløpig ikke er dataavvik som stopper fysisk opprydding, men at audit-kommandoen nå tydelig skiller mellom reelle blockers, vurderingspunkter og forventede legacy-avvik.
-  - Tryggeste feltområde å starte med videre er fortsatt de lavrisiko speilfeltene `content_type` og `is_active`, fordi de allerede er hardt kontrollert av nåværende datamodell og payloader.
+  - Dette ble fulgt opp i 2.8E, der `content_type` og `is_active` ble fjernet fra `$fillable` i `KnowledgeItem`.
 - 2.8D — Fjern lesere/fallback for lavrisikofelter
-  - Modellens speilskriving for `content_type` og `is_active` er nå stoppet.
+  - Modellens speilskriving for `content_type` og `is_active` er nå stoppet ved at feltene er fjernet fra `$fillable`.
   - `document_type` og `document_status` er fortsatt autoritative.
   - Legacy-kolonnene finnes fortsatt i databasen, men de vedlikeholdes ikke lenger som aktive speil.
   - Avvik i `content_type` og `is_active` er nå forventede legacy-funn i audit.
   - Ingen kolonner er droppet i dette steget.
   - Neste konsumentsteg er å sikre at all lesing og all fremtidig opprydding tydelig behandler disse feltene som legacy-kompatibilitet, ikke som styrende felter.
-- 2.8E — Vurder fysisk dropp av lavrisikofelter
-  - Bare etter at ingen lesere, payloads eller tester er avhengige av dem.
+- 2.8E — Fjern `content_type` og `is_active` fra aktiv write-path
+  - `content_type` og `is_active` er ikke lenger mass-assignable via aktiv modellbasert write-path i `KnowledgeItem`.
+  - `document_type` og `document_status` er fortsatt autoritative.
+  - Legacy-kolonnene finnes fortsatt i databasen og er ikke droppet.
+  - Ingen migrasjon ble laget.
+  - `knowledge:legacy-audit` returnerte `OK_FOR_NEXT_STEP`.
+  - Audit leser fortsatt `content_type` og `is_active` som expected legacy-funn, ikke som blockers.
+  - Videre fysisk kolonnedropp må eventuelt være et separat senere steg.
 - 2.8F — Tilsvarende plan for filidentitetsfeltene
   - `storage_path`, `original_filename`, `mime_type`, `file_size_bytes`.
 - 2.8G — Tilsvarende plan for ekstraksjonsfeltene
