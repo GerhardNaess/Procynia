@@ -223,12 +223,12 @@ class AuditKnowledgeLegacyFields extends Command
 
                     if ($this->hasStringMismatch($item->content_type, $item->document_type)) {
                         $summary['content_type_mismatches']++;
-                        $this->appendExample($examples['review'], $item->id);
+                        $this->appendExample($examples['expected'], $item->id);
                     }
 
                     if ($this->hasBoolMismatch($item->is_active, $item->document_status === KnowledgeItem::DOCUMENT_STATUS_ACTIVE)) {
                         $summary['is_active_mismatches']++;
-                        $this->appendExample($examples['review'], $item->id);
+                        $this->appendExample($examples['expected'], $item->id);
                     }
                 }
             });
@@ -354,16 +354,6 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['legacy_extracted_text_mismatches'],
             $examples['review'],
         ));
-        $this->line($this->formatFindingLine(
-            'content_type_vs_document_type_mismatches',
-            $summary['content_type_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'is_active_vs_document_status_mismatches',
-            $summary['is_active_mismatches'],
-            $examples['review'],
-        ));
         $this->line($this->lineBreakIfNoFindings($this->hasFindings([
             $summary['storage_path_mismatches'],
             $summary['original_filename_mismatches'],
@@ -375,8 +365,6 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['legacy_extraction_status_mismatches'],
             $summary['legacy_extraction_error_mismatches'],
             $summary['legacy_extracted_text_mismatches'],
-            $summary['content_type_mismatches'],
-            $summary['is_active_mismatches'],
         ])));
         $this->newLine();
         $this->line('Expected legacy findings');
@@ -395,10 +383,23 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['content_fallback_candidates'],
             $examples['expected'],
         ));
+        $this->line($this->formatFindingLine(
+            'content_type_vs_document_type_mismatches',
+            $summary['content_type_mismatches'],
+            $examples['expected'],
+        ));
+        $this->line($this->formatFindingLine(
+            'is_active_vs_document_status_mismatches',
+            $summary['is_active_mismatches'],
+            $examples['expected'],
+        ));
+        $this->line('- content_type and is_active are no longer actively synchronized; mismatches are expected legacy findings.');
         $this->line($this->lineBreakIfNoFindings($this->hasFindings([
             $summary['current_version_missing_extraction_error_on_success'],
             $summary['current_version_missing_extracted_text'],
             $summary['content_fallback_candidates'],
+            $summary['content_type_mismatches'],
+            $summary['is_active_mismatches'],
         ])));
         $this->newLine();
         $this->line('File identity mirrors');
@@ -412,7 +413,7 @@ class AuditKnowledgeLegacyFields extends Command
         $this->line(sprintf('- legacy_extraction_error_mismatches=%d', $summary['legacy_extraction_error_mismatches']));
         $this->line(sprintf('- legacy_extracted_text_mismatches=%d', $summary['legacy_extracted_text_mismatches']));
         $this->newLine();
-        $this->line('Type/status mirrors');
+        $this->line('Legacy compatibility mirrors');
         $this->line(sprintf('- content_type_vs_document_type_mismatches=%d', $summary['content_type_mismatches']));
         $this->line(sprintf('- is_active_vs_document_status_mismatches=%d', $summary['is_active_mismatches']));
         $this->newLine();
@@ -538,8 +539,6 @@ class AuditKnowledgeLegacyFields extends Command
             'legacy_extraction_error_mismatches',
             'legacy_extracted_text_mismatches',
             'content_fallback_candidates',
-            'content_type_mismatches',
-            'is_active_mismatches',
         ];
 
         foreach ($reviewKeys as $key) {

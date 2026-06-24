@@ -435,7 +435,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $document->storage_path);
         $this->assertTrue(Storage::disk('local')->exists($document->storage_path));
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $document->document_type);
-        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $document->content_type);
+        $this->assertSame(KnowledgeItem::CONTENT_TYPE_OTHER, $document->content_type);
         $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_COMPANY, $document->ownership_type);
         $this->assertSame($context['user']->id, $document->owner_user_id);
         $this->assertSame($context['user']->name, $document->owner?->name);
@@ -3630,7 +3630,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
-        $this->assertFalse((bool) $updatedDocument->is_active);
+        $this->assertTrue((bool) $updatedDocument->is_active);
         $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $updatedDocument->extracted_text));
         $this->assertSame($initialChunkCount, $updatedChunkCount);
     }
@@ -3783,7 +3783,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $preservedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $preservedDocument->document_type);
-        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $preservedDocument->content_type);
+        $this->assertSame(KnowledgeItem::CONTENT_TYPE_OTHER, $preservedDocument->content_type);
         $this->assertTrue((bool) $preservedDocument->is_active);
         $this->assertSame($replacementThemeTerm->id, $preservedDocument->document_theme_term_id);
 
@@ -3799,7 +3799,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $clearedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $clearedDocument->document_type);
-        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_REFERENCE, $clearedDocument->content_type);
+        $this->assertSame(KnowledgeItem::CONTENT_TYPE_OTHER, $clearedDocument->content_type);
         $this->assertTrue((bool) $clearedDocument->is_active);
         $this->assertNull($clearedDocument->document_theme_term_id);
         $this->assertFalse($clearedDocument->hasDocumentTheme());
@@ -5946,7 +5946,7 @@ XML;
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $document->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $document->content_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $document->document_status);
-        $this->assertFalse((bool) $document->is_active);
+        $this->assertTrue((bool) $document->is_active);
     }
 
     public function test_knowledge_document_update_persists_document_status_and_index_payload_exposes_it(): void
@@ -6021,7 +6021,7 @@ XML;
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
-        $this->assertFalse((bool) $updatedDocument->is_active);
+        $this->assertTrue((bool) $updatedDocument->is_active);
     }
 
     public function test_knowledge_document_form_payload_exposes_document_status_and_label(): void

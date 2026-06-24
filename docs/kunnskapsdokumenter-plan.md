@@ -1201,7 +1201,12 @@ Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må v
   - Dette betyr at det foreløpig ikke er dataavvik som stopper fysisk opprydding, men at audit-kommandoen nå tydelig skiller mellom reelle blockers, vurderingspunkter og forventede legacy-avvik.
   - Tryggeste feltområde å starte med videre er fortsatt de lavrisiko speilfeltene `content_type` og `is_active`, fordi de allerede er hardt kontrollert av nåværende datamodell og payloader.
 - 2.8D — Fjern lesere/fallback for lavrisikofelter
-  - Oppdatere konsumenter slik at de leser autoritativt fra `document_type` og `document_status`.
+  - Modellens speilskriving for `content_type` og `is_active` er nå stoppet.
+  - `document_type` og `document_status` er fortsatt autoritative.
+  - Legacy-kolonnene finnes fortsatt i databasen, men de vedlikeholdes ikke lenger som aktive speil.
+  - Avvik i `content_type` og `is_active` er nå forventede legacy-funn i audit.
+  - Ingen kolonner er droppet i dette steget.
+  - Neste konsumentsteg er å sikre at all lesing og all fremtidig opprydding tydelig behandler disse feltene som legacy-kompatibilitet, ikke som styrende felter.
 - 2.8E — Vurder fysisk dropp av lavrisikofelter
   - Bare etter at ingen lesere, payloads eller tester er avhengige av dem.
 - 2.8F — Tilsvarende plan for filidentitetsfeltene

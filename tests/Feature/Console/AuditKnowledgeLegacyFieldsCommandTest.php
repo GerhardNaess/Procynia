@@ -24,7 +24,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('Current version integrity')
             ->expectsOutputToContain('File identity mirrors')
             ->expectsOutputToContain('Extraction mirrors')
-            ->expectsOutputToContain('Type/status mirrors')
+            ->expectsOutputToContain('Legacy compatibility mirrors')
             ->expectsOutputToContain('Content fallback')
             ->expectsOutputToContain('Recommendation')
             ->expectsOutputToContain('OK_FOR_NEXT_STEP')
@@ -128,6 +128,48 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $this->assertSame($itemUpdatedAtBefore, DB::table('knowledge_items')->where('id', $auditItem->id)->value('updated_at'));
         $this->assertSame($versionUpdatedAtBefore, DB::table('knowledge_item_versions')->where('id', $currentVersion->id)->value('updated_at'));
         $this->assertSame($missingVersionItem->updated_at?->toDateTimeString(), $missingVersionItem->fresh()->updated_at?->toDateTimeString());
+    }
+
+    public function test_command_treats_content_type_and_is_active_drift_as_expected_legacy_findings(): void
+    {
+        $customer = $this->createCustomer('Compatibility Audit Customer AS');
+
+        $auditItem = $this->createKnowledgeItem($customer, [
+            'title' => 'Compatibility drift document',
+            'content' => 'Compatibility drift content.',
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+            'original_filename' => 'compatibility-drift.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/compatibility-drift.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Compatibility drift extracted text.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'is_active' => true,
+        ]);
+
+        $currentVersion = $this->createKnowledgeItemVersion($auditItem, [
+            'version_no' => 1,
+            'is_current' => true,
+            'extracted_text' => 'Compatibility drift extracted text.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $auditItem->document_type);
+        $this->assertSame(KnowledgeItem::CONTENT_TYPE_OTHER, $auditItem->content_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $auditItem->document_status);
+        $this->assertTrue((bool) $auditItem->is_active);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $currentVersion->fresh()->knowledgeItem?->document_type);
+
+        $this->artisan('knowledge:legacy-audit')
+            ->expectsOutputToContain('content_type_vs_document_type_mismatches=1')
+            ->expectsOutputToContain('is_active_vs_document_status_mismatches=1')
+            ->expectsOutputToContain('Expected legacy findings')
+            ->expectsOutputToContain('OK_FOR_NEXT_STEP')
+            ->assertSuccessful();
     }
 
     private function createCustomer(string $name): Customer
