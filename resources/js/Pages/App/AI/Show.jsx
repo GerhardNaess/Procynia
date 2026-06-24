@@ -2673,15 +2673,21 @@ export default function AiShow({
                 },
             }));
 
-            if (Object.prototype.hasOwnProperty.call(response.data, 'knowledge_sources_sent_to_ai')) {
-                setRequirementRows((currentRows) =>
-                    currentRows.map((row) =>
-                        row.id === requirement.id
-                            ? { ...row, knowledge_sources_sent_to_ai: response.data.knowledge_sources_sent_to_ai ?? [] }
-                            : row
-                    )
-                );
-            }
+            setRequirementRows((currentRows) =>
+                currentRows.map((row) => {
+                    if (row.id !== requirement.id) {
+                        return row;
+                    }
+                    const rowUpdates = {};
+                    if (Object.prototype.hasOwnProperty.call(response.data, 'answer_draft')) {
+                        rowUpdates.answer_draft = response.data.answer_draft;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(response.data, 'knowledge_sources_sent_to_ai')) {
+                        rowUpdates.knowledge_sources_sent_to_ai = response.data.knowledge_sources_sent_to_ai ?? [];
+                    }
+                    return { ...row, ...rowUpdates };
+                })
+            );
         } catch (error) {
             setAnswerDraftError(extractAxiosErrorMessage(error, 'Kunne ikke generere svarutkast.'));
         } finally {
