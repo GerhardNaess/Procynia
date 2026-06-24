@@ -107,9 +107,9 @@ class RequirementKnowledgeMatcher
                     : $this->metadataBoostScore($requirementTokens, $chunk);
 
                 $score += $chunkMetadataScore;
-                $contentType = (string) data_get($chunk, 'content_type', '');
+                $documentType = (string) data_get($chunk, 'document_type', '');
 
-                if ($contentType !== '' && isset($heuristicBoosts[$contentType])) {
+                if ($documentType !== '' && isset($heuristicBoosts[$documentType])) {
                     $score += self::HEURISTIC_BOOST;
                 }
 
@@ -141,7 +141,7 @@ class RequirementKnowledgeMatcher
                 return [
                     'knowledge_item_id' => (int) data_get($chunk, 'knowledge_item_id'),
                     'knowledge_item_title' => (string) data_get($chunk, 'knowledge_item_title', ''),
-                    'content_type' => $contentType,
+                    'document_type' => $documentType,
                     'chunk_id' => (int) data_get($chunk, 'chunk_id'),
                     'chunk_index' => (int) data_get($chunk, 'chunk_index', 0),
                     'chunk_content' => $chunkContent,

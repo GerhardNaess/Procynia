@@ -1195,6 +1195,29 @@ Fase 2.8F er en readiness-kontroll, ikke en migrasjon. Målet er å avgjøre om 
 - ingen frontend-endring
 - ingen retrieval- eller AI-logikkendring
 
+### 28.8G Fjerning av aktive app-lesere av `content_type` og `is_active` (kontrollert juni 2026)
+
+Fase 2.8G fjerner de siste aktive app-konsumentene av legacy-speilene `content_type` og `is_active` i Kunnskapsbase-/AI-kjeden. Felt og legacy audit-fixtures forblir i databasen, men brukerflaten og AI-payloadene leser nå autoritative felter:
+
+- `document_type` i stedet for `content_type`
+- `document_status` i stedet for `is_active`
+
+**Hva som ble ryddet i denne fasen:**
+
+- Kunnskapsbase-payloadene for liste, detalj, redigering og revisjonssnapshots eksponerer ikke lenger `content_type`, `content_type_label` eller `is_active`.
+- AI-arbeidsflyten bruker `document_type` i alle aktive leser- og prompt-/AI-payloadene.
+- `Show.jsx` normaliserer og viser `document_type` i stedet for `content_type`.
+
+**Hva som fortsatt står igjen bevisst:**
+
+- Legacy-feltene finnes fortsatt i databasen og kan fortsatt leses av audit-/legacy-tester.
+- `KnowledgeItem` beholder foreløpig legacy-kompatibilitet der opprettelsesflyten fortsatt trenger det.
+- Ingen migrasjon eller kolonnedropp er gjort.
+
+**Videre retning:**
+
+- Når det ikke finnes aktive app-lesere igjen og audit er schema-aware, kan fysisk kolonnedropp vurderes som et separat steg.
+
 ### 28.9 Tilsvarende plan for filidentitetsfeltene
 
 - `storage_path`

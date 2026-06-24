@@ -1784,12 +1784,10 @@ class KnowledgeBaseController extends Controller
             'document_topic_name' => $this->documentTopicName($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
-            'content_type' => $knowledgeDocument->document_type, // legacy alias — reads from document_type
             'ownership_type' => $knowledgeDocument->ownership_type,
             'owner_user_id' => $knowledgeDocument->owner_user_id,
             'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
             'document_theme_term_id' => $knowledgeDocument->document_theme_term_id,
-            'is_active' => (bool) $knowledgeDocument->is_active,
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
@@ -1865,11 +1863,8 @@ class KnowledgeBaseController extends Controller
             'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
-            'content_type' => $knowledgeDocument->document_type,
-            'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
             'summary' => $knowledgeDocument->summary,
-            'is_active' => (bool) $knowledgeDocument->is_active, // legacy mirror — document_status is authoritative
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],
@@ -1917,12 +1912,9 @@ class KnowledgeBaseController extends Controller
             'document_theme_label' => $this->documentThemeLabel($knowledgeDocument),
             'document_theme_term' => $this->documentThemeTermPayload($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
-            'content_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
-            'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type, // legacy alias
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
             'summary' => $knowledgeDocument->summary,
-            'is_active' => (bool) $knowledgeDocument->is_active, // legacy mirror — document_status is authoritative
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],

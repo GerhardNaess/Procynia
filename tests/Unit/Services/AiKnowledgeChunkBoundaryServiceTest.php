@@ -24,7 +24,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(101, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromElements([
@@ -57,7 +57,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(102, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromElements([
@@ -89,7 +89,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(103, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromElements([
@@ -119,7 +119,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(104, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromElements([
@@ -145,7 +145,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(105, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromElements([
@@ -189,7 +189,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(101, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromText('Kort innhold til boundary-test.'));
@@ -221,7 +221,7 @@ class AiKnowledgeChunkBoundaryServiceTest extends TestCase
         $result = $service->suggestBoundaries(102, [
             'document_title' => 'Boundary test document',
             'original_filename' => 'boundary-test.docx',
-            'content_type' => 'reference',
+            'document_type' => 'reference',
             'document_type' => 'reference',
             'summary' => null,
         ], $this->structureFromText('Kort innhold til boundary-test.'));

@@ -319,7 +319,7 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'chunk_id' => $chunkId,
             'knowledge_item_id' => $chunkId,
             'knowledge_item_title' => $title,
-            'content_type' => 'other',
+            'document_type' => 'other',
             'chunk_index' => 0,
             'content' => $content,
             'embedding_vector' => $embeddingVector,

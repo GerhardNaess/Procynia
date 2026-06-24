@@ -3057,6 +3057,8 @@ class KnowledgeBaseControllerTest extends TestCase
                 && data_get($page, 'props.knowledgeItem.original_filename') === 'detail-reference.docx'
                 && data_get($page, 'props.knowledgeItem.show_url') === route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id])
                 && data_get($page, 'props.knowledgeItem.document_type_label') === KnowledgeItem::DOCUMENT_TYPE_LABELS[KnowledgeItem::DOCUMENT_TYPE_REFERENCE]
+                && ! array_key_exists('content_type', data_get($page, 'props.knowledgeItem', []))
+                && ! array_key_exists('is_active', data_get($page, 'props.knowledgeItem', []))
                 && data_get($page, 'props.knowledgeItem.chunk_count') > 0
                 && $chunks->count() > 0
                 && $chunks->first()['title'] === null
@@ -3129,18 +3131,24 @@ class KnowledgeBaseControllerTest extends TestCase
                         && ! array_key_exists('extracted_text', $revision['snapshot'])
                         && ! array_key_exists('chunks', $revision['snapshot'])
                         && ! array_key_exists('embeddings', $revision['snapshot'])
-                        && ! array_key_exists('content', $revision['snapshot']);
+                        && ! array_key_exists('content', $revision['snapshot'])
+                        && ! array_key_exists('content_type', $revision['snapshot'])
+                        && ! array_key_exists('is_active', $revision['snapshot']);
                 })
                 && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.knowledge_item_id') === $document->id
                 && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.document_type') === KnowledgeItem::DOCUMENT_TYPE_REFERENCE
                 && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.mime_type') === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_COMPANY
                 && data_get($page, 'props.knowledgeItem.revisions.0.snapshot.document_theme_term_id') === $themeTerm->id
+                && ! array_key_exists('content_type', data_get($page, 'props.knowledgeItem.revisions.0.snapshot', []))
+                && ! array_key_exists('is_active', data_get($page, 'props.knowledgeItem.revisions.0.snapshot', []))
                 && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.knowledge_item_id') === $document->id
                 && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.document_type') === KnowledgeItem::DOCUMENT_TYPE_OTHER
                 && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.mime_type') === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                 && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.ownership_type') === KnowledgeItem::OWNERSHIP_TYPE_COMPANY
-                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.document_theme_term_id') === $themeTerm->id;
+                && data_get($page, 'props.knowledgeItem.revisions.1.snapshot.document_theme_term_id') === $themeTerm->id
+                && ! array_key_exists('content_type', data_get($page, 'props.knowledgeItem.revisions.1.snapshot', []))
+                && ! array_key_exists('is_active', data_get($page, 'props.knowledgeItem.revisions.1.snapshot', []));
         });
     }
 
@@ -6112,7 +6120,9 @@ XML;
             return $item !== null
                 && data_get($item, 'original_filename') === 'current-version-name.pdf'
                 && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 5120;
+                && data_get($item, 'file_size_bytes') === 5120
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
     }
 
@@ -6205,7 +6215,9 @@ XML;
             return $item !== null
                 && data_get($item, 'original_filename') === 'legacy-document-name.docx'
                 && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 2468;
+                && data_get($item, 'file_size_bytes') === 2468
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
@@ -6218,7 +6230,9 @@ XML;
                 && $item !== null
                 && data_get($item, 'original_filename') === 'legacy-document-name.docx'
                 && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 2468;
+                && data_get($item, 'file_size_bytes') === 2468
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
     }
 
@@ -6260,7 +6274,9 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
-                && data_get($item, 'extraction_error') === null;
+                && data_get($item, 'extraction_error') === null
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
 
         // Check edit form payload (documentFormPayload).
@@ -6271,7 +6287,9 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
-                && data_get($item, 'extraction_error') === null;
+                && data_get($item, 'extraction_error') === null
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
 
         // Check show payload (documentDetailPayload).
@@ -6282,7 +6300,9 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
-                && data_get($item, 'extraction_error') === null;
+                && data_get($item, 'extraction_error') === null
+                && ! array_key_exists('content_type', $item)
+                && ! array_key_exists('is_active', $item);
         });
     }
 

@@ -1895,7 +1895,7 @@ class AiController extends Controller
                 $knowledgeChunk = $evidence->knowledgeItemChunk;
                 $selectionStatus = $evidence->selection_status;
                 $matchType = $evidence->match_type;
-                $knowledgeDocumentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+                $knowledgeDocumentType = $knowledgeItem?->document_type ?? KnowledgeItem::DOCUMENT_TYPE_OTHER;
 
                 return [
                     'id' => $evidence->id,
@@ -1946,7 +1946,7 @@ class AiController extends Controller
                 $knowledgeItem = $evidence->knowledgeItem;
                 $knowledgeChunk = $evidence->knowledgeItemChunk;
                 $version = $evidence->knowledgeItemVersion;
-                $documentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+                $documentType = $knowledgeItem?->document_type ?? KnowledgeItem::DOCUMENT_TYPE_OTHER;
 
                 return [
                     'evidence_id' => $evidence->id,
@@ -2007,7 +2007,7 @@ class AiController extends Controller
             ->select([
                 'knowledge_item_chunks.*',
                 'knowledge_items.original_filename as knowledge_item_title',
-                'knowledge_items.document_type as content_type',
+                'knowledge_items.document_type as document_type',
                 'knowledge_items.summary as knowledge_item_summary',
                 'knowledge_items.updated_at as knowledge_item_updated_at',
             ]);
@@ -2045,7 +2045,7 @@ class AiController extends Controller
                 'chunk_id' => (int) $chunk->id,
                 'knowledge_item_id' => (int) $chunk->knowledge_item_id,
                 'knowledge_item_title' => (string) $chunk->getAttribute('knowledge_item_title'),
-                'content_type' => (string) $chunk->getAttribute('content_type'),
+                'document_type' => (string) $chunk->getAttribute('document_type'),
                 'knowledge_item_summary' => (string) $chunk->getAttribute('knowledge_item_summary'),
                 'chunk_index' => (int) $chunk->chunk_index,
                 'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),
@@ -2260,7 +2260,7 @@ class AiController extends Controller
                     'knowledge_item_id' => (int) data_get($match, 'knowledge_item_id', 0),
                     'document_title' => $documentTitle !== '' ? $documentTitle : null,
                     'knowledge_item_title' => $documentTitle !== '' ? $documentTitle : null,
-                    'content_type' => (string) data_get($candidate, 'content_type', ''),
+                    'document_type' => (string) data_get($candidate, 'document_type', ''),
                     'knowledge_item_summary' => (string) data_get($candidate, 'knowledge_item_summary', ''),
                     'chunk_id' => $chunkId,
                     'chunk_index' => $chunkIndex,

@@ -24,8 +24,8 @@ class RequirementKnowledgeMatcherTest extends TestCase
         );
 
         $this->assertSame([1, 2, 3], $matches->pluck('chunk_id')->all());
-        $this->assertSame([2, 2, 2], $matches->pluck('score')->all());
-        $this->assertSame(2, $matches->first()['base_score']);
+        $this->assertSame([2.0, 2.0, 2.0], $matches->pluck('score')->all());
+        $this->assertSame(2.0, $matches->first()['base_score']);
         $this->assertSame(1.0, $matches->first()['embedding_similarity']);
         $this->assertNotNull($matches->get(1)['embedding_similarity']);
         $this->assertNull($matches->get(2)['embedding_similarity']);
@@ -49,7 +49,7 @@ class RequirementKnowledgeMatcherTest extends TestCase
         $this->assertSame([2, 1], $matches->pluck('chunk_id')->all());
         $this->assertNull($matches->first()['embedding_similarity']);
         $this->assertSame(2.0, $matches->first()['final_score']);
-        $this->assertSame(2, $matches->first()['score']);
+        $this->assertSame(2.0, $matches->first()['score']);
     }
 
     private function chunkPayload(
@@ -63,7 +63,7 @@ class RequirementKnowledgeMatcherTest extends TestCase
             'chunk_id' => $chunkId,
             'knowledge_item_id' => $chunkId,
             'knowledge_item_title' => $title,
-            'content_type' => 'other',
+            'document_type' => 'other',
             'chunk_index' => 0,
             'content' => $content,
             'embedding_vector' => $embeddingVector,

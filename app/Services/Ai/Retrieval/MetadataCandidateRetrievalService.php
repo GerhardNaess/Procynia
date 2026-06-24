@@ -297,7 +297,7 @@ class MetadataCandidateRetrievalService
         return [
             'knowledge_item_chunks.*',
             'knowledge_items.original_filename as knowledge_item_title',
-            'knowledge_items.document_type as content_type',
+            'knowledge_items.document_type as document_type',
             'knowledge_items.summary as knowledge_item_summary',
             'knowledge_items.updated_at as knowledge_item_updated_at',
             'knowledge_item_versions.id as knowledge_item_version_id',
@@ -320,7 +320,7 @@ class MetadataCandidateRetrievalService
             'chunk_id' => (int) $chunk->id,
             'knowledge_item_id' => (int) $chunk->knowledge_item_id,
             'knowledge_item_title' => (string) $chunk->getAttribute('knowledge_item_title'),
-            'content_type' => (string) $chunk->getAttribute('content_type'),
+            'document_type' => (string) $chunk->getAttribute('document_type'),
             'knowledge_item_summary' => (string) $chunk->getAttribute('knowledge_item_summary'),
             'chunk_index' => (int) $chunk->chunk_index,
             'chunk_type' => (string) ($chunk->chunk_type ?? 'semantic'),

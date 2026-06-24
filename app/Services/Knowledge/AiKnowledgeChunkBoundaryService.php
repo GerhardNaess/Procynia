@@ -471,7 +471,6 @@ class AiKnowledgeChunkBoundaryService
                 'id' => data_get($documentContext, 'document_id'),
                 'title' => data_get($documentContext, 'document_title'),
                 'original_filename' => data_get($documentContext, 'original_filename'),
-                'content_type' => data_get($documentContext, 'content_type'),
                 'document_type' => data_get($documentContext, 'document_type'),
                 'summary' => data_get($documentContext, 'summary'),
             ],

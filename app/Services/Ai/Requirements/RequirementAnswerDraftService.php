@@ -1001,7 +1001,7 @@ class RequirementAnswerDraftService
             ->map(static function (SavedNoticeAiEvidence $evidence): array {
                 $knowledgeItem = $evidence->knowledgeItem;
                 $knowledgeChunk = $evidence->knowledgeItemChunk;
-                $knowledgeDocumentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+                $knowledgeDocumentType = $knowledgeItem?->document_type ?? KnowledgeItem::DOCUMENT_TYPE_OTHER;
 
                 return [
                     'id' => $evidence->id,

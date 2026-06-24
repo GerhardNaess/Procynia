@@ -437,7 +437,7 @@ function normalizeRetrievalSourcesPayload(value) {
                 title: typeof source?.title === 'string' ? source.title.trim() : '',
                 document_title: typeof source?.document_title === 'string' ? source.document_title.trim() : '',
                 knowledge_item_title: typeof source?.knowledge_item_title === 'string' ? source.knowledge_item_title.trim() : '',
-                content_type: typeof source?.content_type === 'string' ? source.content_type.trim() : '',
+                document_type: typeof source?.document_type === 'string' ? source.document_type.trim() : '',
                 image_url: typeof source?.image_url === 'string' ? source.image_url.trim() : '',
                 image_src: typeof source?.image_src === 'string' ? source.image_src.trim() : '',
                 image_path: typeof source?.image_path === 'string' ? source.image_path.trim() : '',
