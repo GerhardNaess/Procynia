@@ -2290,8 +2290,14 @@ class AiControllerTest extends TestCase
         $imagePath = sprintf('knowledge-images/%d/%s.png', $knowledgeItem->id, $imageHash);
         Storage::disk('local')->put($imagePath, $imageBytes);
 
+        $imageChunkVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
         $imageChunk = KnowledgeItemChunk::query()->create([
             'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_version_id' => $imageChunkVersion->id,
             'chunk_index' => 0,
             'chunk_type' => 'image',
             'start_offset' => 0,
@@ -7707,6 +7713,11 @@ class AiControllerTest extends TestCase
     {
         $knowledgeItem->chunks()->delete();
 
+        $currentVersionId = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('is_current', true)
+            ->value('id');
+
         $chunkPayloads = app(DocumentChunker::class)->chunkText((string) $knowledgeItem->extracted_text);
 
         $knowledgeItem->chunks()->createMany(array_map(
@@ -7715,6 +7726,7 @@ class AiControllerTest extends TestCase
                 'content' => (string) ($chunk['content'] ?? ''),
                 'start_offset' => (int) ($chunk['char_start'] ?? 0),
                 'end_offset' => (int) ($chunk['char_end'] ?? 0),
+                'knowledge_item_version_id' => $currentVersionId,
             ],
             $chunkPayloads,
             array_keys($chunkPayloads),

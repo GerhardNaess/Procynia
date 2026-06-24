@@ -1986,16 +1986,17 @@ class AiController extends Controller
      * Side effects: None.
      *
      * Guards use knowledge_item_versions (not knowledge_items mirrors) as the authoritative source
-     * for storage_path and extraction_status. The join is through the document so all chunks
-     * belonging to documents with a valid current version are included regardless of whether the
-     * chunk itself carries a version pointer.
+     * for storage_path and extraction_status. The join is through the chunk's own version pointer
+     * so only chunks belonging to the current version are returned. Chunks with a null version
+     * pointer or a pointer to a non-current version are excluded.
      */
     protected function knowledgeChunksForMatching(int $customerId, ?array $requirementEmbedding = null): Collection
     {
         $query = KnowledgeItemChunk::query()
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
             ->join('knowledge_item_versions', function (JoinClause $join): void {
-                $join->on('knowledge_item_versions.knowledge_item_id', '=', 'knowledge_items.id')
+                $join->on('knowledge_item_versions.id', '=', 'knowledge_item_chunks.knowledge_item_version_id')
+                    ->on('knowledge_item_versions.knowledge_item_id', '=', 'knowledge_items.id')
                     ->where('knowledge_item_versions.is_current', true);
             })
             ->where('knowledge_items.customer_id', $customerId)

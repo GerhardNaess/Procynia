@@ -252,6 +252,120 @@ class KnowledgeMetadataMapServiceTest extends TestCase
         $this->assertSame(0, $map['chunk_count']);
     }
 
+    public function test_metadata_map_excludes_chunk_from_non_current_version(): void
+    {
+        // Scenario B: chunk belongs to an older version that is no longer current — map must exclude it.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Map Old Version Block AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Old Version Block',
+            'original_filename' => 'old-version-block.docx',
+            'content' => 'Item content.',
+            'storage_path' => 'customers/'.$customer->id.'/old-version-block.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        $oldVersion = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => false,
+            'storage_path' => 'customers/'.$customer->id.'/old-version-block-v1.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 2,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$customer->id.'/old-version-block-v2.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        // Chunk belongs to the old, non-current version.
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $item->id,
+            'knowledge_item_version_id' => $oldVersion->id,
+            'chunk_index' => 0,
+            'content' => 'Old version chunk.',
+            'start_offset' => 0,
+            'end_offset' => 18,
+            'topic' => 'Gammelt tema',
+            'sub_topic' => null,
+            'keywords' => [],
+            'service_product_tag' => null,
+            'theme_tag' => null,
+            'section_title' => null,
+            'section_path' => null,
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(0, $map['chunk_count']);
+    }
+
+    public function test_metadata_map_excludes_chunk_when_version_pointer_is_null(): void
+    {
+        // Scenario C: chunk has knowledge_item_version_id = null despite the document having a valid
+        // current version — map must exclude legacy chunks without a version pointer.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Map Null Version Block AS');
+
+        $item = KnowledgeItem::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Null Version Block',
+            'original_filename' => 'null-version-block.docx',
+            'content' => 'Item content.',
+            'storage_path' => 'customers/'.$customer->id.'/null-version-block.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'summary' => 'Summary',
+            'is_active' => true,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'storage_path' => 'customers/'.$customer->id.'/null-version-block.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+        ]);
+
+        // Legacy chunk with no version pointer.
+        KnowledgeItemChunk::query()->create([
+            'knowledge_item_id' => $item->id,
+            'knowledge_item_version_id' => null,
+            'chunk_index' => 0,
+            'content' => 'Legacy chunk without version.',
+            'start_offset' => 0,
+            'end_offset' => 28,
+            'topic' => 'Legacy tema',
+            'sub_topic' => null,
+            'keywords' => [],
+            'service_product_tag' => null,
+            'theme_tag' => null,
+            'section_title' => null,
+            'section_path' => null,
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(0, $map['chunk_count']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -316,8 +430,14 @@ class KnowledgeMetadataMapServiceTest extends TestCase
     {
         $content = $overrides['content'] ?? sprintf('Chunk %d content.', $chunkIndex + 1);
 
+        $currentVersionId = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $knowledgeItem->id)
+            ->where('is_current', true)
+            ->value('id');
+
         return KnowledgeItemChunk::query()->create(array_merge([
             'knowledge_item_id' => $knowledgeItem->id,
+            'knowledge_item_version_id' => $currentVersionId,
             'chunk_index' => $chunkIndex,
             'content' => $content,
             'start_offset' => $overrides['start_offset'] ?? ($chunkIndex * 100),
