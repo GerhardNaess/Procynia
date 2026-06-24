@@ -1104,7 +1104,7 @@ class AiController extends Controller
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
 
         return response()->json(array_merge(
-            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement),
+            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement, (string) data_get($groundingJudge, 'status')),
             [
                 'warning' => $usageWarning,
                 'answer_basis_item_ids' => $selectedAnswerBasisItems
@@ -1851,17 +1851,23 @@ class AiController extends Controller
      * Returns: A frontend-ready answer draft array.
      * Side effects: None.
      */
-    private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement): array
+    private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement, ?string $judgeStatus = null): array
     {
         $hasAnswerDraftText = filled(trim((string) ($requirement->answer_draft_text ?? '')));
         $retrievalSources = is_array($requirement->answer_draft_retrieval_sources ?? null)
             ? $requirement->answer_draft_retrieval_sources
             : [];
 
+        $generationState = match (true) {
+            ! $hasAnswerDraftText => null,
+            $judgeStatus === 'partial' => 'partial',
+            default => 'generated',
+        };
+
         return [
             'text' => (string) ($requirement->answer_draft_text ?? ''),
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
-            'generation_state' => $hasAnswerDraftText ? 'generated' : null,
+            'generation_state' => $generationState,
             'missing_knowledge' => null,
             'retrieval_sources' => $retrievalSources,
         ];
@@ -1873,11 +1879,11 @@ class AiController extends Controller
      * Returns: A JSON response payload for the answer draft endpoints.
      * Side effects: None.
      */
-    private function aiRequirementAnswerDraftResponsePayload(SavedNoticeAiRequirement $requirement): array
+    private function aiRequirementAnswerDraftResponsePayload(SavedNoticeAiRequirement $requirement, ?string $judgeStatus = null): array
     {
         return [
             'requirement_id' => $requirement->id,
-            'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement),
+            'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement, $judgeStatus),
         ];
     }
 

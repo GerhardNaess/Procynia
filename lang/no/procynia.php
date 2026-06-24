@@ -1152,6 +1152,7 @@ return [
         'risk_level_medium' => 'Middels risiko',
         'risk_level_high' => 'Høy risiko',
         'hint_risk_level' => 'Risikonivå viser hvor sårbart kravet er i tilbudsarbeidet. Vurderingen bygger på kompleksitet, dekningsgrad og hvor sikkert dokumentasjonsgrunnlaget er. Høy risiko betyr at kravet bør prioriteres og kontrolleres manuelt før svaret brukes.',
+        'answer_draft_partial_coverage_warning' => 'Svarutkastet er basert på delvis kunnskapsgrunnlag. Kontroller hva som er dokumentert og hva som bør etterprøves.',
         'knowledge_grounding_judge_supported' => 'Støttet av kunnskap',
         'knowledge_grounding_judge_partial' => 'Delvis kunnskapsgrunnlag',
         'knowledge_grounding_judge_unsupported' => 'Svakt kunnskapsgrunnlag',

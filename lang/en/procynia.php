@@ -1152,6 +1152,7 @@ return [
         'risk_level_medium' => 'Medium risk',
         'risk_level_high' => 'High risk',
         'hint_risk_level' => 'Risk level shows how sensitive the requirement is in the bid work. The assessment is based on complexity, coverage, and how reliable the documentation basis is. High risk means the requirement should be prioritised and manually reviewed before the answer is used.',
+        'answer_draft_partial_coverage_warning' => 'This answer draft is based on partial knowledge grounding. Review what is documented and what requires professional verification.',
         'knowledge_grounding_judge_supported' => 'Supported by knowledge',
         'knowledge_grounding_judge_partial' => 'Partial knowledge basis',
         'knowledge_grounding_judge_unsupported' => 'Weak knowledge basis',

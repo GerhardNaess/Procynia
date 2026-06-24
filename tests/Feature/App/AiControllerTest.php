@@ -6563,6 +6563,161 @@ class AiControllerTest extends TestCase
     }
 
     /**
+     * T_supported – Fully supported judge returns generation_state 'generated'.
+     * Proves that when the grounding judge returns status 'supported', the response
+     * includes generation_state 'generated' and the draft text is persisted.
+     */
+    public function test_answer_draft_generation_returns_generated_state_when_judge_is_supported(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'green',
+                'max_score' => 0.85,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'supported',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Leverandøren har dokumentert sikkerhetsrutiner.',
+                        'support_summary' => 'Kunnskapsgrunnlaget beskriver sikkerhetsrutiner i detalj.',
+                        'evidence_reference' => null,
+                        'evidence_quote' => null,
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => [],
+                'missing_knowledge_summary' => null,
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Grunnlaget er tilstrekkelig.',
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-T-SUPPORTED', 'Supported state target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive sikkerhetsrutiner.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive sikkerhetsrutiner.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive sikkerhetsrutiner.',
+        ]);
+
+        Http::fake(function () {
+            return Http::response(
+                $this->openAiStructuredResponse(['answer_draft_text' => 'Vi har veldokumenterte sikkerhetsrutiner.'], 50, 15),
+                200,
+                ['x-request-id' => 'req_supported_state'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'generated');
+        $response->assertJsonPath('answer_draft.text', 'Vi har veldokumenterte sikkerhetsrutiner.');
+
+        $requirement->refresh();
+        $this->assertSame('Vi har veldokumenterte sikkerhetsrutiner.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    /**
+     * T_partial – Partial judge coverage returns generation_state 'partial'.
+     * Proves that when the grounding judge returns status 'partial', the response
+     * includes generation_state 'partial', the draft is persisted, and no block occurs.
+     * The partial state signals that the answer needs professional review.
+     */
+    public function test_answer_draft_generation_returns_partial_state_when_judge_coverage_is_partial(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'amber',
+                'max_score' => 0.52,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'partial',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Generell beskrivelse av tjenesten er dokumentert.',
+                        'support_summary' => 'Kunnskapsgrunnlaget beskriver tjenesten overordnet.',
+                        'evidence_reference' => null,
+                        'evidence_quote' => null,
+                    ],
+                ],
+                'related_but_insufficient_points' => ['Spesifikke prosedyrer for beredskap er ikke dokumentert.'],
+                'unsupported_points' => ['Detaljert sertifiseringsdokumentasjon mangler.'],
+                'missing_knowledge_summary' => 'Grunnlaget dekker bare deler av kravet.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => 'Noe grunnlag finnes, men faglig utfylling er nødvendig.',
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-T-PARTIAL', 'Partial state target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal beskrive beredskapsplan og sertifiseringer.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal beskrive beredskapsplan og sertifiseringer.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal beskrive beredskapsplan og sertifiseringer.',
+        ]);
+
+        Http::fake(function () {
+            return Http::response(
+                $this->openAiStructuredResponse(['answer_draft_text' => 'Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.'], 55, 18),
+                200,
+                ['x-request-id' => 'req_partial_state'],
+            );
+        });
+
+        $response = $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), [
+            'answer_basis_item_ids' => [],
+        ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('answer_draft.generation_state', 'partial');
+        $response->assertJsonPath('answer_draft.text', 'Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.');
+
+        $requirement->refresh();
+        $this->assertSame('Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.', $requirement->answer_draft_text);
+        $this->assertNotNull($requirement->answer_draft_generated_at);
+    }
+
+    /**
      * T3 – Persistens av retrieval_sources etter vellykket generering.
      * Proves that after a successful generate call, answer_draft_retrieval_sources
      * is stored in the database and is returned correctly from the Show page payload.

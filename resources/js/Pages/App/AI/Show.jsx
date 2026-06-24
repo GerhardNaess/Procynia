@@ -2294,6 +2294,7 @@ export default function AiShow({
             : activeRequirementServerDraft ?? activeRequirementLocalDraft)
         : null;
     const activeRequirementBlockedMissingKnowledge = activeRequirementDraft?.generationState === 'blocked_missing_knowledge';
+    const activeRequirementPartialDraft = activeRequirementDraft?.generationState === 'partial';
     const activeRequirementHasDraft = activeRequirementDraft !== null
         && !activeRequirementBlockedMissingKnowledge
         && (
@@ -4612,6 +4613,18 @@ export default function AiShow({
                                         </div>
                                     ) : activeRequirementHasDraft ? (
                                         <div className="flex flex-col gap-5">
+                                            {activeRequirementPartialDraft ? (
+                                                <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm leading-6 text-slate-700">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                            {tai.coverage_status_partial ?? 'Delvis dekket'}
+                                                        </span>
+                                                        <span className="text-sm text-slate-700">
+                                                            {tai.answer_draft_partial_coverage_warning ?? 'Svarutkastet er basert på delvis kunnskapsgrunnlag. Kontroller hva som er dokumentert og hva som bør etterprøves.'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ) : null}
                                             <div className="flex flex-col gap-2">
                                                 <textarea
                                                     aria-label={`${tai.answer_draft_for_requirement} ${activeRequirementDisplayIdentifier}`}
