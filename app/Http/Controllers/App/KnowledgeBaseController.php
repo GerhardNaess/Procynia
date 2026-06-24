@@ -157,7 +157,7 @@ class KnowledgeBaseController extends Controller
         $canApproveVersions = $user->resolvedBidRole() !== User::BID_ROLE_VIEWER;
 
         return Inertia::render('App/AI/KnowledgeBase/Show', [
-            'pageTitle' => 'Kunnskapsdokumenter · '.($record->currentVersion?->original_filename ?? $record->original_filename),
+            'pageTitle' => 'Kunnskapsdokumenter · '.($record->resolvedOriginalFilename() ?? ''),
             'knowledgeItem' => $this->documentDetailPayload($record, $canApproveVersions),
             'canApproveVersions' => $canApproveVersions,
             'indexUrl' => route('app.ai.knowledge-base.index'),
@@ -398,10 +398,10 @@ class KnowledgeBaseController extends Controller
                     'customer_id' => $customerId,
                     'version_no' => 1,
                     'is_current' => true,
-                    'original_filename' => $knowledgeDocument->original_filename,
+                    'original_filename' => $knowledgeDocument->resolvedOriginalFilename(),
                     'storage_path' => $storedPath,
-                    'mime_type' => $knowledgeDocument->mime_type,
-                    'file_size_bytes' => $knowledgeDocument->file_size_bytes,
+                    'mime_type' => $knowledgeDocument->resolvedMimeType(),
+                    'file_size_bytes' => $knowledgeDocument->resolvedFileSizeBytes(),
                     'extracted_text' => $extractedText,
                     'extraction_status' => $knowledgeDocument->extraction_status,
                     'extraction_error' => $knowledgeDocument->extraction_error,
@@ -537,7 +537,7 @@ class KnowledgeBaseController extends Controller
     {
         [$user, $customerId] = $this->frontendContext($request);
         $record = $this->scopedDocument($customerId, $knowledgeItem->id);
-        $storedPath = $record->storage_path;
+        $storedPath = $record->resolvedStoragePath();
 
         DB::transaction(function () use ($record, $user): void {
             $this->recordKnowledgeItemRevision(
@@ -1775,9 +1775,9 @@ class KnowledgeBaseController extends Controller
             'knowledge_item_id' => $knowledgeDocument->id,
             'customer_id' => $knowledgeDocument->customer_id,
             'title' => $knowledgeDocument->title,
-            'original_filename' => $knowledgeDocument->original_filename,
-            'path' => $knowledgeDocument->storage_path,
-            'mime_type' => $knowledgeDocument->mime_type,
+            'original_filename' => $knowledgeDocument->resolvedOriginalFilename(),
+            'path' => $knowledgeDocument->resolvedStoragePath(),
+            'mime_type' => $knowledgeDocument->resolvedMimeType(),
             'document_category_id' => $knowledgeDocument->document_category_id,
             'document_category_name' => $this->documentCategoryName($knowledgeDocument),
             'document_topic_id' => $knowledgeDocument->document_topic_id,
@@ -1850,10 +1850,13 @@ class KnowledgeBaseController extends Controller
     {
         $currentVersion = $knowledgeDocument->currentVersion;
         $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
+        $resolvedOriginalFilename = $knowledgeDocument->resolvedOriginalFilename();
+        $resolvedMimeType = $knowledgeDocument->resolvedMimeType();
+        $resolvedFileSizeBytes = $knowledgeDocument->resolvedFileSizeBytes();
 
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
-            'original_filename' => $currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
+            'original_filename' => $resolvedOriginalFilename,
             'document_category_id' => $knowledgeDocument->document_category_id,
             'document_category_name' => $this->documentCategoryName($knowledgeDocument),
             'document_topic_id' => $knowledgeDocument->document_topic_id,
@@ -1877,12 +1880,12 @@ class KnowledgeBaseController extends Controller
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
             'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
             'chunk_count' => (int) ($knowledgeDocument->chunks_count ?? $knowledgeDocument->chunks->count()),
-            'file_size_bytes' => $currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes,
-            'file_size_human' => $this->humanFileSize($currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes),
+            'file_size_bytes' => $resolvedFileSizeBytes,
+            'file_size_human' => $this->humanFileSize($resolvedFileSizeBytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
-            'mime_type' => $currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
+            'mime_type' => $resolvedMimeType,
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
             'edit_url' => route('app.ai.knowledge-base.edit', ['knowledgeItem' => $knowledgeDocument->id]),
             'delete_url' => route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $knowledgeDocument->id]),
@@ -1899,10 +1902,13 @@ class KnowledgeBaseController extends Controller
     {
         $currentVersion = $knowledgeDocument->currentVersion;
         $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
+        $resolvedOriginalFilename = $knowledgeDocument->resolvedOriginalFilename();
+        $resolvedMimeType = $knowledgeDocument->resolvedMimeType();
+        $resolvedFileSizeBytes = $knowledgeDocument->resolvedFileSizeBytes();
 
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
-            'original_filename' => $currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
+            'original_filename' => $resolvedOriginalFilename,
             'document_category_id' => $knowledgeDocument->document_category_id,
             'document_category_name' => $this->documentCategoryName($knowledgeDocument),
             'document_topic_id' => $knowledgeDocument->document_topic_id,
@@ -1923,12 +1929,12 @@ class KnowledgeBaseController extends Controller
             'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
             'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
             'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
-            'file_size_bytes' => $currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes,
-            'file_size_human' => $this->humanFileSize($currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes),
+            'file_size_bytes' => $resolvedFileSizeBytes,
+            'file_size_human' => $this->humanFileSize($resolvedFileSizeBytes),
             'uploaded_at' => optional($knowledgeDocument->created_at)?->toIso8601String(),
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
-            'mime_type' => $currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
+            'mime_type' => $resolvedMimeType,
             'extraction_status' => $extractionStatus,
             'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
             'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
@@ -2018,8 +2024,8 @@ class KnowledgeBaseController extends Controller
                                 'v' => $chunk->image_hash ?: optional($chunk->updated_at)?->getTimestamp(),
                             ])
                             : null,
-                        'source_filename' => $knowledgeDocument->currentVersion?->original_filename ?? $knowledgeDocument->original_filename,
-                        'source_filetype' => $knowledgeDocument->currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
+                        'source_filename' => $knowledgeDocument->resolvedOriginalFilename(),
+                        'source_filetype' => $knowledgeDocument->resolvedMimeType(),
                         'knowledge_item_id' => $knowledgeDocument->id,
                     ])
                     ->values()

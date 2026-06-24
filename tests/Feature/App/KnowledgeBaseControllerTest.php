@@ -3923,6 +3923,14 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $storedPath = $document->storage_path;
+        $currentVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
+        $currentVersion->forceFill([
+            'storage_path' => null,
+        ])->save();
 
         $this->actingAs($context['user'])->delete(route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $document->id]))
             ->assertRedirect(route('app.ai.knowledge-base.index'));
@@ -3951,6 +3959,7 @@ class KnowledgeBaseControllerTest extends TestCase
         }
         $this->assertSame($document->id, data_get($revisions[0]->snapshot, 'knowledge_item_id'));
         $this->assertSame($document->id, data_get($revisions[1]->snapshot, 'knowledge_item_id'));
+        $this->assertSame($storedPath, data_get($revisions[1]->snapshot, 'path'));
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
 
@@ -6123,6 +6132,71 @@ XML;
                 && data_get($item, 'original_filename') === 'current-form-version.pdf'
                 && data_get($item, 'mime_type') === 'application/pdf'
                 && data_get($item, 'file_size_bytes') === 8192;
+        });
+    }
+
+    public function test_index_edit_and_show_payload_fall_back_to_legacy_file_identity_when_current_version_is_missing_values(): void
+    {
+        $context = $this->customerContext('Legacy File Identity Fallback AS');
+
+        $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'legacy-document-name.docx',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/legacy-document-name.docx',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 2468,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => null,
+            'storage_path' => null,
+            'mime_type' => null,
+            'file_size_bytes' => null,
+            'extracted_text' => 'Version fallback text',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'legacy-fallback-content'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
+                && data_get($item, 'mime_type') === 'application/pdf'
+                && data_get($item, 'file_size_bytes') === 2468;
+        });
+
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
+                && data_get($item, 'mime_type') === 'application/pdf'
+                && data_get($item, 'file_size_bytes') === 2468;
+        });
+
+        $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
+        $showResponse->assertOk();
+        $showResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
+                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · legacy-document-name.docx'
+                && $item !== null
+                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
+                && data_get($item, 'mime_type') === 'application/pdf'
+                && data_get($item, 'file_size_bytes') === 2468;
         });
     }
 
