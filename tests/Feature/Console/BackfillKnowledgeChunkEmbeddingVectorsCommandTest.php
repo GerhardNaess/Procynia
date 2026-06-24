@@ -138,6 +138,7 @@ class BackfillKnowledgeChunkEmbeddingVectorsCommandTest extends TestCase
             'customer_id' => $customer->id,
             'title' => 'Backfill test document',
             'content' => 'Backfill test content.',
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
             'is_active' => true,
         ]);

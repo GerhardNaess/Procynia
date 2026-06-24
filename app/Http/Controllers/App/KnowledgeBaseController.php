@@ -1789,7 +1789,7 @@ class KnowledgeBaseController extends Controller
             'document_topic_name' => $this->documentTopicName($knowledgeDocument),
             'document_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
-            'content_type' => $knowledgeDocument->content_type,
+            'content_type' => $knowledgeDocument->document_type, // legacy alias — reads from document_type
             'ownership_type' => $knowledgeDocument->ownership_type,
             'owner_user_id' => $knowledgeDocument->owner_user_id,
             'owning_saved_notice_id' => $knowledgeDocument->owning_saved_notice_id,
@@ -1913,7 +1913,7 @@ class KnowledgeBaseController extends Controller
             'document_type' => $knowledgeDocument->document_type,
             'content_type' => $knowledgeDocument->document_type,
             'document_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
-            'content_type_label' => KnowledgeItem::CONTENT_TYPE_LABELS[$knowledgeDocument->content_type] ?? $knowledgeDocument->content_type,
+            'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type, // legacy alias
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
             'summary' => $knowledgeDocument->summary,
             'is_active' => (bool) $knowledgeDocument->is_active,

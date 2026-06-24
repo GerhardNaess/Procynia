@@ -482,7 +482,7 @@ class KnowledgeChunkMetadataGenerationService
                 'id' => $document->id,
                 'title' => $document->title,
                 'original_filename' => $document->original_filename,
-                'content_type' => $document->content_type,
+                'content_type' => $document->document_type, // legacy alias — reads from document_type
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],
@@ -599,7 +599,7 @@ class KnowledgeChunkMetadataGenerationService
                 'id' => $document->id,
                 'title' => $document->title,
                 'original_filename' => $document->original_filename,
-                'content_type' => $document->content_type,
+                'content_type' => $document->document_type, // legacy alias — reads from document_type
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],

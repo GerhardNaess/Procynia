@@ -129,7 +129,7 @@ class KnowledgeItem extends Model
         'storage_path',
         'mime_type',
         'file_size_bytes',
-        'content_type',
+        'content_type', // legacy mirror — document_type is authoritative; do not use as primary source
         'document_type',
         'extracted_text',
         'summary',
