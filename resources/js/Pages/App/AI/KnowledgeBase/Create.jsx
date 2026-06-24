@@ -66,7 +66,6 @@ export default function KnowledgeBaseCreate({
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
     documentCategoryOptions = [],
     documentOwnershipOptions = [],
-    documentThemeOptions = [],
     defaultDocumentType = 'other',
     storeUrl = '/app/ai/knowledge-base',
     indexUrl,
@@ -123,7 +122,6 @@ export default function KnowledgeBaseCreate({
                         documentTypeOptions={documentTypeOptions}
                         documentCategoryOptions={documentCategoryOptions}
                         documentOwnershipOptions={documentOwnershipOptions}
-                        documentThemeOptions={documentThemeOptions}
                         backHref={indexUrl}
                         submitLabel="Last opp dokument"
                         onSubmit={submit}

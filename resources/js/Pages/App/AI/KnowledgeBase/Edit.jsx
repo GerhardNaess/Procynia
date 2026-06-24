@@ -8,7 +8,6 @@ export default function KnowledgeBaseEdit({
     documentTypeOptions,
     documentCategoryOptions = [],
     documentOwnershipOptions = [],
-    documentThemeOptions = [],
     documentOwnerOptions = [],
     updateUrl,
     deleteUrl,
@@ -56,7 +55,6 @@ export default function KnowledgeBaseEdit({
                     documentTypeOptions={documentTypeOptions}
                     documentCategoryOptions={documentCategoryOptions}
                     documentOwnershipOptions={documentOwnershipOptions}
-                    documentThemeOptions={documentThemeOptions}
                     documentOwnerOptions={documentOwnerOptions}
                     backHref={indexUrl}
                     submitLabel="Lagre endringer"

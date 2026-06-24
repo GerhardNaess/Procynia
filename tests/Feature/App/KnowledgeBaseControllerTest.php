@@ -208,37 +208,22 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('original_filename', 'theme-options.docx')
             ->firstOrFail();
 
-        $expectedOptions = [
-            [
-                'id' => $approvedEarlyTheme->id,
-                'label' => $approvedEarlyTheme->canonical_name,
-                'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
-            ],
-            [
-                'id' => $approvedLateTheme->id,
-                'label' => $approvedLateTheme->canonical_name,
-                'type' => KnowledgeMetadataTerm::TYPE_THEME_TAG,
-            ],
-        ];
-
         $createResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.create'));
         $createResponse->assertOk();
-        $createResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+        $createResponse->assertViewHas('page', function (array $page): bool {
             $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Create'
-                && data_get($page, 'props.documentThemeOptions') === $expectedOptions
                 && $ownershipOptions->count() === 3
                 && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false;
         });
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
         $editResponse->assertOk();
-        $editResponse->assertViewHas('page', function (array $page) use ($expectedOptions): bool {
+        $editResponse->assertViewHas('page', function (array $page): bool {
             $ownershipOptions = collect(data_get($page, 'props.documentOwnershipOptions', []));
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Edit'
-                && data_get($page, 'props.documentThemeOptions') === $expectedOptions
                 && $ownershipOptions->count() === 3
                 && $ownershipOptions->firstWhere('value', KnowledgeItem::OWNERSHIP_TYPE_CASE)['selectable'] === false;
         });

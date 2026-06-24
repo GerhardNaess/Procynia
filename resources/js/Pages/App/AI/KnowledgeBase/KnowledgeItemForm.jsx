@@ -61,7 +61,6 @@ export default function KnowledgeItemForm({
     documentTypeOptions = KNOWLEDGE_DOCUMENT_TYPE_OPTIONS,
     documentCategoryOptions = [],
     documentOwnershipOptions = [],
-    documentThemeOptions = [],
     documentOwnerOptions = [],
     backHref,
     submitLabel,
