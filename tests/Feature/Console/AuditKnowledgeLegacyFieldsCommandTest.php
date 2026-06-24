@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Console;
 
+use App\Console\Commands\AuditKnowledgeLegacyFields;
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemVersion;
@@ -168,6 +169,125 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('content_type_vs_document_type_mismatches=1')
             ->expectsOutputToContain('is_active_vs_document_status_mismatches=1')
             ->expectsOutputToContain('Expected legacy findings')
+            ->expectsOutputToContain('OK_FOR_NEXT_STEP')
+            ->assertSuccessful();
+    }
+
+    public function test_command_skips_content_type_when_column_is_absent(): void
+    {
+        $this->app->bind(AuditKnowledgeLegacyFields::class, function () {
+            return new class extends AuditKnowledgeLegacyFields {
+                protected $signature = 'knowledge:legacy-audit';
+
+                protected function hasContentTypeColumn(): bool
+                {
+                    return false;
+                }
+            };
+        });
+
+        $customer = $this->createCustomer('Schema Absent Content Type AS');
+        $item = $this->createKnowledgeItem($customer, [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'is_active' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+        $this->createKnowledgeItemVersion($item, [
+            'version_no' => 1,
+            'is_current' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+
+        $this->artisan('knowledge:legacy-audit')
+            ->expectsOutputToContain('content_type column: absent, skipped')
+            ->expectsOutputToContain('is_active column: present')
+            ->expectsOutputToContain('OK_FOR_NEXT_STEP')
+            ->assertSuccessful();
+    }
+
+    public function test_command_skips_is_active_when_column_is_absent(): void
+    {
+        $this->app->bind(AuditKnowledgeLegacyFields::class, function () {
+            return new class extends AuditKnowledgeLegacyFields {
+                protected $signature = 'knowledge:legacy-audit';
+
+                protected function hasIsActiveColumn(): bool
+                {
+                    return false;
+                }
+            };
+        });
+
+        $customer = $this->createCustomer('Schema Absent Is Active AS');
+        $item = $this->createKnowledgeItem($customer, [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'is_active' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+        $this->createKnowledgeItemVersion($item, [
+            'version_no' => 1,
+            'is_current' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+
+        $this->artisan('knowledge:legacy-audit')
+            ->expectsOutputToContain('is_active column: absent, skipped')
+            ->expectsOutputToContain('content_type column: present')
+            ->expectsOutputToContain('OK_FOR_NEXT_STEP')
+            ->assertSuccessful();
+    }
+
+    public function test_command_returns_ok_for_next_step_when_both_legacy_columns_absent(): void
+    {
+        $this->app->bind(AuditKnowledgeLegacyFields::class, function () {
+            return new class extends AuditKnowledgeLegacyFields {
+                protected $signature = 'knowledge:legacy-audit';
+
+                protected function hasContentTypeColumn(): bool
+                {
+                    return false;
+                }
+
+                protected function hasIsActiveColumn(): bool
+                {
+                    return false;
+                }
+            };
+        });
+
+        $customer = $this->createCustomer('Schema Both Absent AS');
+        $item = $this->createKnowledgeItem($customer, [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
+            'is_active' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+        $this->createKnowledgeItemVersion($item, [
+            'version_no' => 1,
+            'is_current' => true,
+            'extracted_text' => 'Schema test content.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+
+        $this->artisan('knowledge:legacy-audit')
+            ->expectsOutputToContain('content_type column: absent, skipped')
+            ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('OK_FOR_NEXT_STEP')
             ->assertSuccessful();
     }

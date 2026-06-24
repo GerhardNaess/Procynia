@@ -8,6 +8,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 #[Signature('knowledge:legacy-audit')]
 #[Description('Audit legacy knowledge item fields before physical cleanup.')]
@@ -28,6 +29,9 @@ class AuditKnowledgeLegacyFields extends Command
      */
     public function handle(): int
     {
+        $hasContentType = $this->hasContentTypeColumn();
+        $hasIsActive = $this->hasIsActiveColumn();
+
         $summary = [
             'total_knowledge_items' => KnowledgeItem::query()->count(),
             'total_knowledge_item_versions' => KnowledgeItemVersion::query()->count(),
@@ -62,22 +66,30 @@ class AuditKnowledgeLegacyFields extends Command
             'expected' => [],
         ];
 
+        $selectColumns = [
+            'id',
+            'document_type',
+            'document_status',
+            'storage_path',
+            'original_filename',
+            'mime_type',
+            'file_size_bytes',
+            'extracted_text',
+            'extraction_status',
+            'extraction_error',
+            'content',
+        ];
+
+        if ($hasContentType) {
+            $selectColumns[] = 'content_type';
+        }
+
+        if ($hasIsActive) {
+            $selectColumns[] = 'is_active';
+        }
+
         KnowledgeItem::query()
-            ->select([
-                'id',
-                'document_type',
-                'content_type',
-                'document_status',
-                'is_active',
-                'storage_path',
-                'original_filename',
-                'mime_type',
-                'file_size_bytes',
-                'extracted_text',
-                'extraction_status',
-                'extraction_error',
-                'content',
-            ])
+            ->select($selectColumns)
             ->with([
                 'currentVersion' => function ($query): void {
                     $query->select([
@@ -101,7 +113,7 @@ class AuditKnowledgeLegacyFields extends Command
                 },
             ])
             ->orderBy('id')
-            ->chunkById(250, function ($items) use (&$summary, &$examples): void {
+            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasContentType, $hasIsActive): void {
                 foreach ($items as $item) {
                     if ((int) $item->current_versions_count === 0) {
                         $summary['items_without_current_version']++;
@@ -221,14 +233,18 @@ class AuditKnowledgeLegacyFields extends Command
                         $this->appendExample($examples['expected'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($item->content_type, $item->document_type)) {
-                        $summary['content_type_mismatches']++;
-                        $this->appendExample($examples['expected'], $item->id);
+                    if ($hasContentType) {
+                        if ($this->hasStringMismatch($item->content_type, $item->document_type)) {
+                            $summary['content_type_mismatches']++;
+                            $this->appendExample($examples['expected'], $item->id);
+                        }
                     }
 
-                    if ($this->hasBoolMismatch($item->is_active, $item->document_status === KnowledgeItem::DOCUMENT_STATUS_ACTIVE)) {
-                        $summary['is_active_mismatches']++;
-                        $this->appendExample($examples['expected'], $item->id);
+                    if ($hasIsActive) {
+                        if ($this->hasBoolMismatch($item->is_active, $item->document_status === KnowledgeItem::DOCUMENT_STATUS_ACTIVE)) {
+                            $summary['is_active_mismatches']++;
+                            $this->appendExample($examples['expected'], $item->id);
+                        }
                     }
                 }
             });
@@ -383,17 +399,29 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['content_fallback_candidates'],
             $examples['expected'],
         ));
-        $this->line($this->formatFindingLine(
-            'content_type_vs_document_type_mismatches',
-            $summary['content_type_mismatches'],
-            $examples['expected'],
-        ));
-        $this->line($this->formatFindingLine(
-            'is_active_vs_document_status_mismatches',
-            $summary['is_active_mismatches'],
-            $examples['expected'],
-        ));
-        $this->line('- content_type and is_active are no longer actively synchronized; mismatches are expected legacy findings.');
+        if ($hasContentType) {
+            $this->line('- content_type column: present');
+            $this->line($this->formatFindingLine(
+                'content_type_vs_document_type_mismatches',
+                $summary['content_type_mismatches'],
+                $examples['expected'],
+            ));
+        } else {
+            $this->line('- content_type column: absent, skipped');
+        }
+        if ($hasIsActive) {
+            $this->line('- is_active column: present');
+            $this->line($this->formatFindingLine(
+                'is_active_vs_document_status_mismatches',
+                $summary['is_active_mismatches'],
+                $examples['expected'],
+            ));
+        } else {
+            $this->line('- is_active column: absent, skipped');
+        }
+        if ($hasContentType || $hasIsActive) {
+            $this->line('- content_type and is_active are no longer actively synchronized; mismatches are expected legacy findings.');
+        }
         $this->line($this->lineBreakIfNoFindings($this->hasFindings([
             $summary['current_version_missing_extraction_error_on_success'],
             $summary['current_version_missing_extracted_text'],
@@ -414,8 +442,16 @@ class AuditKnowledgeLegacyFields extends Command
         $this->line(sprintf('- legacy_extracted_text_mismatches=%d', $summary['legacy_extracted_text_mismatches']));
         $this->newLine();
         $this->line('Legacy compatibility mirrors');
-        $this->line(sprintf('- content_type_vs_document_type_mismatches=%d', $summary['content_type_mismatches']));
-        $this->line(sprintf('- is_active_vs_document_status_mismatches=%d', $summary['is_active_mismatches']));
+        if ($hasContentType) {
+            $this->line(sprintf('- content_type_vs_document_type_mismatches=%d', $summary['content_type_mismatches']));
+        } else {
+            $this->line('- content_type column: absent, skipped');
+        }
+        if ($hasIsActive) {
+            $this->line(sprintf('- is_active_vs_document_status_mismatches=%d', $summary['is_active_mismatches']));
+        } else {
+            $this->line('- is_active column: absent, skipped');
+        }
         $this->newLine();
         $this->line('Content fallback');
         $this->line(sprintf('- content_fallback_candidates=%d', $summary['content_fallback_candidates']));
@@ -508,6 +544,16 @@ class AuditKnowledgeLegacyFields extends Command
         }
 
         return (int) $value;
+    }
+
+    protected function hasContentTypeColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'content_type');
+    }
+
+    protected function hasIsActiveColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'is_active');
     }
 
     /**

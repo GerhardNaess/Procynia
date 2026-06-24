@@ -1218,6 +1218,39 @@ Fase 2.8G fjerner de siste aktive app-konsumentene av legacy-speilene `content_t
 
 - Når det ikke finnes aktive app-lesere igjen og audit er schema-aware, kan fysisk kolonnedropp vurderes som et separat steg.
 
+### 28.8H Schema-awareness i `knowledge:legacy-audit` for `content_type` og `is_active` (juni 2026)
+
+Fase 2.8H gjør `knowledge:legacy-audit` robust mot fremtidig kolonnedropp. Audit-kommandoen sjekker nå om `content_type` og `is_active` faktisk finnes i `knowledge_items`-skjemaet før den forsøker å lese dem.
+
+**Hva som ble endret:**
+
+- `AuditKnowledgeLegacyFields` har to nye beskyttede metoder: `hasContentTypeColumn()` og `hasIsActiveColumn()`, begge delegerer til `Schema::hasColumn('knowledge_items', ...)`.
+- SELECT-listen bygges dynamisk — `content_type` og `is_active` inkluderes kun når kolonnene finnes.
+- Mismatch-sjekkene for disse feltene kjøres kun når kolonnen finnes.
+- Output skiller tydelig mellom `column: present` (mismatch telles og rapporteres som expected legacy finding) og `column: absent, skipped` (ingen feil, kommandoen fortsetter normalt).
+
+**Overgangsperiodens atferd:**
+
+- Kolonnene finnes: audit rapporterer `content_type column: present` og `is_active column: present`, eventuelle mismatches logges som expected legacy findings.
+- Kolonnene er droppet: audit rapporterer `content_type column: absent, skipped` og `is_active column: absent, skipped`, ingen krasj, `OK_FOR_NEXT_STEP` kan fortsatt returneres dersom ingen andre funn finnes.
+
+**Tester:**
+
+Tre nye tester dekker schema-aware-atferden:
+1. `content_type`-kolonnen mangler → audit krasjer ikke, rapporterer skipped.
+2. `is_active`-kolonnen mangler → audit krasjer ikke, rapporterer skipped.
+3. Begge mangler → `OK_FOR_NEXT_STEP` returneres.
+
+Eksisterende tester verifiserer fortsatt at mismatch rapporteres korrekt som expected legacy finding når kolonnene finnes.
+
+**Ikke gjort i 2.8H:**
+
+- ingen migrasjon
+- ingen kolonnedropp
+- ingen produksjonsdataendring
+- ingen frontend-endring
+- ingen retrieval- eller AI-logikkendring
+
 ### 28.9 Tilsvarende plan for filidentitetsfeltene
 
 - `storage_path`
