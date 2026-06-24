@@ -394,24 +394,52 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $this->assertCount(0, $result);
     }
 
-    public function test_retrieval_excludes_inactive_document(): void
+    public function test_retrieval_includes_document_when_is_active_false_and_document_status_active(): void
     {
+        // document_status is authoritative; is_active alone does not exclude a document.
         $service = app(MetadataCandidateRetrievalService::class);
-        $customer = $this->createCustomer('Inactive AS');
+        $customer = $this->createCustomer('Mismatch Include AS');
         $document = $this->createKnowledgeItem($customer, [
-            'original_filename' => 'inactive-doc.docx',
+            'original_filename' => 'mismatch-include.docx',
             'is_active' => false,
+            // document_status defaults to DOCUMENT_STATUS_ACTIVE — intentional mismatch
         ]);
 
         $this->createChunk($document, 0, [
-            'topic' => 'Inaktivt dokument',
-            'content' => 'Innhold fra inaktivt dokument.',
+            'topic' => 'Mismatch inkludert',
+            'content' => 'Dokument med is_active=false men document_status=active skal inkluderes.',
         ]);
 
         $result = $service->retrieveForCustomer($customer->id, [
-            'selected_metadata' => ['topic' => ['Inaktivt dokument']],
-            'search_text' => 'inaktivt dokument',
-            'intent_summary' => 'Inaktivt dokument skal ekskluderes.',
+            'selected_metadata' => ['topic' => ['Mismatch inkludert']],
+            'search_text' => 'mismatch inkludert',
+            'intent_summary' => 'Dokumentet skal inkluderes fordi document_status er active.',
+            'confidence' => 0.9,
+        ]);
+
+        $this->assertCount(1, $result);
+    }
+
+    public function test_retrieval_excludes_document_when_document_status_archived_and_is_active_true(): void
+    {
+        // Reverse mismatch: is_active=true does not override an archived document_status.
+        $service = app(MetadataCandidateRetrievalService::class);
+        $customer = $this->createCustomer('Mismatch Exclude AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'mismatch-exclude.docx',
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Mismatch ekskludert',
+            'content' => 'Dokument med is_active=true men document_status=archived skal ekskluderes.',
+        ]);
+
+        $result = $service->retrieveForCustomer($customer->id, [
+            'selected_metadata' => ['topic' => ['Mismatch ekskludert']],
+            'search_text' => 'mismatch ekskludert',
+            'intent_summary' => 'Dokumentet skal ekskluderes fordi document_status er archived.',
             'confidence' => 0.9,
         ]);
 

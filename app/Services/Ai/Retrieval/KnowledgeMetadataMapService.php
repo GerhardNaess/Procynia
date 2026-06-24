@@ -77,7 +77,6 @@ class KnowledgeMetadataMapService
             ->join('knowledge_items', 'knowledge_items.id', '=', 'knowledge_item_chunks.knowledge_item_id')
             ->where('knowledge_items.customer_id', $customerId)
             ->where('knowledge_items.ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
-            ->where('knowledge_items.is_active', true)
             ->where('knowledge_items.ai_usage_enabled', true)
             ->where('knowledge_items.document_status', KnowledgeItem::DOCUMENT_STATUS_ACTIVE)
             ->whereNotNull('knowledge_items.storage_path')

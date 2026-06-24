@@ -109,6 +109,56 @@ class KnowledgeMetadataMapServiceTest extends TestCase
         $this->assertSame(['Kapittel > Del 1'], $map['fields']['section_path']);
     }
 
+    public function test_it_includes_document_when_is_active_false_and_document_status_active(): void
+    {
+        // document_status is authoritative; is_active alone does not exclude a document.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Mismatch Include Map AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'is_active' => false,
+            // document_status defaults to DOCUMENT_STATUS_ACTIVE — intentional mismatch
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Mismatch tema',
+            'sub_topic' => 'Underemne',
+            'keywords' => ['nøkkelord'],
+            'service_product_tag' => 'Tag',
+            'theme_tag' => 'Tema-tag',
+            'section_title' => 'Del 1',
+            'section_path' => 'Del 1',
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(1, $map['chunk_count']);
+    }
+
+    public function test_it_excludes_document_when_document_status_archived_and_is_active_true(): void
+    {
+        // Reverse mismatch: is_active=true does not override an archived document_status.
+        $service = app(KnowledgeMetadataMapService::class);
+        $customer = $this->createCustomer('Mismatch Exclude Map AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ]);
+
+        $this->createChunk($document, 0, [
+            'topic' => 'Arkivert tema',
+            'sub_topic' => null,
+            'keywords' => [],
+            'service_product_tag' => null,
+            'theme_tag' => null,
+            'section_title' => null,
+            'section_path' => null,
+        ]);
+
+        $map = $service->buildForCustomer($customer->id);
+
+        $this->assertSame(0, $map['chunk_count']);
+    }
+
     private function createCustomer(string $name): Customer
     {
         $language = Language::query()->firstOrCreate(

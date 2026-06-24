@@ -4913,6 +4913,7 @@ class AiControllerTest extends TestCase
             'content_type' => KnowledgeItem::CONTENT_TYPE_REFERENCE,
             'content' => 'erfaring referanser',
             'is_active' => false,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, // document_status is authoritative filter
         ]);
         $this->syncKnowledgeItemChunks($inactiveKnowledge);
 
