@@ -4614,15 +4614,71 @@ export default function AiShow({
                                     ) : activeRequirementHasDraft ? (
                                         <div className="flex flex-col gap-5">
                                             {activeRequirementPartialDraft ? (
-                                                <div className="rounded-2xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm leading-6 text-slate-700">
-                                                    <div className="flex flex-wrap items-center gap-2">
-                                                        <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                                    <div className="flex flex-wrap items-start gap-2">
+                                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
                                                             {tai.coverage_status_partial ?? 'Delvis dekket'}
                                                         </span>
-                                                        <span className="text-sm text-slate-700">
+                                                        <span className="min-w-0 flex-1 text-sm text-slate-700">
                                                             {tai.answer_draft_partial_coverage_warning ?? 'Svarutkastet er basert på delvis kunnskapsgrunnlag. Kontroller hva som er dokumentert og hva som bør etterprøves.'}
                                                         </span>
                                                     </div>
+
+                                                    {activeRequirementMissingKnowledge !== null ? (
+                                                        <div className="mt-4 space-y-3">
+                                                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 px-4 py-3">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                                                                    {tai.answer_draft_partial_covered_heading ?? 'Dette er dekket'}
+                                                                </div>
+                                                                {(activeRequirementMissingKnowledge.directly_supported_points?.length ?? 0) > 0 ? (
+                                                                    <ul className="mt-2 space-y-1.5">
+                                                                        {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
+                                                                            <li key={`covered-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                                                                                <span>{point?.requirement_point ?? '—'}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : (
+                                                                    <p className="mt-2 text-sm text-slate-500">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="rounded-2xl border border-rose-100 bg-rose-50/40 px-4 py-3">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-700">
+                                                                    {tai.answer_draft_partial_missing_heading ?? 'Dette mangler'}
+                                                                </div>
+                                                                {(activeRequirementMissingKnowledge.unsupported_points?.length ?? 0) > 0 ? (
+                                                                    <ul className="mt-2 space-y-1.5">
+                                                                        {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
+                                                                            <li key={`missing-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400" />
+                                                                                <span>{point}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : (
+                                                                    <p className="mt-2 text-sm text-slate-500">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
+                                                                )}
+                                                            </div>
+
+                                                            {(activeRequirementMissingKnowledge.related_but_insufficient_points?.length ?? 0) > 0 ? (
+                                                                <div className="rounded-2xl border border-amber-200 bg-amber-50/40 px-4 py-3">
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
+                                                                        {tai.answer_draft_partial_manual_review_heading ?? 'Bør etterprøves'}
+                                                                    </div>
+                                                                    <ul className="mt-2 space-y-1.5">
+                                                                        {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
+                                                                            <li key={`review-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                                                                                <span>{point}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : null}
                                                 </div>
                                             ) : null}
                                             <div className="flex flex-col gap-2">

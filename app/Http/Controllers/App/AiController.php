@@ -1103,8 +1103,13 @@ class AiController extends Controller
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
 
+        $judgeStatus = (string) data_get($groundingJudge, 'status');
+        $coverageSummary = $judgeStatus === 'partial'
+            ? $this->partialCoverageSummaryPayload($groundingJudge, $retrievedKnowledgeChunks)
+            : null;
+
         return response()->json(array_merge(
-            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement, (string) data_get($groundingJudge, 'status')),
+            $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement, $judgeStatus, $coverageSummary),
             [
                 'warning' => $usageWarning,
                 'answer_basis_item_ids' => $selectedAnswerBasisItems
@@ -1851,8 +1856,11 @@ class AiController extends Controller
      * Returns: A frontend-ready answer draft array.
      * Side effects: None.
      */
-    private function aiRequirementAnswerDraftPayload(SavedNoticeAiRequirement $requirement, ?string $judgeStatus = null): array
-    {
+    private function aiRequirementAnswerDraftPayload(
+        SavedNoticeAiRequirement $requirement,
+        ?string $judgeStatus = null,
+        ?array $coverageSummary = null,
+    ): array {
         $hasAnswerDraftText = filled(trim((string) ($requirement->answer_draft_text ?? '')));
         $retrievalSources = is_array($requirement->answer_draft_retrieval_sources ?? null)
             ? $requirement->answer_draft_retrieval_sources
@@ -1868,7 +1876,7 @@ class AiController extends Controller
             'text' => (string) ($requirement->answer_draft_text ?? ''),
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
             'generation_state' => $generationState,
-            'missing_knowledge' => null,
+            'missing_knowledge' => $judgeStatus === 'partial' ? $coverageSummary : null,
             'retrieval_sources' => $retrievalSources,
         ];
     }
@@ -1879,11 +1887,14 @@ class AiController extends Controller
      * Returns: A JSON response payload for the answer draft endpoints.
      * Side effects: None.
      */
-    private function aiRequirementAnswerDraftResponsePayload(SavedNoticeAiRequirement $requirement, ?string $judgeStatus = null): array
-    {
+    private function aiRequirementAnswerDraftResponsePayload(
+        SavedNoticeAiRequirement $requirement,
+        ?string $judgeStatus = null,
+        ?array $coverageSummary = null,
+    ): array {
         return [
             'requirement_id' => $requirement->id,
-            'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement, $judgeStatus),
+            'answer_draft' => $this->aiRequirementAnswerDraftPayload($requirement, $judgeStatus, $coverageSummary),
         ];
     }
 
@@ -2392,6 +2403,30 @@ class AiController extends Controller
         return [
             'message' => 'Procynia har ikke laget et svar fordi kunnskapsgrunnlaget er for svakt.',
             ...$this->requirementKnowledgeDocumentRecommendationService->recommendForRequirement($requirement),
+        ];
+    }
+
+    /**
+     * Purpose: Build the coverage summary included in partial answer draft responses.
+     * Inputs: The grounding judge result and retrieved chunks for source enrichment.
+     * Returns: A structured coverage payload matching the missing_knowledge shape.
+     * Side effects: None.
+     */
+    private function partialCoverageSummaryPayload(array $groundingJudge, Collection $retrievedKnowledgeChunks): array
+    {
+        $directlySupportedPoints = $this->normalizeGroundingPointList(
+            data_get($groundingJudge, 'directly_supported_points', data_get($groundingJudge, 'supported_points', [])),
+        );
+        $directlySupportedPoints = $this->enrichGroundingPointsWithSources($directlySupportedPoints, $retrievedKnowledgeChunks);
+
+        return [
+            'missing_knowledge_summary' => $this->normalizeOptionalString(data_get($groundingJudge, 'missing_knowledge_summary')),
+            'directly_supported_points' => $directlySupportedPoints,
+            'related_but_insufficient_points' => $this->normalizeStringList(data_get($groundingJudge, 'related_but_insufficient_points', [])),
+            'unsupported_points' => $this->normalizeStringList(data_get($groundingJudge, 'unsupported_points', [])),
+            'judge_status' => 'partial',
+            'can_generate_answer' => true,
+            'supported_points' => $this->normalizeGroundingPointRequirementPoints($directlySupportedPoints),
         ];
     }
 

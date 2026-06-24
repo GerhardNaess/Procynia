@@ -6711,6 +6711,12 @@ class AiControllerTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('answer_draft.generation_state', 'partial');
         $response->assertJsonPath('answer_draft.text', 'Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.judge_status', 'partial');
+        $response->assertJsonPath('answer_draft.missing_knowledge.can_generate_answer', true);
+        $response->assertJsonPath('answer_draft.missing_knowledge.directly_supported_points.0.requirement_point', 'Generell beskrivelse av tjenesten er dokumentert.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.unsupported_points.0', 'Detaljert sertifiseringsdokumentasjon mangler.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.related_but_insufficient_points.0', 'Spesifikke prosedyrer for beredskap er ikke dokumentert.');
+        $response->assertJsonPath('answer_draft.missing_knowledge.missing_knowledge_summary', 'Grunnlaget dekker bare deler av kravet.');
 
         $requirement->refresh();
         $this->assertSame('Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.', $requirement->answer_draft_text);
