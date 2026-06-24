@@ -1089,6 +1089,34 @@ Kunnskapsbase og Saksdokumenter er fortsatt to adskilte flyter:
 
 `document_type` og `document_theme_term_id` er beholdt som required backend-felt og fallback i UI. Disse kan på sikt erstattes fullt ut av `document_category_id` og `document_topic_id`. Avvikling krever datamigrering, validering av at ingen aktive integrasjoner er avhengige av legacy-feltene, og en kontrollert utfasingsplan.
 
+### 28.7L — Kartlegging av gjenværende legacy-speilfelter (2.7L)
+
+Denne kartleggingen oppsummerer de feltene som fortsatt fungerer som legacy-speil eller fallback i Kunnskapsbase. De er fortsatt i bruk i payloads, UI, retrieval, AI-strømmer eller tester, og kan derfor ikke fjernes før alle konsumenter er flyttet helt over til versjons- og metadata-kildene.
+
+**Autoritativ kilde for filidentitet:** `KnowledgeItemVersion` for gjeldende versjon. `KnowledgeItem` beholder midlertidige speilfelter for bakoverkompatibilitet.
+
+**Autoritativ kilde for ekstraksjonsstatus:** gjeldende `KnowledgeItemVersion.extraction_status`. `KnowledgeItem.extraction_status` er fortsatt et legacy-speil som brukes som fallback i flere payloads og tester.
+
+| Felt | Autoritativ kilde | Skrives fortsatt? | Leses fortsatt? | Brukt i payload/UI/retrieval/AI/tests? | Risiko ved fjerning | Anbefalt neste steg |
+| --- | --- | --- | --- | --- | --- | --- |
+| `storage_path` | `KnowledgeItemVersion.storage_path` for gjeldende versjon; `KnowledgeItem.storage_path` er legacy-speil | Ja, ved opplasting, erstatning og godkjenning | Ja | Ja: filhandlinger, payloads, revisjonssnapshots og tester | Høy — kan bryte filreferanser og historikk | Behold til alle filhandlinger leser rent fra versjonstabellen |
+| `original_filename` | `KnowledgeItemVersion.original_filename` for gjeldende versjon; `KnowledgeItem.original_filename` som bakoverkompatibel fallback | Ja | Ja | Ja: liste, detalj, versjonshistorikk og tester | Høy — påvirker visning, deduplisering og historikk | Fase ut først når alle visninger er versjonsbevisste |
+| `mime_type` | `KnowledgeItemVersion.mime_type` for gjeldende versjon; `KnowledgeItem.mime_type` som legacy-speil | Ja | Ja | Ja: liste, detalj, filmetadata og tester | Høy — filtypevisning og filhandlinger kan feile | Behold til hele UI-et leser fra versjonspayload alene |
+| `file_size_bytes` | `KnowledgeItemVersion.file_size_bytes` for gjeldende versjon; `KnowledgeItem.file_size_bytes` som legacy-speil | Ja | Ja | Ja: liste, detalj, versjonshistorikk og tester | Middels/høy — størrelse kan forsvinne i UI og historikk | Fjern først når alle visninger bruker versjonsfeltet direkte |
+| `extraction_status` | Gjeldende `KnowledgeItemVersion.extraction_status`; `KnowledgeItem.extraction_status` er fortsatt fallback | Ja | Ja | Ja: payload, banner-/statuslogikk, retrieval-sjekker og tester | Høy — kan bryte statusvisning og statusbasert filtrering | Behold til status er hentet konsekvent fra current version i alle konsumenter |
+| `extraction_error` | Gjeldende `KnowledgeItemVersion.extraction_error`; `KnowledgeItem.extraction_error` som fallback | Ja | Ja | Ja: payload, UI-feilvisning og tester | Middels/høy — feilvisning kan bli tom eller feil | Fase ut når alle feilvisninger leser fra versjonspayload |
+| `extracted_text` | `KnowledgeItemVersion.extracted_text` for gjeldende versjon; `KnowledgeItem.extracted_text` som legacy fallback | Ja | Ja | Ja: AI-grunnlag, sammendrag, payload-fallback og tester | Høy — kan påvirke AI-kontekst og fallback-tekster | Behold til alle AI-/oppsummeringskall er versjonsbaserte |
+| `content` | Ingen enkelt kilde; brukes som siste fallback i `textForKnowledgeProcessing()` når versjonstekst og `KnowledgeItem.extracted_text` mangler | Ja, ved opprettelse og noen manuelle flyter | Ja | Ja: AI-/tekstgrunnlag og tester; ikke primær UI-kilde | Høy — kan fjerne siste tekstfallback for gamle dokumenter | Flytt all lesing til versjonstekst før denne kan ryddes bort |
+| `content_type` | `document_type` | Ja, via modellens synkronisering | Ja | Ja: payload, UI og tester som legacy alias | Middels — begrepet er allerede avviklet brukerrettet, men aliaset brukes fortsatt | Behold til alle konsumenter bruker `document_type` konsekvent |
+| `is_active` | `document_status` | Ja, via modellens synkronisering | Ja | Ja: payload, UI, retrieval og tester som legacy alias | Høy — påvirker status, filtrering og retrieval | Behold til `document_status` alene styrer alle konsumenter |
+
+**Oppsummert:**
+
+- Filidentitet og filmetadata bør på sikt leses fra `KnowledgeItemVersion`.
+- `document_type`/`document_status` er de autoritative styringsfeltene; `content_type` og `is_active` er kun kompatibilitetsspeil.
+- `content` er den svakeste delen av kjeden og bør ryddes sist, etter at all tekstbruk er versjonsbasert.
+- Ingen kolonner skal slettes før alle lesere, payloads og tester er flyttet over til de nye kildene.
+
 ---
 
 ## 29. Fase 3 og videre: Utsatt til senere
