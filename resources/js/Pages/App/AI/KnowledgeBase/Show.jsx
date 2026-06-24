@@ -791,7 +791,7 @@ export default function KnowledgeBaseShow({
     const chunks = Array.isArray(knowledgeItem?.chunks) ? knowledgeItem.chunks : [];
     const totalChunksCount = Number(knowledgeItem?.chunk_count ?? chunks.length);
     const readyChunksCount = chunks.filter((chunk) => getChunkStatus(chunk) === 'ready').length;
-    const activeLabel = knowledgeItem?.is_active_label ?? (knowledgeItem?.is_active ? knowledgeShowLabels.activeLabel : knowledgeShowLabels.inactiveLabel);
+    const activeLabel = knowledgeItem?.document_status_label ?? documentStatusMeta.label;
     const chunkReviewCounts = chunks.reduce((accumulator, chunk) => {
         accumulator[getChunkReviewStatus(chunk)] = (accumulator[getChunkReviewStatus(chunk)] ?? 0) + 1;
 
@@ -910,7 +910,7 @@ export default function KnowledgeBaseShow({
     const versionEntries = Array.isArray(knowledgeItem?.versions) ? knowledgeItem.versions : [];
     const currentVersion = versionEntries.find((v) => v.is_current) ?? null;
     const pendingVersions = versionEntries.filter((v) => v.approval_status === 'pending_review');
-    const isDocumentAiActive = knowledgeItem?.is_active === true && knowledgeItem?.ai_usage_enabled !== false;
+    const isDocumentAiActive = knowledgeItem?.document_status === 'active' && knowledgeItem?.ai_usage_enabled !== false;
 
     useEffect(() => {
         if (chunks.length === 0) {

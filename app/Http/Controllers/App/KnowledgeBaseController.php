@@ -1868,8 +1868,7 @@ class KnowledgeBaseController extends Controller
             'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type,
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
             'summary' => $knowledgeDocument->summary,
-            'is_active' => (bool) $knowledgeDocument->is_active,
-            'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
+            'is_active' => (bool) $knowledgeDocument->is_active, // legacy mirror — document_status is authoritative
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],
@@ -1916,8 +1915,7 @@ class KnowledgeBaseController extends Controller
             'content_type_label' => KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocument->document_type] ?? $knowledgeDocument->document_type, // legacy alias
             'content_excerpt' => $this->contentExcerpt($knowledgeDocument),
             'summary' => $knowledgeDocument->summary,
-            'is_active' => (bool) $knowledgeDocument->is_active,
-            'is_active_label' => $knowledgeDocument->is_active ? 'Aktiv' : 'Inaktiv',
+            'is_active' => (bool) $knowledgeDocument->is_active, // legacy mirror — document_status is authoritative
             'ai_usage_enabled' => (bool) $knowledgeDocument->ai_usage_enabled,
             'document_status' => $knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'document_status_label' => KnowledgeItem::DOCUMENT_STATUS_LABELS[$knowledgeDocument->document_status ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE] ?? KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ACTIVE],
