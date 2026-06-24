@@ -376,7 +376,6 @@ class KnowledgeBaseController extends Controller
                     'storage_path' => $storedPath,
                     'mime_type' => $payload['document']->getClientMimeType(),
                     'file_size_bytes' => (int) $payload['document']->getSize(),
-                    'content_type' => $payload['document_type'],
                     'document_type' => $payload['document_type'],
                     'document_category_id' => $payload['document_category_id'],
                     'document_topic_id' => $payload['document_topic_id'],
@@ -392,7 +391,6 @@ class KnowledgeBaseController extends Controller
                     'extraction_error' => $extractionFailed
                         ? 'Tekst kunne ikke trekkes ut fra dokumentet.'
                         : null,
-                    'is_active' => $payload['is_active'],
                 ]);
 
                 $knowledgeVersion = KnowledgeItemVersion::query()->create([
@@ -493,9 +491,7 @@ class KnowledgeBaseController extends Controller
         DB::transaction(function () use ($record, $payload, $user): void {
             $updates = [
                 'document_type' => $payload['document_type'],
-                'content_type' => $payload['document_type'],
                 'ownership_type' => $payload['ownership_type'],
-                'is_active' => $payload['is_active'],
                 'ai_usage_enabled' => $payload['ai_usage_enabled'],
                 'document_status' => $payload['document_status'],
                 'last_reviewed_at' => $payload['last_reviewed_at'],
@@ -1019,7 +1015,6 @@ class KnowledgeBaseController extends Controller
                 : KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
             'document_category_id' => $catalogPayload['document_category_id'] ?? null,
             'document_topic_id' => $catalogPayload['document_topic_id'] ?? null,
-            'is_active' => $documentStatus === KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
                 ? (bool) $validated['ai_usage_enabled']
                 : true,
@@ -1060,7 +1055,6 @@ class KnowledgeBaseController extends Controller
         $payload = [
             'document_type' => Str::lower(trim((string) $validated['document_type'])),
             'ownership_type' => Str::lower(trim((string) $validated['ownership_type'])),
-            'is_active' => $documentStatus === KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'ai_usage_enabled' => array_key_exists('ai_usage_enabled', $validated)
                 ? (bool) $validated['ai_usage_enabled']
                 : (bool) $knowledgeDocument->ai_usage_enabled,

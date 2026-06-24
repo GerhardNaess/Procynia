@@ -5915,6 +5915,31 @@ XML;
         ])->assertSessionHasErrors(['document_status']);
     }
 
+    public function test_knowledge_document_store_ignores_legacy_content_type_and_is_active_inputs(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Legacy Mirror Store AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-legacy-mirror-store.docx', 'Document content for legacy mirror store test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-legacy-mirror-store.docx')
+            ->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $document->document_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $document->content_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $document->document_status);
+        $this->assertFalse((bool) $document->is_active);
+    }
+
     public function test_knowledge_document_update_persists_document_status_and_index_payload_exposes_it(): void
     {
         Storage::fake('local');
@@ -5954,6 +5979,40 @@ XML;
                 && data_get($item, 'document_status') === KnowledgeItem::DOCUMENT_STATUS_ARCHIVED
                 && data_get($item, 'document_status_label') === KnowledgeItem::DOCUMENT_STATUS_LABELS[KnowledgeItem::DOCUMENT_STATUS_ARCHIVED];
         });
+    }
+
+    public function test_knowledge_document_update_ignores_legacy_content_type_and_is_active_inputs(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Doc Legacy Mirror Update AS');
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('doc-legacy-mirror-update.docx', 'Document content for legacy mirror update test.'),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->where('customer_id', $context['customer']->id)
+            ->where('original_filename', 'doc-legacy-mirror-update.docx')
+            ->firstOrFail();
+
+        $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
+            'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+            'ownership_type' => $document->ownership_type,
+            'is_active' => true,
+            'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->content_type);
+        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
+        $this->assertFalse((bool) $updatedDocument->is_active);
     }
 
     public function test_knowledge_document_form_payload_exposes_document_status_and_label(): void

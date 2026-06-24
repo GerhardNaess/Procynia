@@ -162,6 +162,20 @@ class KnowledgeItem extends Model
         ];
     }
 
+    /**
+     * Purpose: Keep legacy compatibility columns aligned with authoritative document fields.
+     * Inputs: The model instance before persistence.
+     * Returns: None.
+     * Side effects: Synchronizes content_type and is_active from document_type and document_status.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $knowledgeItem): void {
+            $knowledgeItem->content_type = $knowledgeItem->document_type;
+            $knowledgeItem->is_active = $knowledgeItem->document_status === self::DOCUMENT_STATUS_ACTIVE;
+        });
+    }
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
