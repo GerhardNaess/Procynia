@@ -6082,6 +6082,59 @@ XML;
         });
     }
 
+    public function test_payload_reads_extraction_status_from_current_version_over_stale_document_fields(): void
+    {
+        // When KnowledgeItem.extraction_status has drifted from the current version, the payload must
+        // prefer the version's extraction_status and extraction_error values.
+        $context = $this->customerContext('Current Version Extraction Status AS');
+
+        $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
+            'original_filename' => 'stale-extraction.docx',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
+            'extraction_error' => 'Stale document-level error',
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $context['customer']->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'stale-extraction.docx',
+            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stale-extraction.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Extracted from version',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => hash('sha256', 'extraction-version-content'),
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        // Check index payload (documentListPayload).
+        $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
+        $indexResponse->assertOk();
+        $indexResponse->assertViewHas('page', function (array $page) use ($document): bool {
+            $item = collect(data_get($page, 'props.knowledgeItems', []))->firstWhere('id', $document->id);
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
+                && data_get($item, 'extraction_error') === null;
+        });
+
+        // Check edit form payload (documentFormPayload).
+        $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
+        $editResponse->assertOk();
+        $editResponse->assertViewHas('page', function (array $page): bool {
+            $item = data_get($page, 'props.knowledgeItem');
+
+            return $item !== null
+                && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_COMPLETED
+                && data_get($item, 'extraction_error') === null;
+        });
+    }
+
     public function test_knowledge_document_store_defaults_review_dates_to_null_when_not_provided(): void
     {
         Storage::fake('local');

@@ -1857,6 +1857,7 @@ class KnowledgeBaseController extends Controller
     private function documentListPayload(KnowledgeItem $knowledgeDocument): array
     {
         $currentVersion = $knowledgeDocument->currentVersion;
+        $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
 
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
@@ -1880,9 +1881,9 @@ class KnowledgeBaseController extends Controller
             'last_reviewed_at' => $knowledgeDocument->last_reviewed_at?->toDateString(),
             'review_due_at' => $knowledgeDocument->review_due_at?->toDateString(),
             'review_state' => $this->resolveReviewStateForDocument($knowledgeDocument),
-            'extraction_status' => $knowledgeDocument->extraction_status,
-            'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
-            'extraction_error' => $knowledgeDocument->extraction_error,
+            'extraction_status' => $extractionStatus,
+            'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
+            'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
             'chunk_count' => (int) ($knowledgeDocument->chunks_count ?? $knowledgeDocument->chunks->count()),
             'file_size_bytes' => $currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes,
             'file_size_human' => $this->humanFileSize($currentVersion?->file_size_bytes ?? $knowledgeDocument->file_size_bytes),
@@ -1905,6 +1906,7 @@ class KnowledgeBaseController extends Controller
     private function documentFormPayload(KnowledgeItem $knowledgeDocument): array
     {
         $currentVersion = $knowledgeDocument->currentVersion;
+        $extractionStatus = $currentVersion?->extraction_status ?? $knowledgeDocument->extraction_status;
 
         return array_merge($this->ownershipPayload($knowledgeDocument), [
             'id' => $knowledgeDocument->id,
@@ -1935,9 +1937,9 @@ class KnowledgeBaseController extends Controller
             'updated_at' => optional($knowledgeDocument->updated_at)?->toIso8601String(),
             'uploaded_by' => $knowledgeDocument->uploadedBy?->name,
             'mime_type' => $currentVersion?->mime_type ?? $knowledgeDocument->mime_type,
-            'extraction_status' => $knowledgeDocument->extraction_status,
-            'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$knowledgeDocument->extraction_status] ?? $knowledgeDocument->extraction_status,
-            'extraction_error' => $knowledgeDocument->extraction_error,
+            'extraction_status' => $extractionStatus,
+            'extraction_status_label' => KnowledgeItem::EXTRACTION_STATUS_LABELS[$extractionStatus] ?? $extractionStatus,
+            'extraction_error' => $currentVersion !== null ? $currentVersion->extraction_error : $knowledgeDocument->extraction_error,
             'chunk_count' => $knowledgeDocument->chunks->count(),
             'show_url' => route('app.ai.knowledge-base.show', ['knowledgeItem' => $knowledgeDocument->id]),
         ]);
