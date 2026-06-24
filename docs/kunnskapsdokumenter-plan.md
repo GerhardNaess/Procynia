@@ -1192,7 +1192,7 @@ Denne fasen er **ikke implementert ennå**. Den skal bare beskrive hva som må v
 - 2.8A — Plan og datakontroll
   - Definere konkret omfang, risikonivå og rollback-strategi.
 - 2.8B — Kartlegg produksjonsdata
-  - Måle hvor ofte legacy-feltene fortsatt brukes i praksis, og hvilke dokumenter som fortsatt er avhengige av fallback.
+  - Artisan-kommandoen `knowledge:legacy-audit` skal rapportere hvor ofte legacy-feltene fortsatt brukes i praksis, hvilke dokumenter som fortsatt er avhengige av fallback, og gi en read-only anbefaling før fysisk opprydding.
 - 2.8C — Stopp eventuell gjenværende speilskriving for lavrisikofelter
   - Vurdere å stoppe intern synkronisering av `content_type` og `is_active` etter at testene er oppdaterte.
 - 2.8D — Fjern lesere/fallback for lavrisikofelter
