@@ -25,7 +25,6 @@ class KnowledgeItem extends Model
         'ownership_type' => self::OWNERSHIP_TYPE_COMPANY,
         'ai_usage_enabled' => true,
         'document_status' => self::DOCUMENT_STATUS_ACTIVE,
-        'content_type' => self::CONTENT_TYPE_OTHER,
     ];
 
     public const DOCUMENT_TYPE_COMPANY = 'company';
@@ -154,7 +153,6 @@ class KnowledgeItem extends Model
             'owner_user_id' => 'integer',
             'owning_saved_notice_id' => 'integer',
             'uploaded_by_user_id' => 'integer',
-            'is_active' => 'boolean',
             'ai_usage_enabled' => 'boolean',
             'last_reviewed_at' => 'date',
             'review_due_at' => 'date',

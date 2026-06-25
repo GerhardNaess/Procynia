@@ -185,7 +185,7 @@ class RequirementAssessmentService
             ->map(static function (SavedNoticeAiEvidence $evidence): array {
                 $knowledgeItem = $evidence->knowledgeItem;
                 $knowledgeChunk = $evidence->knowledgeItemChunk;
-                $knowledgeDocumentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+                $knowledgeDocumentType = $knowledgeItem?->document_type;
 
                 return [
                     'id' => $evidence->id,
@@ -365,7 +365,7 @@ class RequirementAssessmentService
             ->map(static function (SavedNoticeAiEvidence $evidence): array {
                 $knowledgeItem = $evidence->knowledgeItem;
                 $knowledgeChunk = $evidence->knowledgeItemChunk;
-                $knowledgeDocumentType = $knowledgeItem?->document_type ?? $knowledgeItem?->content_type;
+                $knowledgeDocumentType = $knowledgeItem?->document_type;
 
                 return [
                     'id' => $evidence->id,

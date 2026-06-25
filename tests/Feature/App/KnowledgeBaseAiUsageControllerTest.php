@@ -363,7 +363,6 @@ class KnowledgeBaseAiUsageControllerTest extends TestCase
             'content' => 'Testinnhold.',
             'original_filename' => 'testdokument.docx',
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
-            'content_type' => KnowledgeItem::CONTENT_TYPE_COMPANY,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
         ]);

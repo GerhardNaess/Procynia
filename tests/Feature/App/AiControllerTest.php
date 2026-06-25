@@ -2034,7 +2034,6 @@ class AiControllerTest extends TestCase
             'id' => $tableKnowledge->id,
             'customer_id' => $context['customer']->id,
             'original_filename' => 'soc-table-knowledge.docx',
-            'is_active' => true,
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
         ]);
         $this->assertDatabaseHas('knowledge_item_chunks', [
@@ -7938,25 +7937,11 @@ class AiControllerTest extends TestCase
             'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'document_type' => $documentType,
-            'content_type' => $documentType,
             'extracted_text' => $extractedText,
             'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
-            'is_active' => $overrides['is_active'] ?? true,
         ], $overrides));
-
-        if (array_key_exists('content_type', $overrides)) {
-            $item->forceFill([
-                'content_type' => $overrides['content_type'],
-            ])->saveQuietly();
-        }
-
-        if (array_key_exists('is_active', $overrides)) {
-            $item->forceFill([
-                'is_active' => $overrides['is_active'],
-            ])->saveQuietly();
-        }
 
         // Every knowledge item needs a current version so retrieval guards can use version fields.
         KnowledgeItemVersion::query()->create([
