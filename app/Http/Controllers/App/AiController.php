@@ -1067,6 +1067,11 @@ class AiController extends Controller
             (int) ($request->user()?->id ?? 0),
         );
 
+        $judgeStatus = (string) data_get($groundingJudge, 'status');
+        $coverageSummary = $judgeStatus === 'partial'
+            ? $this->partialCoverageSummaryPayload($groundingJudge, $retrievedKnowledgeChunks)
+            : null;
+
         DB::table('saved_notice_ai_requirements')
             ->where('id', $persistedRequirement->id)
             ->update([
@@ -1074,6 +1079,9 @@ class AiController extends Controller
                     $retrievedKnowledgeChunks->all(),
                     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
                 ),
+                'answer_draft_coverage' => $coverageSummary !== null
+                    ? json_encode($coverageSummary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    : null,
             ]);
         $persistedRequirement->refresh();
 
@@ -1102,11 +1110,6 @@ class AiController extends Controller
         ]);
 
         $selectedAnswerBasisItems = collect($selectedAnswerBasisItems->all());
-
-        $judgeStatus = (string) data_get($groundingJudge, 'status');
-        $coverageSummary = $judgeStatus === 'partial'
-            ? $this->partialCoverageSummaryPayload($groundingJudge, $retrievedKnowledgeChunks)
-            : null;
 
         return response()->json(array_merge(
             $this->aiRequirementAnswerDraftResponsePayload($persistedRequirement, $judgeStatus, $coverageSummary),
@@ -1866,9 +1869,22 @@ class AiController extends Controller
             ? $requirement->answer_draft_retrieval_sources
             : [];
 
+        // Fall back to stored coverage when no live judge data is available (page refresh).
+        $storedCoverage = is_array($requirement->answer_draft_coverage ?? null)
+            ? $requirement->answer_draft_coverage
+            : null;
+        $storedJudgeStatus = is_string($storedCoverage['judge_status'] ?? null)
+            ? $storedCoverage['judge_status']
+            : null;
+
+        $effectiveJudgeStatus = $judgeStatus ?? $storedJudgeStatus;
+        $effectiveCoverage = $judgeStatus === 'partial'
+            ? $coverageSummary
+            : ($storedJudgeStatus === 'partial' ? $storedCoverage : null);
+
         $generationState = match (true) {
             ! $hasAnswerDraftText => null,
-            $judgeStatus === 'partial' => 'partial',
+            $effectiveJudgeStatus === 'partial' => 'partial',
             default => 'generated',
         };
 
@@ -1876,7 +1892,7 @@ class AiController extends Controller
             'text' => (string) ($requirement->answer_draft_text ?? ''),
             'generated_at' => optional($requirement->answer_draft_generated_at)?->toIso8601String(),
             'generation_state' => $generationState,
-            'missing_knowledge' => $judgeStatus === 'partial' ? $coverageSummary : null,
+            'missing_knowledge' => $effectiveCoverage,
             'retrieval_sources' => $retrievalSources,
         ];
     }

@@ -6721,6 +6721,93 @@ class AiControllerTest extends TestCase
         $requirement->refresh();
         $this->assertSame('Vi har en overordnet beredskapsplan. Sertifiseringsdetaljer bør verifiseres separat.', $requirement->answer_draft_text);
         $this->assertNotNull($requirement->answer_draft_generated_at);
+
+        // Coverage is persisted to DB.
+        $this->assertIsArray($requirement->answer_draft_coverage);
+        $this->assertSame('partial', data_get($requirement->answer_draft_coverage, 'judge_status'));
+        $this->assertSame('Generell beskrivelse av tjenesten er dokumentert.', data_get($requirement->answer_draft_coverage, 'directly_supported_points.0.requirement_point'));
+        $this->assertSame('Detaljert sertifiseringsdokumentasjon mangler.', data_get($requirement->answer_draft_coverage, 'unsupported_points.0'));
+    }
+
+    /**
+     * T_partial_readback – Partial coverage survives page refresh.
+     * Proves that after generating a partial draft, a subsequent Show page load
+     * still returns missing_knowledge with the full coverage structure.
+     */
+    public function test_partial_coverage_survives_page_refresh_and_appears_in_show_payload(): void
+    {
+        $this->bindKnowledgeGroundingService(function (...$ignored): array {
+            return [
+                'level' => 'amber',
+                'max_score' => 0.52,
+                'sources_count' => 1,
+            ];
+        });
+
+        $this->bindGroundingJudgeService(function (...$ignored): array {
+            return [
+                'status' => 'partial',
+                'can_generate_answer' => true,
+                'directly_supported_points' => [
+                    [
+                        'requirement_point' => 'Tjenestebeskrivelse er dokumentert.',
+                        'support_summary' => 'Kunnskapsgrunnlaget dekker tjenestebeskrivelsen.',
+                        'evidence_reference' => null,
+                        'evidence_quote' => null,
+                    ],
+                ],
+                'related_but_insufficient_points' => [],
+                'unsupported_points' => ['Sertifiseringsdetaljer mangler.'],
+                'missing_knowledge_summary' => 'Grunnlaget dekker delvis kravet.',
+                'recommended_document_title' => null,
+                'suggested_filename' => null,
+                'reasoning_summary' => null,
+            ];
+        });
+
+        $context = $this->customerAdminContext();
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-PARTIAL-RB', 'Partial readback target', [
+            'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
+        ]);
+        $document = $this->createAiDocument($savedNotice, [
+            'original_filename' => 'kravdokument.docx',
+            'stored_path' => sprintf('saved-notices/%d/ai-documents/kravdokument.docx', $savedNotice->id),
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => 'Leverandøren skal dokumentere tjenesten og sertifiseringer.',
+            'text_extracted_at' => '2026-04-06 11:01:00',
+        ]);
+        $chunk = $this->createAiDocumentChunk($document, 'Leverandøren skal dokumentere tjenesten og sertifiseringer.');
+        $requirement = $this->createAiRequirement($savedNotice, $document, $chunk, [
+            'requirement_text' => 'Leverandøren skal dokumentere tjenesten og sertifiseringer.',
+        ]);
+
+        Http::fake(function () {
+            return Http::response(
+                $this->openAiStructuredResponse(['answer_draft_text' => 'Tjenesten er beskrevet. Sertifiseringsdetaljer bør verifiseres separat.'], 40, 12),
+                200,
+                ['x-request-id' => 'req_partial_readback'],
+            );
+        });
+
+        $this->actingAs($context['user'])->post(route('app.ai.requirements.answer-draft.generate', [
+            'savedNotice' => $savedNotice->id,
+            'requirement' => $requirement->id,
+        ]), ['answer_basis_item_ids' => []])->assertOk();
+
+        // Simulate page refresh — load the Show page and read back the payload.
+        $pageResponse = $this->actingAs($context['user'])->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
+        $pageResponse->assertOk();
+        $page = $this->inertiaPageFromResponse($pageResponse);
+        $requirements = collect(data_get($page, 'props.requirements', []));
+        $requirementRow = $requirements->firstWhere('id', $requirement->id);
+
+        $this->assertNotNull($requirementRow);
+        $this->assertSame('partial', data_get($requirementRow, 'answer_draft.generation_state'));
+        $this->assertSame('partial', data_get($requirementRow, 'answer_draft.missing_knowledge.judge_status'));
+        $this->assertSame('Tjenestebeskrivelse er dokumentert.', data_get($requirementRow, 'answer_draft.missing_knowledge.directly_supported_points.0.requirement_point'));
+        $this->assertSame('Sertifiseringsdetaljer mangler.', data_get($requirementRow, 'answer_draft.missing_knowledge.unsupported_points.0'));
+        $this->assertSame('Grunnlaget dekker delvis kravet.', data_get($requirementRow, 'answer_draft.missing_knowledge.missing_knowledge_summary'));
     }
 
     /**
