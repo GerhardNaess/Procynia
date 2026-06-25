@@ -228,7 +228,13 @@ class KnowledgeVocabularyAnalysisBatchService
             ->where('customer_id', $batch->customer_id)
             ->where('ownership_type', KnowledgeItem::OWNERSHIP_TYPE_COMPANY)
             ->whereIn('id', $documentIds)
-            ->whereNotNull('storage_path')
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')
+                    ->from('knowledge_item_versions')
+                    ->whereColumn('knowledge_item_versions.knowledge_item_id', 'knowledge_items.id')
+                    ->where('knowledge_item_versions.is_current', true)
+                    ->whereNotNull('knowledge_item_versions.storage_path');
+            })
             ->with([
                 'currentVersion',
                 'chunks' => static fn ($query) => $query->orderBy('chunk_index'),

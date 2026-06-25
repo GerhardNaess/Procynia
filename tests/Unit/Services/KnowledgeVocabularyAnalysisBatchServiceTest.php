@@ -4,6 +4,7 @@ namespace Tests\Unit\Services;
 
 use App\Models\Customer;
 use App\Models\KnowledgeItem;
+use App\Models\KnowledgeItemVersion;
 use App\Models\KnowledgeMetadataTerm;
 use App\Models\KnowledgeMetadataTermSuggestion;
 use App\Models\KnowledgeVocabularyAnalysisBatch;
@@ -236,6 +237,24 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
                 'is_active' => $overrides['is_active'],
             ])->saveQuietly();
         }
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $item->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => $item->original_filename,
+            'storage_path' => $item->storage_path,
+            'mime_type' => $item->mime_type,
+            'file_size_bytes' => $item->file_size_bytes,
+            'extracted_text' => $item->extracted_text,
+            'extraction_status' => $item->extraction_status,
+            'extraction_error' => $item->extraction_error,
+            'uploaded_by_user_id' => $item->uploaded_by_user_id,
+            'uploaded_at' => $item->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
 
         return $item;
     }

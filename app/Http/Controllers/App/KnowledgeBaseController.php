@@ -951,7 +951,13 @@ class KnowledgeBaseController extends Controller
     {
         return KnowledgeItem::query()
             ->where('customer_id', $customerId)
-            ->whereNotNull('storage_path');
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')
+                    ->from('knowledge_item_versions')
+                    ->whereColumn('knowledge_item_versions.knowledge_item_id', 'knowledge_items.id')
+                    ->where('knowledge_item_versions.is_current', true)
+                    ->whereNotNull('knowledge_item_versions.storage_path');
+            });
     }
 
     /**

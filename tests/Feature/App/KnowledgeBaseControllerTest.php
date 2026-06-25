@@ -3402,6 +3402,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->createCurrentVersionFor($document, $context['user']);
+
         KnowledgeItemChunk::query()->create([
             'knowledge_item_id' => $document->id,
             'chunk_index' => 0,
@@ -3466,6 +3468,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->createCurrentVersionFor($document, $context['user']);
+
         KnowledgeItemChunk::query()->create([
             'knowledge_item_id' => $document->id,
             'chunk_index' => 0,
@@ -3524,6 +3528,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->createCurrentVersionFor($document, $context['user']);
+
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
         $showResponse->assertOk();
@@ -3558,6 +3564,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'extraction_error' => null,
             'is_active' => true,
         ]);
+
+        $this->createCurrentVersionFor($document, $context['user']);
 
         KnowledgeItemChunk::query()->create([
             'knowledge_item_id' => $document->id,
@@ -3923,14 +3931,6 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $storedPath = $document->storage_path;
-        $currentVersion = KnowledgeItemVersion::query()
-            ->where('knowledge_item_id', $document->id)
-            ->where('is_current', true)
-            ->firstOrFail();
-
-        $currentVersion->forceFill([
-            'storage_path' => null,
-        ])->save();
 
         $this->actingAs($context['user'])->delete(route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $document->id]))
             ->assertRedirect(route('app.ai.knowledge-base.index'));
@@ -4091,6 +4091,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->createCurrentVersionFor($document, $context['user']);
+
         $response = $this->actingAs($context['user'])
             ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
@@ -4144,6 +4146,8 @@ class KnowledgeBaseControllerTest extends TestCase
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'is_active' => true,
         ]);
+
+        $this->createCurrentVersionFor($document, $context['user']);
 
         $response = $this->actingAs($context['user'])
             ->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
@@ -4467,7 +4471,52 @@ class KnowledgeBaseControllerTest extends TestCase
             ])->saveQuietly();
         }
 
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => $item->original_filename,
+            'storage_path' => $item->storage_path,
+            'mime_type' => $item->mime_type,
+            'file_size_bytes' => $item->file_size_bytes,
+            'extracted_text' => $item->extracted_text,
+            'extraction_status' => $item->extraction_status,
+            'extraction_error' => $item->extraction_error,
+            'uploaded_by_user_id' => $uploadedBy->id,
+            'uploaded_at' => $item->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
         return $item;
+    }
+
+    /**
+     * Purpose: Create a current version for a knowledge item that was created directly in tests.
+     * Inputs: The knowledge item and the uploading user.
+     * Returns: The persisted version row.
+     * Side effects: Persists one knowledge_item_versions row with is_current=true.
+     */
+    private function createCurrentVersionFor(KnowledgeItem $item, User $uploadedBy): KnowledgeItemVersion
+    {
+        return KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $item->id,
+            'customer_id' => $item->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => $item->original_filename,
+            'storage_path' => $item->storage_path,
+            'mime_type' => $item->mime_type,
+            'file_size_bytes' => $item->file_size_bytes,
+            'extracted_text' => $item->extracted_text,
+            'extraction_status' => $item->extraction_status,
+            'extraction_error' => $item->extraction_error,
+            'uploaded_by_user_id' => $uploadedBy->id,
+            'uploaded_at' => $item->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
     }
 
     /**
@@ -6086,7 +6135,7 @@ XML;
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
             'customer_id' => $context['customer']->id,
-            'version_no' => 1,
+            'version_no' => 2,
             'is_current' => true,
             'original_filename' => 'current-version-name.pdf',
             'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/v1.pdf',
@@ -6129,7 +6178,7 @@ XML;
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
             'customer_id' => $context['customer']->id,
-            'version_no' => 1,
+            'version_no' => 2,
             'is_current' => true,
             'original_filename' => 'current-form-version.pdf',
             'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/form-v1.pdf',
@@ -6169,7 +6218,7 @@ XML;
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
             'customer_id' => $context['customer']->id,
-            'version_no' => 1,
+            'version_no' => 2,
             'is_current' => true,
             'original_filename' => null,
             'storage_path' => null,
@@ -6239,7 +6288,7 @@ XML;
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
             'customer_id' => $context['customer']->id,
-            'version_no' => 1,
+            'version_no' => 2,
             'is_current' => true,
             'original_filename' => 'stale-extraction.docx',
             'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-items/stale-extraction.docx',
