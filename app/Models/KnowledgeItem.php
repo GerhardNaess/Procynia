@@ -231,48 +231,24 @@ class KnowledgeItem extends Model
             ->latestOfMany('version_no');
     }
 
-    /**
-     * Resolve the storage path from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved storage path or null.
-     * Side effects: None.
-     */
     public function resolvedStoragePath(): ?string
     {
-        return $this->currentVersion?->storage_path ?? $this->storage_path;
+        return $this->currentVersion?->storage_path;
     }
 
-    /**
-     * Resolve the original filename from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved original filename or null.
-     * Side effects: None.
-     */
     public function resolvedOriginalFilename(): ?string
     {
-        return $this->currentVersion?->original_filename ?? $this->original_filename;
+        return $this->currentVersion?->original_filename;
     }
 
-    /**
-     * Resolve the MIME type from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved MIME type or null.
-     * Side effects: None.
-     */
     public function resolvedMimeType(): ?string
     {
-        return $this->currentVersion?->mime_type ?? $this->mime_type;
+        return $this->currentVersion?->mime_type;
     }
 
-    /**
-     * Resolve the file size from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved file size in bytes or null.
-     * Side effects: None.
-     */
     public function resolvedFileSizeBytes(): ?int
     {
-        return $this->currentVersion?->file_size_bytes ?? $this->file_size_bytes;
+        return $this->currentVersion?->file_size_bytes;
     }
 
     /**

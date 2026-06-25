@@ -6217,7 +6217,7 @@ XML;
         });
     }
 
-    public function test_index_edit_and_show_payload_fall_back_to_legacy_file_identity_when_current_version_is_missing_values(): void
+    public function test_index_edit_and_show_payload_returns_null_file_fields_when_current_version_has_null_values(): void
     {
         $context = $this->customerContext('Legacy File Identity Fallback AS');
 
@@ -6252,9 +6252,9 @@ XML;
             $item = collect(data_get($page, 'props.knowledgeItems', []))->firstWhere('id', $document->id);
 
             return $item !== null
-                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
-                && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 2468;
+                && data_get($item, 'original_filename') === null
+                && data_get($item, 'mime_type') === null
+                && data_get($item, 'file_size_bytes') === null;
         });
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
@@ -6263,9 +6263,9 @@ XML;
             $item = data_get($page, 'props.knowledgeItem');
 
             return $item !== null
-                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
-                && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 2468
+                && data_get($item, 'original_filename') === null
+                && data_get($item, 'mime_type') === null
+                && data_get($item, 'file_size_bytes') === null
                 && ! array_key_exists('content_type', $item)
                 && ! array_key_exists('is_active', $item);
         });
@@ -6276,11 +6276,11 @@ XML;
             $item = data_get($page, 'props.knowledgeItem');
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
-                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · legacy-document-name.docx'
+                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · '
                 && $item !== null
-                && data_get($item, 'original_filename') === 'legacy-document-name.docx'
-                && data_get($item, 'mime_type') === 'application/pdf'
-                && data_get($item, 'file_size_bytes') === 2468
+                && data_get($item, 'original_filename') === null
+                && data_get($item, 'mime_type') === null
+                && data_get($item, 'file_size_bytes') === null
                 && ! array_key_exists('content_type', $item)
                 && ! array_key_exists('is_active', $item);
         });

@@ -364,6 +364,82 @@ class KnowledgeItemOwnershipTest extends TestCase
         ], $overrides));
     }
 
+    public function test_file_resolvers_return_version_values(): void
+    {
+        $customer = $this->createCustomer('File Resolver Version AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'legacy-name.docx',
+            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 999,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'version-name.docx',
+            'storage_path' => 'customers/'.$customer->id.'/version-path.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+        ]);
+
+        $document->load('currentVersion');
+
+        $this->assertSame('version-name.docx', $document->resolvedOriginalFilename());
+        $this->assertSame('customers/'.$customer->id.'/version-path.docx', $document->resolvedStoragePath());
+        $this->assertSame('application/vnd.openxmlformats-officedocument.wordprocessingml.document', $document->resolvedMimeType());
+        $this->assertSame(4096, $document->resolvedFileSizeBytes());
+    }
+
+    public function test_file_resolvers_return_null_when_no_current_version(): void
+    {
+        $customer = $this->createCustomer('File Resolver Null AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'legacy-name.docx',
+            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 999,
+        ]);
+
+        // No version created — resolvers must return null, not fall back to KI fields.
+        $this->assertNull($document->resolvedOriginalFilename());
+        $this->assertNull($document->resolvedStoragePath());
+        $this->assertNull($document->resolvedMimeType());
+        $this->assertNull($document->resolvedFileSizeBytes());
+    }
+
+    public function test_file_resolvers_ignore_legacy_ki_fields_when_version_exists(): void
+    {
+        $customer = $this->createCustomer('File Resolver Ignore Legacy AS');
+        $document = $this->createKnowledgeItem($customer, [
+            'original_filename' => 'legacy-name.docx',
+            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 999,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'version-name.docx',
+            'storage_path' => 'customers/'.$customer->id.'/version-path.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 4096,
+        ]);
+
+        $document->load('currentVersion');
+
+        // Version values must win; legacy KI fields must not appear in resolver output.
+        $this->assertNotSame($document->original_filename, $document->resolvedOriginalFilename());
+        $this->assertNotSame($document->storage_path, $document->resolvedStoragePath());
+        $this->assertNotSame($document->mime_type, $document->resolvedMimeType());
+        $this->assertNotSame($document->file_size_bytes, $document->resolvedFileSizeBytes());
+    }
+
     public function test_text_for_knowledge_processing_prefers_current_version_extracted_text(): void
     {
         // currentVersion.extracted_text must win over legacy KnowledgeItem fields.
