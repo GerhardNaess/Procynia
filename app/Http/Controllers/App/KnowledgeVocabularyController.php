@@ -599,10 +599,17 @@ class KnowledgeVocabularyController extends Controller
         }
 
         return KnowledgeItem::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('id', $documentIds)
-            ->pluck('original_filename', 'id')
-            ->map(static fn (string $title): string => trim($title) !== '' ? $title : '—')
+            ->where('knowledge_items.customer_id', $customerId)
+            ->whereIn('knowledge_items.id', $documentIds)
+            ->leftJoin('knowledge_item_versions as kiv_current', function ($join): void {
+                $join->on('kiv_current.knowledge_item_id', '=', 'knowledge_items.id')
+                    ->where('kiv_current.is_current', true);
+            })
+            ->select(['knowledge_items.id', 'kiv_current.original_filename'])
+            ->get()
+            ->mapWithKeys(fn ($row): array => [
+                (int) $row->id => trim((string) $row->original_filename) !== '' ? (string) $row->original_filename : '—',
+            ])
             ->all();
     }
 

@@ -38,7 +38,7 @@ class KnowledgeBaseAiUsageService
         // Subquery for the current version of each knowledge item (at most one row per item).
         $currentVersionSubquery = DB::table('knowledge_item_versions')
             ->where('is_current', true)
-            ->select(['knowledge_item_id', 'version_no', 'approval_status']);
+            ->select(['knowledge_item_id', 'version_no', 'approval_status', 'original_filename']);
 
         $query = DB::table('saved_notice_ai_evidence as sae')
             ->join('knowledge_items as ki', 'ki.id', '=', 'sae.knowledge_item_id')
@@ -56,7 +56,7 @@ class KnowledgeBaseAiUsageService
             ->select([
                 'ki.id as knowledge_item_id',
                 'ki.title',
-                'ki.original_filename',
+                'kiv_current.original_filename as original_filename',
                 'ki.document_type',
                 'ki.document_status',
                 'kiv_current.version_no as current_version_no',
@@ -74,7 +74,7 @@ class KnowledgeBaseAiUsageService
             ->groupBy([
                 'ki.id',
                 'ki.title',
-                'ki.original_filename',
+                'kiv_current.original_filename',
                 'ki.document_type',
                 'ki.document_status',
                 'kiv_current.version_no',
@@ -108,10 +108,15 @@ class KnowledgeBaseAiUsageService
      */
     public function chunkAggregate(int $customerId, array $filters = []): Collection
     {
+        $currentVersionSubquery = DB::table('knowledge_item_versions')
+            ->where('is_current', true)
+            ->select(['knowledge_item_id', 'original_filename']);
+
         $query = DB::table('saved_notice_ai_evidence as sae')
             ->join('knowledge_item_chunks as kic', 'kic.id', '=', 'sae.knowledge_item_chunk_id')
             ->join('knowledge_items as ki', 'ki.id', '=', 'kic.knowledge_item_id')
             ->leftJoin('knowledge_item_versions as kiv_used', 'kiv_used.id', '=', 'sae.knowledge_item_version_id')
+            ->leftJoinSub($currentVersionSubquery, 'kiv_current', 'kiv_current.knowledge_item_id', '=', 'ki.id')
             ->join('saved_notice_ai_requirements as snair', 'snair.id', '=', 'sae.saved_notice_ai_requirement_id')
             ->join('saved_notices as sn', 'sn.id', '=', 'snair.saved_notice_id')
             ->where('ki.customer_id', '=', $customerId)
@@ -124,7 +129,7 @@ class KnowledgeBaseAiUsageService
             ->select([
                 'kic.id as knowledge_item_chunk_id',
                 'ki.id as knowledge_item_id',
-                'ki.original_filename',
+                'kiv_current.original_filename as original_filename',
                 'kic.chunk_index',
                 'kic.chunk_type',
                 'kic.section_title',
@@ -142,7 +147,7 @@ class KnowledgeBaseAiUsageService
             ->groupBy([
                 'kic.id',
                 'ki.id',
-                'ki.original_filename',
+                'kiv_current.original_filename',
                 'kic.chunk_index',
                 'kic.chunk_type',
                 'kic.section_title',

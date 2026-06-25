@@ -2039,7 +2039,7 @@ class AiController extends Controller
             ->where('knowledge_item_versions.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->select([
                 'knowledge_item_chunks.*',
-                'knowledge_items.original_filename as knowledge_item_title',
+                'knowledge_item_versions.original_filename as knowledge_item_title',
                 'knowledge_items.document_type as document_type',
                 'knowledge_items.summary as knowledge_item_summary',
                 'knowledge_items.updated_at as knowledge_item_updated_at',

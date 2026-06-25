@@ -7949,6 +7949,7 @@ class AiControllerTest extends TestCase
             'customer_id' => $customer->id,
             'version_no' => 1,
             'is_current' => true,
+            'original_filename' => $originalFilename,
             'storage_path' => $storagePath,
             'extraction_status' => $extractionStatus,
         ]);
