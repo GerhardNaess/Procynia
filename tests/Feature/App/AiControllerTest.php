@@ -6315,6 +6315,14 @@ class AiControllerTest extends TestCase
         RateLimiter::clear($userKey);
         RateLimiter::increment($userKey, 60, 1);
 
+        Http::fake(function () {
+            return Http::response(
+                $this->openAiStructuredResponse(['answer_draft_text' => 'Leverandøren beskriver leveransen i tråd med kravene.'], 50, 15),
+                200,
+                ['x-request-id' => 'req_tempo_warning'],
+            );
+        });
+
         $response = $this->actingAs($context['user'])
             ->postJson(route('app.ai.requirements.answer-draft.generate', [
                 'savedNotice' => $savedNotice->id,
