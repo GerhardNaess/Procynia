@@ -131,7 +131,7 @@ class KnowledgeVocabularySuggestionEnrichmentService
             'document' => [
                 'id' => $document->id,
                 'title' => $document->title,
-                'original_filename' => $document->original_filename,
+                'original_filename' => $document->resolvedOriginalFilename(),
                 'summary' => $document->summary,
             ],
             'chunk' => [

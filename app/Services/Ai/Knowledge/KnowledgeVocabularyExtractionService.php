@@ -194,7 +194,7 @@ class KnowledgeVocabularyExtractionService
 
                 return [
                     'document_id' => $document->id,
-                    'file_name' => $document->original_filename,
+                    'file_name' => $document->resolvedOriginalFilename(),
                     'document_title' => $document->title,
                     'document_type' => $document->document_type,
                     'summary' => $document->summary,

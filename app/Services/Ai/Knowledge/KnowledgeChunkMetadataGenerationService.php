@@ -270,7 +270,7 @@ class KnowledgeChunkMetadataGenerationService
     public function buildEmbeddingInput(KnowledgeItem $document, KnowledgeItemChunk $chunk, array $metadata): string
     {
         $lines = [];
-        $title = trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title ?: $document->original_filename));
+        $title = trim((string) ($chunk->title ?: $chunk->section_title ?: $document->title ?: $document->resolvedOriginalFilename()));
         $content = trim((string) $chunk->content);
 
         if ($title !== '') {
@@ -481,7 +481,7 @@ class KnowledgeChunkMetadataGenerationService
             'document' => [
                 'id' => $document->id,
                 'title' => $document->title,
-                'original_filename' => $document->original_filename,
+                'original_filename' => $document->resolvedOriginalFilename(),
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],
@@ -597,7 +597,7 @@ class KnowledgeChunkMetadataGenerationService
             'document' => [
                 'id' => $document->id,
                 'title' => $document->title,
-                'original_filename' => $document->original_filename,
+                'original_filename' => $document->resolvedOriginalFilename(),
                 'document_type' => $document->document_type,
                 'summary' => $document->summary,
             ],

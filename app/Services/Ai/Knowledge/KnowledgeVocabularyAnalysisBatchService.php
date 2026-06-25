@@ -253,7 +253,7 @@ class KnowledgeVocabularyAnalysisBatchService
                     'customer_id' => (int) $batch->customer_id,
                     'batch_id' => $batch->id,
                     'knowledge_item_id' => $document->id,
-                    'file_name' => $document->original_filename,
+                    'file_name' => $document->resolvedOriginalFilename(),
                 ]);
 
                 return false;

@@ -1947,7 +1947,7 @@ class AiController extends Controller
                     ]),
                     'knowledge_item' => [
                         'id' => $knowledgeItem?->id,
-                        'original_filename' => $knowledgeItem?->original_filename,
+                        'original_filename' => $knowledgeItem?->resolvedOriginalFilename(),
                         'document_type' => $knowledgeDocumentType,
                         'document_type_label' => filled($knowledgeDocumentType)
                             ? (KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocumentType] ?? $knowledgeDocumentType)
@@ -1989,7 +1989,7 @@ class AiController extends Controller
                         : null,
                     'knowledge_item_version_id' => $evidence->knowledge_item_version_id,
                     'knowledge_item_version_no' => $version?->version_no,
-                    'original_filename' => $knowledgeItem?->original_filename,
+                    'original_filename' => $knowledgeItem?->resolvedOriginalFilename(),
                     'document_type' => $documentType,
                     'document_type_label' => filled($documentType)
                         ? (KnowledgeItem::DOCUMENT_TYPE_LABELS[$documentType] ?? $documentType)

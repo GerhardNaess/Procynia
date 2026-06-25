@@ -197,7 +197,7 @@ class RequirementAssessmentService
                     'knowledge_item' => [
                         'id' => $knowledgeItem?->id,
                         'title' => $knowledgeItem?->title,
-                        'original_filename' => $knowledgeItem?->original_filename,
+                        'original_filename' => $knowledgeItem?->resolvedOriginalFilename(),
                         'document_type' => $knowledgeDocumentType,
                     ],
                     'knowledge_chunk' => [
@@ -377,7 +377,7 @@ class RequirementAssessmentService
                     'knowledge_item' => [
                         'id' => $knowledgeItem?->id,
                         'title' => $knowledgeItem?->title,
-                        'original_filename' => $knowledgeItem?->original_filename,
+                        'original_filename' => $knowledgeItem?->resolvedOriginalFilename(),
                         'document_type' => $knowledgeDocumentType,
                     ],
                     'knowledge_chunk' => [

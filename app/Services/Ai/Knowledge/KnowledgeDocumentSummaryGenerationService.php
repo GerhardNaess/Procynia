@@ -135,7 +135,7 @@ class KnowledgeDocumentSummaryGenerationService
             'document' => [
                 'id' => $document->id,
                 'title' => $document->title,
-                'original_filename' => $document->original_filename,
+                'original_filename' => $document->resolvedOriginalFilename(),
                 'document_type' => $document->document_type,
                 'chunk_count' => count($contextRows),
                 'language_code' => $languageCode,

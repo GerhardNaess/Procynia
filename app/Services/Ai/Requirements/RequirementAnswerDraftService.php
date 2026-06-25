@@ -1013,7 +1013,7 @@ class RequirementAnswerDraftService
                     'knowledge_item' => [
                         'id' => $knowledgeItem?->id,
                         'title' => $knowledgeItem?->title,
-                        'original_filename' => $knowledgeItem?->original_filename,
+                        'original_filename' => $knowledgeItem?->resolvedOriginalFilename(),
                         'document_type' => $knowledgeDocumentType,
                         'document_type_label' => filled($knowledgeDocumentType)
                             ? (KnowledgeItem::DOCUMENT_TYPE_LABELS[$knowledgeDocumentType] ?? $knowledgeDocumentType)

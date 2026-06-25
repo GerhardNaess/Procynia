@@ -573,7 +573,7 @@ class KnowledgeVocabularyController extends Controller
             ->get()
             ->map(fn (KnowledgeItem $document): array => [
                 'id' => $document->id,
-                'original_filename' => $document->original_filename,
+                'original_filename' => $document->resolvedOriginalFilename(),
                 'title' => $document->title,
                 'summary' => $document->summary,
                 'document_type' => $document->document_type,
@@ -765,7 +765,7 @@ class KnowledgeVocabularyController extends Controller
             return null;
         }
 
-        $documentTitle = $suggestion->sourceChunk->knowledgeItem?->original_filename
+        $documentTitle = $suggestion->sourceChunk->knowledgeItem?->resolvedOriginalFilename()
             ?? $suggestion->sourceChunk->knowledgeItem?->title
             ?? null;
         $chunkNumber = (int) $suggestion->sourceChunk->chunk_index + 1;
