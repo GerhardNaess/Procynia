@@ -1327,18 +1327,7 @@ Audit-kommandoen er schema-aware (fase 2.8H) og krasjer ikke ved fraværende kol
 - produksjonsdata er validert
 - migrasjonen er reversibel, eller risikoen er eksplisitt akseptert
 
-**Ikke gjort i 2.8-planen:**
-
-- ingen konkrete migrasjoner
-- ingen `Schema::table(... dropColumn ...)`
-- ingen modellendringer
-- ingen controller-endringer
-- ingen frontend-endringer
-- ingen payload- eller retrieval-endringer
-
-**Kort mål for fase 2.8:**
-
-- planlegge og gjennomføre fysisk opprydding først når legacy-bruken er dokumentert borte og alle konsumenter er flyttet over til autoritative kilder.
+**Fase 2.8 er fullført juni 2026.** Den fysiske databaseoppryddingen ble gjennomført kontrollert etter at fase 2.7 isolerte all aktiv legacy-bruk. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items`. Etterkontroll bekreftet at resterende treff kun er historiske migrasjoner, dokumentasjon, schema-aware audit, andre modellers legitime `is_active`-felter eller tester som verifiserer fravær/ignorering. `knowledge:legacy-audit` er schema-aware og rapporterer `OK_FOR_NEXT_STEP` når kolonnene er fraværende. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Autoritative felt er fortsatt `document_type` og `document_status`.
 
 ---
 
@@ -1439,10 +1428,6 @@ Fase 2.7 er nå dokumentert som fullført kontrollert legacy-isolering.
 
 Fase 2.8A — fysisk fjerning av `content_type` og `is_active` fra `knowledge_items` — er fullført per juni 2026. Kolonnene eksisterer ikke lenger i skjemaet. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for begge kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` er ikke endret. Autoritative felt er `document_type` og `document_status`.
 
-2.7J presisering:
-- `KnowledgeBaseController` skriver ikke lenger `content_type` eller `is_active` direkte ved store/update.
-- `KnowledgeItem` holder fortsatt legacy-feltene synkronisert internt ved lagring som midlertidig kompatibilitet.
-- Autoritative felter er fortsatt `document_type` og `document_status`.
-- Legacy-kolonnene er fortsatt til stede; det er ikke gjort databaseopprydding ennå.
+Fase 2.8 er fullført juni 2026. Den fysiske databaseoppryddingen ble gjennomført kontrollert etter at fase 2.7 isolerte all aktiv legacy-bruk. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items`. Etterkontroll bekreftet at resterende treff kun er historiske migrasjoner, dokumentasjon, schema-aware audit, andre modellers legitime `is_active`-felter eller tester som verifiserer fravær/ignorering. `knowledge:legacy-audit` er schema-aware og rapporterer `OK_FOR_NEXT_STEP` når kolonnene er fraværende. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Autoritative felt er fortsatt `document_type` og `document_status`.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
