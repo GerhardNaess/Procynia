@@ -205,7 +205,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-options.docx')
+            ->where('title', 'theme-options.docx')
             ->firstOrFail();
 
         $createResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.create'));
@@ -258,7 +258,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'catalog-options.docx')
+            ->where('title', 'catalog-options.docx')
             ->firstOrFail();
 
         $expectedOptions = [
@@ -327,7 +327,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $document = KnowledgeItem::query()
             ->with(['owner', 'uploadedBy'])
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'personal-ownership.docx')
+            ->where('title', 'personal-ownership.docx')
             ->firstOrFail();
 
         $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_PERSONAL, $document->ownership_type);
@@ -380,7 +380,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $themedDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-index.docx')
+            ->where('title', 'theme-index.docx')
             ->firstOrFail();
 
         $themedDocument->forceFill([
@@ -423,7 +423,12 @@ class KnowledgeBaseControllerTest extends TestCase
         $document = KnowledgeItem::query()
             ->with('owner')
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'method-description.docx')
+            ->where('title', 'method-description.docx')
+            ->firstOrFail();
+
+        $documentVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('is_current', true)
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -432,8 +437,8 @@ class KnowledgeBaseControllerTest extends TestCase
             ->get();
         $normalizedContent = $this->normalizeWhitespace($content);
 
-        $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $document->storage_path);
-        $this->assertTrue(Storage::disk('local')->exists($document->storage_path));
+        $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $documentVersion->storage_path);
+        $this->assertTrue(Storage::disk('local')->exists($documentVersion->storage_path));
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $document->document_type);
         $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_COMPANY, $document->ownership_type);
         $this->assertSame($context['user']->id, $document->owner_user_id);
@@ -467,7 +472,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'version-chunk.docx')
+            ->where('title', 'version-chunk.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -477,7 +482,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertNotNull($version, 'A KnowledgeItemVersion should be created on upload.');
         $this->assertTrue($version->is_current);
-        $this->assertSame($document->storage_path, $version->storage_path);
+        $this->assertSame($document->resolvedStoragePath(), $version->storage_path);
 
         $chunks = KnowledgeItemChunk::query()
             ->where('knowledge_item_id', $document->id)
@@ -511,7 +516,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'metadata-no-version.docx')
+            ->where('title', 'metadata-no-version.docx')
             ->firstOrFail();
 
         $versionsBefore = KnowledgeItemVersion::query()
@@ -574,7 +579,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'structured-pipeline.docx')
+            ->where('title', 'structured-pipeline.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -642,7 +647,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'image-pipeline.docx')
+            ->where('title', 'image-pipeline.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -739,7 +744,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'image-h2-context.docx')
+            ->where('title', 'image-h2-context.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -817,7 +822,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'image-unpreviewable.docx')
+            ->where('title', 'image-unpreviewable.docx')
             ->firstOrFail();
 
         $imageChunk = KnowledgeItemChunk::query()
@@ -876,7 +881,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'image-missing.docx')
+            ->where('title', 'image-missing.docx')
             ->firstOrFail();
 
         $imageChunk = KnowledgeItemChunk::query()
@@ -938,7 +943,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'image-access.docx')
+            ->where('title', 'image-access.docx')
             ->firstOrFail();
 
         $imageChunk = KnowledgeItemChunk::query()
@@ -960,7 +965,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $foreignDocument = KnowledgeItem::query()
             ->where('customer_id', $foreignContext['customer']->id)
-            ->where('original_filename', 'image-access-foreign.docx')
+            ->where('title', 'image-access-foreign.docx')
             ->firstOrFail();
 
         $foreignImageChunk = KnowledgeItemChunk::query()
@@ -1130,7 +1135,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->where('title', 'Masterdata Prosjekt_pdf.pdf')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1268,7 +1273,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'Masterdata Prosjekt_pdf.pdf')
+            ->where('title', 'Masterdata Prosjekt_pdf.pdf')
             ->firstOrFail();
 
         $pageTwentyThreeFigure = KnowledgeItemChunk::query()
@@ -1307,7 +1312,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'table-pipeline.docx')
+            ->where('title', 'table-pipeline.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1623,7 +1628,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'structured-metadata.docx')
+            ->where('title', 'structured-metadata.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1692,7 +1697,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'structured-metadata-calls.docx')
+            ->where('title', 'structured-metadata-calls.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1768,7 +1773,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'structured-metadata-six.docx')
+            ->where('title', 'structured-metadata-six.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1862,7 +1867,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'structured-metadata-blanks.docx')
+            ->where('title', 'structured-metadata-blanks.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1923,7 +1928,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'metadata-failure.docx')
+            ->where('title', 'metadata-failure.docx')
             ->firstOrFail();
 
         $chunks = KnowledgeItemChunk::query()
@@ -1953,7 +1958,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'embedding-success.docx')
+            ->where('title', 'embedding-success.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -2006,7 +2011,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'metadata-generation.docx')
+            ->where('title', 'metadata-generation.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -2114,7 +2119,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'table-summary.docx')
+            ->where('title', 'table-summary.docx')
             ->firstOrFail();
 
         $tableChunk = KnowledgeItemChunk::query()
@@ -2159,7 +2164,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'embedding-failure.docx')
+            ->where('title', 'embedding-failure.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -2192,10 +2197,15 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'broken.docx')
+            ->where('title', 'broken.docx')
             ->firstOrFail();
 
-        $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $document->storage_path);
+        $documentVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('is_current', true)
+            ->firstOrFail();
+
+        $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $documentVersion->storage_path);
         $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_FAILED, $document->extraction_status);
         $this->assertSame('', (string) $document->extracted_text);
         $this->assertNotEmpty((string) $document->extraction_error);
@@ -2226,7 +2236,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'reference-profile.docx')
+            ->where('title', 'reference-profile.docx')
             ->firstOrFail();
 
         $response = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
@@ -2269,7 +2279,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $document = KnowledgeItem::query()
             ->with(['owner', 'uploadedBy'])
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'owner-flow.docx')
+            ->where('title', 'owner-flow.docx')
             ->firstOrFail();
 
         $this->assertSame($context['user']->id, $document->owner_user_id);
@@ -2389,7 +2399,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'owner-foreign.docx')
+            ->where('title', 'owner-foreign.docx')
             ->firstOrFail();
 
         $response = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -2427,7 +2437,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $themedDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-detail.docx')
+            ->where('title', 'theme-detail.docx')
             ->firstOrFail();
 
         $themedDocument->forceFill([
@@ -2436,7 +2446,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $plainDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'plain-detail.docx')
+            ->where('title', 'plain-detail.docx')
             ->firstOrFail();
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $themedDocument->id]));
@@ -2522,12 +2532,12 @@ class KnowledgeBaseControllerTest extends TestCase
         $catalogDocument = KnowledgeItem::query()
             ->with(['documentCategory', 'documentTopic'])
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'catalog-payload.docx')
+            ->where('title', 'catalog-payload.docx')
             ->firstOrFail();
 
         $plainDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'catalog-payload-empty.docx')
+            ->where('title', 'catalog-payload-empty.docx')
             ->firstOrFail();
 
         $this->assertSame($category->id, $catalogDocument->document_category_id);
@@ -2782,7 +2792,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $document = KnowledgeItem::query()
             ->with(['documentCategory', 'documentTopic'])
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'catalog-update.docx')
+            ->where('title', 'catalog-update.docx')
             ->firstOrFail();
 
         $this->assertSame($initialCategory->id, $document->document_category_id);
@@ -3028,7 +3038,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'detail-reference.docx')
+            ->where('title', 'detail-reference.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -3048,7 +3058,7 @@ class KnowledgeBaseControllerTest extends TestCase
             $chunks = collect(data_get($page, 'props.knowledgeItem.chunks', []));
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Show'
-                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · '.$document->original_filename
+                && data_get($page, 'props.pageTitle') === 'Kunnskapsdokumenter · '.$document->title
                 && data_get($page, 'props.indexUrl') === route('app.ai.knowledge-base.index')
                 && data_get($page, 'props.editUrl') === route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id])
                 && data_get($page, 'props.summaryUpdateUrl') === route('app.ai.knowledge-base.summary.update', ['knowledgeItem' => $document->id])
@@ -3096,7 +3106,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'revision-detail.docx')
+            ->where('title', 'revision-detail.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -3166,7 +3176,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'chunk-review.docx')
+            ->where('title', 'chunk-review.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -3210,7 +3220,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'chunk-review-invalid.docx')
+            ->where('title', 'chunk-review-invalid.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -3244,7 +3254,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'chunk-metadata.docx')
+            ->where('title', 'chunk-metadata.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -3317,7 +3327,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'chunk-metadata-invalid.docx')
+            ->where('title', 'chunk-metadata-invalid.docx')
             ->firstOrFail();
 
         $chunk = KnowledgeItemChunk::query()
@@ -3356,7 +3366,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'summary-editable.docx')
+            ->where('title', 'summary-editable.docx')
             ->firstOrFail();
 
         $summary = 'Kort og tydelig oppsummering som kan redigeres på show-siden.';
@@ -3621,7 +3631,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'boilerplate.docx')
+            ->where('title', 'boilerplate.docx')
             ->firstOrFail();
 
         $initialChunkCount = KnowledgeItemChunk::query()
@@ -3666,7 +3676,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $themedDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-store.docx')
+            ->where('title', 'theme-store.docx')
             ->firstOrFail();
 
         $this->assertSame($themeTerm->id, $themedDocument->document_theme_term_id);
@@ -3689,9 +3699,9 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame($themedDocument->id, data_get($themedRevisions[0]->snapshot, 'knowledge_item_id'));
         $this->assertSame($themedDocument->customer_id, data_get($themedRevisions[0]->snapshot, 'customer_id'));
         $this->assertSame($themedDocument->title, data_get($themedRevisions[0]->snapshot, 'title'));
-        $this->assertSame($themedDocument->original_filename, data_get($themedRevisions[0]->snapshot, 'original_filename'));
-        $this->assertSame($themedDocument->storage_path, data_get($themedRevisions[0]->snapshot, 'path'));
-        $this->assertSame($themedDocument->mime_type, data_get($themedRevisions[0]->snapshot, 'mime_type'));
+        $this->assertSame($themedDocument->resolvedOriginalFilename(), data_get($themedRevisions[0]->snapshot, 'original_filename'));
+        $this->assertSame($themedDocument->resolvedStoragePath(), data_get($themedRevisions[0]->snapshot, 'path'));
+        $this->assertSame($themedDocument->resolvedMimeType(), data_get($themedRevisions[0]->snapshot, 'mime_type'));
         $this->assertSame($themedDocument->document_type, data_get($themedRevisions[0]->snapshot, 'document_type'));
         $this->assertSame($themeTerm->id, data_get($themedRevisions[0]->snapshot, 'document_theme_term_id'));
         $this->assertNull(data_get($themedRevisions[0]->snapshot, 'summary'));
@@ -3706,7 +3716,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $plainDocument = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-store-empty.docx')
+            ->where('title', 'theme-store-empty.docx')
             ->firstOrFail();
 
         $this->assertNull($plainDocument->document_theme_term_id);
@@ -3725,7 +3735,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(1, $plainRevisions[0]->revision_no);
         $this->assertRevisionOwnership($plainRevisions[0], $context['customer'], $context['user']);
         $this->assertNull(data_get($plainRevisions[0]->snapshot, 'document_theme_term_id'));
-        $this->assertSame($plainDocument->storage_path, data_get($plainRevisions[0]->snapshot, 'path'));
+        $this->assertSame($plainDocument->resolvedStoragePath(), data_get($plainRevisions[0]->snapshot, 'path'));
         $this->assertNull(data_get($plainRevisions[0]->snapshot, 'summary'));
     }
 
@@ -3746,7 +3756,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'theme-update.docx')
+            ->where('title', 'theme-update.docx')
             ->firstOrFail();
 
         $updateWithThemeResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -3781,7 +3791,7 @@ class KnowledgeBaseControllerTest extends TestCase
         }
         $this->assertSame($initialThemeTerm->id, data_get($revisionsAfterUpdate[0]->snapshot, 'document_theme_term_id'));
         $this->assertSame($replacementThemeTerm->id, data_get($revisionsAfterUpdate[1]->snapshot, 'document_theme_term_id'));
-        $this->assertSame($document->storage_path, data_get($revisionsAfterUpdate[0]->snapshot, 'path'));
+        $this->assertSame($document->resolvedStoragePath(), data_get($revisionsAfterUpdate[0]->snapshot, 'path'));
         $this->assertSame($document->summary, data_get($revisionsAfterUpdate[1]->snapshot, 'summary'));
 
         $preserveResponse = $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -3894,7 +3904,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'valid-theme-update.docx')
+            ->where('title', 'valid-theme-update.docx')
             ->firstOrFail();
 
         foreach ($invalidThemeIds as $invalidThemeId) {
@@ -3927,10 +3937,13 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'delete-me.docx')
+            ->where('title', 'delete-me.docx')
             ->firstOrFail();
 
-        $storedPath = $document->storage_path;
+        $storedPath = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $document->id)
+            ->where('is_current', true)
+            ->value('storage_path');
 
         $this->actingAs($context['user'])->delete(route('app.ai.knowledge-base.destroy', ['knowledgeItem' => $document->id]))
             ->assertRedirect(route('app.ai.knowledge-base.index'));
@@ -3969,7 +3982,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
                 && $items->isEmpty()
-                && ! $items->contains(fn (array $candidate): bool => $candidate['original_filename'] === $document->original_filename);
+                && ! $items->contains(fn (array $candidate): bool => $candidate['original_filename'] === $document->title);
         });
     }
 
@@ -3988,7 +4001,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $foreignDocument = KnowledgeItem::query()
             ->where('customer_id', $foreignContext['customer']->id)
-            ->where('original_filename', 'foreign.docx')
+            ->where('title', 'foreign.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])
@@ -5866,7 +5879,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'ai-usage-default.docx')
+            ->where('title', 'ai-usage-default.docx')
             ->firstOrFail();
 
         $this->assertTrue($document->ai_usage_enabled);
@@ -5887,7 +5900,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'ai-usage-disabled.docx')
+            ->where('title', 'ai-usage-disabled.docx')
             ->firstOrFail();
 
         $this->assertFalse($document->ai_usage_enabled);
@@ -5908,7 +5921,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'ai-usage-update.docx')
+            ->where('title', 'ai-usage-update.docx')
             ->firstOrFail();
 
         $this->assertTrue($document->ai_usage_enabled);
@@ -5946,7 +5959,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-status-default.docx')
+            ->where('title', 'doc-status-default.docx')
             ->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ACTIVE, $document->document_status);
@@ -5967,7 +5980,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-status-draft.docx')
+            ->where('title', 'doc-status-draft.docx')
             ->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_DRAFT, $document->document_status);
@@ -6003,7 +6016,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-legacy-mirror-store.docx')
+            ->where('title', 'doc-legacy-mirror-store.docx')
             ->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $document->document_type);
@@ -6025,7 +6038,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-status-update.docx')
+            ->where('title', 'doc-status-update.docx')
             ->firstOrFail();
 
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ACTIVE, $document->document_status);
@@ -6066,7 +6079,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-legacy-mirror-update.docx')
+            ->where('title', 'doc-legacy-mirror-update.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -6106,7 +6119,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-status-form.docx')
+            ->where('title', 'doc-status-form.docx')
             ->firstOrFail();
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
@@ -6398,7 +6411,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-dates-default.docx')
+            ->where('title', 'review-dates-default.docx')
             ->firstOrFail();
 
         $this->assertNull($document->last_reviewed_at);
@@ -6420,7 +6433,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-dates-explicit.docx')
+            ->where('title', 'review-dates-explicit.docx')
             ->firstOrFail();
 
         $this->assertSame('2026-05-01', $document->last_reviewed_at?->toDateString());
@@ -6455,7 +6468,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-dates-update.docx')
+            ->where('title', 'review-dates-update.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -6485,7 +6498,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-dates-preserve.docx')
+            ->where('title', 'review-dates-preserve.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->put(route('app.ai.knowledge-base.update', ['knowledgeItem' => $document->id]), [
@@ -6511,7 +6524,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-state-not-set.docx')
+            ->where('title', 'review-state-not-set.docx')
             ->firstOrFail();
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
@@ -6541,7 +6554,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-state-ok.docx')
+            ->where('title', 'review-state-ok.docx')
             ->firstOrFail();
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
@@ -6568,7 +6581,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-state-due-soon.docx')
+            ->where('title', 'review-state-due-soon.docx')
             ->firstOrFail();
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
@@ -6595,7 +6608,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-state-overdue.docx')
+            ->where('title', 'review-state-overdue.docx')
             ->firstOrFail();
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
@@ -6623,7 +6636,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'review-dates-form.docx')
+            ->where('title', 'review-dates-form.docx')
             ->firstOrFail();
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
@@ -6653,7 +6666,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'v1.docx')
+            ->where('title', 'v1.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -6717,7 +6730,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'b-v1.docx')
+            ->where('title', 'b-v1.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -6756,7 +6769,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'c-v1.docx')
+            ->where('title', 'c-v1.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -6787,7 +6800,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'd-v1.docx')
+            ->where('title', 'd-v1.docx')
             ->firstOrFail();
 
         $response = $this->actingAs($context['user'])->get(
@@ -6827,7 +6840,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original.docx')
+            ->where('title', 'original.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -6865,7 +6878,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-b.docx')
+            ->where('title', 'original-b.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -6904,7 +6917,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-c.docx')
+            ->where('title', 'original-c.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -6942,7 +6955,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-d.docx')
+            ->where('title', 'original-d.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -6951,7 +6964,7 @@ XML;
         )->assertRedirect();
 
         $document->refresh();
-        $this->assertSame('original-d.docx', $document->original_filename, 'Legacy filename must not update for pending-review upload.');
+        $this->assertSame('original-d.docx', KnowledgeItemVersion::query()->where('knowledge_item_id', $document->id)->where('is_current', true)->value('original_filename'), 'Current version filename must not change for pending-review upload.');
         $this->assertStringNotContainsString('Replacement D content', (string) $document->extracted_text);
     }
 
@@ -6969,7 +6982,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-e.docx')
+            ->where('title', 'original-e.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -6999,7 +7012,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-f.docx')
+            ->where('title', 'original-f.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7021,7 +7034,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-g.docx')
+            ->where('title', 'original-g.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7043,7 +7056,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $ownerContext['customer']->id)
-            ->where('original_filename', 'owner-h.docx')
+            ->where('title', 'owner-h.docx')
             ->firstOrFail();
 
         $attackerContext = $this->customerContext('Replace File Attacker H');
@@ -7066,7 +7079,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-i.docx')
+            ->where('title', 'original-i.docx')
             ->firstOrFail();
 
         Auth::logout();
@@ -7114,7 +7127,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-dup-b.docx')
+            ->where('title', 'original-dup-b.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -7164,7 +7177,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-dup-d.docx')
+            ->where('title', 'original-dup-d.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7195,7 +7208,7 @@ XML;
 
         $docA = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'doc-e-1.docx')
+            ->where('title', 'doc-e-1.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7220,7 +7233,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'original-f2.docx')
+            ->where('title', 'original-f2.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7260,7 +7273,7 @@ XML;
 
         $docB = KnowledgeItem::query()
             ->where('customer_id', $contextB['customer']->id)
-            ->where('original_filename', 'doc-g-b.docx')
+            ->where('title', 'doc-g-b.docx')
             ->firstOrFail();
 
         $this->actingAs($contextB['user'])->post(
@@ -7317,7 +7330,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-a.docx')
+            ->where('title', 'approval-a.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -7344,7 +7357,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-b.docx')
+            ->where('title', 'approval-b.docx')
             ->firstOrFail();
 
         $response = $this->actingAs($context['user'])->get(
@@ -7390,7 +7403,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-c.docx')
+            ->where('title', 'approval-c.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -7431,7 +7444,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-d.docx')
+            ->where('title', 'approval-d.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -7481,7 +7494,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-e-v1.docx')
+            ->where('title', 'approval-e-v1.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7536,7 +7549,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approval-f.docx')
+            ->where('title', 'approval-f.docx')
             ->firstOrFail();
 
         $version = KnowledgeItemVersion::query()
@@ -7566,7 +7579,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'phase25b-v1.docx')
+            ->where('title', 'phase25b-v1.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -7590,7 +7603,7 @@ XML;
         $this->assertTrue((bool) $v1->is_current, 'v1 must remain current after pending-review upload.');
         $this->assertFalse((bool) $v2->is_current, 'v2 must not become current when pending review.');
         $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_PENDING_REVIEW, $v2->approval_status);
-        $this->assertSame('phase25b-v1.docx', $document->original_filename, 'KnowledgeItem legacy filename must not update for pending-review version.');
+        $this->assertSame('phase25b-v1.docx', KnowledgeItemVersion::query()->where('knowledge_item_id', $document->id)->where('is_current', true)->value('original_filename'), 'Current version filename must remain v1 after pending-review upload.');
         $this->assertStringNotContainsString('Phase 2.5B v2 content', (string) $document->extracted_text);
     }
 
@@ -7607,7 +7620,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'phase25b2-v1.docx')
+            ->where('title', 'phase25b2-v1.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -7651,7 +7664,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'phase25b4-v1.docx')
+            ->where('title', 'phase25b4-v1.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -7675,7 +7688,7 @@ XML;
 
         $this->assertTrue((bool) $v1->is_current, 'v1 must remain current when v2 text extraction fails.');
         $this->assertFalse((bool) $v2->is_current, 'v2 must not become current after extraction failure.');
-        $this->assertSame('phase25b4-v1.docx', $document->original_filename, 'Legacy filename must not change after failed extraction.');
+        $this->assertSame('phase25b4-v1.docx', KnowledgeItemVersion::query()->where('knowledge_item_id', $document->id)->where('is_current', true)->value('original_filename'), 'Current version filename must not change after failed extraction.');
     }
 
     public function test_replace_file_pending_review_returns_success_flash_with_pending_message(): void
@@ -7691,7 +7704,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'phase25b-flash-v1.docx')
+            ->where('title', 'phase25b-flash-v1.docx')
             ->firstOrFail();
 
         $response = $this->actingAs($context['user'])->post(
@@ -7719,7 +7732,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approve-v1.docx')
+            ->where('title', 'approve-v1.docx')
             ->firstOrFail();
 
         $this->actingAs($context['user'])->post(
@@ -7754,7 +7767,7 @@ XML;
         $this->assertTrue((bool) $v2->is_current, 'v2 must be current after approval.');
         $this->assertFalse((bool) $v1->is_current, 'v1 must no longer be current after approval.');
         $this->assertSame(KnowledgeItemVersion::APPROVAL_STATUS_SUPERSEDED, $v1->approval_status);
-        $this->assertSame('approve-v2.docx', $document->original_filename, 'Legacy filename must update to v2.');
+        $this->assertSame('approve-v2.docx', $document->currentVersion?->original_filename, 'Current version filename must be v2 after approval.');
     }
 
     public function test_approve_version_retrieval_uses_new_version_after_approval(): void
@@ -7961,7 +7974,7 @@ XML;
 
         $document = KnowledgeItem::query()
             ->where('customer_id', $context['customer']->id)
-            ->where('original_filename', 'approve-c8-v1.docx')
+            ->where('title', 'approve-c8-v1.docx')
             ->firstOrFail();
 
         $v1 = KnowledgeItemVersion::query()
@@ -8020,7 +8033,7 @@ XML;
         $this->assertNull($v2->approved_by_user_id);
         $this->assertFalse((bool) $v2->is_current, 'v2 must remain not current after rejection.');
         $this->assertTrue((bool) $v1->is_current, 'v1 must remain current after rejection.');
-        $this->assertSame('approve-v1.docx', $document->original_filename, 'Legacy filename must not change after rejection.');
+        $this->assertSame('approve-v1.docx', KnowledgeItemVersion::query()->where('knowledge_item_id', $document->id)->where('is_current', true)->value('original_filename'), 'Current version filename must remain v1 after rejection.');
     }
 
     public function test_reject_version_fails_without_rejection_reason(): void

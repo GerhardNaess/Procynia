@@ -372,10 +372,6 @@ class KnowledgeBaseController extends Controller
                     'content' => $extractedText !== ''
                         ? $extractedText
                         : $payload['document']->getClientOriginalName(),
-                    'original_filename' => $payload['document']->getClientOriginalName(),
-                    'storage_path' => $storedPath,
-                    'mime_type' => $payload['document']->getClientMimeType(),
-                    'file_size_bytes' => (int) $payload['document']->getSize(),
                     'document_type' => $payload['document_type'],
                     'document_category_id' => $payload['document_category_id'],
                     'document_topic_id' => $payload['document_topic_id'],
@@ -398,10 +394,10 @@ class KnowledgeBaseController extends Controller
                     'customer_id' => $customerId,
                     'version_no' => 1,
                     'is_current' => true,
-                    'original_filename' => $knowledgeDocument->resolvedOriginalFilename(),
+                    'original_filename' => $payload['document']->getClientOriginalName(),
                     'storage_path' => $storedPath,
-                    'mime_type' => $knowledgeDocument->resolvedMimeType(),
-                    'file_size_bytes' => $knowledgeDocument->resolvedFileSizeBytes(),
+                    'mime_type' => $payload['document']->getClientMimeType(),
+                    'file_size_bytes' => (int) $payload['document']->getSize(),
                     'extracted_text' => $extractedText,
                     'extraction_status' => $knowledgeDocument->extraction_status,
                     'extraction_error' => $knowledgeDocument->extraction_error,
@@ -731,7 +727,7 @@ class KnowledgeBaseController extends Controller
                 ])->save();
             }
 
-            // Activate the version: flips is_current, updates KnowledgeItem legacy fields,
+            // Activate the version: flips is_current, syncs extraction fields on KnowledgeItem,
             // and writes a file_replaced revision entry. Safe to call inside a transaction.
             $this->activateKnowledgeItemVersion($record, $version, $user);
         });
@@ -800,7 +796,7 @@ class KnowledgeBaseController extends Controller
     /**
      * Promotes the given version to the active version of the document within a single transaction.
      * Sets all other versions for the document to is_current = false, marks the given version as
-     * is_current = true, syncs the legacy file fields on KnowledgeItem, and records a
+     * is_current = true, syncs extraction fields on KnowledgeItem, and records a
      * file_replaced revision entry. Must only be called for approved versions.
      */
     private function activateKnowledgeItemVersion(KnowledgeItem $document, KnowledgeItemVersion $version, User $user): void
@@ -814,10 +810,6 @@ class KnowledgeBaseController extends Controller
             $version->forceFill(['is_current' => true])->save();
 
             $document->forceFill([
-                'original_filename' => $version->original_filename,
-                'storage_path' => $version->storage_path,
-                'mime_type' => $version->mime_type,
-                'file_size_bytes' => $version->file_size_bytes,
                 'extracted_text' => $version->extracted_text,
                 'extraction_status' => $version->extraction_status,
                 'extraction_error' => $version->extraction_error,
