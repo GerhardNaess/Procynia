@@ -1107,15 +1107,15 @@ Denne kartleggingen oppsummerer de feltene som fortsatt fungerer som legacy-spei
 | `extraction_error` | Gjeldende `KnowledgeItemVersion.extraction_error`; `KnowledgeItem.extraction_error` som fallback | Ja | Ja | Ja: payload, UI-feilvisning og tester | Middels/høy — feilvisning kan bli tom eller feil | Fase ut når alle feilvisninger leser fra versjonspayload |
 | `extracted_text` | `KnowledgeItemVersion.extracted_text` for gjeldende versjon; `KnowledgeItem.extracted_text` som legacy fallback | Ja | Ja | Ja: AI-grunnlag, sammendrag, payload-fallback og tester | Høy — kan påvirke AI-kontekst og fallback-tekster | Behold til alle AI-/oppsummeringskall er versjonsbaserte |
 | `content` | Ingen enkelt kilde; brukes som siste fallback i `textForKnowledgeProcessing()` når versjonstekst og `KnowledgeItem.extracted_text` mangler | Ja, ved opprettelse og noen manuelle flyter | Ja | Ja: AI-/tekstgrunnlag og tester; ikke primær UI-kilde | Høy — kan fjerne siste tekstfallback for gamle dokumenter | Flytt all lesing til versjonstekst før denne kan ryddes bort |
-| `content_type` | `document_type` | Ja, via modellens synkronisering | Ja | Ja: payload, UI og tester som legacy alias | Middels — begrepet er allerede avviklet brukerrettet, men aliaset brukes fortsatt | Behold til alle konsumenter bruker `document_type` konsekvent |
-| `is_active` | `document_status` | Ja, via modellens synkronisering | Ja | Ja: payload, UI, retrieval og tester som legacy alias | Høy — påvirker status, filtrering og retrieval | Behold til `document_status` alene styrer alle konsumenter |
+| `content_type` | `document_type` | ~~Ja, via modellens synkronisering~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 2.8A). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.8A. |
+| `is_active` | `document_status` | ~~Ja, via modellens synkronisering~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 2.8A). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.8A. |
 
 **Oppsummert:**
 
 - Filidentitet og filmetadata bør på sikt leses fra `KnowledgeItemVersion`.
-- `document_type`/`document_status` er de autoritative styringsfeltene; `content_type` og `is_active` er kun kompatibilitetsspeil.
+- `document_type` og `document_status` er de autoritative styringsfeltene. `content_type` og `is_active` er fysisk fjernet fra `knowledge_items` (fase 2.8A, juni 2026).
 - `content` er den svakeste delen av kjeden og bør ryddes sist, etter at all tekstbruk er versjonsbasert.
-- Ingen kolonner skal slettes før alle lesere, payloads og tester er flyttet over til de nye kildene.
+- Ingen gjenværende kolonner skal slettes før alle lesere, payloads og tester er flyttet over til de nye kildene.
 
 ### 28.7M — Sentralisert filidentitetslesing (fullført)
 
@@ -1142,13 +1142,13 @@ Følgende resolver-metoder finnes nå på `KnowledgeItem`:
 
 `resolvedExtractionError()` behandler `null` på current version som en meningsbærende verdi og faller derfor ikke tilbake til gammel legacy-feil når gjeldende versjon finnes uten feil. `textForKnowledgeProcessing()` bruker nå `resolvedExtractedText()` og beholder `content` som siste fallback.
 
-Videre fysisk opprydding kan eventuelt vurderes som en senere egen fase. Da må det lages egen migrasjonsplan, datakontroll og avvikling av resterende fallback-/speilskriving før legacy-kolonnene eventuelt kan fjernes.
+Fysisk opprydding for `content_type` og `is_active` ble gjennomført som fase 2.8A (juni 2026). Se §28.8A. Videre opprydding for filidentitets- og ekstraksjonsfeltene kan eventuelt vurderes som en senere egen fase, med tilsvarende datakontroll og avvikling av resterende fallback-/speilskriving.
 
 ### 28.8 Drop-readiness for `content_type` og `is_active` (kontrollert juni 2026)
 
-Fase 2.8F er en readiness-kontroll, ikke en migrasjon. Målet er å avgjøre om `content_type` og `is_active` faktisk er klare for fysisk dropp fra `knowledge_items`.
+Fase 2.8F er en readiness-kontroll, ikke en migrasjon. Målet var å avgjøre om `content_type` og `is_active` faktisk var klare for fysisk dropp fra `knowledge_items`.
 
-**Kort konklusjon: ikke klar ennå.**
+**Konklusjon på kontrolltidspunktet: ikke klar ennå. Fase 2.8A gjennomførte det fysiske droppet etter at resterende blokkere ble fjernet. Se §28.8A.**
 
 **Status for `content_type`:**
 
@@ -1250,6 +1250,46 @@ Eksisterende tester verifiserer fortsatt at mismatch rapporteres korrekt som exp
 - ingen produksjonsdataendring
 - ingen frontend-endring
 - ingen retrieval- eller AI-logikkendring
+
+### 28.8A Fysisk fjerning av `content_type` og `is_active` fra `knowledge_items` ✓ Fullført juni 2026
+
+Fase 2.8A er fullført juni 2026. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items` etter at fase 2.7 isolerte all aktiv legacy-bruk og fase 2.8H gjorde audit-kommandoen schema-aware.
+
+**Hva som ble ryddet:**
+
+- `KnowledgeItem.$attributes`-default for `content_type` er fjernet — forhindret INSERT-feil etter kolonnedropp
+- `is_active`-cast er fjernet fra `KnowledgeItem::casts()`
+- Død `content_type`-fallback i `RequirementAssessmentService` er fjernet (to steder)
+- `forceFill`-blokker for `content_type` og `is_active` i `createKnowledgeItem()`-helper i `AiControllerTest` er fjernet
+- Assertions på `content_type` og `is_active` i `KnowledgeBaseControllerTest` og `KnowledgeBaseAiUsageControllerTest` er fjernet
+- Defensiv migrasjon `2026_06_25_160000_drop_legacy_columns_from_knowledge_items_table.php` er lagt til med `Schema::hasColumn()`-sjekk i `up()` og reversibel `down()` som legger tilbake kolonnene som nullable
+
+**`knowledge:legacy-audit` etter kolonnedropp:**
+
+- `content_type column: absent, skipped`
+- `is_active column: absent, skipped`
+- `OK_FOR_NEXT_STEP`
+
+Audit-kommandoen er schema-aware (fase 2.8H) og krasjer ikke ved fraværende kolonner.
+
+**Historiske migrasjoner** kan fortsatt inneholde feltnavnene `content_type` og `is_active`, men de er ikke aktive app-avhengigheter.
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- `SavedNoticeAiEvidence`
+- Retrieval-logikk
+- Frontend/UI
+
+**Autoritative felt etter fjerning:**
+
+- `document_type` — autoritativ kilde for dokumentkategori/type
+- `document_status` — autoritativ kilde for aktiv/inaktiv-status
+
+**Commit:** `ad3e3b7`
+
+---
 
 ### 28.9 Tilsvarende plan for filidentitetsfeltene
 
@@ -1396,6 +1436,8 @@ Kunnskapsbase har nå:
 - Innsyn i Kunnskapsbase-kilder sendt til AI — sporbarhet fra evidence-rad til dokumentversjon, payload per krav, UI-visning i krav-svar-panelet og lenke til riktig Kunnskapsbase-dokument; global oversikt med master-detail-funksjon, sorterbare tabeller og klikkbare dokumentrader
 
 Fase 2.7 er nå dokumentert som fullført kontrollert legacy-isolering.
+
+Fase 2.8A — fysisk fjerning av `content_type` og `is_active` fra `knowledge_items` — er fullført per juni 2026. Kolonnene eksisterer ikke lenger i skjemaet. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for begge kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` er ikke endret. Autoritative felt er `document_type` og `document_status`.
 
 2.7J presisering:
 - `KnowledgeBaseController` skriver ikke lenger `content_type` eller `is_active` direkte ved store/update.
