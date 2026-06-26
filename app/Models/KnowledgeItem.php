@@ -246,58 +246,26 @@ class KnowledgeItem extends Model
         return $this->currentVersion?->file_size_bytes;
     }
 
-    /**
-     * Resolve the extraction status from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved extraction status or null.
-     * Side effects: None.
-     */
     public function resolvedExtractionStatus(): ?string
     {
-        return $this->currentVersion?->extraction_status ?? $this->extraction_status;
+        return $this->currentVersion?->extraction_status;
     }
 
-    /**
-     * Resolve the extraction error from the current version, falling back to the legacy item mirror only when no version exists.
-     * Inputs: None.
-     * Returns: The resolved extraction error or null.
-     * Side effects: None.
-     */
     public function resolvedExtractionError(): ?string
     {
-        if ($this->currentVersion) {
-            return $this->currentVersion->extraction_error;
-        }
-
-        return $this->extraction_error;
+        return $this->currentVersion?->extraction_error;
     }
 
-    /**
-     * Resolve extracted text from the current version, falling back to the legacy item mirror.
-     * Inputs: None.
-     * Returns: The resolved extracted text or null.
-     * Side effects: None.
-     */
     public function resolvedExtractedText(): ?string
     {
-        $currentVersionExtractedText = trim((string) $this->currentVersion?->extracted_text);
+        $text = trim((string) $this->currentVersion?->extracted_text);
 
-        if ($currentVersionExtractedText !== '') {
-            return $currentVersionExtractedText;
-        }
-
-        $legacyExtractedText = trim((string) $this->extracted_text);
-
-        if ($legacyExtractedText !== '') {
-            return $legacyExtractedText;
-        }
-
-        return null;
+        return $text !== '' ? $text : null;
     }
 
     /**
      * Resolve the best available text body for knowledge processing (summarisation, vocabulary, metadata).
-     * Priority: currentVersion.extracted_text → KnowledgeItem.extracted_text → KnowledgeItem.content → null.
+     * Priority: currentVersion.extracted_text → KnowledgeItem.content → null.
      * Callers must eager-load currentVersion to avoid N+1 when iterating many documents.
      */
     public function textForKnowledgeProcessing(): ?string

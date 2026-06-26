@@ -440,16 +440,16 @@ class KnowledgeItemOwnershipTest extends TestCase
         $this->assertSame('Current version extracted text', $document->textForKnowledgeProcessing());
     }
 
-    public function test_text_for_knowledge_processing_falls_back_to_document_extracted_text_when_no_version(): void
+    public function test_text_for_knowledge_processing_returns_content_when_no_version(): void
     {
-        // Without a currentVersion, falls back to KnowledgeItem.extracted_text.
+        // Without a currentVersion, resolvedExtractedText() returns null; falls back to KnowledgeItem.content.
         $customer = $this->createCustomer('Text Processing Fallback AS');
         $document = $this->createKnowledgeItem($customer, [
             'extracted_text' => 'Legacy extracted text',
             'content' => 'Legacy content',
         ]);
 
-        $this->assertSame('Legacy extracted text', $document->textForKnowledgeProcessing());
+        $this->assertSame('Legacy content', $document->textForKnowledgeProcessing());
     }
 
     public function test_text_for_knowledge_processing_falls_back_to_content_when_extracted_text_is_empty(): void

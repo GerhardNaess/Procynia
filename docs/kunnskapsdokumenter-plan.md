@@ -1435,6 +1435,8 @@ Fase 28.10C flytter det siste aktive SQL-filteret på `knowledge_items.extractio
 - `KnowledgeBaseController` versjonshistorikk (~linje 2034): `$version->extraction_status` fra `KnowledgeItemVersion`. Korrekt.
 - Kommentarer i `AiController`, `KnowledgeMetadataMapService`, `MetadataCandidateRetrievalService`. Akseptable.
 
+**Fullført:** Commit `"Read extraction status from knowledge item versions"`. 157/157 tester passerte.
+
 **Fortsatt igjen (til 28.10D):**
 
 - Resolver-fallback i `KnowledgeItem::resolvedExtractionStatus()`, `resolvedExtractionError()` og `resolvedExtractedText()` leser fortsatt fra KI-feltene som fallback.
@@ -1446,6 +1448,33 @@ Fase 28.10C flytter det siste aktive SQL-filteret på `knowledge_items.extractio
 - AI-svarutkastflyt og `answer_draft_coverage`
 - Retrieval-logikk
 - Frontend/UI
+
+### 28.10D Fjern resolver-fallback for ekstraksjonsfeltene på `KnowledgeItem` (juni 2026)
+
+Fase 28.10D fjerner de tre resolver-fallbackene som leste direkte fra `knowledge_items`-feltene dersom `currentVersion` manglet. Resolverne leser nå utelukkende fra `currentVersion`.
+
+**Hva som ble endret:**
+
+- `KnowledgeItem::resolvedExtractionStatus()`: Fjernet `?? $this->extraction_status`. Returnerer nå `$this->currentVersion?->extraction_status`.
+- `KnowledgeItem::resolvedExtractionError()`: Fjernet `if ($this->currentVersion) ... return $this->extraction_error` fallback. Returnerer nå `$this->currentVersion?->extraction_error`.
+- `KnowledgeItem::resolvedExtractedText()`: Fjernet sjekk mot `$this->extracted_text`. Returnerer nå trim av `currentVersion?.extracted_text`, eller `null` om det er tomt eller ingen versjon finnes.
+- Docblock oppdatert: prioritet er nå `currentVersion.extracted_text → KnowledgeItem.content → null`.
+- `tests/Unit/KnowledgeItemOwnershipTest.php`: Oppdatert test `test_text_for_knowledge_processing_returns_content_when_no_version` — reflekterer at uten `currentVersion` returnerer `textForKnowledgeProcessing()` nå `KnowledgeItem.content` (ikke `KnowledgeItem.extracted_text`).
+
+**Gjenværende treff etter 28.10D:**
+
+- `KnowledgeItem.$fillable` — `extraction_status`, `extraction_error`, `extracted_text` finnes fortsatt i fillable/DB. Akseptabelt inntil kolonnedropp.
+- `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` etter endringen.
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- Retrieval-logikk
+- Frontend/UI
+- Ingen kolonner er droppet.
+
+**Fullført:** Commit `"Remove extraction fallback from knowledge items"`. Alle tester passerte.
 
 ### 28.11 Egen vurdering av `content`
 
