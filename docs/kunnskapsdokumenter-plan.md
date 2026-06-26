@@ -1336,11 +1336,61 @@ OK_FOR_NEXT_STEP
 
 ---
 
-### 28.10 Tilsvarende plan for ekstraksjonsfeltene
+### 28.10 Plan for ekstraksjonsfeltene
+
+Gjelder:
 
 - `extraction_status`
 - `extraction_error`
 - `extracted_text`
+
+Autoritativ retning: disse feltene hører hjemme på `knowledge_item_versions`, ikke som aktiv sannhet på `knowledge_items`. `KnowledgeItemVersion` er allerede autoritativ kilde. `KnowledgeItem` er fortsatt et legacy-speil med aktive fallbacks og aktive skrive- og leseveier som må ryddes før fysisk dropp.
+
+### 28.10A Kartlegging av aktive runtime-avhengigheter (juni 2026)
+
+Kartlegging gjennomført juni 2026. Ingen kodeendringer gjort i denne delsteget — kun dokumentasjon.
+
+**Akseptable treff (allerede versjonsstyrt):**
+
+- `KnowledgeItemVersion.$fillable` — feltene er autoritative i versjonstabellen.
+- `KnowledgeBaseController.documentListPayload()`, `documentDetailPayload()`, `documentFormPayload()` — bruker `$knowledgeDocument->resolvedExtractionStatus()` og `$knowledgeDocument->resolvedExtractionError()` fra resolver.
+- `KnowledgeBaseController` — ny versjon upload (linje ~620-626): skriver kun til `KnowledgeItemVersion`, ikke til `knowledge_items`.
+- `KnowledgeBaseController` — versjonshistorikk-payload (linje ~2036-2037): leser fra `$version->extraction_status`, `$version->extraction_error`.
+- `KnowledgeMetadataMapService` og `MetadataCandidateRetrievalService`: filtrerer på `knowledge_item_versions.extraction_status` — korrekt versjonskilde.
+- `AiController` — alle `$document->extracted_text`-referanser gjelder `SavedNoticeAiDocument`, ikke `KnowledgeItem`. Utenfor scope.
+- `KnowledgeVocabularyExtractionService` linje 203: bruker `'extracted_text'`-nøkkel i en AI-prompt-payload; verdien hentes via `textForKnowledgeProcessing()` resolver, ikke direkte KI-kolonne.
+- Migrasjoner (`2026_04_07_140001`, `2026_06_19_000001`) — historisk.
+- Audit-kommandoen: leser `item.extraction_status`, `item.extraction_error`, `item.extracted_text` mot `currentVersion` for drift-sammenligning. Bevisst legacy-speil-sporingsfunksjonalitet.
+
+**Aktive KI-avhengigheter som må ryddes før drop:**
+
+| Avhengighet | Fil | Linje(r) | Beskrivelse |
+|---|---|---|---|
+| KI write (initial upload) | `KnowledgeBaseController::store()` | ~383–390 | Oppretter `KnowledgeItem` med `extracted_text`, `extraction_status`, `extraction_error` ved opplasting |
+| KI read for KIV-opprettelse | `KnowledgeBaseController::store()` | ~401–403 | Leser `$knowledgeDocument->extraction_status`, `$knowledgeDocument->extraction_error` fra nettopp opprettet KI, for å skrive til KIV |
+| KI write (versjonsgodkjenning) | `KnowledgeBaseController::activateKnowledgeItemVersion()` | ~812–817 | `$document->forceFill(['extracted_text' => ..., 'extraction_status' => ..., 'extraction_error' => ...])->save()` — speil synkroniseres til KI ved godkjenning |
+| KI read (resolver fallback) | `KnowledgeItem::resolvedExtractionStatus()` | ~257 | `return $this->currentVersion?->extraction_status ?? $this->extraction_status;` — faller tilbake til KI-felt |
+| KI read (resolver fallback) | `KnowledgeItem::resolvedExtractionError()` | ~266–272 | Faller tilbake til `$this->extraction_error` når `currentVersion` er null |
+| KI read (resolver fallback) | `KnowledgeItem::resolvedExtractedText()` | ~281–295 | Faller tilbake til `$this->extracted_text` når `currentVersion?.extracted_text` er tom |
+| KI read (SQL-filter) | `KnowledgeVocabularyController::representativeDocumentsPayload()` | ~569 | `->where('extraction_status', ...)` — filtrerer direkte på `knowledge_items.extraction_status` uten JOIN mot versjonstabellen |
+
+**Hva som må ryddes i påfølgende delsteg (rekkefølge veiledende):**
+
+1. Stopp skriving av ekstraksjonsfelt til `knowledge_items` i initial upload — skriv kun til `KnowledgeItemVersion`.
+2. Stopp synkronisering av ekstraksjonsfelt til `knowledge_items` i `activateKnowledgeItemVersion()` — KIV er allerede autoritativ kilde, KI trenger ikke oppdateres.
+3. Flytt `KnowledgeVocabularyController::representativeDocumentsPayload()` til å filtrere på `knowledge_item_versions.extraction_status` via subquery eller JOIN.
+4. Fjern fallback til KI-felt i de tre resolver-metodene — etter at alle KI-rader har gyldig current version med ekstraksjonsdata.
+5. Gjør `knowledge:legacy-audit` schema-aware for `extraction_status`, `extraction_error` og `extracted_text` (tilsvarende som ble gjort for `content_type`/`is_active` i fase 28.8H og filidentitetsfeltene i fase 28.9G).
+6. Fysisk dropp etter at alle konsumenter er verifisert rene.
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- `SavedNoticeAiEvidence`
+- Retrieval-logikk
+- Frontend/UI
+- Ingen migrasjon er lagt til
 
 ### 28.11 Egen vurdering av `content`
 
