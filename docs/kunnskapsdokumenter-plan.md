@@ -1684,6 +1684,33 @@ Tjenester som ikke måtte endres: `KnowledgeVocabularyExtractionService`, `Knowl
 
 Tester: 175/175 passerte.
 
+**28.11E — Drop-readiness for `knowledge_items.content` (juni 2026)**
+
+Kontroll bekrefter at `knowledge_items.content` er klar for fysisk dropp i neste fase.
+
+Gjenværende `content`-funn etter 28.11D, klassifisert:
+
+| Lokasjon | Kategori | Vurdering |
+|---|---|---|
+| `KnowledgeItem.$fillable` linje 127: `'content'` | B — skriveglede | Fjernes i 28.11F sammen med fysisk drop; beholdes nå fordi NOT NULL-kravet krever `content = ''` ved `store()` |
+| `KnowledgeBaseController::store()`: `'content' => ''` | B — tom skriving | Fjernes i 28.11F etter nullable-migrasjon eller kolonnedropp |
+| `AuditKnowledgeLegacyFields.php:159,261`: `$item->content` | D — diagnostikk | Beholdes; audit-telleren `content_fallback_candidates` er fortsatt meningsbærende frem til kolonnen droppes |
+| `KnowledgeBaseControllerTest.php:476`: `assertEmpty($document->content)` | C — test-assertion | Verifiserer at 28.11B-endringen holder; kan fjernes i 28.11F |
+| `KnowledgeBaseControllerTest.php:4565`: `createCurrentVersionFor` — `'extracted_text' => $item->content` | C — testhjelpemetode | Setter KIV.extracted_text fra KI.content; etter 28.11B gir dette `''` for nye KI-er, men brukes kun av tester som setter `content` eksplisitt. Oppdateres i 28.11F |
+| `AuditKnowledgeLegacyFieldsCommandTest.php:275,289,303,326`: test-data med `'content' => ...` | C — testdata | Settes for `content_fallback_candidates`-tester; oppdateres/fjernes i 28.11F |
+| Alle `$chunk->content`-treff | F — annen modell | `KnowledgeItemChunk.content` — urelatert |
+
+Akseptansestatus:
+- Ingen aktiv runtime-lesing fra `knowledge_items.content` ✓
+- Ingen aktiv runtime-skriving til faktisk tekst (kun tom streng `''`) ✓
+- Fallback fjernet i 28.11D ✓
+- `content_fallback_candidates=0` ✓
+- `knowledge_items.content` er klar for fysisk dropp
+
+Gjenstår i 28.11F: migrasjon (dropp av `knowledge_items.content`), fjern `'content'` fra `$fillable`, fjern `'content' => ''` fra `store()`, oppdater testhjelpemetoder og test-data.
+
+Tester: 175/175 passerte. Audit: `content_fallback_candidates=0`.
+
 **Datakontroller før eventuell migrasjon:**
 
 - alle `KnowledgeItem`-rader har gyldig `currentVersion` når dokumentet faktisk har fil
