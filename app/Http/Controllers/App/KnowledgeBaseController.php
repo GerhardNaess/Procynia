@@ -376,9 +376,7 @@ class KnowledgeBaseController extends Controller
                     'owner_user_id' => $request->user()?->id,
                     'ownership_type' => $payload['ownership_type'],
                     'title' => $payload['document']->getClientOriginalName(),
-                    'content' => $extractedText !== ''
-                        ? $extractedText
-                        : $payload['document']->getClientOriginalName(),
+                    'content' => '',
                     'document_type' => $payload['document_type'],
                     'document_category_id' => $payload['document_category_id'],
                     'document_topic_id' => $payload['document_topic_id'],

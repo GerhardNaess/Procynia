@@ -455,6 +455,30 @@ class KnowledgeBaseControllerTest extends TestCase
         );
     }
 
+    public function test_knowledge_document_store_writes_extracted_text_to_current_version_without_mirroring_to_content(): void
+    {
+        Storage::fake('local');
+
+        $context = $this->customerContext('Customer Content Mirror AS');
+        $documentText = str_repeat('Extracted text that belongs in the version, not mirrored to content. ', 20);
+
+        $this->actingAs($context['user'])->post(route('app.ai.knowledge-base.store'), [
+            'document' => $this->createDocxUpload('mirror-check.docx', $documentText),
+            'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
+        ])->assertRedirect(route('app.ai.knowledge-base.index'));
+
+        $document = KnowledgeItem::query()
+            ->with('currentVersion')
+            ->where('customer_id', $context['customer']->id)
+            ->where('title', 'mirror-check.docx')
+            ->firstOrFail();
+
+        $this->assertEmpty(trim((string) $document->content), 'knowledge_items.content should be blank after upload — no mirroring');
+        $this->assertNotEmpty($document->currentVersion?->extracted_text, 'extracted_text should be in current version');
+        $this->assertNotNull($document->textForKnowledgeProcessing(), 'textForKnowledgeProcessing() should return version text');
+        $this->assertStringContainsString('Extracted text that belongs', (string) $document->textForKnowledgeProcessing());
+    }
+
     public function test_knowledge_document_upload_creates_chunks_with_version_id(): void
     {
         Storage::fake('local');

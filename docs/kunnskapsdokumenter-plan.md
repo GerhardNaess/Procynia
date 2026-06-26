@@ -1633,9 +1633,24 @@ Testen `test_command_reports_mirror_drift_and_does_not_write_any_rows` oppdatert
 - `test_content_fallback_candidates_counts_correctly` — dekker case A (KIV.extracted_text ikke-blank → ikke telt), case B (KIV.extracted_text blank, content ikke-blank → telt), case D (content blank → ikke telt).
 - `test_content_fallback_candidates_counts_item_without_current_version` — dekker case C (ingen KIV, content ikke-blank → telt).
 
-Lokal audit rapporterer `content_fallback_candidates=0` i testmiljøet (1 KI). **Produksjonsverdi er ikke kjent** — audit må kjøres separat mot produksjonsdatabasen før 28.11B kan planlegges.
+Lokal audit rapporterte `content_fallback_candidates=0` i testmiljøet (1 KI).
 
-28.11B kan ikke startes før `content_fallback_candidates=0` er bekreftet i produksjon.
+**28.11A-3 — Databasekontroll (juni 2026)**
+
+Avklart at Procynia foreløpig ikke har noen produksjonsdatabase. Lokal Docker-database (`postgres:5433/procynia`) er eneste relevante datakilde. Audit kjørt mot Docker-containeren med korrigert teller: `content_fallback_candidates=0`. Ingen eksisterende rader er avhengige av `knowledge_items.content` som fallback. 28.11B kan startes.
+
+**28.11B — Stopp speilskriving til `content` (juni 2026)**
+
+`KnowledgeBaseController::store()` skrev tidligere `content` som speil av ekstrahert tekst (eller filnavn ved mislykket ekstraksjon). Fra og med 28.11B skrives kun `'content' => ''` (tom streng) ved oppretting — NOT NULL-restriksjonen i `knowledge_items` krever en verdi, og tom streng tilfredsstiller dette uten å beholde speilet. `KnowledgeItemVersion.extracted_text` er fortsatt autoritativ.
+
+- `knowledge_items.content`-kolonnen er **ikke** droppet — det er ikke del av 28.11B.
+- `content` er **ikke** fjernet fra `$fillable` — ikke del av 28.11B.
+- Fallback-logikken i `textForKnowledgeProcessing()` er **ikke** endret — blank `content` faller nå naturlig gjennom til `null` ved mislykket ekstraksjon, som er korrekt atferd.
+- `KnowledgeVocabularyExtractionService`, `KnowledgeVocabularyAnalysisBatchService` og `KnowledgeDocumentSummaryGenerationService` er **ikke** endret.
+
+Ny test `test_knowledge_document_store_writes_extracted_text_to_current_version_without_mirroring_to_content` lagt til i `KnowledgeBaseControllerTest`. Bekrefter at `knowledge_items.content` er blank etter opplasting, at `currentVersion.extracted_text` inneholder ekstrahert tekst, og at `textForKnowledgeProcessing()` returnerer versjonsdataene.
+
+Audit kjørt etter endringen: `content_fallback_candidates=0` bekreftet.
 
 **Datakontroller før eventuell migrasjon:**
 
