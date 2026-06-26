@@ -1392,6 +1392,33 @@ Kartlegging gjennomført juni 2026. Ingen kodeendringer gjort i denne delsteget 
 - Frontend/UI
 - Ingen migrasjon er lagt til
 
+### 28.10B Stopp aktiv skriving til ekstraksjonsfelt på `knowledge_items` (juni 2026)
+
+Fase 28.10B fjerner aktiv runtime-skriving av ekstraksjonsfelt fra `knowledge_items`. `KnowledgeItemVersion` er nå eneste sted disse verdiene lagres ved ny opplasting og ved versjonsgodkjenning.
+
+**Hva som ble endret:**
+
+- `KnowledgeBaseController::store()`: Fjernet `extracted_text`, `extraction_status`, `extraction_error` fra `KnowledgeItem::create()`. Lokale variabler (`$versionExtractionStatus`, `$versionExtractionError`) brukes nå direkte i `KnowledgeItemVersion::create()`, uten mellomlagring på KI.
+- `KnowledgeBaseController::activateKnowledgeItemVersion()`: Fjernet speil-synkronisering av `extracted_text`, `extraction_status`, `extraction_error` fra KIV tilbake til KI ved versjonsgodkjenning. Kun `uploaded_by_user_id` speiles fortsatt.
+- Tre tester i `KnowledgeBaseControllerTest` oppdatert til å sjekke ekstraksjonsfelt på `KnowledgeItemVersion` i stedet for på `KnowledgeItem`.
+
+**Gjenværende akseptable skrivinger:**
+
+- `KnowledgeBaseController` ny versjon upload (~linje 620–626): skriver til `KnowledgeItemVersion`, ikke til `KnowledgeItem`. Uendret og korrekt.
+
+**Fortsatt igjen (midlertidig):**
+
+- Resolver-fallback i `KnowledgeItem::resolvedExtractionStatus()`, `resolvedExtractionError()` og `resolvedExtractedText()` leser fortsatt fra KI-feltene som fallback. Fjernes i et later steg etter at data er verifisert.
+- `KnowledgeVocabularyController::representativeDocumentsPayload()` filtrerer fortsatt på `knowledge_items.extraction_status` direkte. Flyttes til versjonskilde i et later steg.
+- Ingen kolonner er droppet.
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- Retrieval-logikk
+- Frontend/UI
+
 ### 28.11 Egen vurdering av `content`
 
 - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.

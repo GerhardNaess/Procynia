@@ -363,6 +363,13 @@ class KnowledgeBaseController extends Controller
                 $extractionFailed,
                 $fileHash,
             ): array {
+                $versionExtractionStatus = $extractionFailed
+                    ? KnowledgeItem::EXTRACTION_STATUS_FAILED
+                    : KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
+                $versionExtractionError = $extractionFailed
+                    ? 'Tekst kunne ikke trekkes ut fra dokumentet.'
+                    : null;
+
                 $knowledgeDocument = KnowledgeItem::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $request->user()?->id,
@@ -380,13 +387,6 @@ class KnowledgeBaseController extends Controller
                     'document_status' => $payload['document_status'],
                     'last_reviewed_at' => $payload['last_reviewed_at'],
                     'review_due_at' => $payload['review_due_at'],
-                    'extracted_text' => $extractedText,
-                    'extraction_status' => $extractionFailed
-                        ? KnowledgeItem::EXTRACTION_STATUS_FAILED
-                        : KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-                    'extraction_error' => $extractionFailed
-                        ? 'Tekst kunne ikke trekkes ut fra dokumentet.'
-                        : null,
                 ]);
 
                 $knowledgeVersion = KnowledgeItemVersion::query()->create([
@@ -399,8 +399,8 @@ class KnowledgeBaseController extends Controller
                     'mime_type' => $payload['document']->getClientMimeType(),
                     'file_size_bytes' => (int) $payload['document']->getSize(),
                     'extracted_text' => $extractedText,
-                    'extraction_status' => $knowledgeDocument->extraction_status,
-                    'extraction_error' => $knowledgeDocument->extraction_error,
+                    'extraction_status' => $versionExtractionStatus,
+                    'extraction_error' => $versionExtractionError,
                     'uploaded_by_user_id' => $request->user()?->id,
                     'uploaded_at' => $knowledgeDocument->created_at,
                     'file_hash_sha256' => $fileHash,
@@ -796,8 +796,9 @@ class KnowledgeBaseController extends Controller
     /**
      * Promotes the given version to the active version of the document within a single transaction.
      * Sets all other versions for the document to is_current = false, marks the given version as
-     * is_current = true, syncs extraction fields on KnowledgeItem, and records a
-     * file_replaced revision entry. Must only be called for approved versions.
+     * is_current = true, and records a file_replaced revision entry.
+     * Must only be called for approved versions.
+     * Extraction fields are authoritative on KnowledgeItemVersion and are not mirrored to KnowledgeItem.
      */
     private function activateKnowledgeItemVersion(KnowledgeItem $document, KnowledgeItemVersion $version, User $user): void
     {
@@ -810,9 +811,6 @@ class KnowledgeBaseController extends Controller
             $version->forceFill(['is_current' => true])->save();
 
             $document->forceFill([
-                'extracted_text' => $version->extracted_text,
-                'extraction_status' => $version->extraction_status,
-                'extraction_error' => $version->extraction_error,
                 'uploaded_by_user_id' => $version->uploaded_by_user_id,
             ])->save();
 

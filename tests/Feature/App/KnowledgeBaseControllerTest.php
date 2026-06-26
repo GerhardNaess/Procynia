@@ -443,9 +443,9 @@ class KnowledgeBaseControllerTest extends TestCase
         $this->assertSame(KnowledgeItem::OWNERSHIP_TYPE_COMPANY, $document->ownership_type);
         $this->assertSame($context['user']->id, $document->owner_user_id);
         $this->assertSame($context['user']->name, $document->owner?->name);
-        $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $document->extraction_status);
-        $this->assertSame('', (string) $document->extraction_error);
-        $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $document->extracted_text));
+        $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $documentVersion->extraction_status);
+        $this->assertSame('', (string) $documentVersion->extraction_error);
+        $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $documentVersion->extracted_text));
         $this->assertStringStartsWith('AI-oppsummering:', (string) $document->summary);
         $this->assertGreaterThan(0, $chunks->count());
         $this->assertSame(range(0, $chunks->count() - 1), $chunks->pluck('chunk_index')->all());
@@ -2206,9 +2206,9 @@ class KnowledgeBaseControllerTest extends TestCase
             ->firstOrFail();
 
         $this->assertStringStartsWith('customers/'.$context['customer']->id.'/knowledge-documents/', $documentVersion->storage_path);
-        $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_FAILED, $document->extraction_status);
-        $this->assertSame('', (string) $document->extracted_text);
-        $this->assertNotEmpty((string) $document->extraction_error);
+        $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_FAILED, $documentVersion->extraction_status);
+        $this->assertSame('', (string) $documentVersion->extracted_text);
+        $this->assertNotEmpty((string) $documentVersion->extraction_error);
         $this->assertSame(0, KnowledgeItemChunk::query()->where('knowledge_item_id', $document->id)->count());
     }
 
@@ -3631,6 +3631,10 @@ class KnowledgeBaseControllerTest extends TestCase
         $response->assertRedirect(route('app.ai.knowledge-base.index'));
 
         $updatedDocument = KnowledgeItem::query()->whereKey($document->id)->firstOrFail();
+        $updatedDocumentVersion = KnowledgeItemVersion::query()
+            ->where('knowledge_item_id', $updatedDocument->id)
+            ->where('is_current', true)
+            ->firstOrFail();
         $updatedChunkCount = KnowledgeItemChunk::query()
             ->where('knowledge_item_id', $updatedDocument->id)
             ->count();
@@ -3638,7 +3642,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_OTHER, $updatedDocument->document_type);
         $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $updatedDocument->document_status);
-        $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $updatedDocument->extracted_text));
+        $this->assertSame($normalizedContent, $this->normalizeWhitespace((string) $updatedDocumentVersion->extracted_text));
         $this->assertSame($initialChunkCount, $updatedChunkCount);
     }
 
