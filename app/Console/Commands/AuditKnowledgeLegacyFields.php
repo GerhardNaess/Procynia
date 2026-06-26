@@ -38,6 +38,7 @@ class AuditKnowledgeLegacyFields extends Command
         $hasExtractionStatus = $this->hasExtractionStatusColumn();
         $hasExtractionError = $this->hasExtractionErrorColumn();
         $hasExtractedText = $this->hasExtractedTextColumn();
+        $hasContent = $this->hasContentColumn();
 
         $summary = [
             'total_knowledge_items' => KnowledgeItem::query()->count(),
@@ -77,8 +78,11 @@ class AuditKnowledgeLegacyFields extends Command
             'id',
             'document_type',
             'document_status',
-            'content',
         ];
+
+        if ($hasContent) {
+            $selectColumns[] = 'content';
+        }
 
         if ($hasExtractionStatus) {
             $selectColumns[] = 'extraction_status';
@@ -141,7 +145,7 @@ class AuditKnowledgeLegacyFields extends Command
                 },
             ])
             ->orderBy('id')
-            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasOriginalFilename, $hasStoragePath, $hasMimeType, $hasFileSizeBytes, $hasContentType, $hasIsActive, $hasExtractionStatus, $hasExtractionError, $hasExtractedText): void {
+            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasOriginalFilename, $hasStoragePath, $hasMimeType, $hasFileSizeBytes, $hasContentType, $hasIsActive, $hasExtractionStatus, $hasExtractionError, $hasExtractedText, $hasContent): void {
                 foreach ($items as $item) {
                     if ((int) $item->current_versions_count === 0) {
                         $summary['items_without_current_version']++;
@@ -156,7 +160,7 @@ class AuditKnowledgeLegacyFields extends Command
                     $currentVersion = $item->currentVersion;
 
                     if ($currentVersion === null) {
-                        if (! $this->isBlank($item->content)) {
+                        if ($hasContent && ! $this->isBlank($item->content)) {
                             $summary['content_fallback_candidates']++;
                             $this->appendExample($examples['expected'], $item->id);
                         }
@@ -257,7 +261,8 @@ class AuditKnowledgeLegacyFields extends Command
                     }
 
                     if (
-                        $this->isBlank($currentVersion->extracted_text)
+                        $hasContent
+                        && $this->isBlank($currentVersion->extracted_text)
                         && ! $this->isBlank($item->content)
                     ) {
                         $summary['content_fallback_candidates']++;
@@ -425,11 +430,15 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['current_version_missing_extracted_text'],
             $examples['expected'],
         ));
-        $this->line($this->formatFindingLine(
-            'content_fallback_candidates',
-            $summary['content_fallback_candidates'],
-            $examples['expected'],
-        ));
+        if ($hasContent) {
+            $this->line($this->formatFindingLine(
+                'content_fallback_candidates',
+                $summary['content_fallback_candidates'],
+                $examples['expected'],
+            ));
+        } else {
+            $this->line('- content column: absent, skipped');
+        }
         if ($hasContentType) {
             $this->line('- content_type column: present');
             $this->line($this->formatFindingLine(
@@ -513,7 +522,11 @@ class AuditKnowledgeLegacyFields extends Command
         }
         $this->newLine();
         $this->line('Content fallback');
-        $this->line(sprintf('- content_fallback_candidates=%d', $summary['content_fallback_candidates']));
+        if ($hasContent) {
+            $this->line(sprintf('- content_fallback_candidates=%d', $summary['content_fallback_candidates']));
+        } else {
+            $this->line('- content column: absent, skipped');
+        }
         $this->newLine();
         $this->line('Recommendation');
         $this->line(sprintf('- reason=%s', $reason));
@@ -648,6 +661,11 @@ class AuditKnowledgeLegacyFields extends Command
     protected function hasExtractedTextColumn(): bool
     {
         return Schema::hasColumn('knowledge_items', 'extracted_text');
+    }
+
+    protected function hasContentColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'content');
     }
 
     /**

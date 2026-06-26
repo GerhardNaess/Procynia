@@ -124,7 +124,6 @@ class KnowledgeItem extends Model
         'ownership_type',
         'document_theme_term_id',
         'title',
-        'content',
         'document_type',
         'summary',
         'owner_user_id',

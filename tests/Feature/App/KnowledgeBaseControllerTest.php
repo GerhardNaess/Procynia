@@ -473,7 +473,6 @@ class KnowledgeBaseControllerTest extends TestCase
             ->where('title', 'mirror-check.docx')
             ->firstOrFail();
 
-        $this->assertEmpty(trim((string) $document->content), 'knowledge_items.content should be blank after upload — no mirroring');
         $this->assertNotEmpty($document->currentVersion?->extracted_text, 'extracted_text should be in current version');
         $this->assertNotNull($document->textForKnowledgeProcessing(), 'textForKnowledgeProcessing() should return version text');
         $this->assertStringContainsString('Extracted text that belongs', (string) $document->textForKnowledgeProcessing());
@@ -4562,7 +4561,7 @@ class KnowledgeBaseControllerTest extends TestCase
             'storage_path' => $storagePath,
             'mime_type' => 'application/pdf',
             'file_size_bytes' => 1024,
-            'extracted_text' => $item->content,
+            'extracted_text' => 'Test document text for '.(string) $item->title.'.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
             'uploaded_by_user_id' => $uploadedBy->id,
@@ -5619,7 +5618,7 @@ XML;
                     ->implode(' ');
 
                 if ($chunkText === '') {
-                    $chunkText = trim((string) ($document->extracted_text ?: $document->content));
+                    $chunkText = trim((string) $document->textForKnowledgeProcessing());
                 }
 
                 if ($chunkText === '') {

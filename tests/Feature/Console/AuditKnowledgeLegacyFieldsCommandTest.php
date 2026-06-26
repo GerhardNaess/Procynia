@@ -98,7 +98,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('extraction_status column: absent, skipped')
             ->expectsOutputToContain('extraction_error column: absent, skipped')
             ->expectsOutputToContain('extracted_text column: absent, skipped')
-            ->expectsOutputToContain('content_fallback_candidates=2')
+            ->expectsOutputToContain('content column: absent, skipped')
             ->expectsOutputToContain('content_type column: absent, skipped')
             ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('BLOCKED')
@@ -267,67 +267,28 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->assertSuccessful();
     }
 
-    public function test_content_fallback_candidates_counts_correctly(): void
+    public function test_content_column_is_reported_as_absent_and_skipped(): void
     {
-        $customer = $this->createCustomer('Content Fallback Count AS');
-
-        // Case A: version has non-blank extracted_text → not a candidate
-        $itemA = $this->createKnowledgeItem($customer, ['content' => 'Item A has extracted text in its version.']);
-        $this->createKnowledgeItemVersion($itemA, [
+        // After knowledge_items.content was physically dropped, the audit must report it as absent
+        // rather than erroring or silently omitting the section.
+        $customer = $this->createCustomer('Content Column Absent AS');
+        $item = $this->createKnowledgeItem($customer);
+        $this->createKnowledgeItemVersion($item, [
             'version_no' => 1,
             'is_current' => true,
-            'original_filename' => 'item-a.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/item-a.docx',
+            'original_filename' => 'absent-column-test.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/absent-column-test.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 1024,
-            'extracted_text' => 'Item A extracted text.',
+            'extracted_text' => 'Some extracted text.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
         ]);
 
-        // Case B: version exists but extracted_text is blank, content is not → is a candidate
-        $itemB = $this->createKnowledgeItem($customer, ['content' => 'Item B has content but no extracted text.']);
-        $this->createKnowledgeItemVersion($itemB, [
-            'version_no' => 1,
-            'is_current' => true,
-            'original_filename' => 'item-b.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/item-b.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
-            'extracted_text' => '',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
-            'extraction_error' => 'Extraction failed.',
-        ]);
-
-        // Case D: content is blank → not a candidate even when version extracted_text is also blank
-        $itemD = $this->createKnowledgeItem($customer, ['content' => '']);
-        $this->createKnowledgeItemVersion($itemD, [
-            'version_no' => 1,
-            'is_current' => true,
-            'original_filename' => 'item-d.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/item-d.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
-            'extracted_text' => '',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
-            'extraction_error' => 'Extraction failed.',
-        ]);
-
         $this->artisan('knowledge:legacy-audit')
-            ->expectsOutputToContain('content_fallback_candidates=1')
-            ->assertSuccessful();
-    }
-
-    public function test_content_fallback_candidates_counts_item_without_current_version(): void
-    {
-        $customer = $this->createCustomer('Content Fallback No Version AS');
-
-        // Case C: no current version, content non-blank → is a candidate
-        $this->createKnowledgeItem($customer, ['content' => 'Item without version has content that would be lost.']);
-
-        $this->artisan('knowledge:legacy-audit')
-            ->expectsOutputToContain('content_fallback_candidates=1')
-            ->expectsOutputToContain('items_without_current_version=1')
+            ->expectsOutputToContain('content column: absent, skipped')
+            ->expectsOutputToContain('Content fallback')
+            ->expectsOutputToContain('OK_FOR_NEXT_STEP')
             ->assertSuccessful();
     }
 

@@ -1732,6 +1732,25 @@ Tester: 175/175 passerte. Audit: `content_fallback_candidates=0`.
 
 **Fase 2.8 er fullført juni 2026.** Den fysiske databaseoppryddingen ble gjennomført kontrollert etter at fase 2.7 isolerte all aktiv legacy-bruk. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items`. Etterkontroll bekreftet at resterende treff kun er historiske migrasjoner, dokumentasjon, schema-aware audit, andre modellers legitime `is_active`-felter eller tester som verifiserer fravær/ignorering. `knowledge:legacy-audit` er schema-aware og rapporterer `OK_FOR_NEXT_STEP` når kolonnene er fraværende. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Autoritative felt er fortsatt `document_type` og `document_status`.
 
+**28.11F — Fysisk dropp av `knowledge_items.content` (juni 2026)**
+
+`knowledge_items.content` er fysisk fjernet. Autoritativ tekstkilde er utelukkende `knowledge_item_versions.extracted_text` via `KnowledgeItem::textForKnowledgeProcessing()`.
+
+Migrasjon: `2026_06_26_120000_drop_content_from_knowledge_items_table` — schema-aware `up()` og `down()`.
+
+Filer oppdatert:
+- `app/Models/KnowledgeItem.php` — `'content'` fjernet fra `$fillable`
+- `app/Http/Controllers/App/KnowledgeBaseController.php` — `'content' => ''` fjernet fra `store()`-opprettelsen
+- `app/Console/Commands/AuditKnowledgeLegacyFields.php` — schema-aware for `content`: `$hasContent`-variabel, `hasContentColumn()` metode, `content`-kolonnen betinget i `$selectColumns`, begge `content_fallback_candidates`-tellere gatekjørt, output viser `content column: absent, skipped` i begge seksjoner når kolonnen mangler
+- `tests/Feature/Console/AuditKnowledgeLegacyFieldsCommandTest.php` — to tester erstattet med `test_content_column_is_reported_as_absent_and_skipped`; `content_fallback_candidates=2`-assertion oppdatert til `content column: absent, skipped`
+- `tests/Feature/App/KnowledgeBaseControllerTest.php` — stale `assertEmpty($document->content)`-assertion fjernet; `createCurrentVersionFor`-helper byttet fra `$item->content` til eksplisitt standard-tekst; mock summary-service byttet fra `$document->extracted_text ?: $document->content` til `$document->textForKnowledgeProcessing()`
+
+Gjenværende `->content`-treff i `app/` etter drop: kun `KnowledgeItemChunk.content` i AI-flyt og audit-diagnostikk gatekjørt av `$hasContent = false`. Ingen `KnowledgeItem.content`-lesing i aktiv runtime-kode.
+
+`KnowledgeItemChunk.content` er urørt. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret.
+
+Tester: 174/174 passerte. Audit: `content column: absent, skipped`, `OK_FOR_NEXT_STEP`.
+
 ---
 
 ## 29. Fase 3 og videre: Utsatt til senere
