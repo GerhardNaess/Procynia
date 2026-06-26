@@ -1476,6 +1476,53 @@ Fase 28.10D fjerner de tre resolver-fallbackene som leste direkte fra `knowledge
 
 **Fullført:** Commit `"Remove extraction fallback from knowledge items"`. Alle tester passerte.
 
+### 28.10E Etterkontroll — bekreft at ingen aktiv runtime-avhengighet gjenstår (juni 2026)
+
+Fase 28.10E er en ren kontroll- og dokumentasjonsfase etter at 28.10A–28.10D er ferdige. Ingen runtime-kodeendringer ble gjort.
+
+**Startstatus:** Arbeidskopi ren. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` (ingen blokkerende funn, ingen mirror-avvik).
+
+**Søkeresultat — kategoriserte treff:**
+
+| Kategori | Fil / plassering | Vurdering |
+|---|---|---|
+| Autoritativ KIV | `KnowledgeItemVersion.$fillable` — `extracted_text`, `extraction_status`, `extraction_error` | Riktig — KIV er autoritativ kilde |
+| Autoritativ KIV | `KnowledgeBaseController.php:401–403` — skriver til KIV ved ny opplasting | Riktig |
+| Autoritativ KIV | `KnowledgeBaseController.php:620–624` — skriver til KIV ved ny versjon | Riktig |
+| Autoritativ KIV | `KnowledgeBaseController.php:697,2034–2035` — leser `$version->extraction_*` (KIV) | Riktig |
+| Via currentVersion | `KnowledgeItem.php:251,256,261` — resolver-metoder leser kun fra `currentVersion` | Riktig etter 28.10D |
+| Via currentVersion | `KnowledgeVocabularyExtractionService.php:203` — nøkkel `extracted_text` i payload, verdi fra `textForKnowledgeProcessing()` (ikke KI direkte) | Riktig |
+| Saksdokumenter (utenfor scope) | `AiController.php:1600,1687,1688` — `SavedNoticeAiDocument $document` | Utenfor scope |
+| Saksdokumenter (utenfor scope) | `RequirementExtractionRunService.php:438,687,835` — `SavedNoticeAiDocument` | Utenfor scope |
+| Saksdokumenter (utenfor scope) | `RequirementExtractionPipeline.php:44` — `SavedNoticeAiDocument` | Utenfor scope |
+| Saksdokumenter (utenfor scope) | `DocumentSplitPlanner.php:32,128` — `SavedNoticeAiDocument` | Utenfor scope |
+| Saksdokumenter (utenfor scope) | `RequirementCandidateExtractor.php:214,622,2276` — `SavedNoticeAiDocument` | Utenfor scope |
+| Saksdokumenter (utenfor scope) | `SavedNoticeAiDocument.$fillable` — `extracted_text` | Utenfor scope |
+| Audit-kommando | `AuditKnowledgeLegacyFields.php:195–244` — leser `$currentVersion->extraction_*` og `$item->extraction_*` for speil-sammenligning | Akseptabelt — audit er bevisst klar over kolonnen |
+| Tester | `AuditKnowledgeLegacyFieldsCommandTest.php:47–83` — oppretter KI med ekstraksjonsfelt for å teste audit-kommandoen | Akseptabelt — audit-tester krever dette |
+| Tester | `AiControllerTest.php:7973` — `$knowledgeItem->extracted_text` direkte lesing i testhjelpemetode `syncKnowledgeItemChunks` | Se pre-drop-liste nedenfor |
+| Modellkonfigurasjon | `KnowledgeItem.$fillable:129,131,132` — `extracted_text`, `extraction_status`, `extraction_error` fortsatt i fillable | Se pre-drop-liste nedenfor |
+
+**Funn: Ingen aktiv runtime-lesing eller -skriving til `knowledge_items.extraction_*` fra produksjonskode.**
+
+Alle treff i `app/` der `->extracted_text`/`->extraction_status`/`->extraction_error` brukes er enten på `KnowledgeItemVersion`, på `SavedNoticeAiDocument` (Saksdokumenter), via resolver/currentVersion, eller i audit-kommandoen. Ingen resolver faller tilbake til KI-felter etter 28.10D.
+
+**Pre-drop-liste for 28.10F:**
+
+Følgende tre punkter blokkerer ikke runtime, men må ryddes som del av eller før kolonnedropp i 28.10F:
+
+1. **`KnowledgeItem.$fillable`** — `extracted_text`, `extraction_status`, `extraction_error` ligger fortsatt i `$fillable`. Bør fjernes fra fillable samtidig med kolonnedroppmigrasjon. Kan ikke fjernes isolert uten å bryte `AuditKnowledgeLegacyFieldsCommandTest` (som skriver disse verdiene til KI for å teste audit-kommandoen).
+
+2. **`AiControllerTest.php:7973`** — `$knowledgeItem->extracted_text` direkte lesing i testhjelpemetode `syncKnowledgeItemChunks`. Bør byttes til `$knowledgeItem->textForKnowledgeProcessing()` eller tilsvarende. Vil krasje med kolonnen fjernet.
+
+3. **`AuditKnowledgeLegacyFields.php`** — sammenligner `$currentVersion->extraction_*` med `$item->extraction_*` for å finne mirror-avvik. Når kolonnen droppes er disse sammenligningene meningsløse og bør fjernes/justeres i audit-kommandoen (og tilsvarende i testen).
+
+**Ingen kodeendringer i 28.10E** — etterkontroll bekrefter at produksjonskoden er klar. Pre-drop-rydding gjøres som del av 28.10F.
+
+**Neste steg: 28.10F** — fysisk drop av `knowledge_items.extraction_status`, `extraction_error`, `extracted_text` etter at pre-drop-listen over er håndtert. Se §28.10E pre-drop-liste.
+
+**Fullført:** Commit `"Document extraction field drop readiness"`.
+
 ### 28.11 Egen vurdering av `content`
 
 - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.
