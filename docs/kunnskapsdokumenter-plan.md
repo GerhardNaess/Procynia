@@ -1652,6 +1652,23 @@ Ny test `test_knowledge_document_store_writes_extracted_text_to_current_version_
 
 Audit kjørt etter endringen: `content_fallback_candidates=0` bekreftet.
 
+**28.11C — Etterkontroll av aktiv tekstlesing og fallback (juni 2026)**
+
+Kartlegging av all gjenværende bruk av `knowledge_items.content` og `->content` i codebase:
+
+- **Aktiv runtime-lesing fra `KnowledgeItem.content`:** Kun via `textForKnowledgeProcessing()` i `KnowledgeItem.php:276` — dette er den intenderte fallback-stien, ikke en primær datakilde.
+- **Aktiv runtime-skriving:** `KnowledgeBaseController::store()` skriver `'content' => ''` (tom streng) etter 28.11B — ingen tekst skrives lenger.
+- **AI-tjenester:** `KnowledgeVocabularyExtractionService` (linje 183), `KnowledgeVocabularyAnalysisBatchService` (linje 246) og `KnowledgeDocumentSummaryGenerationService` (linje 47) henter alle dokumenttekst via `$document->textForKnowledgeProcessing()`. Ingen leser direkte fra `KnowledgeItem.content`.
+- **Øvrige `->content`-treff i `app/`:** Leser fra `KnowledgeItemChunk.content`, ikke `KnowledgeItem.content` — urelatert.
+- **Diagnostikk:** `AuditKnowledgeLegacyFields` leser `$item->content` som del av tellerlogikk — forventet.
+- **Testhjelpemetoder (C — stale men ufarlige):**
+  - `KnowledgeBaseControllerTest:4533` (`createCurrentVersionFor`) — leser `$item->content` for å sette `KIV.extracted_text`; etter 28.11B gir dette `''` for nye KI-er, men brukes kun i tester som setter `content` eksplisitt.
+  - `KnowledgeBaseControllerTest:5590` (`bindSuccessfulKnowledgeDocumentSummaryGenerationService`) — leser `$document->extracted_text ?: $document->content`; `extracted_text`-attributt er alltid `null` (kolonnen droppet i 28.10F), `$document->content` er `''` etter 28.11B. Primær sti (chunks) treffer alltid først — fallback er aldri aktiv i praksis.
+
+Konklusjon: Ingen aktiv runtime-lesing leser direkte fra `knowledge_items.content` utenom `textForKnowledgeProcessing()`. Fallback er i behold. Fysisk kolonnedropp er ikke gjort — ikke del av 28.11C. `content_fallback_candidates=0` bekreftet.
+
+Tester: 175/175 passerte (`KnowledgeBaseControllerTest`, `AuditKnowledgeLegacyFieldsCommandTest`, `KnowledgeVocabularyAnalysisBatchServiceTest`, `KnowledgeItemOwnershipTest`).
+
 **Datakontroller før eventuell migrasjon:**
 
 - alle `KnowledgeItem`-rader har gyldig `currentVersion` når dokumentet faktisk har fil
