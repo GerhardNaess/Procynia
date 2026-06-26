@@ -1618,6 +1618,25 @@ Testene passerte tilfeldig fordi `KnowledgeVocabularyExtractionService` er mocke
 
 - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.
 
+**28.11A — Kartlegging og auditgrunnlag (juni 2026)**
+
+Kartlegging avdekket at `content_fallback_candidates`-telleren i `AuditKnowledgeLegacyFields` var blind etter at `knowledge_items.extracted_text` ble droppet i 28.10F. Telleren var gatekjørt av `$hasExtractedText = Schema::hasColumn('knowledge_items', 'extracted_text')` som alltid returnerte `false` etter droppet — dermed ble verdien alltid `0` uavhengig av faktiske data.
+
+**28.11A-2 — Reparasjon av audit-teller (juni 2026)**
+
+Audit-kommandoen er oppdatert med korrekt logikk for `content_fallback_candidates`:
+
+- Rader der `currentVersion` mangler og `knowledge_items.content` ikke er blank telles nå korrekt (sjekk lagt inn før `continue`-hoppet).
+- Rader der `currentVersion.extracted_text` er blank og `knowledge_items.content` ikke er blank telles uten avhengighet av droppede KI-kolonner.
+
+Testen `test_command_reports_mirror_drift_and_does_not_write_any_rows` oppdatert: `content_fallback_candidates=0` → `content_fallback_candidates=2`. To nye tester lagt til:
+- `test_content_fallback_candidates_counts_correctly` — dekker case A (KIV.extracted_text ikke-blank → ikke telt), case B (KIV.extracted_text blank, content ikke-blank → telt), case D (content blank → ikke telt).
+- `test_content_fallback_candidates_counts_item_without_current_version` — dekker case C (ingen KIV, content ikke-blank → telt).
+
+Lokal audit rapporterer `content_fallback_candidates=0` i testmiljøet (1 KI). **Produksjonsverdi er ikke kjent** — audit må kjøres separat mot produksjonsdatabasen før 28.11B kan planlegges.
+
+28.11B kan ikke startes før `content_fallback_candidates=0` er bekreftet i produksjon.
+
 **Datakontroller før eventuell migrasjon:**
 
 - alle `KnowledgeItem`-rader har gyldig `currentVersion` når dokumentet faktisk har fil

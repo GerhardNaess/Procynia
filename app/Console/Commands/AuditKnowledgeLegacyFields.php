@@ -156,6 +156,10 @@ class AuditKnowledgeLegacyFields extends Command
                     $currentVersion = $item->currentVersion;
 
                     if ($currentVersion === null) {
+                        if (! $this->isBlank($item->content)) {
+                            $summary['content_fallback_candidates']++;
+                            $this->appendExample($examples['expected'], $item->id);
+                        }
                         continue;
                     }
 
@@ -253,9 +257,7 @@ class AuditKnowledgeLegacyFields extends Command
                     }
 
                     if (
-                        $hasExtractedText
-                        && $this->isBlank($currentVersion->extracted_text)
-                        && $this->isBlank($item->extracted_text)
+                        $this->isBlank($currentVersion->extracted_text)
                         && ! $this->isBlank($item->content)
                     ) {
                         $summary['content_fallback_candidates']++;
