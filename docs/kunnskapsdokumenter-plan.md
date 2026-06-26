@@ -1751,6 +1751,18 @@ Gjenværende `->content`-treff i `app/` etter drop: kun `KnowledgeItemChunk.cont
 
 Tester: 174/174 passerte. Audit: `content column: absent, skipped`, `OK_FOR_NEXT_STEP`.
 
+**28.11G — Sluttkontroll og formell lukking (juni 2026)**
+
+Audit kjørt: alle droppede `knowledge_items`-kolonner (`content`, `extracted_text`, `extraction_status`, `extraction_error`, `original_filename`, `storage_path`, `mime_type`, `file_size_bytes`, `content_type`, `is_active`) rapporteres som absent/skipped. `OK_FOR_NEXT_STEP`.
+
+Grep-kontroll: ingen aktiv runtime-lesing eller -skriving til droppede `KnowledgeItem`-felt. Gjenværende `->content`-treff i `app/` er: Filament UI-komponenter (urelatert), `RequirementExtractionBlockData` og `RequirementCandidateExtractor` (urelatert), og audit-diagnostikk gatekjørt av `$hasContent = false`. `KnowledgeItemChunk.content` er urørt.
+
+`KnowledgeItem.php` verifisert: ingen droppede felt i `$fillable`, `$casts` eller `$attributes`. `resolvedExtractedText()` leser fra `currentVersion`. `textForKnowledgeProcessing()` delegerer til `resolvedExtractedText()`.
+
+Tester: 174/174 passerte. Saksdokumenter, `SavedNoticeAiDocument`, AI-svarutkastflyt og `KnowledgeItemChunk.content` ble ikke berørt i noen fase av 28.11.
+
+**Fase 28.11 er formelt lukket juni 2026.** `knowledge_items.content` er fysisk fjernet. All aktiv tekstlesing er versjonsbasert via `knowledge_item_versions.extracted_text`. `KnowledgeItem` er ryddet for alle legacy content-felt. `knowledge:legacy-audit` er schema-aware og grønn. Autoritativ kilde er `currentVersion.extracted_text`. Oppryddingen av `knowledge_items` er fullstendig.
+
 ---
 
 ## 29. Fase 3 og videre: Utsatt til senere
