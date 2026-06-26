@@ -440,28 +440,46 @@ class KnowledgeItemOwnershipTest extends TestCase
         $this->assertSame('Current version extracted text', $document->textForKnowledgeProcessing());
     }
 
-    public function test_text_for_knowledge_processing_returns_content_when_no_version(): void
+    public function test_text_for_knowledge_processing_returns_null_when_no_version(): void
     {
-        // Without a currentVersion, resolvedExtractedText() returns null; falls back to KnowledgeItem.content.
+        // Without a currentVersion, resolvedExtractedText() returns null; content is no longer a fallback.
         $customer = $this->createCustomer('Text Processing Fallback AS');
         $document = $this->createKnowledgeItem($customer, [
-            'extracted_text' => 'Legacy extracted text',
             'content' => 'Legacy content',
         ]);
 
-        $this->assertSame('Legacy content', $document->textForKnowledgeProcessing());
+        $this->assertNull($document->textForKnowledgeProcessing());
     }
 
-    public function test_text_for_knowledge_processing_falls_back_to_content_when_extracted_text_is_empty(): void
+    public function test_text_for_knowledge_processing_returns_null_when_version_has_blank_extracted_text(): void
     {
-        // Without extracted_text, falls back to KnowledgeItem.content.
+        // Version present but blank extracted_text — content is no longer a fallback.
         $customer = $this->createCustomer('Text Processing Content Fallback AS');
         $document = $this->createKnowledgeItem($customer, [
-            'extracted_text' => '',
             'content' => 'Only content is available',
         ]);
 
-        $this->assertSame('Only content is available', $document->textForKnowledgeProcessing());
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $customer->id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'blank-extracted.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/blank-extracted.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
+            'extracted_text' => '',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => null,
+            'uploaded_at' => now(),
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
+
+        $document->load('currentVersion');
+
+        $this->assertNull($document->textForKnowledgeProcessing());
     }
 
     public function test_text_for_knowledge_processing_returns_null_when_all_sources_are_empty(): void

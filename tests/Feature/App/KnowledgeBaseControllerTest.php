@@ -4201,13 +4201,29 @@ class KnowledgeBaseControllerTest extends TestCase
             'customer_id' => $context['customer']->id,
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'service-token-test.pdf',
-            'content' => 'Koordinering og samhandling.',
+            'content' => '',
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
-            'extracted_text' => 'Koordinering og samhandling.',
             'summary' => null,
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'is_active' => true,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $document->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'service-token-test.pdf',
+            'storage_path' => 'customers/'.$document->customer_id.'/knowledge-items/service-token-test.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Koordinering og samhandling.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => $document->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
         ]);
 
         $fakeResponse = [
@@ -4250,13 +4266,29 @@ class KnowledgeBaseControllerTest extends TestCase
             'customer_id' => $context['customer']->id,
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'fail-token-test.pdf',
-            'content' => 'Innhold.',
+            'content' => '',
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
-            'extracted_text' => 'Innhold.',
             'summary' => null,
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'is_active' => true,
+        ]);
+
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $document->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'fail-token-test.pdf',
+            'storage_path' => 'customers/'.$document->customer_id.'/knowledge-items/fail-token-test.pdf',
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'extracted_text' => 'Innhold.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => $document->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
         ]);
 
         $client = Mockery::mock(OpenAiClient::class);

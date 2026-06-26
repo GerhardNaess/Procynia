@@ -262,20 +262,12 @@ class KnowledgeItem extends Model
 
     /**
      * Resolve the best available text body for knowledge processing (summarisation, vocabulary, metadata).
-     * Priority: currentVersion.extracted_text → KnowledgeItem.content → null.
+     * Source: currentVersion.extracted_text only. Returns null if the version is absent or has blank text.
      * Callers must eager-load currentVersion to avoid N+1 when iterating many documents.
      */
     public function textForKnowledgeProcessing(): ?string
     {
-        $resolvedExtractedText = $this->resolvedExtractedText();
-
-        if ($resolvedExtractedText !== null) {
-            return $resolvedExtractedText;
-        }
-
-        $content = trim((string) $this->content);
-
-        return $content !== '' ? $content : null;
+        return $this->resolvedExtractedText();
     }
 
     public function isCompanyOwned(): bool

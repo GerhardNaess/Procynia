@@ -1669,6 +1669,21 @@ Konklusjon: Ingen aktiv runtime-lesing leser direkte fra `knowledge_items.conten
 
 Tester: 175/175 passerte (`KnowledgeBaseControllerTest`, `AuditKnowledgeLegacyFieldsCommandTest`, `KnowledgeVocabularyAnalysisBatchServiceTest`, `KnowledgeItemOwnershipTest`).
 
+**28.11D — Fjern content-fallback fra `textForKnowledgeProcessing()` (juni 2026)**
+
+Fallback-stien `knowledge_items.content → null` er fjernet fra `KnowledgeItem::textForKnowledgeProcessing()`. Metoden delegerer nå direkte til `resolvedExtractedText()` og returnerer `null` dersom `currentVersion.extracted_text` er blank eller versjon mangler.
+
+Endrede filer:
+- `app/Models/KnowledgeItem.php` — fallback-kode fjernet, docblock oppdatert
+- `tests/Unit/KnowledgeItemOwnershipTest.php` — to tester oppdatert: `test_text_for_knowledge_processing_returns_null_when_no_version` og `test_text_for_knowledge_processing_returns_null_when_version_has_blank_extracted_text` bekrefter at `null` returneres i begge fallback-scenarioene
+- `tests/Feature/App/KnowledgeBaseControllerTest.php` — to tester oppdatert til å opprette `KnowledgeItemVersion` med `extracted_text` i stedet for å stole på content-fallback (`test_summary_service_calls_token_logger_*` og `test_summary_service_does_not_call_token_logger_when_generation_fails`)
+
+`knowledge_items.content`-kolonnen er beholdt. `content` er beholdt i `$fillable`. Audit-diagnostikk leser fortsatt `$item->content` for `content_fallback_candidates`-teller. `content_fallback_candidates=0` bekreftet. Aktiv tekstbehandling er nå utelukkende versjonsbasert via `currentVersion.extracted_text`.
+
+Tjenester som ikke måtte endres: `KnowledgeVocabularyExtractionService`, `KnowledgeVocabularyAnalysisBatchService`, `KnowledgeDocumentSummaryGenerationService` — alle bruker allerede `textForKnowledgeProcessing()` uten direkte `content`-lesing.
+
+Tester: 175/175 passerte.
+
 **Datakontroller før eventuell migrasjon:**
 
 - alle `KnowledgeItem`-rader har gyldig `currentVersion` når dokumentet faktisk har fil
