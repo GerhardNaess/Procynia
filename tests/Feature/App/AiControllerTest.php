@@ -7970,7 +7970,7 @@ class AiControllerTest extends TestCase
             ->where('is_current', true)
             ->value('id');
 
-        $chunkPayloads = app(DocumentChunker::class)->chunkText((string) $knowledgeItem->extracted_text);
+        $chunkPayloads = app(DocumentChunker::class)->chunkText((string) $knowledgeItem->textForKnowledgeProcessing());
 
         $knowledgeItem->chunks()->createMany(array_map(
             static fn (array $chunk, int $chunkIndex): array => [

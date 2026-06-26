@@ -1523,6 +1523,56 @@ Følgende tre punkter blokkerer ikke runtime, men må ryddes som del av eller f�
 
 **Fullført:** Commit `"Document extraction field drop readiness"`.
 
+### 28.10F Fysisk drop av ekstraksjonsfelt fra `knowledge_items` (juni 2026)
+
+Fase 28.10F fjerner fysisk kolonnene `extraction_status`, `extraction_error` og `extracted_text` fra `knowledge_items`. `KnowledgeItemVersion` er nå eneste sted disse verdiene lagres og leses.
+
+**Hva som ble endret:**
+
+- **`app/Models/KnowledgeItem.php`**: Fjernet `extracted_text`, `extraction_status`, `extraction_error` fra `$fillable`. Ingen `$casts`- eller `$attributes`-endringer nødvendig for disse feltene.
+- **`app/Console/Commands/AuditKnowledgeLegacyFields.php`**: Audit-kommandoen er gjort schema-aware for ekstraksjonsfeltene. Tilsvarende mønster som for filidentitetsfeltene (fase 28.9G):
+  - Lagt til `hasExtractionStatusColumn()`, `hasExtractionErrorColumn()`, `hasExtractedTextColumn()` metoder.
+  - `selectColumns` er betinget — ekstraksjonsfeltene velges bare dersom de finnes i skjemaet.
+  - Speil-sammenligningene i chunk-løkken er betinget på kolonnetilstedeværelse.
+  - Review findings og Extraction mirrors i output rapporterer `absent, skipped` ved fravær.
+- **`database/migrations/2026_06_26_000001_drop_legacy_extraction_fields_from_knowledge_items_table.php`**: Defensiv migrasjon med `Schema::hasColumn()`-sjekk i `up()` og `down()`. `down()` gjenskaper kolonnene som nullable uten default eller index.
+- **`tests/Feature/App/AiControllerTest.php`**: Testhjelpemetoden `syncKnowledgeItemChunks` byttet fra `$knowledgeItem->extracted_text` til `$knowledgeItem->textForKnowledgeProcessing()`.
+- **`tests/Feature/Console/AuditKnowledgeLegacyFieldsCommandTest.php`**:
+  - `createKnowledgeItemVersion` hjelpemetode: byttet standardverdier fra `$knowledgeItem->extraction_*` (null etter drop) til `''` / `EXTRACTION_STATUS_COMPLETED` / `null`.
+  - `test_command_reports_mirror_drift_and_does_not_write_any_rows`: fjernet `DB::table('knowledge_items')->update(...)` med ekstraksjonsfelt; endret assertions fra `legacy_extraction_status_mismatches=1` til `extraction_status column: absent, skipped` o.l.; `content_fallback_candidates=1` → `content_fallback_candidates=0`.
+- **`tests/Unit/KnowledgeItemOwnershipTest.php`**: `test_knowledge_item_version_is_backfilled_with_file_fields` — byttet `$document->extracted_text/extraction_status/extraction_error` til eksplisitte litereraler i KIV-opprettelse.
+- **`tests/Feature/App/KnowledgeVocabularyControllerTest.php`**: `createKnowledgeItem` hjelpemetode — byttet `$item->extracted_text/extraction_status/extraction_error` til `$overrides['...'] ?? $content/COMPLETED/null`.
+- **`tests/Feature/App/KnowledgeBaseControllerTest.php`**:
+  - `createKnowledgeItemPayloadFixture`: KIV-opprettelse byttet fra `$item->extracted_text/extraction_status/extraction_error` til `$overrides['extracted_text'] ?? $content`, `$overrides['extraction_status'] ?? COMPLETED`, `$overrides['extraction_error'] ?? null`.
+  - `createCurrentVersionFor`: byttet fra `$item->extracted_text/extraction_status/extraction_error` til `$item->content / COMPLETED / null`.
+  - `test_payload_falls_back_to_legacy_extraction_state_when_current_version_is_missing` omdøpt til `test_payload_reads_extraction_state_from_current_version` — tester nå at KIV-verdier returneres i payload (korrekt atferd etter 28.10D/F).
+  - `test_knowledge_document_summary_falls_back_to_cleaned_raw_text_without_toc_noise`: erstattet `createCurrentVersionFor` med direkte KIV-opprettelse for å bevare den strukturerte `extracted_text`-verdien som TOC-rensing testes mot.
+
+**Søk etter aktiv KI-bruk etter drop:** Ingen aktiv runtime-lesing eller -skriving til `knowledge_items.extraction_*` funnet. Alle gjenværende treff er `KnowledgeItemVersion`, `SavedNoticeAiDocument` (utenfor scope), resolver-metoder via `currentVersion`, eller audit-kommandoen.
+
+**Audit etter drop:**
+```
+Extraction mirrors
+- extraction_status column: absent, skipped
+- extraction_error column: absent, skipped
+- extracted_text column: absent, skipped
+Recommendation
+OK_FOR_NEXT_STEP
+```
+
+**Tester:** 145/145 i `KnowledgeBaseControllerTest`, 35/35 i `KnowledgeVocabularyControllerTest` + `KnowledgeItemOwnershipTest` + `AuditKnowledgeLegacyFieldsCommandTest`. Kjent PDF-bilde-/figureutvinningsfeil er pre-eksisterende infrastrukturproblem og ikke relatert til 28.10F.
+
+**Ikke endret:**
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- `knowledge_items.content`
+- Retrieval-logikk
+- Frontend/UI
+
+**Neste steg:** 28.10G etterkontroll/formell lukking av 28.10.
+
+**Fullført:** Commit `"Drop legacy extraction fields from knowledge items"`.
+
 ### 28.11 Egen vurdering av `content`
 
 - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.

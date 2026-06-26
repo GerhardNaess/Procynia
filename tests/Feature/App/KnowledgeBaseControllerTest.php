@@ -3519,14 +3519,27 @@ class KnowledgeBaseControllerTest extends TestCase
             'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2 Reell innholdstekst etter TOC.',
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
-            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nReell innholdstekst etter TOC. Denne teksten skal brukes i oppsummeringen.",
             'summary' => null,
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-            'extraction_error' => null,
             'is_active' => true,
         ]);
 
-        $this->createCurrentVersionFor($document, $context['user']);
+        KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $document->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'toc-fallback.pdf',
+            'storage_path' => sprintf('customers/%d/knowledge-documents/toc-fallback.pdf', $document->customer_id),
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
+            'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nReell innholdstekst etter TOC. Denne teksten skal brukes i oppsummeringen.",
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+            'uploaded_by_user_id' => $context['user']->id,
+            'uploaded_at' => $document->created_at,
+            'file_hash_sha256' => null,
+            'approval_status' => KnowledgeItemVersion::APPROVAL_STATUS_APPROVED,
+        ]);
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
 
@@ -4461,9 +4474,9 @@ class KnowledgeBaseControllerTest extends TestCase
             'storage_path' => $storagePath,
             'mime_type' => $mimeType,
             'file_size_bytes' => $fileSizeBytes,
-            'extracted_text' => $item->extracted_text,
-            'extraction_status' => $item->extraction_status,
-            'extraction_error' => $item->extraction_error,
+            'extracted_text' => (string) ($overrides['extracted_text'] ?? $content),
+            'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $uploadedBy->id,
             'uploaded_at' => $item->created_at,
             'file_hash_sha256' => null,
@@ -4493,9 +4506,9 @@ class KnowledgeBaseControllerTest extends TestCase
             'storage_path' => $storagePath,
             'mime_type' => 'application/pdf',
             'file_size_bytes' => 1024,
-            'extracted_text' => $item->extracted_text,
-            'extraction_status' => $item->extraction_status,
-            'extraction_error' => $item->extraction_error,
+            'extracted_text' => $item->content,
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
             'uploaded_by_user_id' => $uploadedBy->id,
             'uploaded_at' => $item->created_at,
             'file_hash_sha256' => null,
@@ -6327,15 +6340,15 @@ XML;
         });
     }
 
-    public function test_payload_falls_back_to_legacy_extraction_state_when_current_version_is_missing(): void
+    public function test_payload_reads_extraction_state_from_current_version(): void
     {
-        $context = $this->customerContext('Legacy Extraction Fallback AS');
+        $context = $this->customerContext('Extraction State From Version AS');
 
         $document = $this->createKnowledgeItemPayloadFixture($context['customer'], $context['user'], [
-            'original_filename' => 'legacy-extraction.docx',
-            'extracted_text' => 'Legacy document extracted text',
+            'original_filename' => 'version-extraction.docx',
+            'extracted_text' => 'Version document extracted text',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_FAILED,
-            'extraction_error' => 'Legacy document-level error',
+            'extraction_error' => 'Version-level extraction error',
         ]);
 
         $indexResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.index'));
@@ -6345,7 +6358,7 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
-                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+                && data_get($item, 'extraction_error') === 'Version-level extraction error';
         });
 
         $editResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.edit', ['knowledgeItem' => $document->id]));
@@ -6355,7 +6368,7 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
-                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+                && data_get($item, 'extraction_error') === 'Version-level extraction error';
         });
 
         $showResponse = $this->actingAs($context['user'])->get(route('app.ai.knowledge-base.show', ['knowledgeItem' => $document->id]));
@@ -6365,7 +6378,7 @@ XML;
 
             return $item !== null
                 && data_get($item, 'extraction_status') === KnowledgeItem::EXTRACTION_STATUS_FAILED
-                && data_get($item, 'extraction_error') === 'Legacy document-level error';
+                && data_get($item, 'extraction_error') === 'Version-level extraction error';
         });
     }
 

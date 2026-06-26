@@ -35,6 +35,9 @@ class AuditKnowledgeLegacyFields extends Command
         $hasStoragePath = $this->hasStoragePathColumn();
         $hasMimeType = $this->hasMimeTypeColumn();
         $hasFileSizeBytes = $this->hasFileSizeBytesColumn();
+        $hasExtractionStatus = $this->hasExtractionStatusColumn();
+        $hasExtractionError = $this->hasExtractionErrorColumn();
+        $hasExtractedText = $this->hasExtractedTextColumn();
 
         $summary = [
             'total_knowledge_items' => KnowledgeItem::query()->count(),
@@ -74,11 +77,20 @@ class AuditKnowledgeLegacyFields extends Command
             'id',
             'document_type',
             'document_status',
-            'extracted_text',
-            'extraction_status',
-            'extraction_error',
             'content',
         ];
+
+        if ($hasExtractionStatus) {
+            $selectColumns[] = 'extraction_status';
+        }
+
+        if ($hasExtractionError) {
+            $selectColumns[] = 'extraction_error';
+        }
+
+        if ($hasExtractedText) {
+            $selectColumns[] = 'extracted_text';
+        }
 
         if ($hasOriginalFilename) {
             $selectColumns[] = 'original_filename';
@@ -129,7 +141,7 @@ class AuditKnowledgeLegacyFields extends Command
                 },
             ])
             ->orderBy('id')
-            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasOriginalFilename, $hasStoragePath, $hasMimeType, $hasFileSizeBytes, $hasContentType, $hasIsActive): void {
+            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasOriginalFilename, $hasStoragePath, $hasMimeType, $hasFileSizeBytes, $hasContentType, $hasIsActive, $hasExtractionStatus, $hasExtractionError, $hasExtractedText): void {
                 foreach ($items as $item) {
                     if ((int) $item->current_versions_count === 0) {
                         $summary['items_without_current_version']++;
@@ -225,23 +237,24 @@ class AuditKnowledgeLegacyFields extends Command
                         }
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->extraction_status, $item->extraction_status)) {
+                    if ($hasExtractionStatus && $this->hasStringMismatch($currentVersion->extraction_status, $item->extraction_status)) {
                         $summary['legacy_extraction_status_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->extraction_error, $item->extraction_error)) {
+                    if ($hasExtractionError && $this->hasStringMismatch($currentVersion->extraction_error, $item->extraction_error)) {
                         $summary['legacy_extraction_error_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->extracted_text, $item->extracted_text)) {
+                    if ($hasExtractedText && $this->hasStringMismatch($currentVersion->extracted_text, $item->extracted_text)) {
                         $summary['legacy_extracted_text_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
                     if (
-                        $this->isBlank($currentVersion->extracted_text)
+                        $hasExtractedText
+                        && $this->isBlank($currentVersion->extracted_text)
                         && $this->isBlank($item->extracted_text)
                         && ! $this->isBlank($item->content)
                     ) {
@@ -371,21 +384,21 @@ class AuditKnowledgeLegacyFields extends Command
             $summary['current_version_missing_extracted_text_on_success'],
             $examples['review'],
         ));
-        $this->line($this->formatFindingLine(
-            'legacy_extraction_status_mismatches',
-            $summary['legacy_extraction_status_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'legacy_extraction_error_mismatches',
-            $summary['legacy_extraction_error_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'legacy_extracted_text_mismatches',
-            $summary['legacy_extracted_text_mismatches'],
-            $examples['review'],
-        ));
+        if ($hasExtractionStatus) {
+            $this->line($this->formatFindingLine('legacy_extraction_status_mismatches', $summary['legacy_extraction_status_mismatches'], $examples['review']));
+        } else {
+            $this->line('- legacy_extraction_status_mismatches: extraction_status column absent, skipped');
+        }
+        if ($hasExtractionError) {
+            $this->line($this->formatFindingLine('legacy_extraction_error_mismatches', $summary['legacy_extraction_error_mismatches'], $examples['review']));
+        } else {
+            $this->line('- legacy_extraction_error_mismatches: extraction_error column absent, skipped');
+        }
+        if ($hasExtractedText) {
+            $this->line($this->formatFindingLine('legacy_extracted_text_mismatches', $summary['legacy_extracted_text_mismatches'], $examples['review']));
+        } else {
+            $this->line('- legacy_extracted_text_mismatches: extracted_text column absent, skipped');
+        }
         $this->line($this->lineBreakIfNoFindings($this->hasFindings([
             $summary['storage_path_mismatches'],
             $summary['original_filename_mismatches'],
@@ -469,9 +482,21 @@ class AuditKnowledgeLegacyFields extends Command
         }
         $this->newLine();
         $this->line('Extraction mirrors');
-        $this->line(sprintf('- legacy_extraction_status_mismatches=%d', $summary['legacy_extraction_status_mismatches']));
-        $this->line(sprintf('- legacy_extraction_error_mismatches=%d', $summary['legacy_extraction_error_mismatches']));
-        $this->line(sprintf('- legacy_extracted_text_mismatches=%d', $summary['legacy_extracted_text_mismatches']));
+        if ($hasExtractionStatus) {
+            $this->line(sprintf('- legacy_extraction_status_mismatches=%d', $summary['legacy_extraction_status_mismatches']));
+        } else {
+            $this->line('- extraction_status column: absent, skipped');
+        }
+        if ($hasExtractionError) {
+            $this->line(sprintf('- legacy_extraction_error_mismatches=%d', $summary['legacy_extraction_error_mismatches']));
+        } else {
+            $this->line('- extraction_error column: absent, skipped');
+        }
+        if ($hasExtractedText) {
+            $this->line(sprintf('- legacy_extracted_text_mismatches=%d', $summary['legacy_extracted_text_mismatches']));
+        } else {
+            $this->line('- extracted_text column: absent, skipped');
+        }
         $this->newLine();
         $this->line('Legacy compatibility mirrors');
         if ($hasContentType) {
@@ -606,6 +631,21 @@ class AuditKnowledgeLegacyFields extends Command
     protected function hasIsActiveColumn(): bool
     {
         return Schema::hasColumn('knowledge_items', 'is_active');
+    }
+
+    protected function hasExtractionStatusColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'extraction_status');
+    }
+
+    protected function hasExtractionErrorColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'extraction_error');
+    }
+
+    protected function hasExtractedTextColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'extracted_text');
     }
 
     /**

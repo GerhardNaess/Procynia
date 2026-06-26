@@ -75,15 +75,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'extraction_error' => null,
         ]);
 
-        DB::table('knowledge_items')
-            ->where('id', $auditItem->id)
-            ->update([
-                'extracted_text' => '',
-                'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-                'extraction_error' => 'Legacy extraction error must be ignored.',
-                'updated_at' => now(),
-            ]);
-
         $itemUpdatedAtBefore = DB::table('knowledge_items')
             ->where('id', $auditItem->id)
             ->value('updated_at');
@@ -104,9 +95,10 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('storage_path column: absent, skipped')
             ->expectsOutputToContain('mime_type column: absent, skipped')
             ->expectsOutputToContain('file_size_bytes column: absent, skipped')
-            ->expectsOutputToContain('legacy_extraction_status_mismatches=1')
-            ->expectsOutputToContain('legacy_extraction_error_mismatches=1')
-            ->expectsOutputToContain('content_fallback_candidates=1')
+            ->expectsOutputToContain('extraction_status column: absent, skipped')
+            ->expectsOutputToContain('extraction_error column: absent, skipped')
+            ->expectsOutputToContain('extracted_text column: absent, skipped')
+            ->expectsOutputToContain('content_fallback_candidates=0')
             ->expectsOutputToContain('content_type column: absent, skipped')
             ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('BLOCKED')
@@ -324,9 +316,9 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'storage_path' => $overrides['storage_path'] ?? null,
             'mime_type' => $overrides['mime_type'] ?? null,
             'file_size_bytes' => $overrides['file_size_bytes'] ?? null,
-            'extracted_text' => $overrides['extracted_text'] ?? $knowledgeItem->extracted_text,
-            'extraction_status' => $overrides['extraction_status'] ?? $knowledgeItem->extraction_status,
-            'extraction_error' => $overrides['extraction_error'] ?? $knowledgeItem->extraction_error,
+            'extracted_text' => $overrides['extracted_text'] ?? '',
+            'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => $overrides['extraction_error'] ?? null,
         ], $overrides));
     }
 }

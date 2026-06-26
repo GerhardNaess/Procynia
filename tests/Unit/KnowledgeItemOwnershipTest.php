@@ -284,9 +284,9 @@ class KnowledgeItemOwnershipTest extends TestCase
             'storage_path' => $storagePath,
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 2048,
-            'extracted_text' => $document->extracted_text,
-            'extraction_status' => $document->extraction_status,
-            'extraction_error' => $document->extraction_error,
+            'extracted_text' => 'Extracted content from company profile.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
             'uploaded_by_user_id' => $document->uploaded_by_user_id,
             'uploaded_at' => $document->created_at,
         ]);
