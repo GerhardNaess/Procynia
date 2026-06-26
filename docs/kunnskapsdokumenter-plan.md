@@ -1419,6 +1419,34 @@ Fase 28.10B fjerner aktiv runtime-skriving av ekstraksjonsfelt fra `knowledge_it
 - Retrieval-logikk
 - Frontend/UI
 
+### 28.10C Flytt aktiv SQL/query-read fra `knowledge_items.extraction_status` til current version (juni 2026)
+
+Fase 28.10C flytter det siste aktive SQL-filteret på `knowledge_items.extraction_status` over til `knowledge_item_versions.extraction_status`.
+
+**Hva som ble endret:**
+
+- `KnowledgeVocabularyController::representativeDocumentsPayload()`: Fjernet `->where('extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)` på `knowledge_items`. Filteret er nå lagt til i den eksisterende `whereExists`-subqueryen mot `knowledge_item_versions`, som allerede filtrerte på `is_current = true` og `storage_path IS NOT NULL`. `knowledge_item_versions.extraction_status = 'completed'` er nå en del av den subqueryen.
+
+**Gjenværende akseptable treff:**
+
+- `KnowledgeItem.$fillable` — feltet finnes fortsatt i DB og er fillable. Akseptabelt inntil kolonnedropp.
+- `KnowledgeBaseController` ny versjon upload (~linje 621): skriver `extraction_status` til `KnowledgeItemVersion`. Korrekt.
+- `KnowledgeBaseController` payload-metoder (~linje 1870, 1926): bruker `$extractionStatus` fra `resolvedExtractionStatus()` resolver. Korrekt.
+- `KnowledgeBaseController` versjonshistorikk (~linje 2034): `$version->extraction_status` fra `KnowledgeItemVersion`. Korrekt.
+- Kommentarer i `AiController`, `KnowledgeMetadataMapService`, `MetadataCandidateRetrievalService`. Akseptable.
+
+**Fortsatt igjen (til 28.10D):**
+
+- Resolver-fallback i `KnowledgeItem::resolvedExtractionStatus()`, `resolvedExtractionError()` og `resolvedExtractedText()` leser fortsatt fra KI-feltene som fallback.
+- Ingen kolonner er droppet.
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- Retrieval-logikk
+- Frontend/UI
+
 ### 28.11 Egen vurdering av `content`
 
 - Kun når all tekstlesing er versjonsbasert og siste fallback ikke lenger trengs.

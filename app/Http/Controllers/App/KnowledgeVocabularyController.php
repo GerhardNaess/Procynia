@@ -564,9 +564,9 @@ class KnowledgeVocabularyController extends Controller
                     ->from('knowledge_item_versions')
                     ->whereColumn('knowledge_item_versions.knowledge_item_id', 'knowledge_items.id')
                     ->where('knowledge_item_versions.is_current', true)
-                    ->whereNotNull('knowledge_item_versions.storage_path');
+                    ->whereNotNull('knowledge_item_versions.storage_path')
+                    ->where('knowledge_item_versions.extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED);
             })
-            ->where('extraction_status', KnowledgeItem::EXTRACTION_STATUS_COMPLETED)
             ->orderByDesc('updated_at')
             ->orderByDesc('id')
             ->limit(24)
