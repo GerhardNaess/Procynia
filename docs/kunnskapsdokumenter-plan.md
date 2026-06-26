@@ -1087,22 +1087,22 @@ Kunnskapsbase og Saksdokumenter er fortsatt to adskilte flyter:
 
 Fase 2.7 er fullført som en kontrollert legacy-isolering, ikke som fysisk databaseopprydding. Legacy-feltene er ikke fjernet, og kolonner er ikke droppet. I stedet er de autoritative kildene tydeliggjort og lesing er sentralisert slik at nye og gamle felt kan eksistere side om side med klarere ansvarslinjer.
 
-`document_type` er fortsatt den autoritative kilden for dokumentkategori/type, og `document_status` er fortsatt den autoritative kilden for aktiv/inaktiv-status. `KnowledgeItemVersion` er autoritativ kilde for gjeldende filidentitet, filmetadata og ekstraksjonsdata. `KnowledgeItem` beholder legacy-/fallbackfelter av kompatibilitetshensyn.
+`document_type` er fortsatt den autoritative kilden for dokumentkategori/type, og `document_status` er fortsatt den autoritative kilden for aktiv/inaktiv-status. `KnowledgeItemVersion` er autoritativ kilde for gjeldende filidentitet, filmetadata og ekstraksjonsdata. `KnowledgeItem`s filidentitetsfelt (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) er fysisk fjernet (fase 28.9G, juni 2026). Ekstraksjonsfeltene (`extraction_status`, `extraction_error`, `extracted_text`) og `content` beholdes foreløpig som legacy-fallback.
 
 ### 28.7L — Kartlegging av gjenværende legacy-speilfelter (2.7L)
 
 Denne kartleggingen oppsummerer de feltene som fortsatt fungerer som legacy-speil eller fallback i Kunnskapsbase. De er fortsatt i bruk i payloads, UI, retrieval, AI-strømmer eller tester, og kan derfor ikke fjernes før alle konsumenter er flyttet helt over til versjons- og metadata-kildene.
 
-**Autoritativ kilde for filidentitet:** `KnowledgeItemVersion` for gjeldende versjon. `KnowledgeItem` beholder midlertidige speilfelter for bakoverkompatibilitet.
+**Autoritativ kilde for filidentitet:** `KnowledgeItemVersion` for gjeldende versjon. `KnowledgeItem`s filidentitetsfelt er fysisk fjernet (fase 28.9G, juni 2026).
 
 **Autoritativ kilde for ekstraksjonsstatus:** gjeldende `KnowledgeItemVersion.extraction_status`. `KnowledgeItem.extraction_status` er fortsatt et legacy-speil som brukes som fallback i flere payloads og tester.
 
 | Felt | Autoritativ kilde | Skrives fortsatt? | Leses fortsatt? | Brukt i payload/UI/retrieval/AI/tests? | Risiko ved fjerning | Anbefalt neste steg |
 | --- | --- | --- | --- | --- | --- | --- |
-| `storage_path` | `KnowledgeItemVersion.storage_path` for gjeldende versjon; `KnowledgeItem.storage_path` er legacy-speil | Ja, ved opplasting, erstatning og godkjenning | Ja | Ja: filhandlinger, payloads, revisjonssnapshots og tester | Høy — kan bryte filreferanser og historikk | Behold til alle filhandlinger leser rent fra versjonstabellen |
-| `original_filename` | `KnowledgeItemVersion.original_filename` for gjeldende versjon; `KnowledgeItem.original_filename` som bakoverkompatibel fallback | Ja | Ja | Ja: liste, detalj, versjonshistorikk og tester | Høy — påvirker visning, deduplisering og historikk | Fase ut først når alle visninger er versjonsbevisste |
-| `mime_type` | `KnowledgeItemVersion.mime_type` for gjeldende versjon; `KnowledgeItem.mime_type` som legacy-speil | Ja | Ja | Ja: liste, detalj, filmetadata og tester | Høy — filtypevisning og filhandlinger kan feile | Behold til hele UI-et leser fra versjonspayload alene |
-| `file_size_bytes` | `KnowledgeItemVersion.file_size_bytes` for gjeldende versjon; `KnowledgeItem.file_size_bytes` som legacy-speil | Ja | Ja | Ja: liste, detalj, versjonshistorikk og tester | Middels/høy — størrelse kan forsvinne i UI og historikk | Fjern først når alle visninger bruker versjonsfeltet direkte |
+| `storage_path` | `KnowledgeItemVersion.storage_path` | ~~Ja~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 28.9G). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.9. |
+| `original_filename` | `KnowledgeItemVersion.original_filename` | ~~Ja~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 28.9G). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.9. |
+| `mime_type` | `KnowledgeItemVersion.mime_type` | ~~Ja~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 28.9G). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.9. |
+| `file_size_bytes` | `KnowledgeItemVersion.file_size_bytes` | ~~Ja~~ | ~~Ja~~ | **Fysisk fjernet juni 2026 (fase 28.9G). Kolonnen eksisterer ikke lenger i `knowledge_items`.** | — | Fullført. Se §28.9. |
 | `extraction_status` | Gjeldende `KnowledgeItemVersion.extraction_status`; `KnowledgeItem.extraction_status` er fortsatt fallback | Ja | Ja | Ja: payload, banner-/statuslogikk, retrieval-sjekker og tester | Høy — kan bryte statusvisning og statusbasert filtrering | Behold til status er hentet konsekvent fra current version i alle konsumenter |
 | `extraction_error` | Gjeldende `KnowledgeItemVersion.extraction_error`; `KnowledgeItem.extraction_error` som fallback | Ja | Ja | Ja: payload, UI-feilvisning og tester | Middels/høy — feilvisning kan bli tom eller feil | Fase ut når alle feilvisninger leser fra versjonspayload |
 | `extracted_text` | `KnowledgeItemVersion.extracted_text` for gjeldende versjon; `KnowledgeItem.extracted_text` som legacy fallback | Ja | Ja | Ja: AI-grunnlag, sammendrag, payload-fallback og tester | Høy — kan påvirke AI-kontekst og fallback-tekster | Behold til alle AI-/oppsummeringskall er versjonsbaserte |
@@ -1112,8 +1112,9 @@ Denne kartleggingen oppsummerer de feltene som fortsatt fungerer som legacy-spei
 
 **Oppsummert:**
 
-- Filidentitet og filmetadata bør på sikt leses fra `KnowledgeItemVersion`.
+- Filidentitetsfeltene (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) er fysisk fjernet fra `knowledge_items` (fase 28.9G, juni 2026). Autoritativ kilde er `knowledge_item_versions`.
 - `document_type` og `document_status` er de autoritative styringsfeltene. `content_type` og `is_active` er fysisk fjernet fra `knowledge_items` (fase 2.8A, juni 2026).
+- Ekstraksjonsfeltene (`extraction_status`, `extraction_error`, `extracted_text`) beholdes foreløpig som legacy-speil — se fase 28.10 for videre plan.
 - `content` er den svakeste delen av kjeden og bør ryddes sist, etter at all tekstbruk er versjonsbasert.
 - Ingen gjenværende kolonner skal slettes før alle lesere, payloads og tester er flyttet over til de nye kildene.
 
@@ -1128,7 +1129,7 @@ Følgende resolver-metoder finnes nå på `KnowledgeItem`:
 - `resolvedMimeType()`
 - `resolvedFileSizeBytes()`
 
-Resolverne leser først fra gjeldende `currentVersion` og faller deretter tilbake til legacy-feltene på `KnowledgeItem` for bakoverkompatibilitet. Dette reduserte direkte bruk av legacy-speil i controlleren uten å endre kontrakten til frontend.
+Resolverne leser fra gjeldende `currentVersion`. Fallback til legacy-feltene på `KnowledgeItem` ble fjernet i fase 28.9F, og de underliggende legacy-kolonnene ble fysisk droppet i fase 28.9G. Resolverne returnerer `null` dersom gjeldende versjon mangler feltet.
 
 ### 28.7N — Sentralisert ekstraksjonsstatuslesing (fullført)
 
@@ -1142,7 +1143,7 @@ Følgende resolver-metoder finnes nå på `KnowledgeItem`:
 
 `resolvedExtractionError()` behandler `null` på current version som en meningsbærende verdi og faller derfor ikke tilbake til gammel legacy-feil når gjeldende versjon finnes uten feil. `textForKnowledgeProcessing()` bruker nå `resolvedExtractedText()` og beholder `content` som siste fallback.
 
-Fysisk opprydding for `content_type` og `is_active` ble gjennomført som fase 2.8A (juni 2026). Se §28.8A. Videre opprydding for filidentitets- og ekstraksjonsfeltene kan eventuelt vurderes som en senere egen fase, med tilsvarende datakontroll og avvikling av resterende fallback-/speilskriving.
+Fysisk opprydding for `content_type` og `is_active` ble gjennomført som fase 2.8A (juni 2026). Se §28.8A. Fysisk opprydding for filidentitetsfeltene (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) ble gjennomført som fase 28.9 (juni 2026). Se §28.9. Videre opprydding for ekstraksjonsfeltene kan eventuelt vurderes som fase 28.10, med tilsvarende datakontroll og avvikling av resterende fallback-/speilskriving.
 
 ### 28.8 Drop-readiness for `content_type` og `is_active` (kontrollert juni 2026)
 
@@ -1291,12 +1292,49 @@ Audit-kommandoen er schema-aware (fase 2.8H) og krasjer ikke ved fraværende kol
 
 ---
 
-### 28.9 Tilsvarende plan for filidentitetsfeltene
+### 28.9 Fysisk fjerning av filidentitetsfeltene fra `knowledge_items` ✓ Fullført juni 2026
 
-- `storage_path`
-- `original_filename`
-- `mime_type`
-- `file_size_bytes`
+Fase 28.9 er fullført juni 2026. Filidentitetsfeltene `original_filename`, `storage_path`, `mime_type` og `file_size_bytes` er fysisk fjernet fra `knowledge_items`. Autoritativ kilde for filidentitet er nå utelukkende `knowledge_item_versions`.
+
+**Progresjon gjennom underfaser:**
+
+- **28.9C** — Aktiv skriving til legacy-speil (`KnowledgeItem.original_filename` osv.) ble stoppet. Upload-/godkjenningsflyten skriver nå kun til `KnowledgeItemVersion`.
+- **28.9D** — Direkte PHP-lesing fra legacy-feltene ble flyttet til versjonstabell-resolvers i alle app-kontrollere og tjenester.
+- **28.9E** — SQL/query builder-lesing (scope-filtre, joins) ble flyttet fra `knowledge_items`-kolonnene til `knowledge_item_versions`.
+- **28.9F** — Resolver-fallback til legacy-feltene på `KnowledgeItem` ble fjernet fra alle fire resolver-metoder (`resolvedOriginalFilename()`, `resolvedStoragePath()`, `resolvedMimeType()`, `resolvedFileSizeBytes()`). Resolverne returnerer nå `null` dersom `currentVersion` mangler feltet.
+- **28.9G** — Schema-aware audit og fysisk dropp. `knowledge:legacy-audit` utvidet med `Schema::hasColumn()`-sjekker for alle seks legacy-felt. Defensiv migrasjon `2026_06_25_214118_drop_legacy_file_fields_from_knowledge_items_table.php` droppet alle fire kolonner med `hasColumn()`-guard i `up()` og reversibel `down()`. Alle tester ble ryddet for de fire feltene.
+
+**`knowledge:legacy-audit` etter kolonnedropp:**
+
+```
+original_filename column: absent, skipped
+storage_path column: absent, skipped
+mime_type column: absent, skipped
+file_size_bytes column: absent, skipped
+content_type column: absent, skipped
+is_active column: absent, skipped
+OK_FOR_NEXT_STEP
+```
+
+**Commit:** `62a9221`
+
+**Ikke endret:**
+
+- `SavedNoticeAiDocument` og Saksdokumenter
+- AI-svarutkastflyt og `answer_draft_coverage`
+- `SavedNoticeAiEvidence`
+- Retrieval-logikk
+- Frontend/UI
+- `KnowledgeItemVersion`-felter
+
+**Autoritative felt etter fjerning:**
+
+- `knowledge_item_versions.original_filename` — autoritativ kilde for filnavn
+- `knowledge_item_versions.storage_path` — autoritativ kilde for filsti
+- `knowledge_item_versions.mime_type` — autoritativ kilde for MIME-type
+- `knowledge_item_versions.file_size_bytes` — autoritativ kilde for filstørrelse
+
+---
 
 ### 28.10 Tilsvarende plan for ekstraksjonsfeltene
 
@@ -1429,5 +1467,7 @@ Fase 2.7 er nå dokumentert som fullført kontrollert legacy-isolering.
 Fase 2.8A — fysisk fjerning av `content_type` og `is_active` fra `knowledge_items` — er fullført per juni 2026. Kolonnene eksisterer ikke lenger i skjemaet. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for begge kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` er ikke endret. Autoritative felt er `document_type` og `document_status`.
 
 Fase 2.8 er fullført juni 2026. Den fysiske databaseoppryddingen ble gjennomført kontrollert etter at fase 2.7 isolerte all aktiv legacy-bruk. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items`. Etterkontroll bekreftet at resterende treff kun er historiske migrasjoner, dokumentasjon, schema-aware audit, andre modellers legitime `is_active`-felter eller tester som verifiserer fravær/ignorering. `knowledge:legacy-audit` er schema-aware og rapporterer `OK_FOR_NEXT_STEP` når kolonnene er fraværende. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Autoritative felt er fortsatt `document_type` og `document_status`.
+
+Fase 28.9 — fysisk fjerning av filidentitetsfeltene (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) fra `knowledge_items` — er fullført juni 2026. Autoritativ kilde er nå utelukkende `knowledge_item_versions`. Aktiv skriving til legacy-speil ble stoppet i 28.9C, direkte PHP-lesing ble flyttet i 28.9D, SQL/query builder-lesing ble flyttet i 28.9E, resolver-fallback ble fjernet i 28.9F, og fysisk dropp med schema-aware audit ble gjennomført i 28.9G. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for alle seks legacy-kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Fase 28.10 (ekstraksjonsfeltene) og 28.11 (`content`) er ikke startet.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
