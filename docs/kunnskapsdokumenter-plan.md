@@ -1569,9 +1569,50 @@ OK_FOR_NEXT_STEP
 - Retrieval-logikk
 - Frontend/UI
 
-**Neste steg:** 28.10G etterkontroll/formell lukking av 28.10.
-
 **Fullført:** Commit `"Drop legacy extraction fields from knowledge items"`.
+
+### 28.10G Etterkontroll og formell lukking av fase 28.10 (juni 2026)
+
+Fase 28.10G er en ren kontroll- og dokumentasjonsfase som formelt lukker ekstraksjonsfelt-oppryddingen.
+
+**Kontroller utført:**
+
+- Arbeidskopi ren ved start.
+- `knowledge:legacy-audit` kjørt — `OK_FOR_NEXT_STEP`. Alle tre ekstraksjonsfelt rapportert som `absent, skipped`.
+- Søk på `knowledge_items.extraction_*` i `app/`, `tests/`, `database/`, `docs/` — ingen aktiv runtime-lesing eller -skriving mot `knowledge_items` funnet.
+- `KnowledgeItem.php` bekreftet ren: `$fillable` inneholder ikke de droppede feltene, `$casts` har ingen legacy-casts, `$attributes` setter ingen defaults, resolverne leser utelukkende fra `currentVersion`.
+- Migrasjon `2026_06_26_000001_drop_legacy_extraction_fields_from_knowledge_items_table.php` bekreftet defensiv: `up()` og `down()` bruker `Schema::hasColumn()`.
+
+**Konkret feil funnet og rettet:**
+
+Testhjelpemetoden `createKnowledgeItem` i `tests/Unit/Services/KnowledgeVocabularyAnalysisBatchServiceTest.php` leste `$item->extracted_text`, `$item->extraction_status`, `$item->extraction_error` fra KI for å sette KIV-verdier (samme klasse av feil som ble rettet i andre testfiler i 28.10F). Kolonnene returnerer null etter dropp, og KIV fikk feil verdier. Fikset ved å:
+- Fjerne de droppede feltene fra `KnowledgeItem::query()->create()`-kallet
+- Erstatte `$item->extracted_text/extraction_status/extraction_error` i KIV-opprettelsen med `$overrides['extracted_text'] ?? $content`, `$overrides['extraction_status'] ?? EXTRACTION_STATUS_COMPLETED`, `$overrides['extraction_error'] ?? null`
+
+Testene passerte tilfeldig fordi `KnowledgeVocabularyExtractionService` er mocket og ikke filtrerer på `extraction_status`. Feilen er likevel rettet for konsistens og for å unngå stille feil ved fremtidige endringer.
+
+**Akseptable gjenværende treff:**
+
+- `KnowledgeItemVersion` — har kolonnene nativt
+- `SavedNoticeAiDocument.extracted_text` — saksdokumenter, utenfor scope
+- Requirements-tjenester (`RequirementCandidateExtractor`, `DocumentSplitPlanner`, `RequirementExtractionPipeline`, `RequirementExtractionRunService`) — leser `$document->extracted_text` fra `SavedNoticeAiDocument`
+- `KnowledgeVocabularyExtractionService.php:203` — array-literal-nøkkelstreng, ikke modell-tilgang
+- `KnowledgeMetadataMapService`, `MetadataCandidateRetrievalService` — kun kommentarer
+- Audit-kommandoen — schema-aware
+- Historiske migrasjoner
+- Tester som verifiserer current-version-atferd
+
+**Tester etter 28.10G-rettingen:**
+
+- 4/4 `KnowledgeVocabularyAnalysisBatchServiceTest`
+- 145/145 `KnowledgeBaseControllerTest`
+- 35/35 kombinert `KnowledgeVocabularyControllerTest` + `KnowledgeItemOwnershipTest` + `AuditKnowledgeLegacyFieldsCommandTest`
+
+**Fase 28.10 er formelt lukket.**
+
+`KnowledgeItemVersion` er autoritativ kilde for `extraction_status`, `extraction_error` og `extracted_text`. `knowledge_items` har ikke lenger disse kolonnene. `knowledge:legacy-audit` er schema-aware og grønn. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `knowledge_items.content` ble ikke endret.
+
+**Fullført:** Commit `"Mark extraction field cleanup as completed"`. Fase 28.11 ikke startet.
 
 ### 28.11 Egen vurdering av `content`
 
@@ -1699,6 +1740,8 @@ Fase 2.8A — fysisk fjerning av `content_type` og `is_active` fra `knowledge_it
 
 Fase 2.8 er fullført juni 2026. Den fysiske databaseoppryddingen ble gjennomført kontrollert etter at fase 2.7 isolerte all aktiv legacy-bruk. Legacy-kolonnene `content_type` og `is_active` er fysisk fjernet fra `knowledge_items`. Etterkontroll bekreftet at resterende treff kun er historiske migrasjoner, dokumentasjon, schema-aware audit, andre modellers legitime `is_active`-felter eller tester som verifiserer fravær/ignorering. `knowledge:legacy-audit` er schema-aware og rapporterer `OK_FOR_NEXT_STEP` når kolonnene er fraværende. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Autoritative felt er fortsatt `document_type` og `document_status`.
 
-Fase 28.9 — fysisk fjerning av filidentitetsfeltene (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) fra `knowledge_items` — er fullført juni 2026. Autoritativ kilde er nå utelukkende `knowledge_item_versions`. Aktiv skriving til legacy-speil ble stoppet i 28.9C, direkte PHP-lesing ble flyttet i 28.9D, SQL/query builder-lesing ble flyttet i 28.9E, resolver-fallback ble fjernet i 28.9F, og fysisk dropp med schema-aware audit ble gjennomført i 28.9G. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for alle seks legacy-kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret. Fase 28.10 (ekstraksjonsfeltene) og 28.11 (`content`) er ikke startet.
+Fase 28.9 — fysisk fjerning av filidentitetsfeltene (`original_filename`, `storage_path`, `mime_type`, `file_size_bytes`) fra `knowledge_items` — er fullført juni 2026. Autoritativ kilde er nå utelukkende `knowledge_item_versions`. Aktiv skriving til legacy-speil ble stoppet i 28.9C, direkte PHP-lesing ble flyttet i 28.9D, SQL/query builder-lesing ble flyttet i 28.9E, resolver-fallback ble fjernet i 28.9F, og fysisk dropp med schema-aware audit ble gjennomført i 28.9G. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for alle seks legacy-kolonner. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `answer_draft_coverage` ble ikke endret.
+
+Fase 28.10 — fysisk fjerning av ekstraksjonsfeltene (`extraction_status`, `extraction_error`, `extracted_text`) fra `knowledge_items` — er fullført juni 2026. `KnowledgeItemVersion` er autoritativ kilde for alle ekstraksjonsverdier. 28.10A kartla aktive runtime-avhengigheter; 28.10B stoppet aktiv skriving til KI-speilene; 28.10C flyttet det siste aktive SQL-filteret til `knowledge_item_versions`; 28.10D fjernet resolver-fallback; 28.10E bekreftet drop-readiness; 28.10F fjernet kolonnene fysisk og oppdaterte ni filer; 28.10G gjennomførte etterkontroll, rettet én oversett testhjelpemetode, og formelt lukket fasen. `knowledge:legacy-audit` rapporterer `OK_FOR_NEXT_STEP` med `absent, skipped` for alle tre ekstraksjonsfelt. `SavedNoticeAiDocument`, Saksdokumenter, AI-svarutkastflyt og `knowledge_items.content` ble ikke endret. Fase 28.11 (`content`) er ikke startet.
 
 Saksdokumenter og Kunnskapsbase er to distinkte områder og skal fortsette å være det. `SavedNoticeAiDocument` og `KnowledgeItem` er separate modeller med separate flater og separate retrieval-stier.
