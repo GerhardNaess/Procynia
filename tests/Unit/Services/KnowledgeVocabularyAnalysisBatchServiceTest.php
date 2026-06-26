@@ -206,16 +206,16 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
     {
         $title = $overrides['title'] ?? 'Metadata document';
         $filename = $overrides['original_filename'] ?? 'metadata-document.docx';
+        $storagePath = $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx';
+        $mimeType = $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        $fileSizeBytes = $overrides['file_size_bytes'] ?? 1024;
         $content = $overrides['content'] ?? 'Metadata document content.';
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes']));
 
         $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $content,
-            'original_filename' => $filename,
-            'storage_path' => $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx',
-            'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
@@ -224,7 +224,7 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
-        ], $overrides));
+        ], $kiOverrides));
 
         if (array_key_exists('content_type', $overrides)) {
             $item->forceFill([
@@ -243,10 +243,10 @@ class KnowledgeVocabularyAnalysisBatchServiceTest extends TestCase
             'customer_id' => $item->customer_id,
             'version_no' => 1,
             'is_current' => true,
-            'original_filename' => $item->original_filename,
-            'storage_path' => $item->storage_path,
-            'mime_type' => $item->mime_type,
-            'file_size_bytes' => $item->file_size_bytes,
+            'original_filename' => $filename,
+            'storage_path' => $storagePath,
+            'mime_type' => $mimeType,
+            'file_size_bytes' => $fileSizeBytes,
             'extracted_text' => $item->extracted_text,
             'extraction_status' => $item->extraction_status,
             'extraction_error' => $item->extraction_error,

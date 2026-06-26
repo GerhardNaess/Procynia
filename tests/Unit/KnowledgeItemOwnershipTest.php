@@ -268,47 +268,34 @@ class KnowledgeItemOwnershipTest extends TestCase
         $customer = $this->createCustomer('Backfill Test Customer AS');
 
         $document = $this->createKnowledgeItem($customer, [
-            'original_filename' => 'company-profile.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/company-profile.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 2048,
             'extracted_text' => 'Extracted content from company profile.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
         ]);
 
-        $version = KnowledgeItemVersion::query()
-            ->where('knowledge_item_id', $document->id)
-            ->where('version_no', 1)
-            ->first();
+        $storagePath = 'customers/'.$customer->id.'/knowledge-items/company-profile.docx';
 
-        // Backfill runs inside the migration. In tests with RefreshDatabase,
-        // migrations run fresh so no existing rows exist to backfill.
-        // We verify the model/relation by creating the version manually here
-        // and asserting field mapping is correct.
-        if ($version === null) {
-            $version = KnowledgeItemVersion::query()->create([
-                'knowledge_item_id' => $document->id,
-                'customer_id' => $document->customer_id,
-                'version_no' => 1,
-                'is_current' => true,
-                'original_filename' => $document->original_filename,
-                'storage_path' => $document->storage_path,
-                'mime_type' => $document->mime_type,
-                'file_size_bytes' => $document->file_size_bytes,
-                'extracted_text' => $document->extracted_text,
-                'extraction_status' => $document->extraction_status,
-                'extraction_error' => $document->extraction_error,
-                'uploaded_by_user_id' => $document->uploaded_by_user_id,
-                'uploaded_at' => $document->created_at,
-            ]);
-        }
+        $version = KnowledgeItemVersion::query()->create([
+            'knowledge_item_id' => $document->id,
+            'customer_id' => $document->customer_id,
+            'version_no' => 1,
+            'is_current' => true,
+            'original_filename' => 'company-profile.docx',
+            'storage_path' => $storagePath,
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 2048,
+            'extracted_text' => $document->extracted_text,
+            'extraction_status' => $document->extraction_status,
+            'extraction_error' => $document->extraction_error,
+            'uploaded_by_user_id' => $document->uploaded_by_user_id,
+            'uploaded_at' => $document->created_at,
+        ]);
 
         $this->assertSame(1, $version->version_no);
         $this->assertTrue($version->is_current);
         $this->assertSame('company-profile.docx', $version->original_filename);
-        $this->assertSame($document->storage_path, $version->storage_path);
-        $this->assertSame($document->mime_type, $version->mime_type);
+        $this->assertSame($storagePath, $version->storage_path);
+        $this->assertSame('application/vnd.openxmlformats-officedocument.wordprocessingml.document', $version->mime_type);
         $this->assertSame(2048, $version->file_size_bytes);
         $this->assertSame('Extracted content from company profile.', $version->extracted_text);
         $this->assertSame(KnowledgeItem::EXTRACTION_STATUS_COMPLETED, $version->extraction_status);
@@ -340,16 +327,13 @@ class KnowledgeItemOwnershipTest extends TestCase
     private function createKnowledgeItem(Customer $customer, array $overrides = []): KnowledgeItem
     {
         $content = $overrides['content'] ?? 'Ownership test content.';
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes']));
 
         return KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'ownership_type' => $overrides['ownership_type'] ?? KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
             'title' => $overrides['title'] ?? 'Ownership test document',
             'content' => $content,
-            'original_filename' => $overrides['original_filename'] ?? 'ownership-test-document.docx',
-            'storage_path' => $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/ownership-test-document.docx',
-            'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_theme_term_id' => $overrides['document_theme_term_id'] ?? null,
@@ -361,18 +345,13 @@ class KnowledgeItemOwnershipTest extends TestCase
             'owning_saved_notice_id' => $overrides['owning_saved_notice_id'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
             'is_active' => $overrides['is_active'] ?? true,
-        ], $overrides));
+        ], $kiOverrides));
     }
 
     public function test_file_resolvers_return_version_values(): void
     {
         $customer = $this->createCustomer('File Resolver Version AS');
-        $document = $this->createKnowledgeItem($customer, [
-            'original_filename' => 'legacy-name.docx',
-            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 999,
-        ]);
+        $document = $this->createKnowledgeItem($customer);
 
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
@@ -396,12 +375,7 @@ class KnowledgeItemOwnershipTest extends TestCase
     public function test_file_resolvers_return_null_when_no_current_version(): void
     {
         $customer = $this->createCustomer('File Resolver Null AS');
-        $document = $this->createKnowledgeItem($customer, [
-            'original_filename' => 'legacy-name.docx',
-            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 999,
-        ]);
+        $document = $this->createKnowledgeItem($customer);
 
         // No version created — resolvers must return null, not fall back to KI fields.
         $this->assertNull($document->resolvedOriginalFilename());
@@ -413,12 +387,7 @@ class KnowledgeItemOwnershipTest extends TestCase
     public function test_file_resolvers_ignore_legacy_ki_fields_when_version_exists(): void
     {
         $customer = $this->createCustomer('File Resolver Ignore Legacy AS');
-        $document = $this->createKnowledgeItem($customer, [
-            'original_filename' => 'legacy-name.docx',
-            'storage_path' => 'customers/'.$customer->id.'/legacy-path.docx',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 999,
-        ]);
+        $document = $this->createKnowledgeItem($customer);
 
         KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $document->id,
@@ -454,10 +423,10 @@ class KnowledgeItemOwnershipTest extends TestCase
             'customer_id' => $customer->id,
             'version_no' => 1,
             'is_current' => true,
-            'original_filename' => $document->original_filename,
-            'storage_path' => $document->storage_path,
-            'mime_type' => $document->mime_type,
-            'file_size_bytes' => $document->file_size_bytes,
+            'original_filename' => 'ownership-test-document.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/ownership-test-document.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
             'extracted_text' => 'Current version extracted text',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'uploaded_by_user_id' => null,

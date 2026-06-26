@@ -530,12 +530,8 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $item = KnowledgeItem::query()->create([
             'customer_id' => $customer->id,
             'title' => 'Version Storage Win',
-            'original_filename' => 'version-storage-win.docx',
             'content' => 'Stale item — no storage path.',
-            'storage_path' => null,
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_PENDING,
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'summary' => 'Summary',
@@ -578,12 +574,8 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $item = KnowledgeItem::query()->create([
             'customer_id' => $customer->id,
             'title' => 'Version Storage Block',
-            'original_filename' => 'version-storage-block.docx',
             'content' => 'Valid item — storage path set on item.',
-            'storage_path' => 'customers/'.$customer->id.'/version-storage-block.docx',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'summary' => 'Summary',
@@ -644,35 +636,21 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
         $storagePath = $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/metadata-document.docx';
         $extractionStatus = $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
 
+        $mimeType = $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        $fileSizeBytes = $overrides['file_size_bytes'] ?? 1024;
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes', 'content_type', 'is_active']));
+
         $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $content,
-            'original_filename' => $filename,
-            'storage_path' => $storagePath,
-            'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
-            'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
             'summary' => $overrides['summary'] ?? 'Oppsummering',
             'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
-            'is_active' => $overrides['is_active'] ?? true,
-        ], $overrides));
-
-        if (array_key_exists('content_type', $overrides)) {
-            $item->forceFill([
-                'content_type' => $overrides['content_type'],
-            ])->saveQuietly();
-        }
-
-        if (array_key_exists('is_active', $overrides)) {
-            $item->forceFill([
-                'is_active' => $overrides['is_active'],
-            ])->saveQuietly();
-        }
+        ], $kiOverrides));
 
         // Every knowledge item needs a current version so retrieval can find its chunks.
         KnowledgeItemVersion::query()->create([
@@ -680,7 +658,10 @@ class MetadataCandidateRetrievalServiceTest extends TestCase
             'customer_id' => $customer->id,
             'version_no' => 1,
             'is_current' => true,
+            'original_filename' => $filename,
             'storage_path' => $storagePath,
+            'mime_type' => $mimeType,
+            'file_size_bytes' => $fileSizeBytes,
             'extraction_status' => $extractionStatus,
         ]);
 

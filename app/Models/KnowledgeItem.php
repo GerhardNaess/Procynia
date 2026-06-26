@@ -125,10 +125,6 @@ class KnowledgeItem extends Model
         'document_theme_term_id',
         'title',
         'content',
-        'original_filename',
-        'storage_path',
-        'mime_type',
-        'file_size_bytes',
         'document_type',
         'extracted_text',
         'summary',
@@ -146,7 +142,6 @@ class KnowledgeItem extends Model
     protected function casts(): array
     {
         return [
-            'file_size_bytes' => 'integer',
             'document_category_id' => 'integer',
             'document_topic_id' => 'integer',
             'document_theme_term_id' => 'integer',

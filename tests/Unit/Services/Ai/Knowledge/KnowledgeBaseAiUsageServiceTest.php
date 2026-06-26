@@ -425,7 +425,6 @@ class KnowledgeBaseAiUsageServiceTest extends TestCase
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => 'Testinnhold for '.$title.'.',
-            'original_filename' => Str::slug($title).'.docx',
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_COMPANY,
             'content_type' => KnowledgeItem::CONTENT_TYPE_COMPANY,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,

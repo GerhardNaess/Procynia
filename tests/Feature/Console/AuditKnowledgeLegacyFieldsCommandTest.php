@@ -44,10 +44,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'content' => 'Knowledge item without a current version.',
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_REFERENCE,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'original_filename' => 'missing-current-version.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/missing-current-version.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 512,
             'extracted_text' => 'Legacy extracted text that should still be counted.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -60,10 +56,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'content' => 'Fallback content that should be used when extraction text is absent.',
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'original_filename' => 'legacy-drift.docx',
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/legacy-drift.docx',
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 2048,
             'extracted_text' => '',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => 'Legacy extraction error must not replace the current version error.',
@@ -86,15 +78,9 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         DB::table('knowledge_items')
             ->where('id', $auditItem->id)
             ->update([
-                'storage_path' => 'legacy/customers/'.$customer->id.'/knowledge-items/legacy-drift.docx',
-                'original_filename' => 'legacy-drift-legacy.docx',
-                'mime_type' => 'application/pdf',
-                'file_size_bytes' => 4096,
                 'extracted_text' => '',
                 'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
                 'extraction_error' => 'Legacy extraction error must be ignored.',
-                'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
-                'is_active' => false,
                 'updated_at' => now(),
             ]);
 
@@ -114,15 +100,15 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             ->expectsOutputToContain('current_version_failed_extraction_status=1')
             ->expectsOutputToContain('current_version_failed_without_extraction_error=1')
             ->expectsOutputToContain('current_version_missing_extracted_text=1')
-            ->expectsOutputToContain('storage_path_mismatches=1')
-            ->expectsOutputToContain('original_filename_mismatches=1')
-            ->expectsOutputToContain('mime_type_mismatches=1')
-            ->expectsOutputToContain('file_size_bytes_mismatches=1')
+            ->expectsOutputToContain('original_filename column: absent, skipped')
+            ->expectsOutputToContain('storage_path column: absent, skipped')
+            ->expectsOutputToContain('mime_type column: absent, skipped')
+            ->expectsOutputToContain('file_size_bytes column: absent, skipped')
             ->expectsOutputToContain('legacy_extraction_status_mismatches=1')
             ->expectsOutputToContain('legacy_extraction_error_mismatches=1')
             ->expectsOutputToContain('content_fallback_candidates=1')
-            ->expectsOutputToContain('content_type_vs_document_type_mismatches=1')
-            ->expectsOutputToContain('is_active_vs_document_status_mismatches=1')
+            ->expectsOutputToContain('content_type column: absent, skipped')
+            ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('BLOCKED')
             ->assertSuccessful();
 
@@ -131,7 +117,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $this->assertSame($missingVersionItem->updated_at?->toDateTimeString(), $missingVersionItem->fresh()->updated_at?->toDateTimeString());
     }
 
-    public function test_command_treats_content_type_and_is_active_drift_as_expected_legacy_findings(): void
+    public function test_command_reports_absent_content_type_and_is_active_columns_as_skipped(): void
     {
         $customer = $this->createCustomer('Compatibility Audit Customer AS');
 
@@ -140,35 +126,26 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'content' => 'Compatibility drift content.',
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ARCHIVED,
-            'original_filename' => 'compatibility-drift.docx',
+            'extracted_text' => 'Compatibility drift extracted text.',
+            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
+            'extraction_error' => null,
+        ]);
+
+        $this->createKnowledgeItemVersion($auditItem, [
+            'version_no' => 1,
+            'is_current' => true,
             'storage_path' => 'customers/'.$customer->id.'/knowledge-items/compatibility-drift.docx',
+            'original_filename' => 'compatibility-drift.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 1024,
             'extracted_text' => 'Compatibility drift extracted text.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'is_active' => true,
         ]);
-
-        $currentVersion = $this->createKnowledgeItemVersion($auditItem, [
-            'version_no' => 1,
-            'is_current' => true,
-            'extracted_text' => 'Compatibility drift extracted text.',
-            'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
-            'extraction_error' => null,
-        ]);
-
-        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $auditItem->document_type);
-        $this->assertSame(KnowledgeItem::CONTENT_TYPE_OTHER, $auditItem->content_type);
-        $this->assertSame(KnowledgeItem::DOCUMENT_STATUS_ARCHIVED, $auditItem->document_status);
-        $this->assertTrue((bool) $auditItem->is_active);
-        $this->assertSame(KnowledgeItem::DOCUMENT_TYPE_METHOD, $currentVersion->fresh()->knowledgeItem?->document_type);
 
         $this->artisan('knowledge:legacy-audit')
-            ->expectsOutputToContain('content_type_vs_document_type_mismatches=1')
-            ->expectsOutputToContain('is_active_vs_document_status_mismatches=1')
-            ->expectsOutputToContain('Expected legacy findings')
+            ->expectsOutputToContain('content_type column: absent, skipped')
+            ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('OK_FOR_NEXT_STEP')
             ->assertSuccessful();
     }
@@ -190,8 +167,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $item = $this->createKnowledgeItem($customer, [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'is_active' => true,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -199,6 +174,10 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $this->createKnowledgeItemVersion($item, [
             'version_no' => 1,
             'is_current' => true,
+            'original_filename' => 'schema-test.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/schema-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -206,7 +185,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
 
         $this->artisan('knowledge:legacy-audit')
             ->expectsOutputToContain('content_type column: absent, skipped')
-            ->expectsOutputToContain('is_active column: present')
+            ->expectsOutputToContain('is_active column: absent, skipped')
             ->expectsOutputToContain('OK_FOR_NEXT_STEP')
             ->assertSuccessful();
     }
@@ -228,8 +207,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $item = $this->createKnowledgeItem($customer, [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'is_active' => true,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -237,6 +214,10 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $this->createKnowledgeItemVersion($item, [
             'version_no' => 1,
             'is_current' => true,
+            'original_filename' => 'schema-test.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/schema-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -244,7 +225,7 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
 
         $this->artisan('knowledge:legacy-audit')
             ->expectsOutputToContain('is_active column: absent, skipped')
-            ->expectsOutputToContain('content_type column: present')
+            ->expectsOutputToContain('content_type column: absent, skipped')
             ->expectsOutputToContain('OK_FOR_NEXT_STEP')
             ->assertSuccessful();
     }
@@ -271,8 +252,6 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $item = $this->createKnowledgeItem($customer, [
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_status' => KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'content_type' => KnowledgeItem::CONTENT_TYPE_OTHER,
-            'is_active' => true,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -280,6 +259,10 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
         $this->createKnowledgeItemVersion($item, [
             'version_no' => 1,
             'is_current' => true,
+            'original_filename' => 'schema-test.docx',
+            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/schema-test.docx',
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'file_size_bytes' => 1024,
             'extracted_text' => 'Schema test content.',
             'extraction_status' => KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => null,
@@ -316,37 +299,18 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
     private function createKnowledgeItem(Customer $customer, array $overrides = []): KnowledgeItem
     {
         $content = $overrides['content'] ?? 'Legacy audit content.';
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes', 'content_type', 'is_active']));
 
-        $item = KnowledgeItem::query()->create(array_merge([
+        return KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $overrides['title'] ?? 'Legacy audit document',
             'content' => $content,
             'document_type' => $overrides['document_type'] ?? KnowledgeItem::DOCUMENT_TYPE_OTHER,
-            'content_type' => $overrides['content_type'] ?? KnowledgeItem::CONTENT_TYPE_OTHER,
             'document_status' => $overrides['document_status'] ?? KnowledgeItem::DOCUMENT_STATUS_ACTIVE,
-            'original_filename' => $overrides['original_filename'] ?? 'legacy-audit-document.docx',
-            'storage_path' => $overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/legacy-audit-document.docx',
-            'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'extracted_text' => $overrides['extracted_text'] ?? $content,
             'extraction_status' => $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED,
             'extraction_error' => $overrides['extraction_error'] ?? null,
-            'is_active' => $overrides['is_active'] ?? true,
-        ], $overrides));
-
-        if (array_key_exists('content_type', $overrides)) {
-            $item->forceFill([
-                'content_type' => $overrides['content_type'],
-            ])->saveQuietly();
-        }
-
-        if (array_key_exists('is_active', $overrides)) {
-            $item->forceFill([
-                'is_active' => $overrides['is_active'],
-            ])->saveQuietly();
-        }
-
-        return $item;
+        ], $kiOverrides));
     }
 
     private function createKnowledgeItemVersion(KnowledgeItem $knowledgeItem, array $overrides = []): KnowledgeItemVersion
@@ -356,10 +320,10 @@ class AuditKnowledgeLegacyFieldsCommandTest extends TestCase
             'customer_id' => $knowledgeItem->customer_id,
             'version_no' => $overrides['version_no'] ?? 1,
             'is_current' => $overrides['is_current'] ?? true,
-            'original_filename' => $overrides['original_filename'] ?? $knowledgeItem->original_filename,
-            'storage_path' => $overrides['storage_path'] ?? $knowledgeItem->storage_path,
-            'mime_type' => $overrides['mime_type'] ?? $knowledgeItem->mime_type,
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? $knowledgeItem->file_size_bytes,
+            'original_filename' => $overrides['original_filename'] ?? null,
+            'storage_path' => $overrides['storage_path'] ?? null,
+            'mime_type' => $overrides['mime_type'] ?? null,
+            'file_size_bytes' => $overrides['file_size_bytes'] ?? null,
             'extracted_text' => $overrides['extracted_text'] ?? $knowledgeItem->extracted_text,
             'extraction_status' => $overrides['extraction_status'] ?? $knowledgeItem->extraction_status,
             'extraction_error' => $overrides['extraction_error'] ?? $knowledgeItem->extraction_error,

@@ -31,6 +31,10 @@ class AuditKnowledgeLegacyFields extends Command
     {
         $hasContentType = $this->hasContentTypeColumn();
         $hasIsActive = $this->hasIsActiveColumn();
+        $hasOriginalFilename = $this->hasOriginalFilenameColumn();
+        $hasStoragePath = $this->hasStoragePathColumn();
+        $hasMimeType = $this->hasMimeTypeColumn();
+        $hasFileSizeBytes = $this->hasFileSizeBytesColumn();
 
         $summary = [
             'total_knowledge_items' => KnowledgeItem::query()->count(),
@@ -70,15 +74,27 @@ class AuditKnowledgeLegacyFields extends Command
             'id',
             'document_type',
             'document_status',
-            'storage_path',
-            'original_filename',
-            'mime_type',
-            'file_size_bytes',
             'extracted_text',
             'extraction_status',
             'extraction_error',
             'content',
         ];
+
+        if ($hasOriginalFilename) {
+            $selectColumns[] = 'original_filename';
+        }
+
+        if ($hasStoragePath) {
+            $selectColumns[] = 'storage_path';
+        }
+
+        if ($hasMimeType) {
+            $selectColumns[] = 'mime_type';
+        }
+
+        if ($hasFileSizeBytes) {
+            $selectColumns[] = 'file_size_bytes';
+        }
 
         if ($hasContentType) {
             $selectColumns[] = 'content_type';
@@ -113,7 +129,7 @@ class AuditKnowledgeLegacyFields extends Command
                 },
             ])
             ->orderBy('id')
-            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasContentType, $hasIsActive): void {
+            ->chunkById(250, function ($items) use (&$summary, &$examples, $hasOriginalFilename, $hasStoragePath, $hasMimeType, $hasFileSizeBytes, $hasContentType, $hasIsActive): void {
                 foreach ($items as $item) {
                     if ((int) $item->current_versions_count === 0) {
                         $summary['items_without_current_version']++;
@@ -156,22 +172,22 @@ class AuditKnowledgeLegacyFields extends Command
                         $this->appendExample($examples['blocking'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->storage_path, $item->storage_path)) {
+                    if ($hasStoragePath && $this->hasStringMismatch($currentVersion->storage_path, $item->storage_path)) {
                         $summary['storage_path_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->original_filename, $item->original_filename)) {
+                    if ($hasOriginalFilename && $this->hasStringMismatch($currentVersion->original_filename, $item->original_filename)) {
                         $summary['original_filename_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
-                    if ($this->hasStringMismatch($currentVersion->mime_type, $item->mime_type)) {
+                    if ($hasMimeType && $this->hasStringMismatch($currentVersion->mime_type, $item->mime_type)) {
                         $summary['mime_type_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
 
-                    if ($this->hasIntMismatch($currentVersion->file_size_bytes, $item->file_size_bytes)) {
+                    if ($hasFileSizeBytes && $this->hasIntMismatch($currentVersion->file_size_bytes, $item->file_size_bytes)) {
                         $summary['file_size_bytes_mismatches']++;
                         $this->appendExample($examples['review'], $item->id);
                     }
@@ -320,26 +336,26 @@ class AuditKnowledgeLegacyFields extends Command
         ])));
         $this->newLine();
         $this->line('Review findings');
-        $this->line($this->formatFindingLine(
-            'storage_path_mismatches',
-            $summary['storage_path_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'original_filename_mismatches',
-            $summary['original_filename_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'mime_type_mismatches',
-            $summary['mime_type_mismatches'],
-            $examples['review'],
-        ));
-        $this->line($this->formatFindingLine(
-            'file_size_bytes_mismatches',
-            $summary['file_size_bytes_mismatches'],
-            $examples['review'],
-        ));
+        if ($hasOriginalFilename) {
+            $this->line($this->formatFindingLine('original_filename_mismatches', $summary['original_filename_mismatches'], $examples['review']));
+        } else {
+            $this->line('- original_filename column: absent, skipped');
+        }
+        if ($hasStoragePath) {
+            $this->line($this->formatFindingLine('storage_path_mismatches', $summary['storage_path_mismatches'], $examples['review']));
+        } else {
+            $this->line('- storage_path column: absent, skipped');
+        }
+        if ($hasMimeType) {
+            $this->line($this->formatFindingLine('mime_type_mismatches', $summary['mime_type_mismatches'], $examples['review']));
+        } else {
+            $this->line('- mime_type column: absent, skipped');
+        }
+        if ($hasFileSizeBytes) {
+            $this->line($this->formatFindingLine('file_size_bytes_mismatches', $summary['file_size_bytes_mismatches'], $examples['review']));
+        } else {
+            $this->line('- file_size_bytes column: absent, skipped');
+        }
         $this->line($this->formatFindingLine(
             'current_version_failed_extraction_status',
             $summary['current_version_failed_extraction_status'],
@@ -431,10 +447,26 @@ class AuditKnowledgeLegacyFields extends Command
         ])));
         $this->newLine();
         $this->line('File identity mirrors');
-        $this->line(sprintf('- storage_path_mismatches=%d', $summary['storage_path_mismatches']));
-        $this->line(sprintf('- original_filename_mismatches=%d', $summary['original_filename_mismatches']));
-        $this->line(sprintf('- mime_type_mismatches=%d', $summary['mime_type_mismatches']));
-        $this->line(sprintf('- file_size_bytes_mismatches=%d', $summary['file_size_bytes_mismatches']));
+        if ($hasOriginalFilename) {
+            $this->line(sprintf('- original_filename_mismatches=%d', $summary['original_filename_mismatches']));
+        } else {
+            $this->line('- original_filename column: absent, skipped');
+        }
+        if ($hasStoragePath) {
+            $this->line(sprintf('- storage_path_mismatches=%d', $summary['storage_path_mismatches']));
+        } else {
+            $this->line('- storage_path column: absent, skipped');
+        }
+        if ($hasMimeType) {
+            $this->line(sprintf('- mime_type_mismatches=%d', $summary['mime_type_mismatches']));
+        } else {
+            $this->line('- mime_type column: absent, skipped');
+        }
+        if ($hasFileSizeBytes) {
+            $this->line(sprintf('- file_size_bytes_mismatches=%d', $summary['file_size_bytes_mismatches']));
+        } else {
+            $this->line('- file_size_bytes column: absent, skipped');
+        }
         $this->newLine();
         $this->line('Extraction mirrors');
         $this->line(sprintf('- legacy_extraction_status_mismatches=%d', $summary['legacy_extraction_status_mismatches']));
@@ -544,6 +576,26 @@ class AuditKnowledgeLegacyFields extends Command
         }
 
         return (int) $value;
+    }
+
+    protected function hasOriginalFilenameColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'original_filename');
+    }
+
+    protected function hasStoragePathColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'storage_path');
+    }
+
+    protected function hasMimeTypeColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'mime_type');
+    }
+
+    protected function hasFileSizeBytesColumn(): bool
+    {
+        return Schema::hasColumn('knowledge_items', 'file_size_bytes');
     }
 
     protected function hasContentTypeColumn(): bool

@@ -7928,20 +7928,18 @@ class AiControllerTest extends TestCase
         $storagePath = $overrides['storage_path'] ?? sprintf('customers/%d/knowledge-documents/%s', $customer->id, $slug.'.docx');
         $extractionStatus = $overrides['extraction_status'] ?? KnowledgeItem::EXTRACTION_STATUS_COMPLETED;
 
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes']));
+
         $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
             'title' => $title,
             'content' => $extractedText,
-            'original_filename' => $originalFilename,
-            'storage_path' => $storagePath,
-            'mime_type' => $overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => $overrides['file_size_bytes'] ?? 1024,
             'document_type' => $documentType,
             'extracted_text' => $extractedText,
             'extraction_status' => $extractionStatus,
             'extraction_error' => $overrides['extraction_error'] ?? null,
             'uploaded_by_user_id' => $overrides['uploaded_by_user_id'] ?? null,
-        ], $overrides));
+        ], $kiOverrides));
 
         // Every knowledge item needs a current version so retrieval guards can use version fields.
         KnowledgeItemVersion::query()->create([

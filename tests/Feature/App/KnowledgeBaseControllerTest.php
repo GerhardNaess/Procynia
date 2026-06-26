@@ -354,7 +354,7 @@ class KnowledgeBaseControllerTest extends TestCase
 
         $this->assertDatabaseMissing('knowledge_items', [
             'customer_id' => $context['customer']->id,
-            'original_filename' => 'invalid-ownership.docx',
+            'title' => 'invalid-ownership.docx',
         ]);
     }
 
@@ -2639,9 +2639,9 @@ class KnowledgeBaseControllerTest extends TestCase
         $indexResponse->assertOk();
         $indexResponse->assertViewHas('page', function (array $page) use ($companyDocument, $personalDocument, $caseDocument, $owner, $savedNotice): bool {
             $items = collect(data_get($page, 'props.knowledgeItems', []));
-            $companyItem = $items->firstWhere('original_filename', $companyDocument->original_filename);
-            $personalItem = $items->firstWhere('original_filename', $personalDocument->original_filename);
-            $caseItem = $items->firstWhere('original_filename', $caseDocument->original_filename);
+            $companyItem = $items->firstWhere('id', $companyDocument->id);
+            $personalItem = $items->firstWhere('id', $personalDocument->id);
+            $caseItem = $items->firstWhere('id', $caseDocument->id);
 
             return data_get($page, 'component') === 'App/AI/KnowledgeBase/Index'
                 && $companyItem !== null
@@ -2777,7 +2777,7 @@ class KnowledgeBaseControllerTest extends TestCase
             $response->assertSessionHasErrors([$case['error']]);
             $this->assertDatabaseMissing('knowledge_items', [
                 'customer_id' => $context['customer']->id,
-                'original_filename' => sprintf('catalog-invalid-%d.docx', $index + 1),
+                'title' => sprintf('catalog-invalid-%d.docx', $index + 1),
             ]);
         }
 
@@ -3399,10 +3399,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'ai-summary.pdf',
             'content' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
-            'original_filename' => 'ai-summary.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/ai-summary.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 2048,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'extracted_text' => 'Første del av dokumentet beskriver koordinering, roller og samhandling. Andre del beskriver risiko, oppfølging og kostnadsstyring.',
@@ -3465,10 +3461,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'toc-summary.pdf',
             'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
-            'original_filename' => 'toc-summary.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-summary.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 2048,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3",
@@ -3525,10 +3517,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'toc-fallback.pdf',
             'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2 Reell innholdstekst etter TOC.',
-            'original_filename' => 'toc-fallback.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/toc-fallback.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 2048,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nReell innholdstekst etter TOC. Denne teksten skal brukes i oppsummeringen.",
@@ -3562,10 +3550,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'index-toc-summary.pdf',
             'content' => 'Masterdata Prosjekter i Advania BILAG 1-11 1 Leverandørens Masterdata for prosjekter........................ 2',
-            'original_filename' => 'index-toc-summary.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/index-toc-summary.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 2048,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'extracted_text' => "Masterdata Prosjekter i Advania\n\nBILAG 1-11\n\n1 Leverandørens Masterdata for prosjekter........................ 2\n\n1.1 Koordinering og samhandling i Etableringsprosjekt........................ 3\n\nDette er faktisk innhold fra dokumentets semantiske del. Det beskriver leveranse, ansvar og oppfølging.",
@@ -3891,7 +3875,7 @@ class KnowledgeBaseControllerTest extends TestCase
             $storeResponse->assertSessionHasErrors(['document_theme_term_id']);
             $this->assertDatabaseMissing('knowledge_items', [
                 'customer_id' => $context['customer']->id,
-                'original_filename' => $filename,
+                'title' => $filename,
             ]);
         }
 
@@ -4060,7 +4044,7 @@ class KnowledgeBaseControllerTest extends TestCase
         $response->assertSessionHasErrors(['document_type']);
         $this->assertDatabaseMissing('knowledge_items', [
             'customer_id' => $context['customer']->id,
-            'original_filename' => 'invalid-type.docx',
+            'title' => 'invalid-type.docx',
         ]);
     }
 
@@ -4092,10 +4076,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'quota-test.pdf',
             'content' => 'Dokumentinnhold for test.',
-            'original_filename' => 'quota-test.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/quota-test.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => 'Dokumentinnhold for test.',
@@ -4148,10 +4128,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'available-quota.pdf',
             'content' => 'Første avsnitt handler om koordinering. Andre avsnitt handler om risiko og oppfølging.',
-            'original_filename' => 'available-quota.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/available-quota.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => 'Første avsnitt handler om koordinering. Andre avsnitt handler om risiko og oppfølging.',
@@ -4185,10 +4161,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'service-token-test.pdf',
             'content' => 'Koordinering og samhandling.',
-            'original_filename' => 'service-token-test.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/service-token-test.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 512,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_METHOD,
             'extracted_text' => 'Koordinering og samhandling.',
@@ -4238,10 +4210,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'fail-token-test.pdf',
             'content' => 'Innhold.',
-            'original_filename' => 'fail-token-test.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/fail-token-test.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 256,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => 'Innhold.',
@@ -4275,10 +4243,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'uploaded_by_user_id' => $context['user']->id,
             'title' => 'has-summary.pdf',
             'content' => 'Innhold som allerede har sammendrag.',
-            'original_filename' => 'has-summary.pdf',
-            'storage_path' => 'customers/'.$context['customer']->id.'/knowledge-documents/has-summary.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size_bytes' => 512,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'extracted_text' => 'Innhold som allerede har sammendrag.',
@@ -4446,7 +4410,11 @@ class KnowledgeBaseControllerTest extends TestCase
     {
         $title = (string) ($overrides['title'] ?? 'Ownership payload document');
         $originalFilename = (string) ($overrides['original_filename'] ?? 'ownership-payload.docx');
+        $storagePath = (string) ($overrides['storage_path'] ?? 'customers/'.$customer->id.'/knowledge-items/'.$originalFilename);
+        $mimeType = (string) ($overrides['mime_type'] ?? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        $fileSizeBytes = (int) ($overrides['file_size_bytes'] ?? 1024);
         $content = (string) ($overrides['content'] ?? 'Ownership payload content.');
+        $kiOverrides = array_diff_key($overrides, array_flip(['original_filename', 'storage_path', 'mime_type', 'file_size_bytes']));
 
         $item = KnowledgeItem::query()->create(array_merge([
             'customer_id' => $customer->id,
@@ -4454,10 +4422,6 @@ class KnowledgeBaseControllerTest extends TestCase
             'ownership_type' => KnowledgeItem::OWNERSHIP_TYPE_COMPANY,
             'title' => $title,
             'content' => $content,
-            'original_filename' => $originalFilename,
-            'storage_path' => 'customers/'.$customer->id.'/knowledge-items/'.$originalFilename,
-            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'file_size_bytes' => 1024,
             'content_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_type' => KnowledgeItem::DOCUMENT_TYPE_OTHER,
             'document_category_id' => null,
@@ -4470,7 +4434,7 @@ class KnowledgeBaseControllerTest extends TestCase
             'owner_user_id' => null,
             'owning_saved_notice_id' => null,
             'is_active' => true,
-        ], $overrides));
+        ], $kiOverrides));
 
         if (array_key_exists('content_type', $overrides)) {
             $item->forceFill([
@@ -4489,10 +4453,10 @@ class KnowledgeBaseControllerTest extends TestCase
             'customer_id' => $customer->id,
             'version_no' => 1,
             'is_current' => true,
-            'original_filename' => $item->original_filename,
-            'storage_path' => $item->storage_path,
-            'mime_type' => $item->mime_type,
-            'file_size_bytes' => $item->file_size_bytes,
+            'original_filename' => $originalFilename,
+            'storage_path' => $storagePath,
+            'mime_type' => $mimeType,
+            'file_size_bytes' => $fileSizeBytes,
             'extracted_text' => $item->extracted_text,
             'extraction_status' => $item->extraction_status,
             'extraction_error' => $item->extraction_error,
@@ -4513,15 +4477,18 @@ class KnowledgeBaseControllerTest extends TestCase
      */
     private function createCurrentVersionFor(KnowledgeItem $item, User $uploadedBy): KnowledgeItemVersion
     {
+        $filename = (string) $item->title;
+        $storagePath = sprintf('customers/%d/knowledge-documents/%s', $item->customer_id, $filename);
+
         return KnowledgeItemVersion::query()->create([
             'knowledge_item_id' => $item->id,
             'customer_id' => $item->customer_id,
             'version_no' => 1,
             'is_current' => true,
-            'original_filename' => $item->original_filename,
-            'storage_path' => $item->storage_path,
-            'mime_type' => $item->mime_type,
-            'file_size_bytes' => $item->file_size_bytes,
+            'original_filename' => $filename,
+            'storage_path' => $storagePath,
+            'mime_type' => 'application/pdf',
+            'file_size_bytes' => 1024,
             'extracted_text' => $item->extracted_text,
             'extraction_status' => $item->extraction_status,
             'extraction_error' => $item->extraction_error,
