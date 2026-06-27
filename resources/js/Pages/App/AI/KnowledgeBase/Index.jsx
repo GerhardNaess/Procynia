@@ -239,7 +239,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                         <button
                             type="button"
                             onClick={onCancel}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             {tk.cancel}
                         </button>
@@ -247,7 +247,7 @@ function DeleteKnowledgeDocumentModal({ item, processing = false, onCancel, onCo
                             type="button"
                             onClick={onConfirm}
                             disabled={processing}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {processing ? tk.deleting : tk.delete_confirm}
                         </button>
@@ -264,7 +264,7 @@ function PaginationButton({ children, disabled = false, onClick, direction = 'ne
             type="button"
             disabled={disabled}
             onClick={onClick}
-            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-base font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
         >
             {direction === 'prev' ? <ChevronIcon className="mr-1 h-4 w-4 rotate-180" /> : null}
             {children}
@@ -581,7 +581,7 @@ export default function KnowledgeBaseIndex({
                                     ]}
                                 />
                             </div>
-                            <p className="max-w-3xl text-[15px] leading-7 text-slate-500">
+                            <p className="max-w-3xl text-base leading-7 text-slate-600">
                                 {tk.subtitle}
                             </p>
                         </div>
@@ -589,7 +589,7 @@ export default function KnowledgeBaseIndex({
                         <div className="flex flex-wrap gap-3 lg:justify-end">
                             <Link
                                 href={newDocumentUrl}
-                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white transition hover:bg-violet-700"
                             >
                                 {tk.new_document}
                             </Link>
@@ -610,7 +610,7 @@ export default function KnowledgeBaseIndex({
                                         type="button"
                                         onClick={() => setStatusFilter(option.value)}
                                         className={classNames(
-                                            'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition',
+                                            'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-base font-medium transition',
                                             isActive
                                                 ? 'border-violet-200 bg-violet-50/80 text-violet-700'
                                                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-950',
@@ -648,7 +648,7 @@ export default function KnowledgeBaseIndex({
                                 type="button"
                                 onClick={() => setShowMoreFilters((current) => !current)}
                                 className={classNames(
-                                    'inline-flex h-[54px] items-center justify-center gap-2 rounded-2xl border px-5 text-sm font-semibold transition',
+                                    'inline-flex h-[54px] items-center justify-center gap-2 rounded-2xl border px-5 text-base font-semibold transition',
                                     showMoreFilters || isAnyFilterActive
                                         ? 'border-violet-200 bg-violet-50 text-violet-700'
                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
@@ -758,7 +758,7 @@ export default function KnowledgeBaseIndex({
                                 <button
                                     type="button"
                                     onClick={clearMoreFilters}
-                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {tk.clear_filters}
                                 </button>
@@ -842,7 +842,7 @@ export default function KnowledgeBaseIndex({
                                                             <div className="font-medium text-slate-950">
                                                                 {item.original_filename}
                                                             </div>
-                                                            <div className="text-[11px] text-slate-500">
+                                                            <div className="text-sm leading-5 text-slate-500">
                                                                 {subtitle}
                                                             </div>
                                                         </div>
@@ -854,7 +854,7 @@ export default function KnowledgeBaseIndex({
                                                             {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
                                                         {documentTopicDisplayLabel !== '' ? (
-                                                            <div className="text-[11px] leading-5 text-slate-500">
+                                                            <div className="text-sm leading-5 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}
                                                             </div>
                                                         ) : null}
@@ -921,7 +921,7 @@ export default function KnowledgeBaseIndex({
                                                             </span>
                                                         )}
                                                         {uploadedByName !== '' ? (
-                                                            <div className="text-xs text-slate-500">
+                                                            <div className="text-sm leading-5 text-slate-500">
                                                                 {uploadedByLabelText}: {uploadedByName}
                                                             </div>
                                                         ) : null}
@@ -931,14 +931,14 @@ export default function KnowledgeBaseIndex({
                                                     <div className="inline-flex items-center gap-2">
                                                         <Link
                                                             href={item.show_url ?? item.edit_url}
-                                                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-base font-medium text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                         >
                                                             {commonText.open}
                                                         </Link>
                                                         <button
                                                             type="button"
                                                             onClick={() => openDeleteDialog(item)}
-                                                            className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800"
+                                                            className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-3 py-2 text-base font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800"
                                                         >
                                                             <DeleteIcon className="h-4 w-4" />
                                                             <span className="ml-1.5">{tk.delete}</span>
@@ -968,7 +968,7 @@ export default function KnowledgeBaseIndex({
                             >
                                 {commonText.previous}
                             </PaginationButton>
-                            <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
+                            <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-base font-medium text-slate-700">
                                 {safeCurrentPage} {tk.of} {totalPages}
                             </span>
                             <PaginationButton
