@@ -2038,7 +2038,7 @@ export default function AiShow({
     const [selectedEvidence, setSelectedEvidence] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
-    const [caseDocumentsCollapsed, setCaseDocumentsCollapsed] = useState(false);
+    const [caseDocumentsCollapsed, setCaseDocumentsCollapsed] = useState(true);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
