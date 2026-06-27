@@ -4684,12 +4684,12 @@ export default function AiShow({
                                     ) : activeRequirementHasDraft ? (
                                         <div className="flex flex-col gap-5">
                                             {activeRequirementPartialDraft ? (
-                                                <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-sm leading-6 text-slate-700">
+                                                <div className="rounded-2xl border border-amber-200 bg-white px-4 py-4 text-slate-700">
                                                     <div className="flex flex-wrap items-start gap-2">
                                                         <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-700">
                                                             {tai.coverage_status_partial ?? 'Delvis dekket'}
                                                         </span>
-                                                        <span className="min-w-0 flex-1 text-sm text-slate-700">
+                                                        <span className="min-w-0 flex-1 text-base leading-7 text-slate-950">
                                                             {tai.answer_draft_partial_coverage_warning ?? 'Svarutkastet er basert på delvis kunnskapsgrunnlag. Kontroller hva som er dokumentert og hva som bør etterprøves.'}
                                                         </span>
                                                     </div>
@@ -4703,14 +4703,14 @@ export default function AiShow({
                                                                 {(activeRequirementMissingKnowledge.directly_supported_points?.length ?? 0) > 0 ? (
                                                                     <ul className="mt-2 space-y-1.5">
                                                                         {activeRequirementMissingKnowledge.directly_supported_points.map((point, index) => (
-                                                                            <li key={`covered-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                            <li key={`covered-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
                                                                                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                                                                                 <span>{point?.requirement_point ?? '—'}</span>
                                                                             </li>
                                                                         ))}
                                                                     </ul>
                                                                 ) : (
-                                                                    <p className="mt-2 text-sm text-slate-500">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
+                                                                    <p className="mt-2 text-[15px] leading-7 text-slate-500">{tai.answer_draft_partial_no_covered_points ?? 'Ingen dokumenterte punkter funnet.'}</p>
                                                                 )}
                                                             </div>
 
@@ -4721,14 +4721,14 @@ export default function AiShow({
                                                                 {(activeRequirementMissingKnowledge.unsupported_points?.length ?? 0) > 0 ? (
                                                                     <ul className="mt-2 space-y-1.5">
                                                                         {activeRequirementMissingKnowledge.unsupported_points.map((point, index) => (
-                                                                            <li key={`missing-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                            <li key={`missing-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
                                                                                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400" />
                                                                                 <span>{point}</span>
                                                                             </li>
                                                                         ))}
                                                                     </ul>
                                                                 ) : (
-                                                                    <p className="mt-2 text-sm text-slate-500">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
+                                                                    <p className="mt-2 text-[15px] leading-7 text-slate-500">{tai.answer_draft_partial_no_missing_points ?? 'Ingen manglende punkter identifisert.'}</p>
                                                                 )}
                                                             </div>
 
@@ -4739,7 +4739,7 @@ export default function AiShow({
                                                                     </div>
                                                                     <ul className="mt-2 space-y-1.5">
                                                                         {activeRequirementMissingKnowledge.related_but_insufficient_points.map((point, index) => (
-                                                                            <li key={`review-${index}`} className="flex gap-2 text-sm text-slate-700">
+                                                                            <li key={`review-${index}`} className="flex gap-2 text-base leading-7 text-slate-950">
                                                                                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
                                                                                 <span>{point}</span>
                                                                             </li>
@@ -4761,7 +4761,7 @@ export default function AiShow({
                                                         answerDraftGeneratingRequirementId === activeRequirement.id
                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                     }
-                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm leading-7 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
+                                                    className={`${answerDraftReaderExpanded ? 'h-[32rem] lg:h-[calc(100vh-18rem)]' : 'h-[14rem]'} w-full resize-y overflow-y-auto rounded-2xl border border-slate-200 bg-white px-3 py-3 text-base leading-7 text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-violet-400 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:opacity-60`}
                                                     placeholder={tai.answer_draft_placeholder}
                                                 />
                                             </div>
@@ -4948,7 +4948,7 @@ export default function AiShow({
                                             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                                                 {tai.sources_sent_to_ai_title ?? 'Kilder sendt til AI'}
                                             </div>
-                                            <p className="text-[11px] leading-5 text-slate-500">
+                                            <p className="text-sm leading-6 text-slate-700">
                                                 {tai.sources_sent_to_ai_help ?? 'Disse kunnskapskildene ble sendt til AI som grunnlag for svaret.'}
                                             </p>
                                             <div className="space-y-1.5">
@@ -4958,12 +4958,12 @@ export default function AiShow({
                                                             {source.knowledge_item_show_url ? (
                                                                 <Link
                                                                     href={source.knowledge_item_show_url}
-                                                                    className="text-xs font-semibold text-slate-800 hover:text-violet-700 hover:underline"
+                                                                    className="text-sm font-semibold text-slate-900 hover:text-violet-700 hover:underline"
                                                                 >
                                                                     {source.original_filename ?? '—'}
                                                                 </Link>
                                                             ) : (
-                                                                <span className="text-xs font-semibold text-slate-800">
+                                                                <span className="text-sm font-semibold text-slate-900">
                                                                     {source.original_filename ?? '—'}
                                                                 </span>
                                                             )}
@@ -4983,7 +4983,7 @@ export default function AiShow({
                                                                 </span>
                                                             ) : null}
                                                         </div>
-                                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+                                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-600">
                                                             {source.chunk_index != null ? (
                                                                 <span>{tai.sources_sent_to_ai_excerpt_label ?? 'Utdrag'} {source.chunk_index + 1}</span>
                                                             ) : null}
