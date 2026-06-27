@@ -197,7 +197,7 @@ const REQUIREMENT_TYPE_META = {
 
 const REQUIREMENT_SOURCE_TYPE_META = {
     ai_candidate: {
-        label: 'AI-kandidat',
+        label: 'Fra kravdokument',
         className: 'bg-violet-100 text-violet-700 ring-violet-200',
     },
     manual: {

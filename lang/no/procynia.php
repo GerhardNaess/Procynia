@@ -1127,7 +1127,7 @@ return [
         'requirement_type_administrative' => 'Administrativ',
         'requirement_type_unspecified' => 'Uspesifisert',
         'hint_requirement_type' => 'Kravtype klassifiserer hva slags krav dette er. "Obligatorisk" brukes for krav som må besvares for å kvalifisere. "Dokumentasjon" brukes for krav om vedlegg eller sertifikater. "Administrativ" brukes for prosedyrekrav. "Uspesifisert" brukes der kravet ikke er klassifisert.',
-        'requirement_source_ai_candidate' => 'AI-kandidat',
+        'requirement_source_ai_candidate' => 'Fra kravdokument',
         'requirement_source_manual' => 'Manuelt',
         'requirement_approval_draft' => 'Utkast',
         'requirement_approval_approved' => 'Godkjent',
