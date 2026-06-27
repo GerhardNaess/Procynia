@@ -1976,6 +1976,7 @@ export default function AiShow({
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
     const [refreshingEvidence, setRefreshingEvidence] = useState(false);
     const [deletingAllRequirements, setDeletingAllRequirements] = useState(false);
+    const [confirmRejectRequirementId, setConfirmRejectRequirementId] = useState(null);
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
     const [responsiblePickerRequirementId, setResponsiblePickerRequirementId] = useState(null);
@@ -3759,6 +3760,10 @@ export default function AiShow({
                                                                     {tai.create_answer}
                                                                 </button>
                                                             </>
+                                                        ) : approvalStatus === 'rejected' ? (
+                                                            <span className="inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
+                                                                {tai.requirement_approval_rejected}
+                                                            </span>
                                                         ) : (
                                                             <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
                                                                 {requirement.source_type_label ?? sourceTypeMeta.label}
@@ -4358,11 +4363,42 @@ export default function AiShow({
                                                             {tai.edit_requirement}
                                                         </button>
 
-                                                        {approvalActions.map((action) => (
+                                                        {confirmRejectRequirementId === requirement.id ? (
+                                                            <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs">
+                                                                <p className="font-semibold text-rose-800">{tai.reject_confirm_title}</p>
+                                                                <p className="text-rose-700">{tai.reject_confirm_message}</p>
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setConfirmRejectRequirementId(null);
+                                                                            updateRequirementReviewStatus(requirement, 'rejected');
+                                                                        }}
+                                                                        disabled={requirementUpdatesLocked}
+                                                                        className="inline-flex items-center justify-center rounded-full border border-rose-300 bg-rose-100 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-400 hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    >
+                                                                        {tai.reject_confirm_button}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setConfirmRejectRequirementId(null)}
+                                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                    >
+                                                                        {tai.cancel}
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : approvalActions.map((action) => (
                                                             <button
                                                                 key={action.value}
                                                                 type="button"
-                                                                onClick={() => updateRequirementReviewStatus(requirement, action.value)}
+                                                                onClick={() => {
+                                                                    if (action.value === 'rejected') {
+                                                                        setConfirmRejectRequirementId(requirement.id);
+                                                                        return;
+                                                                    }
+                                                                    updateRequirementReviewStatus(requirement, action.value);
+                                                                }}
                                                                 disabled={requirementUpdatesLocked}
                                                                 className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
                                                             >

@@ -668,7 +668,13 @@ class AiController extends Controller
             $request->user(),
         );
 
-        return back()->with('success', 'Kravstatus oppdatert.');
+        $flashMessages = [
+            'rejected' => 'Kravet er avvist. Du kan gjenopprette det ved å klikke «Gjenopprett».',
+            'confirmed' => 'Kravet er godkjent.',
+            'pending' => 'Kravet er gjenopprettet.',
+        ];
+
+        return back()->with('success', $flashMessages[$validated['review_status']] ?? 'Kravstatus oppdatert.');
     }
 
     /**
