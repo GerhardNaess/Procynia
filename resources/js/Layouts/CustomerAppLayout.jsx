@@ -171,7 +171,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
-        ...(billingHref ? [{ key: 'billing', label: translations.billing?.nav ?? 'Fakturering', href: billingHref }] : []),
+        ...(billingHref ? [{ key: 'billing', label: translations.billing?.nav ?? 'Abonnement', href: billingHref }] : []),
     ];
 
     const secondaryNavigation = (() => {
