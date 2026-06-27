@@ -1408,12 +1408,6 @@ export default function KnowledgeBaseShow({
                                     <dd className="text-right font-medium text-slate-950">{ownershipLabel}</dd>
                                 </div>
                             ) : null}
-                            {ownerName !== '' ? (
-                                <div className="flex items-start justify-between gap-4">
-                                    <dt className="text-slate-500">Eier</dt>
-                                    <dd className="text-right font-medium text-slate-950">{ownerName}</dd>
-                                </div>
-                            ) : null}
                             {owningSavedNoticeTitle !== '' ? (
                                 <div className="flex items-start justify-between gap-4">
                                     <dt className="text-slate-500">Sak</dt>
