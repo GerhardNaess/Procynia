@@ -202,8 +202,8 @@ Route::prefix('app')
             ->name('ai.answer-basis.destroy');
         Route::post('/ai/{savedNotice}/requirements', [AiController::class, 'storeRequirement'])
             ->name('ai.requirements.store');
-        Route::delete('/ai/{savedNotice}/requirements', [AiController::class, 'destroyAllRequirements'])
-            ->name('ai.requirements.destroy-all');
+        Route::patch('/ai/{savedNotice}/requirements/reject-all', [AiController::class, 'rejectAllRequirements'])
+            ->name('ai.requirements.reject-all');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}', [AiController::class, 'updateRequirement'])
             ->name('ai.requirements.update');
         Route::patch('/ai/{savedNotice}/requirements/{requirement}/assigned-user', [AiController::class, 'updateRequirementAssignedUser'])

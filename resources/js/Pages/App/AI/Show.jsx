@@ -1686,7 +1686,7 @@ export default function AiShow({
     requirements_count: requirementsCount = 0,
     requirements = [],
     requirements_store_url: requirementsStoreUrl = '',
-    requirements_destroy_all_url: requirementsDestroyAllUrl = '',
+    requirements_reject_all_url: requirementsRejectAllUrl = '',
     assessment_refresh_url: assessmentRefreshUrl = '',
     evidence_refresh_url: evidenceRefreshUrl = '',
     documents = [],
@@ -1975,7 +1975,8 @@ export default function AiShow({
     const [workingRequirementId, setWorkingRequirementId] = useState(null);
     const [refreshingAssessments, setRefreshingAssessments] = useState(false);
     const [refreshingEvidence, setRefreshingEvidence] = useState(false);
-    const [deletingAllRequirements, setDeletingAllRequirements] = useState(false);
+    const [rejectingAllRequirements, setRejectingAllRequirements] = useState(false);
+    const [showBulkRejectConfirm, setShowBulkRejectConfirm] = useState(false);
     const [confirmRejectRequirementId, setConfirmRejectRequirementId] = useState(null);
     const [updatingEvidenceId, setUpdatingEvidenceId] = useState(null);
     const [editingRequirementId, setEditingRequirementId] = useState(null);
@@ -2540,32 +2541,24 @@ export default function AiShow({
         }
     };
 
-    const destroyAllExtractedRequirements = () => {
+    const rejectAllExtractedRequirements = () => {
         if (
             !canUseAiOffer
-            || !requirementsDestroyAllUrl
+            || !requirementsRejectAllUrl
             || extractedRequirementRows.length === 0
             || requirementUpdatesLocked
-            || deletingAllRequirements
+            || rejectingAllRequirements
         ) {
             return;
         }
 
-        const confirmed = window.confirm(
-            `${tai.delete_all_confirm_title}\n\n${tai.delete_all_confirm_message}`,
-        );
+        setRejectingAllRequirements(true);
 
-        if (!confirmed) {
-            return;
-        }
-
-        setDeletingAllRequirements(true);
-
-        router.delete(requirementsDestroyAllUrl, {
+        router.patch(requirementsRejectAllUrl, {}, {
             preserveScroll: true,
             preserveState: false,
             onFinish: () => {
-                setDeletingAllRequirements(false);
+                setRejectingAllRequirements(false);
             },
         });
     };
@@ -3444,15 +3437,42 @@ export default function AiShow({
                                     </>
                                 ) : null}
 
-                                {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsDestroyAllUrl ? (
-                                    <button
-                                        type="button"
-                                        onClick={destroyAllExtractedRequirements}
-                                        disabled={requirementUpdatesLocked || deletingAllRequirements}
-                                        className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        {deletingAllRequirements ? tai.deleting : tai.delete_all_requirements}
-                                    </button>
+                                {canUseAiOffer && extractedRequirementRows.length > 0 && requirementsRejectAllUrl ? (
+                                    showBulkRejectConfirm ? (
+                                        <div className="flex flex-col gap-2 rounded-2xl border border-rose-200 bg-rose-50/70 px-3 py-2.5 text-xs">
+                                            <p className="font-semibold text-rose-800">{tai.reject_all_confirm_title}</p>
+                                            <p className="text-rose-700">{tai.reject_all_confirm_message}</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setShowBulkRejectConfirm(false);
+                                                        rejectAllExtractedRequirements();
+                                                    }}
+                                                    disabled={requirementUpdatesLocked || rejectingAllRequirements}
+                                                    className="inline-flex items-center justify-center rounded-full border border-rose-300 bg-rose-100 px-3 py-1 font-semibold text-rose-700 transition hover:border-rose-400 hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {rejectingAllRequirements ? tai.rejecting_all : tai.reject_confirm_button}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowBulkRejectConfirm(false)}
+                                                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1 font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                >
+                                                    {tai.cancel}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowBulkRejectConfirm(true)}
+                                            disabled={requirementUpdatesLocked || rejectingAllRequirements}
+                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {rejectingAllRequirements ? tai.rejecting_all : tai.reject_all_requirements}
+                                        </button>
+                                    )
                                 ) : null}
 
                             </div>

@@ -166,7 +166,7 @@ class AiController extends Controller
             'requirements_overview' => $requirementsOverview,
             'requirements' => $requirementsPayload,
             'requirements_store_url' => route('app.ai.requirements.store', ['savedNotice' => $record->id]),
-            'requirements_destroy_all_url' => route('app.ai.requirements.destroy-all', ['savedNotice' => $record->id]),
+            'requirements_reject_all_url' => route('app.ai.requirements.reject-all', ['savedNotice' => $record->id]),
             'assessment_refresh_url' => route('app.ai.requirements.assessment.refresh', ['savedNotice' => $record->id]),
             'evidence_refresh_url' => route('app.ai.evidence.refresh', ['savedNotice' => $record->id]),
             'assigned_user_options' => $this->customerRequirementAssigneeOptions((int) $record->customer_id),
@@ -704,21 +704,33 @@ class AiController extends Controller
     }
 
     /**
-     * Purpose: Delete all requirement candidates for the visible AI case.
+     * Purpose: Bulk-reject all AI-extracted requirement candidates for the visible AI case.
      * Inputs: The current request and the route-bound saved notice.
-     * Returns: A redirect back to the AI case view after deletion.
-     * Side effects: Deletes all SavedNoticeAiRequirement rows for the notice.
+     * Returns: A redirect back to the AI case view after rejection.
+     * Side effects: Sets approval_status/review_status to rejected for all ai_candidate requirements.
+     *               Rows, relations, evidence, revisions and assessments are preserved.
      */
-    public function destroyAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
+    public function rejectAllRequirements(Request $request, SavedNotice $savedNotice): RedirectResponse
     {
         $record = $this->visibleAiSavedNotice($request, $savedNotice);
         $this->assertAiAccess($record);
 
-        $record->aiRequirements()
+        $requirements = $record->aiRequirements()
             ->where('source_type', SavedNoticeAiRequirement::SOURCE_TYPE_AI_CANDIDATE)
-            ->delete();
+            ->where('approval_status', '!=', SavedNoticeAiRequirement::APPROVAL_STATUS_REJECTED)
+            ->get();
 
-        return back()->with('success', 'Alle ekstraherte kravkandidater er slettet.');
+        DB::transaction(function () use ($requirements, $request): void {
+            foreach ($requirements as $requirement) {
+                $this->requirementEditorService->transitionRequirementReviewStatus(
+                    $requirement,
+                    SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
+                    $request->user(),
+                );
+            }
+        });
+
+        return back()->with('success', 'Ekstraherte krav er avvist. Du kan gjenopprette dem enkeltvis.');
     }
 
     /**

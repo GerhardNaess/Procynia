@@ -409,7 +409,7 @@ class AiControllerTest extends TestCase
         $this->assertSame(1, data_get($page, 'props.requirements_count'));
         $this->assertSame(route('app.notices.saved.show', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.saved_notice_show_url'));
         $this->assertSame(route('app.ai.requirements.store', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_store_url'));
-        $this->assertSame(route('app.ai.requirements.destroy-all', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_destroy_all_url'));
+        $this->assertSame(route('app.ai.requirements.reject-all', ['savedNotice' => $savedNotice->id]), data_get($page, 'props.requirements_reject_all_url'));
         $this->assertCount(1, $requirements);
         $this->assertNotNull($requirementRow);
         $this->assertSame([], data_get($requirementRow, 'answer_basis_item_ids'));
@@ -441,21 +441,21 @@ class AiControllerTest extends TestCase
         $this->assertNotEmpty(data_get($requirementRow, 'answer_draft.generated_at'));
     }
 
-    public function test_ai_requirement_destroy_all_removes_only_extracted_requirements_and_keeps_manual_requirements(): void
+    public function test_ai_requirement_reject_all_rejects_only_extracted_requirements_and_keeps_manual_requirements(): void
     {
         $context = $this->customerAdminContext();
-        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-DELETE', 'Delete extracted requirements target', [
+        $savedNotice = $this->createSavedNotice($context['customer']->id, 'AI-3004-REJECT', 'Reject extracted requirements target', [
             'bid_status' => SavedNotice::BID_STATUS_QUALIFYING,
         ]);
         $this->touchSavedNotice($savedNotice, '2026-04-06 12:10:00');
 
         $document = $this->createAiDocument($savedNotice, [
             'uploaded_by_user_id' => $context['user']->id,
-            'original_filename' => 'delete-target.docx',
-            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/delete-target.docx',
+            'original_filename' => 'reject-target.docx',
+            'stored_path' => 'saved-notices/'.$savedNotice->id.'/ai-documents/reject-target.docx',
             'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'file_size_bytes' => 2048,
-            'extracted_text' => 'Dokumenttekst for sletting.',
+            'extracted_text' => 'Dokumenttekst for avvisning.',
             'text_extracted_at' => '2026-04-06 12:05:00',
         ]);
         $firstChunk = $this->createAiDocumentChunk($document, 'Ekstrahert krav 1.');
@@ -478,14 +478,30 @@ class AiControllerTest extends TestCase
 
         $response = $this->actingAs($context['user'])
             ->from(route('app.ai.show', ['savedNotice' => $savedNotice->id]))
-            ->delete(route('app.ai.requirements.destroy-all', ['savedNotice' => $savedNotice->id]));
+            ->patch(route('app.ai.requirements.reject-all', ['savedNotice' => $savedNotice->id]));
 
         $response->assertRedirect(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
-        $response->assertSessionHas('success', 'Alle ekstraherte kravkandidater er slettet.');
-        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $firstExtractedRequirement->id]);
-        $this->assertDatabaseMissing('saved_notice_ai_requirements', ['id' => $secondExtractedRequirement->id]);
-        $this->assertDatabaseHas('saved_notice_ai_requirements', ['id' => $manualRequirement->id]);
+        $response->assertSessionHas('success', 'Ekstraherte krav er avvist. Du kan gjenopprette dem enkeltvis.');
 
+        // Extracted requirements must still exist in the database — rows are preserved, not deleted.
+        $this->assertDatabaseHas('saved_notice_ai_requirements', [
+            'id' => $firstExtractedRequirement->id,
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_REJECTED,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
+        ]);
+        $this->assertDatabaseHas('saved_notice_ai_requirements', [
+            'id' => $secondExtractedRequirement->id,
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_REJECTED,
+            'review_status' => SavedNoticeAiRequirement::REVIEW_STATUS_REJECTED,
+        ]);
+
+        // Manual requirement must be untouched.
+        $this->assertDatabaseHas('saved_notice_ai_requirements', [
+            'id' => $manualRequirement->id,
+            'approval_status' => SavedNoticeAiRequirement::APPROVAL_STATUS_DRAFT,
+        ]);
+
+        // Page still serves all requirements (rejected ones remain visible in the list).
         $pageResponse = $this->actingAs($context['user'])
             ->get(route('app.ai.show', ['savedNotice' => $savedNotice->id]));
 
@@ -493,9 +509,17 @@ class AiControllerTest extends TestCase
         $page = $this->inertiaPageFromResponse($pageResponse);
         $requirements = collect(data_get($page, 'props.requirements', []));
 
-        $this->assertSame(1, data_get($page, 'props.requirements_count'));
-        $this->assertCount(1, $requirements);
-        $this->assertSame($manualRequirement->id, $requirements->first()['id']);
+        $this->assertSame(3, data_get($page, 'props.requirements_count'));
+        $this->assertCount(3, $requirements);
+
+        $rejectedIds = $requirements
+            ->whereIn('id', [$firstExtractedRequirement->id, $secondExtractedRequirement->id])
+            ->pluck('approval_status')
+            ->all();
+        $this->assertSame(['rejected', 'rejected'], array_values($rejectedIds));
+
+        $manualRow = $requirements->firstWhere('id', $manualRequirement->id);
+        $this->assertSame('draft', data_get($manualRow, 'approval_status'));
     }
 
     public function test_ai_case_instructions_page_includes_ai_instructions_payload_and_update_url(): void
