@@ -196,7 +196,10 @@ export default function KnowledgeItemForm({
 
     const documentStatusSelect = (
         <label className="space-y-2">
-            <span className="text-base font-medium text-slate-700">{documentStatusLabel}</span>
+            <span className="flex items-center gap-1.5 text-base font-medium text-slate-700">
+                {documentStatusLabel}
+                <InfoHint label="Forklaring for Status" text={documentStatusHelpText} />
+            </span>
             <select
                 value={form.data.document_status ?? 'active'}
                 onChange={(event) => form.setData('document_status', event.target.value)}
@@ -208,7 +211,6 @@ export default function KnowledgeItemForm({
                     </option>
                 ))}
             </select>
-            <p className="text-base leading-6 text-slate-400">{documentStatusHelpText}</p>
             {form.errors.document_status ? <p className="text-base text-rose-600">{form.errors.document_status}</p> : null}
         </label>
     );
