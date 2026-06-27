@@ -1352,7 +1352,7 @@ export default function NoticeIndex({
                                                     href={notice.external_url}
                                                     target="_blank"
                                                     rel="noreferrer"
-                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                    className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-[15px] font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                 >
                                                     {noticesText.alertsOpenDoffin}
                                                 </a>
@@ -1407,7 +1407,7 @@ export default function NoticeIndex({
                             ]}
                         />
                     </div>
-                    <p className="text-[15px] text-slate-500">{pageSubtitle}</p>
+                    <p className="text-base text-slate-600">{pageSubtitle}</p>
                 </section>
 
                 <div className={classNames(
@@ -1419,8 +1419,8 @@ export default function NoticeIndex({
                             <>
                                 <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)] sm:p-5">
                                 <div className="mb-3">
-                                <div className="text-sm font-medium text-slate-900">{noticesText.liveTitle}</div>
-                                <p className="mt-1 text-sm text-slate-500">
+                                <div className="text-base font-medium text-slate-900">{noticesText.liveTitle}</div>
+                                <p className="mt-1 text-[15px] text-slate-600">
                                     {noticesText.liveDescription}
                                 </p>
                             </div>
@@ -1450,7 +1450,7 @@ export default function NoticeIndex({
                                         <FilterIcon className="h-5 w-5 text-slate-500" />
                                     <h2 className="text-xl font-semibold text-slate-950">{tf.filters_title}</h2>
                                     </div>
-                                    <p className="mt-1 text-sm text-slate-500">
+                                    <p className="mt-1 text-[15px] text-slate-600">
                                     {noticesText.filtersDescription}
                                     </p>
                                 </div>
@@ -1460,7 +1460,7 @@ export default function NoticeIndex({
                                     <div className="flex items-center justify-between gap-3">
                                         <span className="text-sm font-medium text-slate-700">{navigation.watch_lists}</span>
                                         {activeWatchList ? (
-                                            <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
+                                            <span className="inline-flex items-center rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
                                                 {common.active}
                                             </span>
                                         ) : null}
@@ -1469,7 +1469,7 @@ export default function NoticeIndex({
                                         value={selectedWatchListId}
                                         disabled={watchListOptions.length === 0}
                                         onChange={(event) => applyWatchListPrefill(event.target.value)}
-                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
                                     >
                                         <option value="">{watchListOptions.length === 0 ? noticesText.watchListPlaceholderEmpty : noticesText.watchListPlaceholder}</option>
                                         {watchListOptions.map((item) => (
@@ -1484,12 +1484,12 @@ export default function NoticeIndex({
                                                 <span className="text-xs font-semibold uppercase tracking-[0.12em] text-violet-700">{noticesText.watchListActiveTitle}</span>
                                                 <span className="text-sm font-medium text-violet-900">{activeWatchList.label}</span>
                                             </div>
-                                            <p className="mt-1 text-xs leading-5 text-violet-800">
+                                            <p className="mt-1 text-sm leading-6 text-violet-800">
                                                 {noticesText.watchListActiveDescription}
                                             </p>
                                         </div>
                                     ) : (
-                                        <p className="text-xs text-slate-400">
+                                        <p className="text-sm text-slate-500">
                                             {watchListOptions.length === 0
                                                 ? noticesText.watchListEmptyHelp
                                                 : noticesText.watchListHelp}
@@ -1505,7 +1505,7 @@ export default function NoticeIndex({
                                             value={organizationName}
                                             onChange={(event) => setOrganizationName(event.target.value)}
                                             placeholder={noticesText.organizationPlaceholder}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
                                     </label>
                                     <CpvSelector
@@ -1525,29 +1525,29 @@ export default function NoticeIndex({
                                                 setKeywordsSource('manual');
                                             }}
                                             placeholder={noticesText.keywordsPlaceholder}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         />
-                                        <p className="text-xs text-slate-400">{noticesText.keywordsHelp}</p>
+                                        <p className="text-sm text-slate-500">{noticesText.keywordsHelp}</p>
                                     </label>
                                     <label className="space-y-2">
                                         <span className="text-sm font-medium text-slate-700">{noticesText.publicationDateLabel}</span>
                                         <div className="grid gap-2 sm:grid-cols-2">
                                             <label className="space-y-1">
-                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{noticesText.fromDateLabel}</span>
+                                                <span className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{noticesText.fromDateLabel}</span>
                                                 <input
                                                     type="date"
                                                     value={publicationDateFrom}
                                                     onChange={(event) => setPublicationDateFrom(event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                             </label>
                                             <label className="space-y-1">
-                                                <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{noticesText.toDateLabel}</span>
+                                                <span className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">{noticesText.toDateLabel}</span>
                                                 <input
                                                     type="date"
                                                     value={publicationDateTo}
                                                     onChange={(event) => setPublicationDateTo(event.target.value)}
-                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                 />
                                             </label>
                                         </div>
@@ -1557,7 +1557,7 @@ export default function NoticeIndex({
                                         <select
                                             value={status}
                                             onChange={(event) => setStatus(event.target.value)}
-                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                         >
                                             {statusOptions.map((option) => (
                                                 <option key={option.value || 'empty'} value={option.value}>
@@ -1573,14 +1573,14 @@ export default function NoticeIndex({
                                 <button
                                     type="button"
                                     onClick={applyFilters}
-                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-[15px] font-semibold text-white transition hover:bg-violet-700"
                                 >
                                     {common.search}
                                 </button>
                                 <button
                                     type="button"
                                     onClick={clearFilters}
-                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
                                     {tf.clear_filters}
                                 </button>
@@ -1602,8 +1602,8 @@ export default function NoticeIndex({
                                 <div className="space-y-4">
                                     <div className="flex items-start justify-between gap-4">
                                         <div>
-                                            <div className="text-sm font-medium text-slate-900">{noticesText.privateRequestTitle}</div>
-                                            <p className="mt-1 text-sm text-slate-500">
+                                            <div className="text-base font-medium text-slate-900">{noticesText.privateRequestTitle}</div>
+                                            <p className="mt-1 text-[15px] text-slate-600">
                                                 {noticesText.privateRequestDescription}
                                             </p>
                                         </div>
@@ -1613,7 +1613,7 @@ export default function NoticeIndex({
                                             aria-expanded={isPrivateRequestFormOpen}
                                             aria-controls="private-request-form"
                                             onClick={() => setIsPrivateRequestFormOpen((current) => !current)}
-                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                         >
                                             {isPrivateRequestFormOpen ? noticesText.privateRequestToggleHide : noticesText.privateRequestToggleShow}
                                         </button>
@@ -1637,7 +1637,7 @@ export default function NoticeIndex({
                                                         type="text"
                                                         value={privateRequestForm.data.title}
                                                         onChange={(event) => privateRequestForm.setData('title', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderTitle}
                                                     />
                                                     {privateRequestForm.errors.title ? (
@@ -1651,7 +1651,7 @@ export default function NoticeIndex({
                                                         type="text"
                                                         value={privateRequestForm.data.buyer_name}
                                                         onChange={(event) => privateRequestForm.setData('buyer_name', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderBuyerName}
                                                     />
                                                     {privateRequestForm.errors.buyer_name ? (
@@ -1665,7 +1665,7 @@ export default function NoticeIndex({
                                                         type="date"
                                                         value={privateRequestForm.data.deadline}
                                                         onChange={(event) => privateRequestForm.setData('deadline', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                     />
                                                     {privateRequestForm.errors.deadline ? (
                                                         <p className="text-sm text-rose-600">{privateRequestForm.errors.deadline}</p>
@@ -1678,7 +1678,7 @@ export default function NoticeIndex({
                                                         value={privateRequestForm.data.summary}
                                                         onChange={(event) => privateRequestForm.setData('summary', event.target.value)}
                                                         rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderSummary}
                                                     />
                                                     {privateRequestForm.errors.summary ? (
@@ -1692,7 +1692,7 @@ export default function NoticeIndex({
                                                         type="text"
                                                         value={privateRequestForm.data.reference_number}
                                                         onChange={(event) => privateRequestForm.setData('reference_number', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderReference}
                                                     />
                                                     {privateRequestForm.errors.reference_number ? (
@@ -1706,7 +1706,7 @@ export default function NoticeIndex({
                                                         type="text"
                                                         value={privateRequestForm.data.contact_person_name}
                                                         onChange={(event) => privateRequestForm.setData('contact_person_name', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderContactPerson}
                                                     />
                                                     {privateRequestForm.errors.contact_person_name ? (
@@ -1720,7 +1720,7 @@ export default function NoticeIndex({
                                                         type="email"
                                                         value={privateRequestForm.data.contact_person_email}
                                                         onChange={(event) => privateRequestForm.setData('contact_person_email', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderContactEmail}
                                                     />
                                                     {privateRequestForm.errors.contact_person_email ? (
@@ -1734,7 +1734,7 @@ export default function NoticeIndex({
                                                         type="url"
                                                         value={privateRequestForm.data.external_url}
                                                         onChange={(event) => privateRequestForm.setData('external_url', event.target.value)}
-                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderExternalUrl}
                                                     />
                                                     {privateRequestForm.errors.external_url ? (
@@ -1748,7 +1748,7 @@ export default function NoticeIndex({
                                                         value={privateRequestForm.data.notes}
                                                         onChange={(event) => privateRequestForm.setData('notes', event.target.value)}
                                                         rows={3}
-                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                         placeholder={noticesText.privateRequestPlaceholderNotes}
                                                     />
                                                     {privateRequestForm.errors.notes ? (
@@ -1761,7 +1761,7 @@ export default function NoticeIndex({
                                                 <button
                                                     type="submit"
                                                     disabled={privateRequestForm.processing}
-                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-5 py-2.5 text-[15px] font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {privateRequestForm.processing ? noticesText.privateRequestSaving : noticesText.privateRequestSubmit}
                                                 </button>
@@ -1772,7 +1772,7 @@ export default function NoticeIndex({
                                                         privateRequestForm.clearErrors();
                                                     }}
                                                     disabled={privateRequestForm.processing}
-                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                 >
                                                     {noticesText.privateRequestReset}
                                                 </button>
@@ -1791,8 +1791,8 @@ export default function NoticeIndex({
                             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                                     <div>
-                                        <div className="text-sm font-medium text-slate-900">{worklistFilterTitle}</div>
-                                        <p className="mt-1 text-sm text-slate-500">
+                                        <div className="text-base font-medium text-slate-900">{worklistFilterTitle}</div>
+                                        <p className="mt-1 text-[15px] text-slate-600">
                                             {worklistFilterDescription}
                                         </p>
                                     </div>
@@ -1803,7 +1803,7 @@ export default function NoticeIndex({
                                             <select
                                                 value={worklistFilterValue}
                                                 onChange={(event) => applySavedNoticeFilter(event.target.value)}
-                                                className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                className="h-11 min-w-[240px] rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                             >
                                                 {worklistFilterOptions.map((option) => (
                                                     <option key={option.value || 'empty'} value={option.value}>
@@ -1817,7 +1817,7 @@ export default function NoticeIndex({
                                             <button
                                                 type="button"
                                                 onClick={() => applySavedNoticeFilter('')}
-                                                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                             >
                                                 {noticesText.worklistClearFilter}
                                             </button>
@@ -1905,7 +1905,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-[15px] font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
                                                                 {noticesText.openInDoffinLabel}
                                                             </a>
@@ -1928,7 +1928,7 @@ export default function NoticeIndex({
                                                             </h2>
                                                         </div>
 
-                                                        <div className="mt-1.5 flex flex-wrap items-center gap-4 text-sm text-slate-600">
+                                                        <div className="mt-1.5 flex flex-wrap items-center gap-4 text-[15px] text-slate-700">
                                                             <span className="inline-flex items-center gap-2">
                                                                 <BuildingIcon className="h-4 w-4 text-slate-400" />
                                                                 {notice.buyer_name || noticesText.buyerUnknown}
@@ -1948,7 +1948,7 @@ export default function NoticeIndex({
                                                             </div>
                                                         ) : null}
 
-                                                        <div className="mt-3 max-w-4xl text-sm leading-7 text-slate-600 whitespace-pre-line">
+                                                        <div className="mt-3 max-w-4xl text-base leading-7 text-slate-700 whitespace-pre-line">
                                                             <div style={noticeSummaryStyle}>{summarizeText(notice.summary, noticesText)}</div>
                                                             {isNoticeSummaryExpandable ? (
                                                                 <button
@@ -1980,25 +1980,25 @@ export default function NoticeIndex({
                                                                     {isEditingDeadlines ? (
                                                                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Registrert</div>
+                                                                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">Registrert</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
                                                                                     {notice.saved_at ? formatDate(notice.saved_at, locale, { hour: '2-digit', minute: '2-digit' }) : noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Oppdragsgiver</div>
+                                                                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">Oppdragsgiver</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
                                                                                     {notice.buyer_name || noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="rounded-xl bg-white px-3 py-2.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Frist</div>
+                                                                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">Frist</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
                                                                                     {notice.deadline ? formatDate(notice.deadline, locale) : noticesText.notRegistered}
                                                                                 </div>
                                                                             </div>
                                                                             <div className="space-y-1.5">
-                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`reference_number_${notice.id}`}>
+                                                                                <label className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`reference_number_${notice.id}`}>
                                                                                     Referanse
                                                                                 </label>
                                                                                 <input
@@ -2006,14 +2006,14 @@ export default function NoticeIndex({
                                                                                     type="text"
                                                                                     value={deadlineForm.data.reference_number}
                                                                                     onChange={(event) => deadlineForm.setData('reference_number', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[15px] text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 />
                                                                                 {deadlineForm.errors.reference_number ? (
                                                                                     <p className="text-sm text-rose-600">{deadlineForm.errors.reference_number}</p>
                                                                                 ) : null}
                                                                             </div>
                                                                             <div className="space-y-1.5">
-                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`contact_person_name_${notice.id}`}>
+                                                                                <label className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`contact_person_name_${notice.id}`}>
                                                                                     Kontaktperson
                                                                                 </label>
                                                                                 <input
@@ -2021,14 +2021,14 @@ export default function NoticeIndex({
                                                                                     type="text"
                                                                                     value={deadlineForm.data.contact_person_name}
                                                                                     onChange={(event) => deadlineForm.setData('contact_person_name', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[15px] text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 />
                                                                                 {deadlineForm.errors.contact_person_name ? (
                                                                                     <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_name}</p>
                                                                                 ) : null}
                                                                             </div>
                                                                             <div className="space-y-1.5">
-                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`contact_person_email_${notice.id}`}>
+                                                                                <label className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`contact_person_email_${notice.id}`}>
                                                                                     Kontakt e-post
                                                                                 </label>
                                                                                 <input
@@ -2036,14 +2036,14 @@ export default function NoticeIndex({
                                                                                     type="email"
                                                                                     value={deadlineForm.data.contact_person_email}
                                                                                     onChange={(event) => deadlineForm.setData('contact_person_email', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-[15px] text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 />
                                                                                 {deadlineForm.errors.contact_person_email ? (
                                                                                     <p className="text-sm text-rose-600">{deadlineForm.errors.contact_person_email}</p>
                                                                                 ) : null}
                                                                             </div>
                                                                             <div className="sm:col-span-2">
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{noticesText.externalLinkLabel}</div>
+                                                                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">{noticesText.externalLinkLabel}</div>
                                                                                 <div className="mt-1 text-sm font-medium leading-6 text-slate-900">
                                                                                     {notice.external_url ? (
                                                                                         <a
@@ -2060,7 +2060,7 @@ export default function NoticeIndex({
                                                                                 </div>
                                                                             </div>
                                                                             <div className="sm:col-span-2 space-y-1.5">
-                                                                                <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500" htmlFor={`notes_${notice.id}`}>
+                                                                                <label className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600" htmlFor={`notes_${notice.id}`}>
                                                                                     Notater
                                                                                 </label>
                                                                                 <textarea
@@ -2068,7 +2068,7 @@ export default function NoticeIndex({
                                                                                     value={deadlineForm.data.notes}
                                                                                     onChange={(event) => deadlineForm.setData('notes', event.target.value)}
                                                                                     rows={4}
-                                                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-[15px] text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                     placeholder="Valgfritt notat"
                                                                                 />
                                                                                 {deadlineForm.errors.notes ? (
@@ -2086,7 +2086,7 @@ export default function NoticeIndex({
                                                                                         field.span ? 'sm:col-span-2' : '',
                                                                                     )}
                                                                                 >
-                                                                                    <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                                                                    <dt className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-600">
                                                                                         {field.label}
                                                                                     </dt>
                                                                                     <dd className="mt-1 text-sm font-medium leading-6 text-slate-900">
@@ -2111,7 +2111,7 @@ export default function NoticeIndex({
                                                                                     {index < timelineSteps.length - 1 ? (
                                                                                         <span className="absolute left-1/2 top-[30px] h-px w-full bg-slate-200" aria-hidden="true" />
                                                                                     ) : null}
-                                                                                    <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                                                                                    <div className="text-xs font-medium uppercase tracking-[0.1em] text-slate-600">
                                                                                         {step.label}
                                                                                     </div>
                                                                                     <div className="relative mt-2 flex justify-center">
@@ -2122,7 +2122,7 @@ export default function NoticeIndex({
                                                                                             )}
                                                                                         />
                                                                                     </div>
-                                                                                    <div className={classNames('mt-2 text-xs', isActive ? 'text-slate-700' : 'text-slate-400')}>
+                                                                                    <div className={classNames('mt-2 text-sm', isActive ? 'text-slate-700' : 'text-slate-500')}>
                                                                                         {isActive ? formatDeadlineDate(step.date) : '—'}
                                                                                     </div>
                                                                                 </div>
@@ -2131,7 +2131,7 @@ export default function NoticeIndex({
                                                                     </div>
                                                                     {businessReviews.length > 0 ? (
                                                                         <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-4">
-                                                                            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                                            <div className="text-xs font-semibold uppercase tracking-[0.1em] text-blue-700">
                                                                                     {noticesText.businessReviewTitle}
                                                                             </div>
                                                                             <div className="mt-3 space-y-3">
@@ -2161,7 +2161,7 @@ export default function NoticeIndex({
                                                         {isSavedOrHistoryMode && notice.show_url ? (
                                                             <Link
                                                                 href={notice.show_url}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-[15px] font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
                                                                 Åpne sak
                                                             </Link>
@@ -2172,7 +2172,7 @@ export default function NoticeIndex({
                                                                 aria-expanded={isDetailsExpanded}
                                                                 onClick={() => toggleHistoryEditor(notice)}
                                                                 className={classNames(
-                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-[15px] font-semibold transition',
                                                                     isDetailsExpanded
                                                                         ? 'border-slate-300 bg-slate-100 text-slate-900'
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
@@ -2186,7 +2186,7 @@ export default function NoticeIndex({
                                                                 type="button"
                                                                 onClick={() => openDeadlineEditor(notice)}
                                                                 className={classNames(
-                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-[15px] font-semibold transition',
                                                                     isEditingDeadlines
                                                                         ? 'border-slate-300 bg-slate-100 text-slate-900'
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
@@ -2201,7 +2201,7 @@ export default function NoticeIndex({
                                                                 onClick={() => saveNotice(notice)}
                                                                 disabled={notice.is_saved}
                                                                 className={classNames(
-                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-sm font-semibold transition',
+                                                                    'inline-flex min-w-[132px] items-center justify-center rounded-xl border px-4 py-2.5 text-[15px] font-semibold transition',
                                                                     notice.is_saved
                                                                         ? 'cursor-not-allowed border-emerald-200 bg-emerald-50 text-emerald-700'
                                                                         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950',
@@ -2218,7 +2218,7 @@ export default function NoticeIndex({
                                                                         ? cancelArchiveSavedNoticeForm()
                                                                         : openArchiveSavedNoticeForm(notice)
                                                                 )}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {archivingSavedNoticeId === notice.id ? noticesText.hideMove : noticesText.moveToHistory}
                                                             </button>
@@ -2233,7 +2233,7 @@ export default function NoticeIndex({
                                                                     }
                                                                     removeNotice(notice);
                                                                 }}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-[15px] font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                             >
                                                                 {noticesText.delete}
                                                             </button>
@@ -2248,7 +2248,7 @@ export default function NoticeIndex({
                                                                     }
                                                                     removeHistoryNotice(notice);
                                                                 }}
-                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                className="inline-flex min-w-[132px] items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-[15px] font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                             >
                                                                 {noticesText.delete}
                                                             </button>
@@ -2258,7 +2258,7 @@ export default function NoticeIndex({
                                                                 href={notice.external_url}
                                                                 target="_blank"
                                                                 rel="noreferrer"
-                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                                                                className="inline-flex min-w-[108px] items-center justify-center rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-[15px] font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
                                                             >
                                                                 {noticeExternalLinkLabel(notice, noticesText)}
                                                             </a>
@@ -2273,7 +2273,7 @@ export default function NoticeIndex({
                                                     >
                                                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                                             <div>
-                                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
                                                                     {noticesText.moveToHistory}
                                                                 </div>
                                                                 <p className="mt-1 text-sm text-slate-600">
@@ -2284,7 +2284,7 @@ export default function NoticeIndex({
                                                             <button
                                                                 type="button"
                                                                 onClick={cancelArchiveSavedNoticeForm}
-                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex min-h-8 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {noticesText.cancelLabel}
                                                             </button>
@@ -2295,7 +2295,7 @@ export default function NoticeIndex({
                                                             <select
                                                                 value={archiveHistoryForm.data.history_type}
                                                                 onChange={(event) => archiveHistoryForm.setData('history_type', event.target.value)}
-                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                             >
                                                                 <option value="">Velg type</option>
                                                                 {historyTypeOptions.map((option) => (
@@ -2314,7 +2314,7 @@ export default function NoticeIndex({
                                                                 type="button"
                                                                 onClick={(event) => submitArchiveSavedNotice(notice, event)}
                                                                 disabled={archiveHistoryForm.processing || archiveHistoryForm.data.history_type.trim() === ''}
-                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-[15px] font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {archiveHistoryForm.processing ? noticesText.moving : noticesText.saveAndMoveToHistory}
                                                             </button>
@@ -2470,7 +2470,7 @@ export default function NoticeIndex({
                                                                             type="date"
                                                                             value={deadlineForm.data.questions_rfi_deadline_at}
                                                                             onChange={(event) => deadlineForm.setData('questions_rfi_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {deadlineForm.errors.questions_rfi_deadline_at ? (
                                                                             <p className="text-sm text-rose-600">{deadlineForm.errors.questions_rfi_deadline_at}</p>
@@ -2483,7 +2483,7 @@ export default function NoticeIndex({
                                                                             type="date"
                                                                             value={deadlineForm.data.rfi_submission_deadline_at}
                                                                             onChange={(event) => deadlineForm.setData('rfi_submission_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {deadlineForm.errors.rfi_submission_deadline_at ? (
                                                                             <p className="text-sm text-rose-600">{deadlineForm.errors.rfi_submission_deadline_at}</p>
@@ -2496,7 +2496,7 @@ export default function NoticeIndex({
                                                                             type="date"
                                                                             value={deadlineForm.data.questions_rfp_deadline_at}
                                                                             onChange={(event) => deadlineForm.setData('questions_rfp_deadline_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {deadlineForm.errors.questions_rfp_deadline_at ? (
                                                                             <p className="text-sm text-rose-600">{deadlineForm.errors.questions_rfp_deadline_at}</p>
@@ -2509,7 +2509,7 @@ export default function NoticeIndex({
                                                                             type="date"
                                                                             value={deadlineForm.data.award_date_at}
                                                                             onChange={(event) => deadlineForm.setData('award_date_at', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {deadlineForm.errors.award_date_at ? (
                                                                             <p className="text-sm text-rose-600">{deadlineForm.errors.award_date_at}</p>
@@ -2519,7 +2519,7 @@ export default function NoticeIndex({
                                                                     <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 md:col-span-2">
                                                                         <div className="flex flex-wrap items-start justify-between gap-3">
                                                                             <div>
-                                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                                                                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-blue-700">
                                                                                     {noticesText.businessReviewTitle}
                                                                                 </div>
                                                                                 <p className="mt-1 text-sm text-blue-950/75">
@@ -2530,7 +2530,7 @@ export default function NoticeIndex({
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={addBusinessReview}
-                                                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+                                                                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-4 py-2 text-[15px] font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
                                                                             >
                                                                                 {noticesText.addBusinessReview}
                                                                             </button>
@@ -2552,7 +2552,7 @@ export default function NoticeIndex({
                                                                                                     type="date"
                                                                                                     value={review.business_review_at}
                                                                                                     onChange={(event) => updateBusinessReviewAt(index, event.target.value)}
-                                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                                                                                                 />
                                                                                                 {deadlineForm.errors[`business_reviews.${index}.business_review_at`] ? (
                                                                                                     <p className="text-sm text-rose-600">
@@ -2564,7 +2564,7 @@ export default function NoticeIndex({
                                                                                             <button
                                                                                                 type="button"
                                                                                                 onClick={() => removeBusinessReview(index)}
-                                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                                                                                                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-[15px] font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
                                                                                             >
                                                                                                 {noticesText.delete}
                                                                                             </button>
@@ -2585,7 +2585,7 @@ export default function NoticeIndex({
                                                                         <button
                                                                             type="submit"
                                                                             disabled={deadlineForm.processing}
-                                                                            className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                            className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-[15px] font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                         >
                                                                             {deadlineForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                         </button>
@@ -2593,7 +2593,7 @@ export default function NoticeIndex({
                                                                             type="button"
                                                                             onClick={cancelDeadlineEditor}
                                                                             disabled={deadlineForm.processing}
-                                                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                                         >
                                                                             {noticesText.cancelLabel}
                                                                         </button>
@@ -2608,7 +2608,7 @@ export default function NoticeIndex({
                                                                             questions_rfp_deadline_at: '',
                                                                             award_date_at: '',
                                                                         }))}
-                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[15px] font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
                                                                         Nullstill frister
                                                                     </button>
@@ -2631,7 +2631,7 @@ export default function NoticeIndex({
                                                                             type="text"
                                                                             value={historyForm.data.selected_supplier_name}
                                                                             onChange={(event) => historyForm.setData('selected_supplier_name', event.target.value)}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {historyForm.errors.selected_supplier_name ? (
                                                                             <p className="text-sm text-rose-600">{historyForm.errors.selected_supplier_name}</p>
@@ -2645,7 +2645,7 @@ export default function NoticeIndex({
                                                                             inputMode="decimal"
                                                                             value={formatNumberWithSpaces(historyForm.data.contract_value_mnok)}
                                                                             onChange={(event) => historyForm.setData('contract_value_mnok', parseNumberFromSpaces(event.target.value))}
-                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {historyForm.errors.contract_value_mnok ? (
                                                                             <p className="text-sm text-rose-600">{historyForm.errors.contract_value_mnok}</p>
@@ -2658,7 +2658,7 @@ export default function NoticeIndex({
                                                                             <select
                                                                                 value={historyForm.data.procurement_type}
                                                                                 onChange={(event) => updateHistoryProcurementType(event.target.value)}
-                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                             >
                                                                                 <option value="">{noticesText.selectProcurementType}</option>
                                                                                 {historyProcurementTypeOptions.map((option) => (
@@ -2678,7 +2678,7 @@ export default function NoticeIndex({
                                                                                 <select
                                                                                     value={historyForm.data.follow_up_mode}
                                                                                     onChange={(event) => updateHistoryFollowUpMode(event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 >
                                                                                     {historyFollowUpOptions.map((option) => (
                                                                                         <option key={option.value} value={option.value}>
@@ -2702,7 +2702,7 @@ export default function NoticeIndex({
                                                                                     step="1"
                                                                                     value={historyForm.data.follow_up_offset_months}
                                                                                     onChange={(event) => historyForm.setData('follow_up_offset_months', event.target.value)}
-                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                                 />
                                                                                 {historyForm.errors.follow_up_offset_months ? (
                                                                                     <p className="text-sm text-rose-600">{historyForm.errors.follow_up_offset_months}</p>
@@ -2721,9 +2721,9 @@ export default function NoticeIndex({
                                                                                 step="1"
                                                                                 value={historyForm.data.contract_period_months}
                                                                                 onChange={(event) => historyForm.setData('contract_period_months', event.target.value)}
-                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-[15px] outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                             />
-                                                                            <p className="text-xs text-slate-500">{noticesText.contractPeriodHelp}</p>
+                                                                            <p className="text-sm text-slate-500">{noticesText.contractPeriodHelp}</p>
                                                                             {historyForm.errors.contract_period_months ? (
                                                                                 <p className="text-sm text-rose-600">{historyForm.errors.contract_period_months}</p>
                                                                             ) : null}
@@ -2736,7 +2736,7 @@ export default function NoticeIndex({
                                                                             <div className="mt-1 text-sm text-violet-700">
                                                                                 {historyNextFollowUpPreview ? formatDate(historyNextFollowUpPreview, locale) : noticesText.nextFollowUpManualHint}
                                                                             </div>
-                                                                            <p className="mt-1 text-xs text-violet-700">
+                                                                            <p className="mt-1 text-sm text-violet-700">
                                                                                 {noticesText.nextFollowUpManualHelp}
                                                                             </p>
                                                                         </div>
@@ -2753,7 +2753,7 @@ export default function NoticeIndex({
                                                                     <button
                                                                         type="submit"
                                                                         disabled={historyForm.processing}
-                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-[15px] font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
                                                                         {historyForm.processing ? noticesText.savingLabel : noticesText.saveLabel}
                                                                     </button>
@@ -2761,7 +2761,7 @@ export default function NoticeIndex({
                                                                         type="button"
                                                                         onClick={cancelHistoryEditor}
                                                                         disabled={historyForm.processing}
-                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[15px] font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                                     >
                                                                         {noticesText.cancelLabel}
                                                                     </button>
