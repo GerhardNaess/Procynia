@@ -37,7 +37,7 @@ export default function KnowledgeBaseEdit({
             <div className="space-y-7">
                 <section className="space-y-4">
                     <div className="space-y-2">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                             Kunnskapsbase
                         </div>
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">

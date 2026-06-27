@@ -149,11 +149,11 @@ export default function KnowledgeItemForm({
 
     const ownershipSelect = (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">{ownershipLabel}</span>
+            <span className="text-base font-medium text-slate-700">{ownershipLabel}</span>
             <select
                 value={selectedOwnershipType}
                 onChange={(event) => form.setData('ownership_type', event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
             >
                 {selectableOwnershipOptions.map((option) => (
                     <option
@@ -166,21 +166,21 @@ export default function KnowledgeItemForm({
                 ))}
             </select>
             {ownershipHelpText ? (
-                <p className="text-xs leading-5 text-slate-500">
+                <p className="text-base leading-5 text-slate-500">
                     {ownershipHelpText}
                 </p>
             ) : null}
-            {form.errors.ownership_type ? <p className="text-sm text-rose-600">{form.errors.ownership_type}</p> : null}
+            {form.errors.ownership_type ? <p className="text-base text-rose-600">{form.errors.ownership_type}</p> : null}
         </label>
     );
 
     const documentOwnerSelect = knowledgeItem ? (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">{documentOwnerLabel}</span>
+            <span className="text-base font-medium text-slate-700">{documentOwnerLabel}</span>
             <select
                 value={selectedDocumentOwnerUserId}
                 onChange={(event) => form.setData('owner_user_id', event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
             >
                 <option value="">{notSetLabel}</option>
                 {documentOwnerOptions.map((option) => (
@@ -189,17 +189,17 @@ export default function KnowledgeItemForm({
                     </option>
                 ))}
             </select>
-            {form.errors.owner_user_id ? <p className="text-sm text-rose-600">{form.errors.owner_user_id}</p> : null}
+            {form.errors.owner_user_id ? <p className="text-base text-rose-600">{form.errors.owner_user_id}</p> : null}
         </label>
     ) : null;
 
     const documentStatusSelect = (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">{documentStatusLabel}</span>
+            <span className="text-base font-medium text-slate-700">{documentStatusLabel}</span>
             <select
                 value={form.data.document_status ?? 'active'}
                 onChange={(event) => form.setData('document_status', event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
             >
                 {documentStatusOptions.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -207,43 +207,43 @@ export default function KnowledgeItemForm({
                     </option>
                 ))}
             </select>
-            <p className="text-[12px] leading-5 text-slate-400">{documentStatusHelpText}</p>
-            {form.errors.document_status ? <p className="text-sm text-rose-600">{form.errors.document_status}</p> : null}
+            <p className="text-base leading-6 text-slate-400">{documentStatusHelpText}</p>
+            {form.errors.document_status ? <p className="text-base text-rose-600">{form.errors.document_status}</p> : null}
         </label>
     );
 
     const reviewDatesSection = (
         <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
-                <span className="text-sm font-medium text-slate-700">{lastReviewedAtLabel}</span>
+                <span className="text-base font-medium text-slate-700">{lastReviewedAtLabel}</span>
                 <input
                     type="date"
                     value={form.data.last_reviewed_at ?? ''}
                     onChange={(event) => form.setData('last_reviewed_at', event.target.value || null)}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                 />
-                {form.errors.last_reviewed_at ? <p className="text-sm text-rose-600">{form.errors.last_reviewed_at}</p> : null}
+                {form.errors.last_reviewed_at ? <p className="text-base text-rose-600">{form.errors.last_reviewed_at}</p> : null}
             </label>
             <label className="space-y-2">
-                <span className="text-sm font-medium text-slate-700">{reviewDueAtLabel}</span>
+                <span className="text-base font-medium text-slate-700">{reviewDueAtLabel}</span>
                 <input
                     type="date"
                     value={form.data.review_due_at ?? ''}
                     onChange={(event) => form.setData('review_due_at', event.target.value || null)}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                 />
-                {form.errors.review_due_at ? <p className="text-sm text-rose-600">{form.errors.review_due_at}</p> : null}
+                {form.errors.review_due_at ? <p className="text-base text-rose-600">{form.errors.review_due_at}</p> : null}
             </label>
         </div>
     );
 
     const documentCategorySelect = (
         <label className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">{documentCategoryLabel}</span>
+            <span className="text-base font-medium text-slate-700">{documentCategoryLabel}</span>
             <select
                 value={selectedCategoryId ?? ''}
                 onChange={(event) => handleCategoryChange(event.target.value)}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
             >
                 <option value="">{selectDocumentCategoryText}</option>
                 {(Array.isArray(documentCategoryOptions) ? documentCategoryOptions : []).map((category) => (
@@ -252,26 +252,26 @@ export default function KnowledgeItemForm({
                     </option>
                 ))}
             </select>
-            {form.errors.document_category_id ? <p className="text-sm text-rose-600">{form.errors.document_category_id}</p> : null}
+            {form.errors.document_category_id ? <p className="text-base text-rose-600">{form.errors.document_category_id}</p> : null}
         </label>
     );
 
     const documentTopicSelect = (
         <div className="space-y-2">
-            <span className="text-sm font-medium text-slate-700">{documentTopicLabel}</span>
+            <span className="text-base font-medium text-slate-700">{documentTopicLabel}</span>
             {selectedCategoryId === null ? (
-                <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-400">
+                <div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-400">
                     {selectDocumentCategoryFirstText}
                 </div>
             ) : selectedCategoryHasNoTopics ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm leading-5 text-amber-700">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-base leading-5 text-amber-700">
                     {noTopicsAvailableText}
                 </div>
             ) : (
                 <select
                     value={selectedTopicId ?? ''}
                     onChange={(event) => form.setData('document_topic_id', event.target.value === '' ? null : Number(event.target.value))}
-                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-base outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                 >
                     <option value="">{selectDocumentTopicText}</option>
                     {availableTopics.map((topic) => (
@@ -281,7 +281,7 @@ export default function KnowledgeItemForm({
                     ))}
                 </select>
             )}
-            {form.errors.document_topic_id ? <p className="text-sm text-rose-600">{form.errors.document_topic_id}</p> : null}
+            {form.errors.document_topic_id ? <p className="text-base text-rose-600">{form.errors.document_topic_id}</p> : null}
         </div>
     );
 
@@ -309,7 +309,7 @@ export default function KnowledgeItemForm({
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                         <div className="space-y-4">
                             <div className="space-y-2">
-                                <label htmlFor="knowledge-document" className="text-sm font-medium text-slate-700">
+                                <label htmlFor="knowledge-document" className="text-base font-medium text-slate-700">
                                     Velg dokument
                                 </label>
                                 <div className="flex min-h-[56px] items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -317,10 +317,10 @@ export default function KnowledgeItemForm({
                                         htmlFor="knowledge-document"
                                         className="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
                                     >
-                                        <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700">
+                                        <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-base font-medium text-white transition hover:bg-violet-700">
                                             Velg fil
                                         </span>
-                                        <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                        <span className="min-w-0 flex-1 text-base text-slate-500">
                                             {selectedDocumentLabel}
                                         </span>
                                     </label>
@@ -332,10 +332,10 @@ export default function KnowledgeItemForm({
                                         className="sr-only"
                                     />
                                 </div>
-                                <p className="text-xs leading-5 text-slate-500">
+                                <p className="text-base leading-5 text-slate-500">
                                     Tillatte filtyper: PDF, DOC, DOCX, XLS, XLSX. Maks 20 MB per fil.
                                 </p>
-                                {form.errors.document && !form.errors.duplicate_file ? <p className="text-sm text-rose-600">{form.errors.document}</p> : null}
+                                {form.errors.document && !form.errors.duplicate_file ? <p className="text-base text-rose-600">{form.errors.document}</p> : null}
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-4">
@@ -348,8 +348,8 @@ export default function KnowledgeItemForm({
 
                             <div className="grid gap-4 sm:grid-cols-4">
                                 <label className="space-y-2">
-                                    <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
-                                    <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
+                                    <span className="text-base font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
+                                    <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
                                         <input
                                             type="checkbox"
                                             checked={form.data.ai_usage_enabled}
@@ -358,7 +358,7 @@ export default function KnowledgeItemForm({
                                         />
                                         <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
                                     </label>
-                                    <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
+                                    <p className="text-base leading-6 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                                 </label>
 
                                 {documentStatusSelect}
@@ -370,7 +370,7 @@ export default function KnowledgeItemForm({
                         <button
                             type="submit"
                             disabled={form.processing}
-                            className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60 lg:mt-7"
+                            className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60 lg:mt-7"
                         >
                             {form.processing ? 'Lagrer...' : submitLabel}
                         </button>
@@ -389,35 +389,35 @@ export default function KnowledgeItemForm({
                             <div className="font-medium text-slate-950">
                                 {knowledgeItem.original_filename}
                             </div>
-                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 {knowledgeItem.extraction_status_label}
                             </span>
-                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-base font-semibold uppercase tracking-[0.12em] text-slate-600">
                                 Tekstbiter: {Number(knowledgeItem.chunk_count ?? 0)}
                             </span>
                         </div>
 
-                        <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                        <div className="grid gap-3 text-base text-slate-600 sm:grid-cols-2">
                             <div>
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     Lastet opp
                                 </div>
                                 <div>{formatDateTime(knowledgeItem.uploaded_at)}</div>
                             </div>
                             <div>
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     Størrelse
                                 </div>
                                 <div>{formatFileSize(knowledgeItem.file_size_bytes)}</div>
                             </div>
                             <div>
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     Lastet opp av
                                 </div>
                                 <div>{knowledgeItem.uploaded_by ?? '—'}</div>
                             </div>
                             <div>
-                                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                <div className="text-base font-semibold uppercase tracking-[0.12em] text-slate-400">
                                     Utdrag
                                 </div>
                                 <div className="whitespace-pre-wrap break-words leading-6">
@@ -427,7 +427,7 @@ export default function KnowledgeItemForm({
                                     <button
                                         type="button"
                                         onClick={() => setContentExcerptExpanded((currentValue) => !currentValue)}
-                                        className="mt-1 text-sm font-semibold text-violet-700 transition hover:text-violet-900"
+                                        className="mt-1 text-base font-semibold text-violet-700 transition hover:text-violet-900"
                                     >
                                         {contentExcerptExpanded ? 'Vis mindre' : 'Mer'}
                                     </button>
@@ -436,12 +436,12 @@ export default function KnowledgeItemForm({
                         </div>
 
                         {knowledgeItem.extraction_error ? (
-                            <p className="text-sm text-rose-600">
+                            <p className="text-base text-rose-600">
                                 {knowledgeItem.extraction_error}
                             </p>
                         ) : null}
 
-                        <p className="text-sm text-slate-500">
+                        <p className="text-base text-slate-500">
                             For å endre innholdet, last opp et nytt dokument.
                         </p>
                     </section>
@@ -458,8 +458,8 @@ export default function KnowledgeItemForm({
                     {documentTopicSelect}
 
                     <label className="space-y-2">
-                        <span className="text-sm font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
-                        <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
+                        <span className="text-base font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
+                        <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
                             <input
                                 type="checkbox"
                                 checked={form.data.ai_usage_enabled}
@@ -468,7 +468,7 @@ export default function KnowledgeItemForm({
                             />
                             <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
                         </label>
-                        <p className="text-[12px] leading-5 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
+                        <p className="text-base leading-6 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                     </label>
                 </div>
 
@@ -485,7 +485,7 @@ export default function KnowledgeItemForm({
                     <div className="flex flex-col gap-3 sm:flex-row">
                         <Link
                             href={backHref}
-                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                         >
                             Tilbake
                         </Link>
@@ -494,7 +494,7 @@ export default function KnowledgeItemForm({
                                 type="button"
                                 onClick={deleteKnowledgeItem}
                                 disabled={deleting}
-                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 {deleting ? 'Sletter...' : 'Slett'}
                             </button>
@@ -504,7 +504,7 @@ export default function KnowledgeItemForm({
                     <button
                         type="submit"
                         disabled={form.processing}
-                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex min-h-11 items-center justify-center rounded-xl bg-violet-600 px-4 py-2.5 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         {form.processing ? 'Lagrer...' : submitLabel}
                     </button>
