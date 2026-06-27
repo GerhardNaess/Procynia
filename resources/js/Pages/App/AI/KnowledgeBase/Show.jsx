@@ -1339,9 +1339,8 @@ export default function KnowledgeBaseShow({
                             <textarea
                                 value={summaryForm.data.summary}
                                 onChange={(event) => summaryForm.setData('summary', event.target.value)}
-                                rows={2}
                                 placeholder={tks.summary_placeholder}
-                                className="mt-3 h-[92px] w-full resize-none rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="mt-3 min-h-[120px] flex-1 w-full resize-none rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
 
                             <div className="mt-3 flex items-end justify-between gap-3">
