@@ -1,5 +1,6 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
+import InfoHint from '../../../../Components/App/InfoHint';
 
 export const KNOWLEDGE_DOCUMENT_TYPE_OPTIONS = [
     { value: 'company', label: 'Selskap' },
@@ -348,7 +349,13 @@ export default function KnowledgeItemForm({
 
                             <div className="grid gap-4 sm:grid-cols-4">
                                 <label className="space-y-2">
-                                    <span className="text-base font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
+                                    <span className="flex items-center gap-1.5 text-base font-medium text-slate-700">
+                                        {knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}
+                                        <InfoHint
+                                            label="Forklaring for Kan brukes av AI"
+                                            text={knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid. Deaktiver for å holde dokumentet utenfor AI-kjøringer uten å deaktivere det.'}
+                                        />
+                                    </span>
                                     <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
                                         <input
                                             type="checkbox"
@@ -358,7 +365,6 @@ export default function KnowledgeItemForm({
                                         />
                                         <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
                                     </label>
-                                    <p className="text-base leading-6 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                                 </label>
 
                                 {documentStatusSelect}
@@ -458,7 +464,13 @@ export default function KnowledgeItemForm({
                     {documentTopicSelect}
 
                     <label className="space-y-2">
-                        <span className="text-base font-medium text-slate-700">{knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}</span>
+                        <span className="flex items-center gap-1.5 text-base font-medium text-slate-700">
+                            {knowledgeText.ai_usage_label ?? 'Kan brukes av AI'}
+                            <InfoHint
+                                label="Forklaring for Kan brukes av AI"
+                                text={knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid. Deaktiver for å holde dokumentet utenfor AI-kjøringer uten å deaktivere det.'}
+                            />
+                        </span>
                         <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-base text-slate-700">
                             <input
                                 type="checkbox"
@@ -468,7 +480,6 @@ export default function KnowledgeItemForm({
                             />
                             <span>{form.data.ai_usage_enabled ? (knowledgeText.ai_usage_on ?? 'Brukes av AI') : (knowledgeText.ai_usage_off ?? 'Brukes ikke av AI')}</span>
                         </label>
-                        <p className="text-base leading-6 text-slate-400">{knowledgeText.ai_usage_help ?? 'Aktiver for å inkludere dokumentet som grunnlag i AI-arbeid.'}</p>
                     </label>
                 </div>
 
