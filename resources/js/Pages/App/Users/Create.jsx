@@ -162,7 +162,7 @@ export default function UsersCreate({
                                         ? (remainingUserSlots > 0
                                             ? `${remainingUserSlots} ledige`
                                             : (usersFormText.user_license_selected_included ?? 'Denne brukeren blir inkludert i abonnementet.'))
-                                        : (usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Fakturering.')}
+                                        : (usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Abonnement.')}
                                 </div>
                             </div>
 
@@ -196,7 +196,7 @@ export default function UsersCreate({
                                         {!hasActiveSubscription
                                             ? (usersFormText.user_license_requires_subscription ?? 'Kunden har ikke aktivt abonnement ennå. Brukeren får kun tilgang til gratis funksjonalitet frem til abonnement er aktivert.')
                                             : (!canEditUserLicense
-                                                ? (usersFormText.user_license_locked ?? 'Brukerlisens settes av System Owner under Fakturering.')
+                                                ? (usersFormText.user_license_locked ?? 'Brukerlisens settes av System Owner under Abonnement.')
                                                 : (usersFormText.user_license_no_options ?? 'Ingen brukerbaserte tjenestenivåer er tilgjengelige for denne kunden.'))}
                                     </p>
                                 )}
@@ -205,7 +205,7 @@ export default function UsersCreate({
 
                         {canAddUser ? null : (
                             <AlertBox>
-                                {usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Fakturering.'}
+                                {usersFormText.user_limit_reached ?? 'Abonnementet tillater ikke flere brukere. System Owner kan endre abonnement under Abonnement.'}
                             </AlertBox>
                         )}
                     </section>

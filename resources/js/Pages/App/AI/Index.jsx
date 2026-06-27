@@ -100,14 +100,14 @@ export default function AiIndex({ pageTitle = 'Oversikt', analysisCases = [] }) 
                 {!canUseAiOffer ? (
                     <AlertBox title={tai.ai_access_unavailable_title ?? 'AI er ikke tilgjengelig'}>
                         <p className="mt-1">
-                            {tai.ai_access_unavailable_message ?? 'AI er ikke tilgjengelig for abonnementet ditt. System Owner kan aktivere eller endre abonnement under Fakturering.'}
+                            {tai.ai_access_unavailable_message ?? 'AI er ikke tilgjengelig for abonnementet ditt. System Owner kan aktivere eller endre abonnement under Abonnement.'}
                         </p>
                         {billingHref ? (
                             <a
                                 href={billingHref}
                                 className="mt-3 inline-flex items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 transition hover:bg-amber-100"
                             >
-                                {tai.ai_access_billing_cta ?? 'Gå til Fakturering'}
+                                {tai.ai_access_billing_cta ?? 'Gå til Abonnement'}
                             </a>
                         ) : null}
                     </AlertBox>

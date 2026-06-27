@@ -156,20 +156,20 @@ export default function BillingIndex() {
     };
 
     const resolveStatusLabel = (status) => resolveLabel(status, statusLabels, statusLabels.unknown ?? 'Ukjent');
-    const resolveSourceLabel = (source) => resolveLabel(source, sourceLabels, summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe');
-    const resolveIntervalLabel = (interval) => resolveLabel(interval, intervalLabels, summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe');
+    const resolveSourceLabel = (source) => resolveLabel(source, sourceLabels, summaryText.not_available ?? 'Ikke tilgjengelig');
+    const resolveIntervalLabel = (interval) => resolveLabel(interval, intervalLabels, summaryText.not_available ?? 'Ikke tilgjengelig');
     const resolveLineTypeLabel = (interval) => (normalizeKey(interval) === 'one_time'
         ? (lineTypeLabels.one_time ?? 'Engang')
         : (lineTypeLabels.recurring ?? 'Løpende'));
     const resolveServiceLevelLabel = (levelKey) => resolveLabel(
         levelKey,
         serviceLevelLabels,
-        summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe'
+        summaryText.not_available ?? 'Ikke tilgjengelig'
     );
     const resolveBillingLineLabel = (line) => line.billing_price
         ?? line.billing_product
         ?? summaryText.not_available
-        ?? 'Ikke tilgjengelig fra Stripe';
+        ?? 'Ikke tilgjengelig';
 
     const formatCount = (count) => {
         if (count === 0) {
@@ -182,18 +182,18 @@ export default function BillingIndex() {
 
     const formatOpenInvoiceCount = (count) => {
         if (count === 0) {
-            return summaryText.no_outstanding ?? 'Ingen utestående Stripe-fakturaer';
+            return summaryText.no_outstanding ?? 'Ingen utestående betalinger';
         }
 
         const template = count === 1 ? summaryText.open_one : summaryText.open_many;
-        return (template ?? ':count åpne Stripe-fakturaer').replace(':count', String(count));
+        return (template ?? ':count åpne fakturaer').replace(':count', String(count));
     };
 
     const formatMoney = (value) => new Intl.NumberFormat(locale).format(Number(value ?? 0));
 
     const formatPlanIntervalPrice = (value, interval) => {
         if (value === null || value === undefined) {
-            return summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe';
+            return summaryText.not_available ?? 'Ikke tilgjengelig';
         }
 
         const intervalUnit = normalizeKey(interval) === 'yearly'
@@ -213,11 +213,11 @@ export default function BillingIndex() {
     };
 
     const stripeSubscriptionValue = hasActiveStripeSubscription
-        ? (subscription?.plan_label ?? summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe')
-        : (summaryText.no_active_subscription ?? 'Ingen aktiv Stripe-subscription');
+        ? (subscription?.plan_label ?? summaryText.not_available ?? 'Ikke tilgjengelig')
+        : (summaryText.no_active_subscription ?? 'Ingen aktivt betalingsabonnement');
 
     const stripePaymentValue = sortedInvoices.length === 0
-        ? (summaryText.not_available ?? 'Ikke tilgjengelig fra Stripe')
+        ? (summaryText.not_available ?? 'Ikke tilgjengelig')
         : formatOpenInvoiceCount(openStripeInvoices.length);
 
     const procyniaServicesValue = formatCount(billingLines.length);
@@ -317,7 +317,7 @@ export default function BillingIndex() {
     };
 
     return (
-        <CustomerAppLayout title={tb.title ?? 'Fakturering og abonnement'}>
+        <CustomerAppLayout title={tb.title ?? 'Abonnement og betaling'}>
             <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
                 {flash?.success && (
                     <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
@@ -333,26 +333,26 @@ export default function BillingIndex() {
                 <header className="space-y-3">
                     <div className="flex items-center gap-3">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-                            {tb.title ?? 'Fakturering og abonnement'}
+                            {tb.title ?? 'Abonnement og betaling'}
                         </h1>
                         <PageHelpButton
                             buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                            title={tb.page_help_title ?? 'Om Fakturering'}
-                            intro={tb.page_help_intro ?? 'Faktureringssiden gir deg oversikt over abonnement, tjenester, brukernivåer og betalingsstatus.'}
+                            title={tb.page_help_title ?? 'Om abonnement og betaling'}
+                            intro={tb.page_help_intro ?? 'Siden gir deg oversikt over abonnement, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
                             sections={[
                                 {
                                     title: tb.page_help_section_overview ?? 'Hva du finner her',
                                     items: [
                                         {
                                             title: tb.page_help_item_subscription_title ?? 'Abonnement',
-                                            text: tb.page_help_item_subscription_text ?? 'Viser gjeldende abonnement, neste fakturering og betalingsstatus.',
+                                            text: tb.page_help_item_subscription_text ?? 'Viser gjeldende abonnement, neste fornyelse og betalingsstatus.',
                                         },
                                         {
-                                            title: tb.page_help_item_services_title ?? 'Tjenester og brukernivåer',
+                                            title: tb.page_help_item_services_title ?? 'Aktive tjenester',
                                             text: tb.page_help_item_services_text ?? 'Viser hvilke tjenester som er aktive og antall brukere per nivå.',
                                         },
                                         {
-                                            title: tb.page_help_item_invoices_title ?? 'Fakturaer',
+                                            title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
                                             text: tb.page_help_item_invoices_text ?? 'Historikk over fakturaer med beløp, dato og status.',
                                         },
                                     ],
@@ -361,42 +361,42 @@ export default function BillingIndex() {
                         />
                     </div>
                     <p className="max-w-4xl text-sm leading-6 text-slate-600">
-                        {tb.subtitle ?? 'Oversikt over abonnement, tjenester, brukernivåer og fakturaer fra Stripe.'}
+                        {tb.subtitle ?? 'Oversikt over abonnement, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
                     </p>
                     <p className="max-w-4xl text-sm leading-6 text-slate-600">
-                        {tb.intro ?? 'Stripe er økonomisk fasit for abonnement, fakturaer, betaling, utestående og forfall. Procynia er fasit for tjenester, tilgang og brukernivåer.'}
+                        {tb.intro ?? 'Her ser du kundens abonnement, betalingsstatus, aktive tjenester og brukernivåer. Procynia styrer hvilke tjenester og tilganger som er aktive. Betaling, fakturaer og forfall håndteres gjennom betalingsløsningen når abonnement eller faktura er opprettet.'}
                     </p>
                 </header>
 
                 <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <SummaryCard
-                        label={summaryText.stripe_subscription ?? 'Abonnement fra Stripe'}
+                        label={summaryText.stripe_subscription ?? 'Abonnement'}
                         value={stripeSubscriptionValue}
                     />
                     <SummaryCard
-                        label={summaryText.stripe_payment ?? 'Betaling fra Stripe'}
+                        label={summaryText.stripe_payment ?? 'Betalingsstatus'}
                         value={stripePaymentValue}
                     />
                     <SummaryCard
-                        label={summaryText.procynia_services ?? 'Tjenester i Procynia'}
+                        label={summaryText.procynia_services ?? 'Aktive tjenester'}
                         value={procyniaServicesValue}
                     />
                     <SummaryCard
-                        label={summaryText.procynia_levels ?? 'Brukernivåer i Procynia'}
+                        label={summaryText.procynia_levels ?? 'Aktive brukernivåer'}
                         value={procyniaLevelsValue}
                     />
                 </section>
 
                 {showProcyniaStripeWarning && (
                     <AlertBox>
-                        {alertText.services_without_subscription ?? 'Kontoen har aktive tjenester eller brukernivåer i Procynia, men ingen aktiv Stripe-subscription. Fakturaer, betaling og utestående håndteres via Stripe når abonnement eller faktura er opprettet.'}
+                            {alertText.services_without_subscription ?? 'Kontoen har aktive tjenester eller brukernivåer, men ingen aktivt betalingsabonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
                     </AlertBox>
                 )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {subscriptionText.heading ?? 'Abonnement fra Stripe'}
+                            {subscriptionText.heading ?? 'Abonnement'}
                         </h2>
                         <InfoHint size="sm" label="Vis forklaring for Abonnement" text={tb.hint_subscription} />
                     </div>
@@ -415,28 +415,28 @@ export default function BillingIndex() {
                             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm md:grid-cols-2">
                                 {subscription.plan_label && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Stripe-plan'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Abonnementsplan'}</dt>
                                         <dd className="font-medium text-slate-900">{subscription.plan_label}</dd>
                                     </>
                                 )}
-                                <dt className="text-slate-500">{subscriptionText.status ?? 'Stripe-status'}</dt>
+                                <dt className="text-slate-500">{subscriptionText.status ?? 'Betalingsstatus'}</dt>
                                 <dd className="font-medium text-slate-900">{resolveStatusLabel(subscription.status)}</dd>
 
                                 {subscription.billing_interval && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.interval ?? 'Stripe-faktureringsintervall'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.interval ?? 'Abonnementsintervall'}</dt>
                                         <dd className="font-medium text-slate-900">{resolveIntervalLabel(subscription.billing_interval)}</dd>
                                     </>
                                 )}
                                 {subscription.current_period_end && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.next_renewal ?? 'Neste Stripe-fakturering'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.next_renewal ?? 'Neste fornyelse'}</dt>
                                         <dd className="font-medium text-slate-900">{formatDate(subscription.current_period_end)}</dd>
                                     </>
                                 )}
                                 {subscription.trial_ends_at && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.trial ?? 'Stripe-trial'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.trial ?? 'Prøveperiode'}</dt>
                                         <dd className="font-medium text-slate-900">{formatDate(subscription.trial_ends_at)}</dd>
                                     </>
                                 )}
@@ -487,7 +487,7 @@ export default function BillingIndex() {
                     ) : (
                         <div className="mt-4 space-y-3">
                             <p className="text-sm leading-6 text-slate-600">
-                                {subscriptionText.empty ?? 'Ingen aktiv Stripe-subscription. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.'}
+                                {subscriptionText.empty ?? 'Ingen aktivt betalingsabonnement. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.'}
                             </p>
                             {canChangePlan && (
                                 <button
@@ -504,12 +504,12 @@ export default function BillingIndex() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {servicesText.heading ?? 'Tjenester i Procynia'}
+                            {servicesText.heading ?? 'Aktive tjenester'}
                         </h2>
                         <InfoHint size="sm" label="Vis forklaring for Tjenester" text={tb.hint_procynia_services} />
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {servicesText.help ?? 'Dette viser aktive tjenester og faktureringsgrunnlag i Procynia. Fakturaer og betalingsstatus håndteres via Stripe.'}
+                        {servicesText.help ?? 'Dette viser aktive tjenester og faktureringsgrunnlag i Procynia. Fakturaer og betalingsstatus håndteres via betalingsløsningen.'}
                     </p>
 
                     {billingLines.length > 0 ? (
@@ -561,7 +561,7 @@ export default function BillingIndex() {
                         </div>
                     ) : (
                         <p className="mt-4 text-sm leading-6 text-slate-600">
-                            {servicesText.empty ?? 'Ingen interne Procynia-billing-linjer registrert. Interne linjer beskriver tjenester, tilgang eller faktureringsgrunnlag, men er ikke økonomisk fasit.'}
+                            {servicesText.empty ?? 'Ingen interne Procynia-linjer registrert. Interne linjer beskriver tjenester, tilgang eller grunnlag for abonnement og betaling, men er ikke økonomisk fasit.'}
                         </p>
                     )}
                 </section>
@@ -569,7 +569,7 @@ export default function BillingIndex() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {levelsText.heading ?? 'Brukernivåer i Procynia'}
+                            {levelsText.heading ?? 'Aktive brukernivåer'}
                         </h2>
                         <InfoHint size="sm" label="Vis forklaring for Brukernivåer" text={tb.hint_procynia_levels} />
                     </div>
@@ -621,10 +621,10 @@ export default function BillingIndex() {
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <h2 className="text-base font-semibold text-slate-900">
-                        {invoicesText.heading ?? 'Fakturaer fra Stripe'}
+                        {invoicesText.heading ?? 'Fakturaer og betalinger'}
                     </h2>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {invoicesText.help ?? 'Fakturaer og PDF-er vises her når de er opprettet i Stripe.'}
+                        {invoicesText.help ?? 'Fakturaer og PDF-er vises her når de er opprettet i betalingsløsningen.'}
                     </p>
 
                     {sortedInvoices.length > 0 ? (
@@ -673,7 +673,7 @@ export default function BillingIndex() {
                         </div>
                     ) : (
                         <p className="mt-4 text-sm leading-6 text-slate-600">
-                            {invoicesText.empty ?? 'Ingen Stripe-fakturaer funnet. Fakturaer og PDF-er vises her når de er opprettet i Stripe.'}
+                            {invoicesText.empty ?? 'Ingen fakturaer funnet. Fakturaer og PDF-er vises her når de er opprettet i betalingsløsningen.'}
                         </p>
                     )}
                 </section>
@@ -691,11 +691,11 @@ export default function BillingIndex() {
                             <p className="text-sm leading-6 text-slate-600">
                                 {planChangeStep === 'confirm'
                                     ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
-                                    : (planChangeText.description ?? 'Velg en ny plan. Fakturering håndteres via Stripe.')}
+                                    : (planChangeText.description ?? 'Velg en ny plan. Abonnementet håndteres via betalingsløsningen.')}
                             </p>
                             {planChangeStep === 'confirm' && (
                                 <p className="text-sm leading-6 text-slate-600">
-                                    {planChangeText.confirm_note ?? 'Endringen behandles via Stripe og kan påvirke videre fakturering.'}
+                                    {planChangeText.confirm_note ?? 'Endringen behandles via betalingsløsningen og kan påvirke videre abonnement.'}
                                 </p>
                             )}
                         </div>
@@ -797,7 +797,7 @@ export default function BillingIndex() {
                                         {planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.'}
                                     </p>
                                     <p className="mt-2">
-                                        {planChangeText.confirm_note ?? 'Endringen behandles via Stripe og kan påvirke videre fakturering.'}
+                                        {planChangeText.confirm_note ?? 'Endringen behandles via betalingsløsningen og kan påvirke videre abonnement.'}
                                     </p>
                                 </AlertBox>
 
@@ -820,7 +820,7 @@ export default function BillingIndex() {
                                                 {selectedPlanSummary.name}
                                             </div>
                                             <div className="text-slate-500">
-                                                {planChangeText.billing_interval ?? 'Faktureringsintervall'}
+                                                {planChangeText.billing_interval ?? 'Abonnementsintervall'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {selectedPlanSummary.intervalLabel}
