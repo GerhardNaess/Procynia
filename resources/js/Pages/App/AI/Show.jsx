@@ -2038,6 +2038,7 @@ export default function AiShow({
     const [selectedEvidence, setSelectedEvidence] = useState(null);
     const [showAdvancedAI, setShowAdvancedAI] = useState(false);
     const [showManualRequirementForm, setShowManualRequirementForm] = useState(false);
+    const [caseDocumentsCollapsed, setCaseDocumentsCollapsed] = useState(false);
     const documentRefreshInFlightRef = useRef(false);
     const finalRequirementsRefreshInFlightRef = useRef(false);
     const documentUploadForm = useForm({
@@ -3276,16 +3277,27 @@ export default function AiShow({
                             </div>
                         )}
 
-                        <div className="space-y-3">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <h3 className="text-sm font-semibold tracking-tight text-slate-950">
-                                    {isEnglish ? 'Uploaded case documents' : 'Opplastede saksdokumenter'}
-                                </h3>
-                                <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
-                                    {documentRows.length}
-                                </span>
+                        <div className="rounded-[18px] border border-slate-200 bg-slate-50/40">
+                            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                    <h3 className="text-sm font-semibold tracking-tight text-slate-950">
+                                        {isEnglish ? 'Uploaded case documents' : 'Opplastede saksdokumenter'}
+                                    </h3>
+                                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                        {documentRows.length}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setCaseDocumentsCollapsed((v) => !v)}
+                                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                >
+                                    {caseDocumentsCollapsed ? tai.show_documents_section ?? 'Vis dokumenter' : tai.hide_documents_section ?? 'Skjul dokumenter'}
+                                </button>
                             </div>
 
+                            {!caseDocumentsCollapsed && (
+                            <div className="p-4">
                             {documentRows.length > 0 ? (
                                 <ul className="space-y-3">
                                     {documentRows.map((document) => {
@@ -3373,6 +3385,8 @@ export default function AiShow({
                                             : 'Last opp konkurransegrunnlag, kravdokumenter eller andre dokumenter som gjelder denne konkrete saken.'}
                                     </p>
                                 </div>
+                            )}
+                            </div>
                             )}
                         </div>
                     </div>
