@@ -782,31 +782,31 @@ export default function KnowledgeBaseIndex({
                             <table className="min-w-full divide-y divide-slate-200">
                                 <thead className="bg-slate-50/80">
                                     <tr>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_document}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_type}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.status}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_ai_usage ?? 'AI-bruk'}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.chunks}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_updated}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {ownershipLabelText}
                                         </th>
-                                        <th className="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-left text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_owner}
                                         </th>
-                                        <th className="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        <th className="px-4 py-2.5 text-right text-base font-medium uppercase tracking-[0.08em] text-slate-400">
                                             {tk.col_action}
                                         </th>
                                     </tr>
@@ -842,7 +842,7 @@ export default function KnowledgeBaseIndex({
                                                             <div className="font-medium text-slate-950">
                                                                 {item.original_filename}
                                                             </div>
-                                                            <div className="text-sm leading-5 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-500">
                                                                 {subtitle}
                                                             </div>
                                                         </div>
@@ -854,7 +854,7 @@ export default function KnowledgeBaseIndex({
                                                             {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
                                                         {documentTopicDisplayLabel !== '' ? (
-                                                            <div className="text-sm leading-5 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-500">
                                                                 <span className="font-medium text-slate-600">{themeLabelText}:</span> {documentTopicDisplayLabel}
                                                             </div>
                                                         ) : null}
@@ -885,12 +885,12 @@ export default function KnowledgeBaseIndex({
                                                         </span>
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-sm text-slate-500">
+                                                <td className="px-4 py-3.5 text-base text-slate-500">
                                                     {formatChunkRatio(item, commonText.not_available)}
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1">
-                                                        <div className="text-sm font-medium text-slate-900">
+                                                        <div className="text-base font-medium text-slate-900">
                                                             {formatDate(item.updated_at ?? item.uploaded_at, locale, commonText.not_available)}
                                                         </div>
                                                     </div>
@@ -910,7 +910,7 @@ export default function KnowledgeBaseIndex({
                                                                     {ownerInitials}
                                                                 </div>
                                                                 <div className="min-w-0">
-                                                                    <div className="truncate text-sm font-medium text-slate-900">
+                                                                    <div className="truncate text-base font-medium text-slate-900">
                                                                         {ownerDisplayName}
                                                                     </div>
                                                                 </div>
@@ -921,7 +921,7 @@ export default function KnowledgeBaseIndex({
                                                             </span>
                                                         )}
                                                         {uploadedByName !== '' ? (
-                                                            <div className="text-sm leading-5 text-slate-500">
+                                                            <div className="text-base leading-6 text-slate-500">
                                                                 {uploadedByLabelText}: {uploadedByName}
                                                             </div>
                                                         ) : null}
