@@ -1640,7 +1640,7 @@ return [
         'continue_review' => 'Fortsett review',
         'doc_summary' => 'Dokumentoppsummering',
         'summary_placeholder' => 'Skriv en kort oppsummering av dokumentet.',
-        'summary_hint' => 'Rediger direkte her.',
+        'summary_hint' => 'Rediger direkte i teksten over.',
         'more' => 'Mer',
         'saving' => 'Lagrer...',
         'save' => 'Lagre',
