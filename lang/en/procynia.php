@@ -1986,7 +1986,7 @@ return [
         'page_help_item_recommendation_body' => 'Only create departments that are actually used for accountability, reporting or organization. Review users and permissions regularly, especially when employees change roles or leave. Deactivate old departments or users rather than deleting history.',
     ],
     'knowledge_base_settings' => [
-        'page_title' => 'Knowledge base',
+        'page_title' => 'Knowledge base - Document categories and topics',
         'page_subtitle' => 'Here the organization manages which document categories and topics can be used on knowledge documents.',
         'scope_note' => 'These values are customer-specific and are used when knowledge documents are created and managed.',
         'categories_title' => 'Document categories',

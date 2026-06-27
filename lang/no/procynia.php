@@ -1986,7 +1986,7 @@ return [
         'page_help_item_recommendation_body' => 'Opprett bare avdelinger som faktisk brukes til ansvar, rapportering eller organisering. Gå jevnlig gjennom brukere og tilganger, spesielt når ansatte bytter rolle eller slutter. Deaktiver gamle avdelinger eller brukere fremfor å slette historikk.',
     ],
     'knowledge_base_settings' => [
-        'page_title' => 'Kunnskapsbase',
+        'page_title' => 'Kunnskapsbase - Dokumentkategorier og temaer',
         'page_subtitle' => 'Her styrer virksomheten hvilke dokumentkategorier og temaer som kan brukes på kunnskapsdokumenter.',
         'scope_note' => 'Disse verdiene er kundespesifikke og brukes når kunnskapsdokumenter opprettes og styres.',
         'categories_title' => 'Dokumentkategorier',
