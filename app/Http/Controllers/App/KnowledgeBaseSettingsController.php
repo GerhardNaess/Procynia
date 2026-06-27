@@ -106,8 +106,9 @@ class KnowledgeBaseSettingsController extends Controller
     {
         [$actor, $customerId] = $this->systemOwnerContext($request);
         $payload = $this->validatedCatalogPayload($request, $customerId, 'topic');
+        $categoryIds = $this->validatedCategoryIds($request, $customerId);
 
-        KnowledgeDocumentTopic::query()->create([
+        $topic = KnowledgeDocumentTopic::query()->create([
             'customer_id' => $customerId,
             'name' => $payload['name'],
             'description' => $payload['description'],
@@ -116,6 +117,14 @@ class KnowledgeBaseSettingsController extends Controller
             'created_by_user_id' => $actor->id,
             'updated_by_user_id' => $actor->id,
         ]);
+
+        if ($categoryIds !== null && count($categoryIds) > 0) {
+            KnowledgeDocumentCategory::query()
+                ->forCustomer($customerId)
+                ->whereIn('id', $categoryIds)
+                ->get()
+                ->each(fn (KnowledgeDocumentCategory $category) => $category->topics()->syncWithoutDetaching([$topic->id]));
+        }
 
         return redirect()
             ->route('app.customer-environment.knowledge-base.index')
@@ -209,6 +218,11 @@ class KnowledgeBaseSettingsController extends Controller
     {
         return KnowledgeDocumentTopic::query()
             ->forCustomer($customerId)
+            ->with([
+                'categories' => fn ($query) => $query
+                    ->orderByRaw('LOWER(knowledge_document_categories.name)')
+                    ->orderBy('knowledge_document_categories.id'),
+            ])
             ->ordered()
             ->get()
             ->map(fn (KnowledgeDocumentTopic $topic): array => $this->topicPayload($topic))
@@ -255,12 +269,21 @@ class KnowledgeBaseSettingsController extends Controller
      */
     private function topicPayload(KnowledgeDocumentTopic $topic): array
     {
+        $categories = $topic->relationLoaded('categories')
+            ? $topic->categories->map(static fn (KnowledgeDocumentCategory $cat): array => [
+                'id' => $cat->id,
+                'name' => $cat->name,
+            ])->values()->all()
+            : [];
+
         return [
             'id' => $topic->id,
             'name' => $topic->name,
             'description' => $topic->description,
             'is_active' => (bool) $topic->is_active,
             'status_label' => $topic->is_active ? __('procynia.knowledge_base_settings.active') : __('procynia.knowledge_base_settings.inactive'),
+            'category_ids' => array_column($categories, 'id'),
+            'categories' => $categories,
             'update_url' => route('app.customer-environment.knowledge-base.topics.update', ['topic' => $topic->id]),
             'destroy_url' => route('app.customer-environment.knowledge-base.topics.destroy', ['topic' => $topic->id]),
             'created_at' => optional($topic->created_at)?->toIso8601String(),
@@ -349,6 +372,49 @@ class KnowledgeBaseSettingsController extends Controller
         }
 
         return $topicIds;
+    }
+
+    /**
+     * Purpose: Validate category links for a topic when the request includes them.
+     * Inputs: The current request and customer id.
+     * Returns: The approved category ids, or null when the request does not touch category links.
+     * Side effects: Throws validation errors when category links are invalid or cross-customer.
+     */
+    private function validatedCategoryIds(Request $request, int $customerId): ?array
+    {
+        if (! $request->exists('document_category_ids')) {
+            return null;
+        }
+
+        $validated = $request->validate([
+            'document_category_ids' => ['nullable', 'array'],
+            'document_category_ids.*' => ['integer'],
+        ]);
+
+        $categoryIds = collect($validated['document_category_ids'] ?? [])
+            ->filter(static fn ($value): bool => $value !== null && $value !== '')
+            ->map(static fn ($value): int => (int) $value)
+            ->unique()
+            ->values()
+            ->all();
+
+        $approvedCategoryIds = KnowledgeDocumentCategory::query()
+            ->forCustomer($customerId)
+            ->active()
+            ->whereIn('id', $categoryIds)
+            ->pluck('id')
+            ->all();
+
+        sort($categoryIds);
+        sort($approvedCategoryIds);
+
+        if ($categoryIds !== $approvedCategoryIds) {
+            throw ValidationException::withMessages([
+                'document_category_ids' => __('procynia.knowledge_base_settings.validation.invalid_category_selection'),
+            ]);
+        }
+
+        return $categoryIds;
     }
 
     /**
