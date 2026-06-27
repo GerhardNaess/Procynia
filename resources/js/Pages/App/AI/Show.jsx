@@ -2119,7 +2119,7 @@ export default function AiShow({
         || answerDraftGeneratingRequirementId !== null
         || answerDraftSavingRequirementId !== null
         || answerBasisSelectionSavingRequirementId !== null
-        || deletingAllRequirements
+        || rejectingAllRequirements
         || updatingEvidenceId !== null
         || manualRequirementForm.processing
         || requirementEditForm.processing
