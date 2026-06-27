@@ -478,7 +478,7 @@ function StructuredTablePreview({ tableJson }) {
 
     return (
         <div className="mt-4 overflow-x-auto rounded-[14px] border border-slate-200 bg-white">
-            <table className="min-w-full border-collapse text-sm">
+            <table className="min-w-full border-collapse text-base">
                 {(titleRow || headerRowIndices.length > 0) ? (
                     <thead>
                         {titleRow ? renderRow(titleRow, titleRowIndex, false) : null}
@@ -1253,35 +1253,35 @@ export default function KnowledgeBaseShow({
                                 </div>
 
                                 <div className="space-y-3">
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                         {tks.breadcrumb}
                                     </div>
                                     <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-slate-950">
                                         {documentTitle}
                                     </h1>
                                     <div className="flex flex-wrap gap-2">
-                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-base font-medium text-slate-600">
                                             {knowledgeItem?.document_type_label ?? '—'}
                                         </span>
                                         {ownershipLabel !== '' ? (
-                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-600">
                                                 {ownershipLabel}
                                             </span>
                                         ) : null}
                                         <span className={classNames(
-                                            'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
+                                            'inline-flex rounded-full px-3 py-1 text-base font-medium ring-1 ring-inset',
                                             documentStatusMeta.className,
                                         )}>
                                             {documentStatusMeta.label}
                                         </span>
-                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-600">
                                             {activeLabel}
                                         </span>
-                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-600">
                                             {chunkCountText}
                                         </span>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-base text-slate-500">
                                         <span>
                                             {tks.last_updated}: <span className="font-medium text-slate-900">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</span>
                                         </span>
@@ -1301,20 +1301,20 @@ export default function KnowledgeBaseShow({
                         <div className="flex flex-wrap gap-3 lg:justify-end">
                             <Link
                                 href={indexUrl}
-                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
                                 {tks.back}
                             </Link>
                             <Link
                                 href={editUrl}
-                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
                                 {tks.edit_metadata}
                             </Link>
                             <button
                                 type="button"
                                 onClick={openChunksTab}
-                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-700"
+                                className="inline-flex items-center justify-center rounded-2xl bg-violet-600 px-5 py-3 text-base font-semibold text-white transition hover:bg-violet-700"
                             >
                                 {tks.continue_review}
                             </button>
@@ -1326,11 +1326,11 @@ export default function KnowledgeBaseShow({
                     <article className="h-full sm:col-span-2 xl:col-span-2 rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
                         <form onSubmit={submitSummary} className="flex h-full flex-col">
                             <div className="flex items-center justify-between gap-3">
-                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                     {tks.doc_summary}
                                 </div>
                                 {summaryHasOverflow ? (
-                                    <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                    <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                         {tks.more}
                                     </span>
                                 ) : null}
@@ -1341,17 +1341,17 @@ export default function KnowledgeBaseShow({
                                 onChange={(event) => summaryForm.setData('summary', event.target.value)}
                                 rows={2}
                                 placeholder={tks.summary_placeholder}
-                                className="mt-3 h-[92px] w-full resize-none rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                className="mt-3 h-[92px] w-full resize-none rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-700 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                             />
 
                             <div className="mt-3 flex items-end justify-between gap-3">
-                                <p className="max-w-[15rem] text-xs leading-5 text-slate-500">
+                                <p className="max-w-[15rem] text-base leading-5 text-slate-500">
                                     {tks.summary_hint}
                                 </p>
                                 <button
                                     type="submit"
                                     disabled={summaryForm.processing}
-                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     {summaryForm.processing ? tks.saving : tks.save}
                                 </button>
@@ -1360,17 +1360,17 @@ export default function KnowledgeBaseShow({
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                             {tks.status_progress}
                         </div>
                         <div className="mt-3 flex items-center justify-between gap-3">
                             <span className={classNames(
-                                'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
+                                'inline-flex rounded-full px-3 py-1 text-base font-medium ring-1 ring-inset',
                                 documentStatusMeta.className,
                             )}>
                                 {documentStatusMeta.label}
                             </span>
-                            <span className="text-sm font-medium text-slate-700">
+                            <span className="text-base font-medium text-slate-700">
                                 {totalChunksCount > 0 ? `${readyChunksCount} / ${totalChunksCount} ${tks.meta_chunks}` : tks.no_chunks_yet}
                             </span>
                         </div>
@@ -1380,7 +1380,7 @@ export default function KnowledgeBaseShow({
                                 style={{ width: `${progressPercent}%` }}
                             />
                         </div>
-                        <p className="mt-2 text-xs text-slate-500">
+                        <p className="mt-2 text-base text-slate-500">
                             {totalChunksCount > 0
                                 ? formatTemplate(tks.extraction_progress, { percent: progressPercent })
                                 : tks.extraction_incomplete}
@@ -1388,10 +1388,10 @@ export default function KnowledgeBaseShow({
                     </article>
 
                     <article className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                             {tks.doc_info}
                         </div>
-                        <dl className="mt-3 space-y-3 text-sm">
+                        <dl className="mt-3 space-y-3 text-base">
                             <div className="flex items-start justify-between gap-4">
                                 <dt className="text-slate-500">{tks.doc_type}</dt>
                                 <dd className="text-right font-medium text-slate-950">{documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : '—'}</dd>
@@ -1470,51 +1470,51 @@ export default function KnowledgeBaseShow({
 
                 {versionEntries.length > 0 ? (
                     <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                             {knowledgeShowLabels.aiStatusTitle}
                         </div>
 
                         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:gap-6">
                             <div className="min-w-0 flex-1 space-y-1">
-                                <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                     {knowledgeShowLabels.aiStatusActiveVersion}
                                 </div>
                                 {currentVersion ? (
                                     <div className="flex flex-wrap items-baseline gap-2">
-                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-xs font-semibold text-violet-700">
+                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-base font-semibold text-violet-700">
                                             {knowledgeShowLabels.versionLabel} {currentVersion.version_no}
                                         </span>
-                                        <span className={`text-sm ${isDocumentAiActive ? 'text-emerald-700' : 'text-slate-500'}`}>
+                                        <span className={`text-base ${isDocumentAiActive ? 'text-emerald-700' : 'text-slate-500'}`}>
                                             {isDocumentAiActive
                                                 ? knowledgeShowLabels.aiStatusActiveUsed
                                                 : knowledgeShowLabels.aiStatusActiveNotUsed}
                                         </span>
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-slate-500">{knowledgeShowLabels.aiStatusNoActive}</p>
+                                    <p className="text-base text-slate-500">{knowledgeShowLabels.aiStatusNoActive}</p>
                                 )}
                             </div>
 
                             <div className="min-w-0 flex-1 space-y-1">
-                                <div className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                <div className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                     {knowledgeShowLabels.aiStatusPendingVersions}
                                 </div>
                                 {pendingVersions.length > 0 ? (
                                     <div className="space-y-1">
                                         <div className="flex flex-wrap items-center gap-1.5">
                                             {pendingVersions.map((v) => (
-                                                <span key={v.id} className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                <span key={v.id} className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-base font-semibold text-amber-700">
                                                     {knowledgeShowLabels.versionLabel} {v.version_no}
                                                 </span>
                                             ))}
                                         </div>
-                                        <p className="text-sm text-slate-600">
+                                        <p className="text-base text-slate-600">
                                             {knowledgeShowLabels.aiStatusPendingNote}{' '}
                                             {knowledgeShowLabels.aiStatusPendingWhere}
                                         </p>
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-slate-400">{knowledgeShowLabels.aiStatusNoPending}</p>
+                                    <p className="text-base text-slate-400">{knowledgeShowLabels.aiStatusNoPending}</p>
                                 )}
                             </div>
                         </div>
@@ -1536,7 +1536,7 @@ export default function KnowledgeBaseShow({
                                         type="button"
                                         onClick={() => setActiveTab(option.value)}
                                         className={classNames(
-                                            'inline-flex items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition',
+                                            'inline-flex items-center justify-center rounded-full border px-4 py-2 text-base font-medium transition',
                                             isActive
                                                 ? 'border-violet-200 bg-violet-50 text-violet-700'
                                                 : 'border-transparent bg-white text-slate-600 hover:border-slate-200 hover:text-slate-950',
@@ -1557,7 +1557,7 @@ export default function KnowledgeBaseShow({
                                     value={chunkSearchQuery}
                                     onChange={(e) => setChunkSearchQuery(e.target.value)}
                                     placeholder={tks.search_chunks}
-                                    className="h-9 w-56 rounded-full border border-slate-300 bg-white pl-8 pr-4 text-sm text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                                    className="h-9 w-56 rounded-full border border-slate-300 bg-white pl-8 pr-4 text-base text-slate-900 placeholder:text-slate-500 focus:border-violet-300 focus:outline-none focus:ring-2 focus:ring-violet-100"
                                 />
                             </div>
                         ) : null}
@@ -1570,18 +1570,18 @@ export default function KnowledgeBaseShow({
                             <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
                                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                     <div className="flex flex-wrap gap-2">
-                                        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                                        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-base font-medium text-emerald-700">
                                         {tks.review_approved} {chunkReviewCounts.approved}
                                         </span>
-                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                                        <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-base font-medium text-amber-700">
                                             {tks.review_pending} {chunkReviewCounts.pending_review}
                                         </span>
-                                        <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700">
+                                        <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-base font-medium text-rose-700">
                                             {tks.review_rejected} {chunkReviewCounts.rejected}
                                         </span>
                                     </div>
 
-                                    <div className="text-sm font-medium text-slate-600">
+                                    <div className="text-base font-medium text-slate-600">
                                         {reviewProgressText}
                                     </div>
                                 </div>
@@ -1599,7 +1599,7 @@ export default function KnowledgeBaseShow({
                                     <div className="text-lg font-semibold text-slate-900">
                                         {tks.no_chunks_empty_title}
                                     </div>
-                                    <p className="mt-2 text-sm text-slate-500">
+                                    <p className="mt-2 text-base text-slate-500">
                                         {tks.no_chunks_empty_hint}
                                     </p>
                                 </div>
@@ -1608,14 +1608,14 @@ export default function KnowledgeBaseShow({
                                     <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4 xl:flex xl:max-h-[calc(100vh-14rem)] xl:flex-col xl:overflow-hidden">
                                         <div className="flex items-center justify-between gap-3 xl:shrink-0">
                                             <div>
-                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                     {tks.chunks_list_heading}
                                                 </div>
-                                                <div className="mt-1 text-sm text-slate-500">
+                                                <div className="mt-1 text-base text-slate-500">
                                                     {tks.chunks_list_hint}
                                                 </div>
                                             </div>
-                                            <div className="text-xs font-medium text-slate-500">
+                                            <div className="text-base font-medium text-slate-500">
                                                 {chunkSearchQuery
                                                     ? `${filteredChunks.length} av ${chunks.length} ${tks.meta_chunks}`
                                                     : `${chunks.length} ${tks.meta_chunks}`}
@@ -1624,7 +1624,7 @@ export default function KnowledgeBaseShow({
 
                                         <div className="mt-4 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-2">
                                             {filteredChunks.length === 0 && chunkSearchQuery ? (
-                                                <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-sm text-slate-500">
+                                                <div className="rounded-[18px] border border-dashed border-slate-200 bg-slate-50 px-5 py-7 text-center text-base text-slate-500">
                                                     {formatTemplate(tks.no_chunks_match, { query: chunkSearchQuery })}
                                                 </div>
                                             ) : null}
@@ -1651,18 +1651,18 @@ export default function KnowledgeBaseShow({
                                                         <div className="flex items-start justify-between gap-3">
                                                             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                                                                 {isSelected ? (
-                                                                    <span className="inline-flex shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                                                                    <span className="inline-flex shrink-0 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-base font-medium text-violet-700">
                                                                         {tks.selected_badge}
                                                                     </span>
                                                                 ) : null}
-                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                                                     {formatTemplate(knowledgeShowLabels.chunkNumberLabel, { number: originalIndex + 1 })}
                                                                 </span>
-                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                                                <span className="inline-flex shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-base font-medium text-slate-600">
                                                                     {getChunkTypeLabel(chunk, knowledgeShowLabels)}
                                                                 </span>
                                                                 {isChunkMetadataPending(chunk) ? (
-                                                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                                                    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-base font-medium text-amber-700">
                                                                         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
                                                                         {tks.metadata_generating}
                                                                     </span>
@@ -1670,27 +1670,27 @@ export default function KnowledgeBaseShow({
                                                             </div>
 
                                                             <span className={classNames(
-                                                                'inline-flex shrink-0 rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
+                                                                'inline-flex shrink-0 rounded-full px-3 py-1 text-base font-medium ring-1 ring-inset',
                                                                 reviewStatusMeta.className,
                                                             )}>
                                                                 {reviewStatusMeta.label}
                                                             </span>
                                                         </div>
 
-                                                        <div className="mt-3 text-sm font-medium text-slate-950">
+                                                        <div className="mt-3 text-base font-medium text-slate-950">
                                                             {highlightText(getChunkDisplayTitle(chunk, originalIndex, graphicSequenceByChunkId.get(chunk.id) ?? 0, tableSequenceByChunkId.get(chunk.id) ?? 0, knowledgeShowLabels), q)}
                                                         </div>
 
-                                                        <p className="mt-2 max-h-24 overflow-hidden text-sm leading-6 text-slate-600">
+                                                        <p className="mt-2 max-h-24 overflow-hidden text-base leading-6 text-slate-600">
                                                             {highlightText(previewText, q)}
                                                         </p>
 
                                                         <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                                                 {getChunkRangeLabel(chunk)}
                                                             </span>
                                                             {chunk.embedding_model ? (
-                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                                                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                                                     {chunk.embedding_model}
                                                                 </span>
                                                             ) : null}
@@ -1706,7 +1706,7 @@ export default function KnowledgeBaseShow({
                                             <div className="space-y-5">
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                             {tks.selected_chunk_heading}
                                                         </div>
                                                         <div className="flex shrink-0 gap-1.5">
@@ -1715,7 +1715,7 @@ export default function KnowledgeBaseShow({
                                                                 onClick={() => updateSelectedChunkReviewStatus('approved')}
                                                                 disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
                                                                 className={classNames(
-                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
                                                                     selectedChunkReviewStatus === 'approved'
                                                                         ? 'bg-emerald-600 text-white hover:bg-emerald-700'
                                                                         : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100',
@@ -1730,7 +1730,7 @@ export default function KnowledgeBaseShow({
                                                                 onClick={() => updateSelectedChunkReviewStatus('rejected')}
                                                                 disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
                                                                 className={classNames(
-                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
                                                                     selectedChunkReviewStatus === 'rejected'
                                                                         ? 'bg-rose-600 text-white hover:bg-rose-700'
                                                                         : 'border border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300 hover:bg-rose-100',
@@ -1745,7 +1745,7 @@ export default function KnowledgeBaseShow({
                                                                 onClick={() => updateSelectedChunkReviewStatus('pending_review')}
                                                                 disabled={chunkReviewRequest?.chunkId === selectedChunk.id}
                                                                 className={classNames(
-                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+                                                                    'inline-flex items-center justify-center rounded-lg px-3 py-1 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
                                                                     selectedChunkReviewStatus === 'pending_review'
                                                                         ? 'bg-amber-600 text-white hover:bg-amber-700'
                                                                         : 'border border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-100',
@@ -1762,24 +1762,24 @@ export default function KnowledgeBaseShow({
                                                     </h2>
                                                     <div className="flex flex-wrap gap-2">
                                                         <span className={classNames(
-                                                            'inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset',
+                                                            'inline-flex rounded-full px-3 py-1 text-base font-medium ring-1 ring-inset',
                                                             selectedChunkReviewStatusMeta.className,
                                                         )}>
                                                             {selectedChunkReviewStatusMeta.label}
                                                         </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-base font-medium text-slate-600">
                                                             {selectedChunkIndex >= 0
                                                                 ? formatTemplate(knowledgeShowLabels.chunkNumberLabel, { number: selectedChunkIndex + 1 })
                                                                 : knowledgeShowLabels.chunkLabel}
                                                         </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-base font-medium text-slate-600">
                                                             {getChunkTypeLabel(selectedChunk, knowledgeShowLabels)}
                                                         </span>
                                                     </div>
                                                 </div>
 
                                                 <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
-                                                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                                                    <div className="flex flex-wrap items-center gap-2 text-base font-medium text-slate-500">
                                                         <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
                                                             {getChunkRangeLabel(selectedChunk)}
                                                         </span>
@@ -1802,7 +1802,7 @@ export default function KnowledgeBaseShow({
 
                                                     {selectedChunk.chunk_type === 'image' ? (
                                                         <div className="mt-4 max-h-[32rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 {tks.graphic_section}
                                                             </div>
                                                             {selectedChunk.image_url && selectedChunkImageCanPreview ? (
@@ -1814,7 +1814,7 @@ export default function KnowledgeBaseShow({
                                                                     />
                                                                 </div>
                                                             ) : (
-                                                                <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                                                                <div className="mt-4 rounded-[16px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-base text-slate-500">
                                                                     {selectedChunk.image_url && !selectedChunkImageCanPreview
                                                                         ? tks.graphic_not_previewable
                                                                         : tks.no_preview}
@@ -1823,54 +1823,54 @@ export default function KnowledgeBaseShow({
 
                                                             <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.graphic_caption}
                                                                     </div>
-                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                    <div className="mt-2 text-base leading-6 text-slate-700">
                                                                         {getGraphicCaption(selectedChunk) || tks.no_graphic_caption}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.graphic_alt_text}
                                                                     </div>
-                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                    <div className="mt-2 text-base leading-6 text-slate-700">
                                                                         {getGraphicAltText(selectedChunk) || tks.no_graphic_alt_text}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.graphic_ocr}
                                                                     </div>
-                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                    <div className="mt-2 text-base leading-6 text-slate-700">
                                                                         {selectedChunk.ocr_text ? tks.ocr_done : tks.ocr_not_done}
                                                                     </div>
                                                                 </div>
                                                                 <div className="rounded-[14px] border border-slate-200 bg-slate-50/70 p-3">
-                                                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.graphic_description_label}
                                                                     </div>
-                                                                    <div className="mt-2 text-sm leading-6 text-slate-700">
+                                                                    <div className="mt-2 text-base leading-6 text-slate-700">
                                                                         {selectedChunk.image_description ? tks.graphic_description_done : tks.graphic_description_not_done}
                                                                     </div>
                                                                 </div>
                                                             </div>
 
                                                             <div className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.searchable_text}
                                                                 </div>
-                                                                <pre className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                <pre className="mt-2 whitespace-pre-wrap text-base leading-6 text-slate-700">
                                                                     {getGraphicSearchableContent(selectedChunk) || tks.no_searchable_text}
                                                                 </pre>
                                                             </div>
 
                                                             {selectedChunk.image_metadata ? (
                                                                 <details className="mt-4 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                    <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <summary className="cursor-pointer text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.graphic_metadata}
                                                                     </summary>
-                                                                    <pre className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
+                                                                    <pre className="mt-3 whitespace-pre-wrap break-words text-base leading-5 text-slate-600">
                                                                         {JSON.stringify(selectedChunk.image_metadata, null, 2)}
                                                                     </pre>
                                                                 </details>
@@ -1878,11 +1878,11 @@ export default function KnowledgeBaseShow({
                                                         </div>
                                                     ) : selectedChunk.chunk_type === 'table' ? (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 {tks.table_section}
                                                             </div>
                                                             {selectedChunk.table_complexity === 'complex' ? (
-                                                                <div className="mt-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                                                <div className="mt-3 rounded-[14px] border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-800">
                                                                     {tks.complex_table_warning}
                                                                 </div>
                                                             ) : null}
@@ -1891,7 +1891,7 @@ export default function KnowledgeBaseShow({
                                                                     {selectedChunkTableWarnings.map((warning) => (
                                                                         <span
                                                                             key={warning}
-                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                                                                            className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600"
                                                                         >
                                                                             {warning}
                                                                         </span>
@@ -1906,18 +1906,18 @@ export default function KnowledgeBaseShow({
                                                             ) : selectedChunk.table_json ? (
                                                                 <StructuredTablePreview tableJson={selectedChunk.table_json} />
                                                             ) : selectedChunk.table_text ? (
-                                                                <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                <pre className="mt-4 whitespace-pre-wrap text-base leading-6 text-slate-700">
                                                                     {selectedChunk.table_text}
                                                                 </pre>
                                                             ) : (
-                                                                <pre className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                <pre className="mt-4 whitespace-pre-wrap text-base leading-6 text-slate-700">
                                                                     {selectedChunk.table_markdown || tks.no_table_view}
                                                                 </pre>
                                                             )}
                                                         </div>
                                                     ) : (
                                                         <div className="mt-4 max-h-[28rem] overflow-auto rounded-[18px] border border-slate-200 bg-white p-4">
-                                                            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">
+                                                            <p className="whitespace-pre-wrap text-base leading-7 text-slate-700">
                                                                 {selectedChunk.content || selectedChunk.content_preview || tks.no_preview}
                                                             </p>
                                                         </div>
@@ -1927,10 +1927,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 {tks.chunk_content_heading}
                                                             </div>
-                                                            <p className="mt-1 text-sm text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-500">
                                                                 {tks.chunk_content_hint}
                                                             </p>
                                                         </div>
@@ -1939,7 +1939,7 @@ export default function KnowledgeBaseShow({
                                                             <button
                                                                 type="button"
                                                                 onClick={beginChunkContentEdit}
-                                                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {tks.edit_content}
                                                             </button>
@@ -1951,112 +1951,112 @@ export default function KnowledgeBaseShow({
                                                             {selectedChunk.chunk_type === 'image' ? (
                                                                 <div className="grid gap-4 sm:grid-cols-2">
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.replace_graphic}
                                                                         </span>
                                                                         <input
                                                                             type="file"
                                                                             accept="image/jpeg,image/png,image/webp,image/gif"
                                                                             onChange={(event) => chunkContentForm.setData('image', event.target.files?.[0] ?? null)}
-                                                                            className="block w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition file:mr-4 file:rounded-xl file:border-0 file:bg-violet-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-violet-700 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="block w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition file:mr-4 file:rounded-xl file:border-0 file:bg-violet-600 file:px-4 file:py-2 file:text-base file:font-semibold file:text-white hover:file:bg-violet-700 focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {chunkContentForm.errors.image ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.image}</p>
+                                                                            <p className="text-base text-rose-600">{chunkContentForm.errors.image}</p>
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             {tks.graphic_caption_label}
                                                                         </span>
                                                                         <input
                                                                             type="text"
                                                                             value={chunkContentForm.data.image_caption}
                                                                             onChange={(event) => chunkContentForm.setData('image_caption', event.target.value)}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                     </label>
                                                                     <label className="space-y-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             {tks.alt_text_label}
                                                                         </span>
                                                                         <input
                                                                             type="text"
                                                                             value={chunkContentForm.data.image_alt_text}
                                                                             onChange={(event) => chunkContentForm.setData('image_alt_text', event.target.value)}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             {tks.ocr_text_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.ocr_text}
                                                                             onChange={(event) => chunkContentForm.setData('ocr_text', event.target.value)}
                                                                             rows={5}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {chunkContentForm.errors.ocr_text ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.ocr_text}</p>
+                                                                            <p className="text-base text-rose-600">{chunkContentForm.errors.ocr_text}</p>
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             {tks.graphic_description_edit_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.image_description}
                                                                             onChange={(event) => chunkContentForm.setData('image_description', event.target.value)}
                                                                             rows={5}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {chunkContentForm.errors.image_description ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.image_description}</p>
+                                                                            <p className="text-base text-rose-600">{chunkContentForm.errors.image_description}</p>
                                                                         ) : null}
                                                                     </label>
                                                                     <label className="space-y-2 sm:col-span-2">
-                                                                        <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                        <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                             {tks.searchable_text_edit_label}
                                                                         </span>
                                                                         <textarea
                                                                             value={chunkContentForm.data.content}
                                                                             onChange={(event) => chunkContentForm.setData('content', event.target.value)}
                                                                             rows={6}
-                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                            className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                         />
                                                                         {chunkContentForm.errors.content ? (
-                                                                            <p className="text-xs text-rose-600">{chunkContentForm.errors.content}</p>
+                                                                            <p className="text-base text-rose-600">{chunkContentForm.errors.content}</p>
                                                                         ) : null}
                                                                     </label>
                                                                 </div>
                                                             ) : selectedChunk.chunk_type === 'table' ? (
                                                                 <label className="block space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.table_text_label}
                                                                     </span>
                                                                     <textarea
                                                                         value={chunkContentForm.data.table_text}
                                                                         onChange={(event) => chunkContentForm.setData('table_text', event.target.value)}
                                                                         rows={10}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                     {chunkContentForm.errors.table_text ? (
-                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.table_text}</p>
+                                                                        <p className="text-base text-rose-600">{chunkContentForm.errors.table_text}</p>
                                                                     ) : null}
                                                                 </label>
                                                             ) : (
                                                                 <label className="block space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.text_content_label}
                                                                     </span>
                                                                     <textarea
                                                                         value={chunkContentForm.data.content}
                                                                         onChange={(event) => chunkContentForm.setData('content', event.target.value)}
                                                                         rows={10}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                     {chunkContentForm.errors.content ? (
-                                                                        <p className="text-xs text-rose-600">{chunkContentForm.errors.content}</p>
+                                                                        <p className="text-base text-rose-600">{chunkContentForm.errors.content}</p>
                                                                     ) : null}
                                                                 </label>
                                                             )}
@@ -2065,14 +2065,14 @@ export default function KnowledgeBaseShow({
                                                                 <button
                                                                     type="button"
                                                                     onClick={cancelChunkContentEdit}
-                                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                 >
                                                                     {tks.cancel}
                                                                 </button>
                                                                 <button
                                                                     type="submit"
                                                                     disabled={isChunkContentSaving}
-                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {isChunkContentSaving ? tks.saving : tks.save_content}
                                                                 </button>
@@ -2084,10 +2084,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-white p-5">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 {tks.product_metadata_heading}
                                                             </div>
-                                                            <p className="mt-1 text-sm text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-500">
                                                                 {tks.product_metadata_hint}
                                                             </p>
                                                         </div>
@@ -2096,7 +2096,7 @@ export default function KnowledgeBaseShow({
                                                             <button
                                                                 type="button"
                                                                 onClick={beginChunkMetadataEdit}
-                                                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {tks.edit_metadata}
                                                             </button>
@@ -2105,7 +2105,7 @@ export default function KnowledgeBaseShow({
                                                                 <button
                                                                     type="button"
                                                                     onClick={cancelChunkMetadataEdit}
-                                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                                 >
                                                                     {tks.cancel}
                                                                 </button>
@@ -2113,7 +2113,7 @@ export default function KnowledgeBaseShow({
                                                                     type="button"
                                                                     onClick={submitChunkMetadata}
                                                                     disabled={chunkMetadataForm.processing}
-                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex items-center justify-center rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {chunkMetadataForm.processing ? tks.saving : tks.save_metadata}
                                                                 </button>
@@ -2126,64 +2126,64 @@ export default function KnowledgeBaseShow({
                                                             {isChunkMetadataPending(selectedChunk) ? (
                                                                 <div className="sm:col-span-2 flex items-center gap-3 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3">
                                                                     <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400" />
-                                                                    <p className="text-sm text-amber-800">
+                                                                    <p className="text-base text-amber-800">
                                                                         {tks.ai_metadata_generating}
                                                                     </p>
                                                                 </div>
                                                             ) : null}
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.chunk_title_label}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {selectedChunk.title ?? tks.no_title}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.ai_summary_label}
                                                                 </div>
-                                                                <div className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                                                <div className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-base leading-6 text-slate-700">
                                                                     {selectedChunk.ai_summary || tks.no_ai_summary}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.service_product_tag}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {selectedChunk.service_product_tag || '—'}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.theme_tag}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {selectedChunk.theme_tag || '—'}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.topic_placeholder}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {selectedChunk.topic || '—'}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.sub_topic_placeholder}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {selectedChunk.sub_topic || '—'}
                                                                 </div>
                                                             </div>
                                                             <div className="rounded-[18px] border border-slate-200 bg-slate-50/70 p-4 sm:col-span-2">
-                                                                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                     {tks.keywords_placeholder}
                                                                 </div>
-                                                                <div className="mt-2 text-sm font-medium text-slate-950">
+                                                                <div className="mt-2 text-base font-medium text-slate-950">
                                                                     {formatChunkKeywordList(selectedChunk.keywords)}
                                                                 </div>
                                                             </div>
@@ -2192,7 +2192,7 @@ export default function KnowledgeBaseShow({
                                                         <form onSubmit={submitChunkMetadata} className="mt-4 space-y-4">
                                                             <div className="grid gap-4 sm:grid-cols-2">
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.chunk_title_label}
                                                                     </span>
                                                                     <input
@@ -2200,12 +2200,12 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.title}
                                                                         onChange={(event) => chunkMetadataForm.setData('title', event.target.value)}
                                                                         placeholder={tks.title_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.ai_summary_label}
                                                                     </span>
                                                                     <textarea
@@ -2213,12 +2213,12 @@ export default function KnowledgeBaseShow({
                                                                         onChange={(event) => chunkMetadataForm.setData('ai_summary', event.target.value)}
                                                                         rows={4}
                                                                         placeholder={tks.summary_edit_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base leading-6 text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.service_product_tag}
                                                                     </span>
                                                                     <input
@@ -2226,12 +2226,12 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.service_product_tag}
                                                                         onChange={(event) => chunkMetadataForm.setData('service_product_tag', event.target.value)}
                                                                         placeholder={tks.service_product_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.theme_tag}
                                                                     </span>
                                                                     <input
@@ -2239,12 +2239,12 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.theme_tag}
                                                                         onChange={(event) => chunkMetadataForm.setData('theme_tag', event.target.value)}
                                                                         placeholder={tks.theme_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.topic_placeholder}
                                                                     </span>
                                                                     <input
@@ -2252,12 +2252,12 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.topic}
                                                                         onChange={(event) => chunkMetadataForm.setData('topic', event.target.value)}
                                                                         placeholder={tks.topic_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.sub_topic_placeholder}
                                                                     </span>
                                                                     <input
@@ -2265,12 +2265,12 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.sub_topic}
                                                                         onChange={(event) => chunkMetadataForm.setData('sub_topic', event.target.value)}
                                                                         placeholder={tks.sub_topic_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
                                                                 </label>
 
                                                                 <label className="space-y-2 sm:col-span-2">
-                                                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <span className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {tks.keywords_placeholder}
                                                                     </span>
                                                                     <input
@@ -2278,9 +2278,9 @@ export default function KnowledgeBaseShow({
                                                                         value={chunkMetadataForm.data.keywords}
                                                                         onChange={(event) => chunkMetadataForm.setData('keywords', event.target.value)}
                                                                         placeholder={tks.keywords_placeholder}
-                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
+                                                                        className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 outline-none transition focus:border-violet-300 focus:ring-4 focus:ring-violet-100"
                                                                     />
-                                                                    <p className="text-xs text-slate-500">
+                                                                    <p className="text-base text-slate-500">
                                                                         {tks.keywords_json_hint}
                                                                     </p>
                                                                 </label>
@@ -2292,10 +2292,10 @@ export default function KnowledgeBaseShow({
                                                 <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-4">
                                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                                         <div>
-                                                            <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                            <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                 {tks.system_data_heading}
                                                             </div>
-                                                            <p className="mt-1 text-sm text-slate-500">
+                                                            <p className="mt-1 text-base text-slate-500">
                                                                 {tks.system_data_hint}
                                                             </p>
                                                         </div>
@@ -2303,7 +2303,7 @@ export default function KnowledgeBaseShow({
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowChunkSystemMetadata((current) => !current)}
-                                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                         >
                                                             {showChunkSystemMetadata ? tks.hide_system_data : tks.show_system_data}
                                                         </button>
@@ -2313,10 +2313,10 @@ export default function KnowledgeBaseShow({
                                                         <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                                                             {selectedChunkSystemMetadata.map((item) => (
                                                                 <div key={item.label} className="rounded-[18px] border border-slate-200 bg-white p-4">
-                                                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                                                         {item.label}
                                                                     </dt>
-                                                                    <dd className="mt-2 break-words text-sm font-medium text-slate-950">
+                                                                    <dd className="mt-2 break-words text-base font-medium text-slate-950">
                                                                         {item.value}
                                                                     </dd>
                                                                 </div>
@@ -2326,7 +2326,7 @@ export default function KnowledgeBaseShow({
                                                 </div>
 
                                                 <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div className="text-sm text-slate-500">
+                                                    <div className="text-base text-slate-500">
                                                             {selectedChunkIndex >= 0 && chunks.length > 0
                                                                 ? formatTemplate(knowledgeShowLabels.chunkCounterLabel, { current: selectedChunkIndex + 1, total: chunks.length })
                                                                 : knowledgeShowLabels.chunkLabel}
@@ -2336,7 +2336,7 @@ export default function KnowledgeBaseShow({
                                                         type="button"
                                                         onClick={goToNextChunk}
                                                         disabled={selectedChunkIndex < 0 || selectedChunkIndex >= chunks.length - 1}
-                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                        className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
                                                             {selectedChunkIndex >= 0 && selectedChunkIndex < chunks.length - 1
                                                                 ? tks.next_chunk
@@ -2349,7 +2349,7 @@ export default function KnowledgeBaseShow({
                                                 <div className="text-lg font-semibold text-slate-900">
                                                     {tks.no_chunk_selected}
                                                 </div>
-                                                <p className="mt-2 text-sm text-slate-500">
+                                                <p className="mt-2 text-base text-slate-500">
                                                     {tks.no_chunk_selected_hint}
                                                 </p>
                                             </div>
@@ -2364,38 +2364,38 @@ export default function KnowledgeBaseShow({
                         <div className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5">
                             <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_type}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_type}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{knowledgeItem?.document_type_label ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_status}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{documentStatusMeta.label}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_status}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{documentStatusMeta.label}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_activity}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{activeLabel}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_activity}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{activeLabel}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_file_size}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_file_size}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{formatFileSize(knowledgeItem?.file_size_bytes)}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_mime}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{knowledgeItem?.mime_type ?? '—'}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_mime}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{knowledgeItem?.mime_type ?? '—'}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{knowledgeShowLabels.documentOwnerLabel}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{ownerDisplayName}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{knowledgeShowLabels.documentOwnerLabel}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{ownerDisplayName}</dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_chunks}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_chunks}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">
                                         {totalChunksCount > 0 ? `${readyChunksCount} av ${totalChunksCount}` : tks.no_chunks}
                                     </dd>
                                 </div>
                                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                    <dt className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_last_updated}</dt>
-                                    <dd className="mt-2 text-sm font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
+                                    <dt className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">{tks.meta_last_updated}</dt>
+                                    <dd className="mt-2 text-base font-medium text-slate-950">{formatDateTime(knowledgeItem?.updated_at ?? knowledgeItem?.uploaded_at, locale)}</dd>
                                 </div>
                             </dl>
                         </div>
@@ -2406,13 +2406,13 @@ export default function KnowledgeBaseShow({
                             <section className="space-y-3">
                                 <div className="flex items-start justify-between gap-3">
                                     <div>
-                                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                             {knowledgeShowLabels.versionsSection}
                                         </div>
-                                        <p className="mt-1 text-sm text-slate-500">
+                                        <p className="mt-1 text-base text-slate-500">
                                             {knowledgeShowLabels.versionsSectionDescription}
                                         </p>
-                                        <p className="mt-1 text-xs text-amber-700">
+                                        <p className="mt-1 text-base text-amber-700">
                                             {knowledgeShowLabels.versionsAiNote}
                                         </p>
                                     </div>
@@ -2420,7 +2420,7 @@ export default function KnowledgeBaseShow({
                                         <button
                                             type="button"
                                             onClick={() => setIsReplaceFileOpen(true)}
-                                            className="shrink-0 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                            className="shrink-0 rounded-xl border border-violet-200 bg-violet-50 px-3.5 py-2 text-base font-semibold text-violet-700 hover:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                         >
                                             {knowledgeShowLabels.uploadNewVersionButton}
                                         </button>
@@ -2433,30 +2433,30 @@ export default function KnowledgeBaseShow({
                                         className="rounded-[20px] border border-violet-200 bg-violet-50/60 px-5 py-4 space-y-4"
                                     >
                                         <div>
-                                            <div className="text-sm font-semibold text-slate-900">
+                                            <div className="text-base font-semibold text-slate-900">
                                                 {knowledgeShowLabels.uploadNewVersionTitle}
                                             </div>
-                                            <p className="mt-1 text-sm text-slate-600">
+                                            <p className="mt-1 text-base text-slate-600">
                                                 {knowledgeShowLabels.uploadNewVersionHelp}
                                             </p>
                                         </div>
 
                                         <div className="space-y-1.5">
-                                            <label className="block text-xs font-medium text-slate-700">
+                                            <label className="block text-base font-medium text-slate-700">
                                                 {knowledgeShowLabels.uploadNewVersionChooseFile}
                                             </label>
                                             <input
                                                 type="file"
                                                 accept=".pdf,.docx,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                                 onChange={(event) => replaceFileForm.setData('file', event.target.files?.[0] ?? null)}
-                                                className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-50 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-violet-700 hover:file:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-base text-slate-900 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-50 file:px-3 file:py-1 file:text-base file:font-semibold file:text-violet-700 hover:file:bg-violet-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                                 disabled={replaceFileForm.processing}
                                             />
-                                            <p className="text-xs text-slate-500">
+                                            <p className="text-base text-slate-500">
                                                 {knowledgeShowLabels.uploadNewVersionAllowedTypes}
                                             </p>
                                             {replaceFileForm.errors.file && !replaceFileForm.errors.duplicate_file ? (
-                                                <p className="text-xs text-rose-600">{replaceFileForm.errors.file}</p>
+                                                <p className="text-base text-rose-600">{replaceFileForm.errors.file}</p>
                                             ) : null}
                                         </div>
 
@@ -2464,7 +2464,7 @@ export default function KnowledgeBaseShow({
                                             <button
                                                 type="submit"
                                                 disabled={replaceFileForm.processing || !replaceFileForm.data.file}
-                                                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                                                className="rounded-xl bg-violet-600 px-4 py-2 text-base font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
                                             >
                                                 {replaceFileForm.processing
                                                     ? knowledgeShowLabels.uploadNewVersionSubmitting
@@ -2477,7 +2477,7 @@ export default function KnowledgeBaseShow({
                                                     replaceFileForm.reset();
                                                 }}
                                                 disabled={replaceFileForm.processing}
-                                                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                                                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-base font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
                                             >
                                                 {knowledgeShowLabels.uploadNewVersionCancel}
                                             </button>
@@ -2494,29 +2494,29 @@ export default function KnowledgeBaseShow({
                                             >
                                                 <div className="min-w-0 flex-1 space-y-2">
                                                     <div className="flex flex-wrap items-center gap-2">
-                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-base font-semibold text-violet-700">
                                                             {knowledgeShowLabels.versionLabel} {version.version_no}
                                                         </span>
                                                         {version.is_current ? (
-                                                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                                                            <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-base font-semibold text-emerald-700">
                                                                 {knowledgeShowLabels.versionCurrentBadge}
                                                             </span>
                                                         ) : null}
                                                         {version.extraction_status === 'failed' ? (
-                                                            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
+                                                            <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-base font-medium text-rose-700">
                                                                 {knowledgeShowLabels.versionExtractionFailed}
                                                             </span>
                                                         ) : null}
                                                         {version.approval_status ? (
-                                                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getApprovalStatusClasses(version.approval_status)}`}>
+                                                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-base font-medium ${getApprovalStatusClasses(version.approval_status)}`}>
                                                                 {getApprovalStatusLabel(version.approval_status, knowledgeShowLabels)}
                                                             </span>
                                                         ) : null}
                                                     </div>
 
-                                                    <dl className="grid gap-x-6 gap-y-2 text-sm text-slate-600 sm:grid-cols-2">
+                                                    <dl className="grid gap-x-6 gap-y-2 text-base text-slate-600 sm:grid-cols-2">
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionFilename}
                                                             </dt>
                                                             <dd className="truncate font-medium text-slate-900" title={version.original_filename}>
@@ -2525,7 +2525,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionFiletype}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2534,7 +2534,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionFilesize}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2543,7 +2543,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionChunksCount}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2552,7 +2552,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionExtractionStatus}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2561,7 +2561,7 @@ export default function KnowledgeBaseShow({
                                                         </div>
 
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 {knowledgeShowLabels.versionUploadedAt}
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2571,7 +2571,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.uploaded_by_name ? (
                                                             <div className="space-y-0.5 sm:col-span-2">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                     {knowledgeShowLabels.versionUploadedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2582,7 +2582,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.extraction_status === 'failed' && version.extraction_error ? (
                                                             <div className="space-y-0.5 sm:col-span-2">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-rose-500">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-rose-500">
                                                                     {knowledgeShowLabels.versionExtractionStatus}
                                                                 </dt>
                                                                 <dd className="text-rose-700">
@@ -2593,7 +2593,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'approved' && version.approved_by_name ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                     {knowledgeShowLabels.versionApprovedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2604,7 +2604,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'approved' && version.approved_at ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                     {knowledgeShowLabels.versionApprovedAt}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2615,7 +2615,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'rejected' && version.rejected_by_name ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                     {knowledgeShowLabels.versionRejectedBy}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2626,7 +2626,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'rejected' && version.rejected_at ? (
                                                             <div className="space-y-0.5">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                     {knowledgeShowLabels.versionRejectedAt}
                                                                 </dt>
                                                                 <dd className="font-medium text-slate-900">
@@ -2637,7 +2637,7 @@ export default function KnowledgeBaseShow({
 
                                                         {version.approval_status === 'rejected' && version.rejection_reason ? (
                                                             <div className="space-y-0.5 sm:col-span-2">
-                                                                <dt className="text-xs font-medium uppercase tracking-[0.14em] text-rose-500">
+                                                                <dt className="text-base font-medium uppercase tracking-[0.14em] text-rose-500">
                                                                     {knowledgeShowLabels.versionRejectionReason}
                                                                 </dt>
                                                                 <dd className="text-rose-700">
@@ -2649,7 +2649,7 @@ export default function KnowledgeBaseShow({
                                                 </div>
 
                                                 <div className="flex shrink-0 flex-col items-end gap-2">
-                                                    <span className="text-sm font-medium text-slate-400">
+                                                    <span className="text-base font-medium text-slate-400">
                                                         #{version.version_no}
                                                     </span>
                                                     {version.approve_url ? (
@@ -2657,7 +2657,7 @@ export default function KnowledgeBaseShow({
                                                             type="button"
                                                             disabled={approvingVersionId !== null}
                                                             onClick={() => submitApproveVersion(version.approve_url, version.id)}
-                                                            className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-base font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             {approvingVersionId === version.id
                                                                 ? knowledgeShowLabels.versionApproveSubmitting
@@ -2669,7 +2669,7 @@ export default function KnowledgeBaseShow({
                                                             type="button"
                                                             disabled={approvingVersionId !== null || rejectingVersionId !== null}
                                                             onClick={() => openRejectDialog(version.id)}
-                                                            className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-3 py-1.5 text-base font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             {knowledgeShowLabels.versionRejectButton}
                                                         </button>
@@ -2679,7 +2679,7 @@ export default function KnowledgeBaseShow({
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-sm text-slate-500">
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-500">
                                         {knowledgeShowLabels.versionEmptyState}
                                     </div>
                                 )}
@@ -2688,10 +2688,10 @@ export default function KnowledgeBaseShow({
                             <section className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                        <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                             Revisjoner
                                         </div>
-                                        <p className="mt-1 text-sm text-slate-500">
+                                        <p className="mt-1 text-base text-slate-500">
                                             Read-only historikk for lagrede dokumentendringer.
                                         </p>
                                     </div>
@@ -2706,17 +2706,17 @@ export default function KnowledgeBaseShow({
                                             >
                                                 <div className="space-y-2">
                                                     <div className="flex flex-wrap items-center gap-2">
-                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-base font-semibold text-violet-700">
                                                             Revisjon {revision.revision_no}
                                                         </span>
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-base font-medium text-slate-600">
                                                             {getRevisionChangeTypeLabel(revision.change_type)}
                                                         </span>
                                                     </div>
 
-                                                    <dl className="grid gap-x-6 gap-y-2 text-sm text-slate-600 sm:grid-cols-2">
+                                                    <dl className="grid gap-x-6 gap-y-2 text-base text-slate-600 sm:grid-cols-2">
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 Endringstype
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2724,7 +2724,7 @@ export default function KnowledgeBaseShow({
                                                             </dd>
                                                         </div>
                                                         <div className="space-y-0.5">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 Tidspunkt
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2732,7 +2732,7 @@ export default function KnowledgeBaseShow({
                                                             </dd>
                                                         </div>
                                                         <div className="space-y-0.5 sm:col-span-2">
-                                                            <dt className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                                                            <dt className="text-base font-medium uppercase tracking-[0.14em] text-slate-400">
                                                                 Bruker
                                                             </dt>
                                                             <dd className="font-medium text-slate-900">
@@ -2742,14 +2742,14 @@ export default function KnowledgeBaseShow({
                                                     </dl>
                                                 </div>
 
-                                                <div className="text-sm font-medium text-slate-500">
+                                                <div className="text-base font-medium text-slate-500">
                                                     #{revision.revision_no}
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-sm text-slate-500">
+                                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-5 py-4 text-base text-slate-500">
                                         Ingen revisjoner registrert ennå.
                                     </div>
                                 )}
@@ -2757,10 +2757,10 @@ export default function KnowledgeBaseShow({
 
                             <section className="space-y-3">
                                 <div>
-                                    <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                                    <div className="text-base font-medium uppercase tracking-[0.16em] text-slate-400">
                                         Prosesshistorikk
                                     </div>
-                                    <p className="mt-1 text-sm text-slate-500">
+                                    <p className="mt-1 text-base text-slate-500">
                                         Opplasting, lagring og ekstraksjon for dokumentet.
                                     </p>
                                 </div>
@@ -2775,16 +2775,16 @@ export default function KnowledgeBaseShow({
                                                 <div className="flex gap-3">
                                                     <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500" />
                                                     <div className="space-y-1">
-                                                        <div className="text-sm font-medium text-slate-900">
+                                                        <div className="text-base font-medium text-slate-900">
                                                             {entry.label}
                                                         </div>
-                                                        <p className="text-sm leading-6 text-slate-600">
+                                                        <p className="text-base leading-6 text-slate-600">
                                                             {entry.text}
                                                         </p>
                                                     </div>
                                                 </div>
 
-                                                <div className="text-sm font-medium text-slate-500">
+                                                <div className="text-base font-medium text-slate-500">
                                                     {entry.time}
                                                 </div>
                                             </div>
@@ -2816,7 +2816,7 @@ export default function KnowledgeBaseShow({
                                     ? (td.same_document_title ?? 'Filen finnes allerede som versjon')
                                     : (td.other_document_title ?? 'Filen finnes allerede i Kunnskapsbase')}
                             </h2>
-                            <p className="text-sm leading-6 text-slate-500">
+                            <p className="text-base leading-6 text-slate-500">
                                 {duplicateDialogType === 'same_document'
                                     ? (td.same_document_body ?? 'Denne filen finnes allerede som en versjon av dette dokumentet. Velg en annen fil dersom du vil opprette en ny dokumentversjon.')
                                     : (td.other_document_body ?? 'Denne filen finnes allerede som et annet kunnskapsdokument. Åpne det eksisterende dokumentet dersom du vil se eller oppdatere det.')}
@@ -2835,7 +2835,7 @@ export default function KnowledgeBaseShow({
                             <button
                                 type="button"
                                 onClick={() => setDuplicateDialogType(null)}
-                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                             >
                                 {td.close ?? 'Lukk'}
                             </button>
@@ -2873,11 +2873,11 @@ export default function KnowledgeBaseShow({
                             </button>
                         </div>
                         <div className="px-6 py-5">
-                            <label className="block text-sm font-medium text-slate-700">
+                            <label className="block text-base font-medium text-slate-700">
                                 {knowledgeShowLabels.versionRejectReasonLabel}
                             </label>
                             <textarea
-                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 placeholder-slate-400 focus:border-slate-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                                 rows={4}
                                 placeholder={knowledgeShowLabels.versionRejectReasonPlaceholder}
                                 value={rejectReasonInput}
@@ -2891,7 +2891,7 @@ export default function KnowledgeBaseShow({
                                     type="button"
                                     onClick={closeRejectDialog}
                                     disabled={rejectingVersionId !== null}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-base font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {knowledgeShowLabels.versionRejectCancel}
                                 </button>
@@ -2899,7 +2899,7 @@ export default function KnowledgeBaseShow({
                                     type="button"
                                     onClick={() => submitRejectVersion(rejectUrl)}
                                     disabled={rejectingVersionId !== null || rejectReasonInput.trim().length < 3}
-                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                    className="inline-flex min-h-11 items-center justify-center rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-base font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {rejectingVersionId !== null
                                         ? knowledgeShowLabels.versionRejectSubmitting
