@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\Billing\BillingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 use Mockery;
@@ -368,6 +369,48 @@ class BillingServiceTest extends TestCase
 
         $this->assertSame('ended', $second->fresh()->status);
         $this->assertCount(2, $service->customerSpecificPriceLines($customer));
+    }
+
+    public function test_resolve_price_id_prefers_local_billing_price_over_config_fallback(): void
+    {
+        Config::set('procynia_plans.pro.stripe_monthly', 'price_config_fallback');
+
+        $priceKey = Customer::PLAN_PRO.'_'.Customer::BILLING_MONTHLY;
+        $price = BillingPrice::query()->where('key', $priceKey)->first();
+
+        if ($price === null) {
+            $product = BillingProduct::query()->create([
+                'key' => 'pro_plan_catalog',
+                'name' => 'Pro plan',
+                'description' => 'Tjenestekatalog base plan.',
+                'category' => BillingProduct::CATEGORY_BASE_PLAN,
+                'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+                'is_active' => true,
+                'sort_order' => 1,
+                'metadata' => [],
+            ]);
+
+            $price = BillingPrice::query()->create([
+                'billing_product_id' => $product->id,
+                'key' => $priceKey,
+                'name' => 'Pro — Månedlig',
+                'interval' => BillingPrice::INTERVAL_MONTHLY,
+                'currency' => 'nok',
+                'unit_amount' => 199000,
+                'stripe_price_id' => 'price_local_catalog',
+                'tier_key' => 'pro',
+                'is_recurring' => true,
+                'is_active' => true,
+                'included_quantity' => 1,
+                'metadata' => [],
+            ]);
+        } else {
+            $price->forceFill(['stripe_price_id' => 'price_local_catalog'])->save();
+        }
+
+        $result = app(BillingService::class)->resolvePriceId(Customer::PLAN_PRO, Customer::BILLING_MONTHLY);
+
+        $this->assertSame('price_local_catalog', $result);
     }
 
     private function createCustomer(string $name = 'Procynia AS'): Customer

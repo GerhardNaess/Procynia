@@ -139,9 +139,10 @@ class BillingEntitlementServiceTest extends TestCase
      * Returns: None.
      * Side effects: Writes fixture rows to the test database.
      */
-    public function test_included_ai_credits_returns_from_tjenestekatalog_after_refactor(): void
+    public function test_included_ai_credits_prefers_tjenestekatalog_over_customer_snapshot_when_active_line_exists(): void
     {
         $customer = $this->createCustomer('Tjenestekatalog Kapasitet AS');
+        $customer->forceFill(['included_ai_credits' => 5])->save();
         $product = $this->createProduct('test-base-plan-credits');
         $price = $this->createPrice($product, BillingPrice::INTERVAL_MONTHLY, 649000, 'nok', 60);
         $this->createLine($customer, $product, $price);
@@ -149,6 +150,22 @@ class BillingEntitlementServiceTest extends TestCase
         $result = app(BillingEntitlementService::class)->includedAiCredits($customer);
 
         $this->assertSame(60, $result);
+    }
+
+    /**
+     * Purpose: Verify that includedAiCredits() falls back to the customer snapshot before plan config when no active billing line exists.
+     * Inputs: None.
+     * Returns: None.
+     * Side effects: Writes fixture rows to the test database.
+     */
+    public function test_included_ai_credits_prefers_customer_snapshot_over_config_fallback_when_no_active_line_exists(): void
+    {
+        $customer = $this->createCustomer('Customer Snapshot Fallback AS');
+        $customer->forceFill(['included_ai_credits' => 7])->save();
+
+        $result = app(BillingEntitlementService::class)->includedAiCredits($customer);
+
+        $this->assertSame(7, $result);
     }
 
     /**
