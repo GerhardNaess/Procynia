@@ -3069,7 +3069,7 @@ export default function AiShow({
                                     <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                                         {caseData?.title ?? tai.ai_case_title}
                                     </h1>
-                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
+                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${aiStatusMeta.className}`}>
                                         {aiStatusMeta.label}
                                     </span>
                                     <InfoHint size="sm" label="Vis forklaring for AI-status" text={tai.hint_ai_status} />
@@ -3216,10 +3216,10 @@ export default function AiShow({
                             <h2 className="text-xl font-semibold tracking-tight text-slate-950">
                                 {tai.documents_section_title}
                             </h2>
-                            <p className="max-w-3xl text-sm leading-6 text-slate-500">
+                            <p className="max-w-3xl text-base leading-7 text-slate-700">
                                 {tai.documents_section_description}
                             </p>
-                            <p className="max-w-3xl text-xs leading-5 text-slate-400">
+                            <p className="max-w-3xl text-base leading-7 text-slate-600">
                                 {tai.documents_section_dedup_notice ?? (isEnglish ? 'The list shows the latest upload per filename. Earlier uploads with the same filename are not shown in this overview.' : 'Listen viser nyeste opplasting per filnavn. Tidligere opplastinger med samme filnavn vises ikke i denne oversikten.')}
                             </p>
                         </div>
@@ -3227,7 +3227,7 @@ export default function AiShow({
                         {canUseAiOffer ? (
                             <form onSubmit={submitDocuments} className="space-y-4">
                                 <div className="space-y-2">
-                                    <label htmlFor="ai-documents" className="text-sm font-medium text-slate-700">
+                                    <label htmlFor="ai-documents" className="text-base font-medium text-slate-700">
                                         {tai.choose_files}
                                     </label>
                                     <div className="flex min-h-[56px] flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
@@ -3238,7 +3238,7 @@ export default function AiShow({
                                             <span className="inline-flex shrink-0 items-center rounded-full bg-violet-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-violet-700">
                                                 {tai.choose_files}
                                             </span>
-                                            <span className="min-w-0 flex-1 text-sm text-slate-500">
+                                            <span className="min-w-0 flex-1 text-base text-slate-700">
                                                 {selectedDocumentsLabel}
                                             </span>
                                         </label>
@@ -3263,7 +3263,7 @@ export default function AiShow({
                                             className="sr-only"
                                         />
                                     </div>
-                                    <p className="text-xs leading-5 text-slate-500">
+                                    <p className="text-sm leading-6 text-slate-600">
                                         {tai.allowed_file_types}
                                     </p>
                                     {documentError ? (
@@ -3290,9 +3290,9 @@ export default function AiShow({
                                 <button
                                     type="button"
                                     onClick={() => setCaseDocumentsCollapsed((v) => !v)}
-                                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                 >
-                                    {caseDocumentsCollapsed ? tai.show_documents_section ?? 'Vis dokumenter' : tai.hide_documents_section ?? 'Skjul dokumenter'}
+                                    {caseDocumentsCollapsed ? tai.show_documents_section ?? 'Vis dokumenter' : tai.hide_documents_section ?? 'Skjul dokumentliste'}
                                 </button>
                             </div>
 
@@ -3339,7 +3339,7 @@ export default function AiShow({
                                                             </div>
                                                         </div>
 
-                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                                                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-600">
                                                             {document.uploaded_by ? (
                                                                 <span>
                                                                     {isEnglish ? 'Uploaded by' : 'Lastet opp av'} {document.uploaded_by}
@@ -3353,7 +3353,7 @@ export default function AiShow({
                                                         </div>
 
                                                         {progressLabel ? (
-                                                            <p className="text-xs leading-5 text-slate-500">
+                                                            <p className="text-sm leading-6 text-slate-600">
                                                                 {progressLabel}
                                                             </p>
                                                         ) : null}
@@ -3362,7 +3362,7 @@ export default function AiShow({
                                                     {document.preview_url ? (
                                                         <a
                                                             href={document.preview_url}
-                                                            className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                            className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                         >
                                                             {isEnglish ? 'Preview' : 'Forhåndsvis'}
                                                         </a>
@@ -3773,7 +3773,7 @@ export default function AiShow({
                                                                     aria-expanded={requirementPromptEditorOpen}
                                                                     aria-controls={`requirement-prompt-${requirement.id}`}
                                                                     title={tai.open_prompt_for_requirement}
-                                                                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                    className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                         requirementPromptEditorOpen || requirementHasUserPrompt
                                                                             ? 'border-violet-300 bg-violet-50 text-violet-700'
                                                                             : 'border-slate-200 bg-white text-slate-600 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700'
@@ -3789,17 +3789,17 @@ export default function AiShow({
                                                                     disabled={requirementUpdatesLocked}
                                                                     aria-pressed={isActiveRequirement}
                                                                     title={tai.generate_draft_for_requirement}
-                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {tai.create_answer}
                                                                 </button>
                                                             </>
                                                         ) : approvalStatus === 'rejected' ? (
-                                                            <span className="inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
+                                                            <span className="inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset bg-rose-50 text-rose-700 ring-rose-200">
                                                                 {tai.requirement_approval_rejected}
                                                             </span>
                                                         ) : (
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${sourceTypeMeta.className}`}>
                                                                 {requirement.source_type_label ?? sourceTypeMeta.label}
                                                             </span>
                                                         )}
@@ -3809,10 +3809,10 @@ export default function AiShow({
                                                 <div className="flex flex-wrap gap-2">
                                                     {isApprovedRequirement ? (
                                                         <>
-                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${workStatusMeta.className}`}>
+                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${workStatusMeta.className}`}>
                                                                 {requirement.work_status_label ?? workStatusMeta.label}
                                                             </span>
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600">
                                                                 {tai.assigned_prefix} {assignedUserLabel}
                                                             </span>
                                                         </>
@@ -3875,7 +3875,7 @@ export default function AiShow({
                                                                 type="button"
                                                                 onClick={() => { void requestAnswerDraftGeneration(requirement); }}
                                                                 disabled={requirementUpdatesLocked}
-                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                className="inline-flex rounded-full bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                                                             >
                                                                 {tai.create_answer}
                                                             </button>
@@ -3901,7 +3901,7 @@ export default function AiShow({
                                                                         || answerDraftSavingRequirementId === activeRequirement.id
                                                                         || answerBasisSelectionSavingRequirementId === activeRequirement.id
                                                                     }
-                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
                                                                 >
                                                                     {answerDraftGeneratingRequirementId === activeRequirement.id ? tai.generating : tai.regenerate}
                                                                 </button>
@@ -3944,7 +3944,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
                                                                                             disabled={isToggling || !isSelected}
-                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                                                                            className="inline-flex items-center justify-center rounded-full border border-rose-200 bg-white px-3 py-1.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                                                         >
                                                                                             {tai.remove_button}
                                                                                         </button>
@@ -4008,7 +4008,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => toggleActiveRequirementAnswerBasisItem(answerBasisItem.id)}
                                                                                             disabled={isToggling}
-                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                                                                            className={`inline-flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                                                                                                 isSelected
                                                                                                     ? 'border border-rose-200 bg-white text-rose-700 hover:border-rose-300 hover:bg-rose-50'
                                                                                                     : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100'
@@ -4144,7 +4144,7 @@ export default function AiShow({
                                                                 assessmentCompleted ? (
                                                                     <div className="space-y-3">
                                                                         <div className="flex flex-wrap gap-2">
-                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                            <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
                                                                                 ASSESSMENT_STATUS_META[assessment.assessment_status]?.className
                                                                                     ?? ASSESSMENT_STATUS_META.completed.className
                                                                             }`}>
@@ -4152,7 +4152,7 @@ export default function AiShow({
                                                                             </span>
                                                                             {assessment.coverage_status ? (
                                                                                 <span className="inline-flex items-center gap-1">
-                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
                                                                                         COVERAGE_STATUS_META[assessment.coverage_status]?.className
                                                                                             ?? COVERAGE_STATUS_META.missing.className
                                                                                     }`}>
@@ -4163,7 +4163,7 @@ export default function AiShow({
                                                                             ) : null}
                                                                             {assessment.risk_level ? (
                                                                                 <span className="inline-flex items-center gap-1">
-                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${
+                                                                                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset ${
                                                                                         RISK_LEVEL_META[assessment.risk_level]?.className
                                                                                             ?? RISK_LEVEL_META.high.className
                                                                                     }`}>
@@ -4309,7 +4309,7 @@ export default function AiShow({
                                                                                             type="button"
                                                                                             onClick={() => updateEvidenceSelectionStatus(evidence, action.value)}
                                                                                             disabled={requirementUpdatesLocked || evidenceUpdating || isCurrentStatus}
-                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
+                                                                                            className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
                                                                                         >
                                                                                             {action.label}
                                                                                         </button>
@@ -4340,7 +4340,7 @@ export default function AiShow({
                                                                     }));
                                                                 }}
                                                                 aria-expanded={requirementDetailsExpanded}
-                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
                                                             >
                                                                 {requirementDetailsExpanded ? tai.requirement_details_less : tai.requirement_details_more}
                                                             </button>
@@ -4392,7 +4392,7 @@ export default function AiShow({
                                                             type="button"
                                                             onClick={() => startEditingRequirement(requirement)}
                                                             disabled={requirementUpdatesLocked && !isEditingThisRequirement}
-                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
                                                         >
                                                             {tai.edit_requirement}
                                                         </button>
@@ -4434,7 +4434,7 @@ export default function AiShow({
                                                                     updateRequirementReviewStatus(requirement, action.value);
                                                                 }}
                                                                 disabled={requirementUpdatesLocked}
-                                                                className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
+                                                                className={`inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${action.className}`}
                                                             >
                                                                 {action.label}
                                                             </button>
@@ -4494,7 +4494,7 @@ export default function AiShow({
                                                 <button
                                                     type="button"
                                                     onClick={() => setAnswerDraftReaderExpanded((currentState) => !currentState)}
-                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
+                                                    className="inline-flex items-center justify-center rounded-full border border-violet-200 bg-white px-3 py-1.5 text-sm font-semibold text-violet-700 transition hover:border-violet-300 hover:bg-violet-50"
                                                 >
                                                     {answerDraftReaderExpanded ? tai.normal_reader : tai.larger_reader}
                                                 </button>
@@ -4561,7 +4561,7 @@ export default function AiShow({
                                                     <button
                                                         type="button"
                                                         onClick={() => setAnswerDraftMissingKnowledgeDetailsExpanded((currentState) => !currentState)}
-                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                                                        className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
                                                         aria-expanded={answerDraftMissingKnowledgeDetailsExpanded}
                                                     >
                                                         {answerDraftMissingKnowledgeDetailsExpanded
@@ -4621,7 +4621,7 @@ export default function AiShow({
                                                                                                 <button
                                                                                                     type="button"
                                                                                                     onClick={() => openEvidenceSource(point)}
-                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-xs font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
+                                                                                                    className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-left text-sm font-medium text-slate-600 transition hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700"
                                                                                                     aria-label={`${tai.evidence_title} ${evidenceLabel}`}
                                                                                                 >
                                                                                                     {tai.evidence_title}: {evidenceLabel}
@@ -4968,17 +4968,17 @@ export default function AiShow({
                                                                 </span>
                                                             )}
                                                             {source.knowledge_item_version_no != null ? (
-                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                                                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-500">
                                                                     v{source.knowledge_item_version_no}
                                                                 </span>
                                                             ) : null}
                                                             {source.document_type_label ? (
-                                                                <span className="inline-flex items-center rounded-full border border-violet-100 bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                                                                <span className="inline-flex items-center rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700">
                                                                     {source.document_type_label}
                                                                 </span>
                                                             ) : null}
                                                             {source.version_is_current_now === false ? (
-                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
                                                                     {tai.sources_sent_to_ai_outdated_version ?? 'Tidligere dokumentversjon'}
                                                                 </span>
                                                             ) : null}
@@ -5075,7 +5075,7 @@ export default function AiShow({
                                             </div>
                                         </div>
                                             {isNoResponsibleSelected ? (
-                                                <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                                <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white">
                                                     {tai.selected}
                                                 </span>
                                             ) : null}
@@ -5111,7 +5111,7 @@ export default function AiShow({
                                                             </div>
                                                         </div>
                                                         {isSelectedResponsibleUser ? (
-                                                            <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-xs font-semibold text-white">
+                                                            <span className="shrink-0 rounded-full bg-violet-600 px-3 py-1 text-sm font-semibold text-white">
                                                                 {tai.selected_responsible_user}
                                                             </span>
                                                         ) : null}
