@@ -1,6 +1,7 @@
 import { router, useForm, usePage } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
+import PageHelpButton from '../../../Components/App/PageHelpButton';
 
 function CatalogModal({
     isOpen,
@@ -519,6 +520,71 @@ export default function KnowledgeBaseSettings({
     const sectionTitle = pageTitle || knowledgeBaseText.page_title || 'Kunnskapsbase';
     const subtitleText = pageSubtitle || knowledgeBaseText.page_subtitle || '';
     const noteText = scopeNote || knowledgeBaseText.scope_note || '';
+    const knowledgeBaseHelpSections = useMemo(() => [
+        {
+            title: knowledgeBaseText.page_help_section_purpose ?? 'Formål',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_purpose_title ?? 'Strukturen for kunnskapsdokumenter',
+                    text: knowledgeBaseText.page_help_item_purpose_text ?? 'Denne siden styrer hvilke kategorier og temaer som kan brukes på kunnskapsdokumenter.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_categories ?? 'Dokumentkategorier',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_categories_title ?? 'Hovedgruppen dokumentet hører til i',
+                    text: knowledgeBaseText.page_help_item_categories_text ?? 'En dokumentkategori er hovedgruppen dokumentet hører til i, for eksempel Policies, Rutinebeskrivelser eller Tjenestebeskrivelser.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_topics ?? 'Temaer',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_topics_title ?? 'Emner som kan gjenbrukes på tvers',
+                    text: knowledgeBaseText.page_help_item_topics_text ?? 'Temaer er emner eller undertemaer som kan brukes innenfor én eller flere dokumentkategorier. Et tema kan knyttes til flere kategorier når det er relevant flere steder.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_relation ?? 'Kategorier og temaer',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_relation_title ?? 'Temaer må knyttes til kategorier før de vises i dokumenter',
+                    text: knowledgeBaseText.page_help_item_relation_text ?? 'Når et kunnskapsdokument redigeres, vises bare temaer som er knyttet til valgt dokumentkategori. Hvis en kategori mangler temaer, må de legges til her før de kan velges på dokumentet.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_workflow ?? 'Anbefalt arbeidsflyt',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_workflow_title ?? 'Slik jobber du',
+                    text: knowledgeBaseText.page_help_item_workflow_text ?? 'Opprett eller rediger dokumentkategori, legg til relevante temaer, opprett eventuelt nytt tema direkte fra kategorien, og gå deretter til kunnskapsdokumentet for å velge kategori og tema.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_rules ?? 'Viktige regler',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_rules_title ?? 'Temaer administreres sentralt',
+                    text: knowledgeBaseText.page_help_item_rules_text ?? 'Temaer administreres sentralt her, ikke som fritekst på dokumentet. Deaktiverte kategorier og temaer brukes ikke for nye dokumenter.',
+                },
+            ],
+        },
+        {
+            title: knowledgeBaseText.page_help_section_not_do ?? 'Dette gjør ikke siden',
+            items: [
+                {
+                    title: knowledgeBaseText.page_help_item_not_do_title ?? 'Ikke opplasting eller AI-innhold',
+                    text: knowledgeBaseText.page_help_item_not_do_text ?? 'Denne siden laster ikke opp dokumenter, endrer ikke dokumentinnhold og påvirker ikke AI-svar direkte.',
+                },
+            ],
+        },
+    ], [knowledgeBaseText]);
 
     return (
         <CustomerAppLayout title={sectionTitle} showPageTitle={false}>
@@ -528,9 +594,17 @@ export default function KnowledgeBaseSettings({
                         <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                             {sectionTitle}
                         </div>
-                        <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
-                            {sectionTitle}
-                        </h1>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                                {sectionTitle}
+                            </h1>
+                            <PageHelpButton
+                                buttonLabel={knowledgeBaseText.page_help_button ?? 'Hjelp'}
+                                title={knowledgeBaseText.page_help_title ?? 'Om kategorier og temaer i kunnskapsbasen'}
+                                intro={knowledgeBaseText.page_help_intro ?? 'Her administrerer du strukturen som brukes når kunnskapsdokumenter klassifiseres. Dokumentkategorier er hovedgrupper, mens temaer er emner som kan knyttes til én eller flere kategorier.'}
+                                sections={knowledgeBaseHelpSections}
+                            />
+                        </div>
                         {subtitleText ? <p className="max-w-3xl text-[15px] leading-7 text-slate-500">{subtitleText}</p> : null}
                     </div>
 
