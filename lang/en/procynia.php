@@ -1127,7 +1127,7 @@ return [
         'requirement_type_administrative' => 'Administrative',
         'requirement_type_unspecified' => 'Unspecified',
         'hint_requirement_type' => 'Requirement type classifies what kind of requirement this is. "Mandatory" is used for requirements that must be answered to qualify. "Documentation" is used for requirements related to attachments or certificates. "Administrative" is used for procedural requirements. "Unspecified" is used when the requirement has not been classified.',
-        'requirement_source_ai_candidate' => 'From requirements document',
+        'requirement_source_ai_candidate' => 'AI candidate',
         'requirement_source_manual' => 'Manual',
         'requirement_approval_draft' => 'Draft',
         'requirement_approval_approved' => 'Approved',

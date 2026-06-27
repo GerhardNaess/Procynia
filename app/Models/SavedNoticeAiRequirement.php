@@ -20,7 +20,7 @@ class SavedNoticeAiRequirement extends Model
     ];
 
     public const SOURCE_TYPE_LABELS = [
-        self::SOURCE_TYPE_AI_CANDIDATE => 'Fra kravdokument',
+        self::SOURCE_TYPE_AI_CANDIDATE => 'AI-kandidat',
         self::SOURCE_TYPE_MANUAL => 'Manuelt',
     ];
 
