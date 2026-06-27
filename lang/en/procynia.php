@@ -1640,7 +1640,7 @@ return [
         'continue_review' => 'Continue review',
         'doc_summary' => 'Document summary',
         'summary_placeholder' => 'Write a brief summary of the document.',
-        'summary_hint' => 'Edit directly here.',
+        'summary_hint' => 'Edit directly in the text above.',
         'more' => 'More',
         'saving' => 'Saving...',
         'save' => 'Save',
