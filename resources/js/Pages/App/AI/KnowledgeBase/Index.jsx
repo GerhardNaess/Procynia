@@ -850,7 +850,7 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500">
+                                                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium uppercase tracking-[0.08em] text-slate-500">
                                                             {documentCategoryDisplayLabel !== '' ? documentCategoryDisplayLabel : documentTypeLabel !== '' ? documentTypeLabel : documentTypeValue !== '' ? documentTypeValue : commonText.not_available}
                                                         </span>
                                                         {documentTopicDisplayLabel !== '' ? (
@@ -862,12 +862,12 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${statusClass}`}>
+                                                        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-base font-medium ring-1 ring-inset ${statusClass}`}>
                                                             {statusLabel}
                                                         </span>
                                                         {item?.review_state && item.review_state !== 'not_set' ? (
                                                             <div>
-                                                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${REVIEW_STATE_CLASS[item.review_state] ?? REVIEW_STATE_CLASS.not_set}`}>
+                                                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-base font-medium ring-1 ring-inset ${REVIEW_STATE_CLASS[item.review_state] ?? REVIEW_STATE_CLASS.not_set}`}>
                                                                     {REVIEW_STATE_LABEL[item.review_state] ?? item.review_state}
                                                                 </span>
                                                             </div>
@@ -876,11 +876,11 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     {item.ai_usage_enabled !== false ? (
-                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-emerald-100 text-emerald-700 ring-emerald-200">
+                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-base font-medium ring-1 ring-inset bg-emerald-100 text-emerald-700 ring-emerald-200">
                                                             {tk.ai_usage_yes ?? 'Ja'}
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset bg-amber-100 text-amber-800 ring-amber-200">
+                                                        <span className="inline-flex rounded-full px-2.5 py-0.5 text-base font-medium ring-1 ring-inset bg-amber-100 text-amber-800 ring-amber-200">
                                                             {tk.ai_usage_no ?? 'Nei'}
                                                         </span>
                                                     )}
@@ -897,7 +897,7 @@ export default function KnowledgeBaseIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="space-y-1.5">
-                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] font-medium text-violet-700">
+                                                        <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-base font-medium text-violet-700">
                                                             {ownershipLabel !== '' ? ownershipLabel : commonText.not_set}
                                                         </span>
                                                     </div>
@@ -916,7 +916,7 @@ export default function KnowledgeBaseIndex({
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+                                                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-base font-medium text-slate-500">
                                                                 {ownerDisplayName}
                                                             </span>
                                                         )}
