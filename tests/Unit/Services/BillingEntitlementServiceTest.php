@@ -169,6 +169,24 @@ class BillingEntitlementServiceTest extends TestCase
         }
     }
 
+    public function test_customer_has_feature_treats_market_insight_catalog_line_as_distinct_from_markedsinnsikt_plan_config(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->attachBillingLineWithFeature($customer, 'market_insight');
+
+            $this->assertTrue($service->customerHasFeature($customer, 'market_insight'));
+            $this->assertFalse($service->customerHasFeature($customer, 'markedsinnsikt'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
     public function test_customer_has_feature_returns_true_when_feature_exists_in_plan_config_only(): void
     {
         $customer = $this->createCustomer();
