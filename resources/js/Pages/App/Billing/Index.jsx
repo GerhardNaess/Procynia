@@ -45,11 +45,18 @@ function resolveLabel(value, labels, fallback) {
 }
 
 
-function SummaryCard({ label, value }) {
+function SummaryCard({ label, value, hint, hintLabel }) {
     return (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                {label}
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                <span>{label}</span>
+                {hint && (
+                    <InfoHint
+                        size="sm"
+                        label={hintLabel ?? `Vis forklaring for ${label}`}
+                        text={hint}
+                    />
+                )}
             </div>
             <div className="mt-3 text-lg font-semibold text-slate-900">
                 {value}
@@ -121,6 +128,7 @@ export default function BillingIndex() {
     const intervalLabels = tb.interval_labels ?? {};
     const serviceLevelLabels = tb.service_level_labels ?? {};
     const lineTypeLabels = tb.billing_line_type_labels ?? {};
+    const summaryHints = tb.summary_hints ?? {};
 
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmResume, setConfirmResume] = useState(false);
@@ -214,7 +222,7 @@ export default function BillingIndex() {
 
     const stripeSubscriptionValue = hasActiveStripeSubscription
         ? (subscription?.plan_label ?? summaryText.not_available ?? 'Ikke tilgjengelig')
-        : (summaryText.no_active_subscription ?? 'Ingen aktivt betalingsabonnement');
+        : (summaryText.no_active_subscription ?? 'Ingen aktiv betalingskobling');
 
     const stripePaymentValue = sortedInvoices.length === 0
         ? (summaryText.not_available ?? 'Ikke tilgjengelig')
@@ -335,25 +343,25 @@ export default function BillingIndex() {
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
                             {tb.title ?? 'Abonnement og betaling'}
                         </h1>
-                        <PageHelpButton
-                            buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                            title={tb.page_help_title ?? 'Om abonnement og betaling'}
-                            intro={tb.page_help_intro ?? 'Siden gir deg oversikt over abonnement, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
-                            sections={[
-                                {
-                                    title: tb.page_help_section_overview ?? 'Hva du finner her',
-                                    items: [
-                                        {
-                                            title: tb.page_help_item_subscription_title ?? 'Abonnement',
-                                            text: tb.page_help_item_subscription_text ?? 'Viser gjeldende abonnement, neste fornyelse og betalingsstatus.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_services_title ?? 'Aktive tjenester',
-                                            text: tb.page_help_item_services_text ?? 'Viser hvilke tjenester som er aktive og antall brukere per nivå.',
-                                        },
-                                        {
-                                            title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
-                                            text: tb.page_help_item_invoices_text ?? 'Historikk over fakturaer med beløp, dato og status.',
+                    <PageHelpButton
+                        buttonLabel={tb.page_help_button ?? 'Hjelp'}
+                        title={tb.page_help_title ?? 'Om teknisk betalingsløsning og betaling'}
+                        intro={tb.page_help_intro ?? 'Siden gir deg oversikt over teknisk betalingsløsning, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
+                        sections={[
+                            {
+                                title: tb.page_help_section_overview ?? 'Hva du finner her',
+                                items: [
+                                    {
+                                        title: tb.page_help_item_subscription_title ?? 'Teknisk betalingsløsning',
+                                        text: tb.page_help_item_subscription_text ?? 'Viser om kunden har en aktiv betalingskobling i den tekniske betalingsløsningen, samt neste fornyelse og betalingsstatus.',
+                                    },
+                                    {
+                                        title: tb.page_help_item_services_title ?? 'Aktive tjenester',
+                                        text: tb.page_help_item_services_text ?? 'Viser aktive Procynia-tjenester og antall brukere per nivå.',
+                                    },
+                                    {
+                                        title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
+                                        text: tb.page_help_item_invoices_text ?? 'Historikk over fakturaer med beløp, dato og status.',
                                         },
                                     ],
                                 },
@@ -361,44 +369,48 @@ export default function BillingIndex() {
                         />
                     </div>
                     <p className="max-w-4xl text-sm leading-6 text-slate-600">
-                        {tb.subtitle ?? 'Oversikt over abonnement, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
+                        {tb.subtitle ?? 'Oversikt over teknisk betalingsløsning, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
                     </p>
                     <p className="max-w-4xl text-sm leading-6 text-slate-600">
-                        {tb.intro ?? 'Her ser du kundens abonnement, betalingsstatus, aktive tjenester og brukernivåer. Procynia styrer hvilke tjenester og tilganger som er aktive. Betaling, fakturaer og forfall håndteres gjennom betalingsløsningen når abonnement eller faktura er opprettet.'}
+                        {tb.intro ?? 'Her ser du kundens tekniske betalingsløsning, betalingsstatus, aktive tjenester og brukernivåer. Procynia styrer hvilke tjenester og tilganger som er aktive. Betaling, fakturaer og forfall håndteres gjennom betalingsløsningen når en kobling eller faktura er opprettet.'}
                     </p>
                 </header>
 
                 <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <SummaryCard
-                        label={summaryText.stripe_subscription ?? 'Abonnement'}
+                        label={summaryText.stripe_subscription ?? 'Teknisk betalingsløsning'}
                         value={stripeSubscriptionValue}
+                        hint={summaryHints.technical_payment_solution}
                     />
                     <SummaryCard
                         label={summaryText.stripe_payment ?? 'Betalingsstatus'}
                         value={stripePaymentValue}
+                        hint={summaryHints.payment_status}
                     />
                     <SummaryCard
                         label={summaryText.procynia_services ?? 'Aktive tjenester'}
                         value={procyniaServicesValue}
+                        hint={summaryHints.active_services}
                     />
                     <SummaryCard
                         label={summaryText.procynia_levels ?? 'Aktive brukernivåer'}
                         value={procyniaLevelsValue}
+                        hint={summaryHints.active_user_levels}
                     />
                 </section>
 
                 {showProcyniaStripeWarning && (
                     <AlertBox>
-                            {alertText.services_without_subscription ?? 'Kontoen har aktive tjenester eller brukernivåer, men ingen aktivt betalingsabonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
+                            {alertText.services_without_subscription ?? 'Kontoen har aktive Procynia-tjenester eller brukernivåer, men ingen aktiv betalingskobling i den tekniske betalingsløsningen. Kontakt Procynia dersom betalingsoppsettet skal aktiveres eller endres.'}
                     </AlertBox>
                 )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {subscriptionText.heading ?? 'Abonnement'}
+                            {subscriptionText.heading ?? 'Teknisk betalingsløsning'}
                         </h2>
-                        <InfoHint size="sm" label="Vis forklaring for Abonnement" text={tb.hint_subscription} />
+                        <InfoHint size="sm" label="Vis forklaring for teknisk betalingsløsning" text={tb.hint_subscription} />
                     </div>
 
                     {hasActiveStripeSubscription ? (
@@ -415,7 +427,7 @@ export default function BillingIndex() {
                             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm md:grid-cols-2">
                                 {subscription.plan_label && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Abonnementsplan'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Plan'}</dt>
                                         <dd className="font-medium text-slate-900">{subscription.plan_label}</dd>
                                     </>
                                 )}
@@ -424,7 +436,7 @@ export default function BillingIndex() {
 
                                 {subscription.billing_interval && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.interval ?? 'Abonnementsintervall'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.interval ?? 'Intervall'}</dt>
                                         <dd className="font-medium text-slate-900">{resolveIntervalLabel(subscription.billing_interval)}</dd>
                                     </>
                                 )}
@@ -471,7 +483,7 @@ export default function BillingIndex() {
                                         onClick={() => setConfirmCancel(true)}
                                         className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
                                     >
-                                        {tb.cancel ?? 'Si opp abonnement'}
+                                        {tb.cancel ?? 'Si opp kobling'}
                                     </button>
                                 )}
                                 {subscription.cancel_at_period_end && (
@@ -479,7 +491,7 @@ export default function BillingIndex() {
                                         onClick={() => setConfirmResume(true)}
                                         className="rounded-lg border border-green-200 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-50"
                                     >
-                                        {tb.resume ?? 'Behold abonnement'}
+                                        {tb.resume ?? 'Gjenoppta kobling'}
                                     </button>
                                 )}
                             </div>
@@ -487,7 +499,7 @@ export default function BillingIndex() {
                     ) : (
                         <div className="mt-4 space-y-3">
                             <p className="text-sm leading-6 text-slate-600">
-                                {subscriptionText.empty ?? 'Ingen aktivt betalingsabonnement. Ta kontakt med Procynia dersom abonnementet skal aktiveres eller endres.'}
+                                {subscriptionText.empty ?? 'Ingen aktiv betalingskobling er registrert i den tekniske betalingsløsningen. Kontoen kan likevel ha aktive Procynia-tjenester eller brukernivåer.'}
                             </p>
                             {canChangePlan && (
                                 <button
@@ -690,12 +702,12 @@ export default function BillingIndex() {
                             </h3>
                             <p className="text-sm leading-6 text-slate-600">
                                 {planChangeStep === 'confirm'
-                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
-                                    : (planChangeText.description ?? 'Velg en ny plan. Abonnementet håndteres via betalingsløsningen.')}
+                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre planen.')
+                                    : (planChangeText.description ?? 'Velg en ny plan. Den tekniske betalingsløsningen håndterer koblingen.')}
                             </p>
                             {planChangeStep === 'confirm' && (
                                 <p className="text-sm leading-6 text-slate-600">
-                                    {planChangeText.confirm_note ?? 'Endringen behandles via betalingsløsningen og kan påvirke videre abonnement.'}
+                                    {planChangeText.confirm_note ?? 'Endringen behandles via den tekniske betalingsløsningen og kan påvirke videre tilgang.'}
                                 </p>
                             )}
                         </div>
@@ -793,13 +805,13 @@ export default function BillingIndex() {
                         ) : (
                             <>
                                 <AlertBox className="mt-4">
-                                    <p className="font-medium">
-                                        {planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.'}
-                                    </p>
-                                    <p className="mt-2">
-                                        {planChangeText.confirm_note ?? 'Endringen behandles via betalingsløsningen og kan påvirke videre abonnement.'}
-                                    </p>
-                                </AlertBox>
+                                <p className="font-medium">
+                                        {planChangeText.confirm_intro ?? 'Du er i ferd med å endre planen.'}
+                                </p>
+                                <p className="mt-2">
+                                        {planChangeText.confirm_note ?? 'Endringen behandles via den tekniske betalingsløsningen og kan påvirke videre tilgang.'}
+                                </p>
+                            </AlertBox>
 
                                 {selectedPlanSummary && (
                                     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
@@ -820,7 +832,7 @@ export default function BillingIndex() {
                                                 {selectedPlanSummary.name}
                                             </div>
                                             <div className="text-slate-500">
-                                                {planChangeText.billing_interval ?? 'Abonnementsintervall'}
+                                                {planChangeText.billing_interval ?? 'Intervall'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {selectedPlanSummary.intervalLabel}
@@ -865,22 +877,22 @@ export default function BillingIndex() {
 
             <ConfirmDialog
                 isOpen={confirmCancel}
-                title={tb.cancel_confirm_title ?? 'Si opp abonnement'}
-                message={tb.cancel_confirm_message ?? 'Abonnementet avsluttes automatisk ved slutten av inneværende periode. Du beholder tilgang til da.'}
+                title={tb.cancel_confirm_title ?? 'Si opp kobling'}
+                message={tb.cancel_confirm_message ?? 'Den tekniske betalingskoblingen avsluttes automatisk ved slutten av inneværende periode. Du beholder tilgang til da.'}
                 onConfirm={handleCancel}
                 onCancel={() => setConfirmCancel(false)}
-                confirmLabel={tb.cancel ?? 'Si opp'}
+                confirmLabel={tb.cancel ?? 'Si opp kobling'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
                 danger
             />
 
             <ConfirmDialog
                 isOpen={confirmResume}
-                title={tb.resume_confirm_title ?? 'Behold abonnement'}
-                message={tb.resume_confirm_message ?? 'Oppsigelsen trekkes tilbake og abonnementet fortsetter som normalt.'}
+                title={tb.resume_confirm_title ?? 'Gjenoppta kobling'}
+                message={tb.resume_confirm_message ?? 'Oppsigelsen trekkes tilbake og den tekniske betalingskoblingen fortsetter som normalt.'}
                 onConfirm={handleResume}
                 onCancel={() => setConfirmResume(false)}
-                confirmLabel={tb.resume ?? 'Behold abonnement'}
+                confirmLabel={tb.resume ?? 'Gjenoppta kobling'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
             />
         </CustomerAppLayout>
