@@ -79,6 +79,7 @@ class BillingService
 
         if ($mode !== 'period_end') {
             $this->syncPlanMeta($customer, Customer::PLAN_FREE, Customer::BILLING_MONTHLY);
+            $this->syncBasePlanLine($customer, Customer::PLAN_FREE, Customer::BILLING_MONTHLY);
         }
 
         $this->recordEvent($customer, 'subscription_closed', 'system', "Abonnement ble avsluttet ({$mode}).");

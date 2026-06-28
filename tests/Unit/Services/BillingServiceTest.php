@@ -253,6 +253,111 @@ class BillingServiceTest extends TestCase
         ]);
     }
 
+    public function test_close_account_billing_immediate_materializes_free_plan_as_active_catalog_line_and_is_idempotent(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingService::class);
+
+        $paidProduct = BillingProduct::query()->create([
+            'key' => 'paid_base_plan_test',
+            'name' => 'Paid Base Plan',
+            'description' => 'Test base plan that should be ended when the customer becomes free.',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+            'metadata' => ['plan_key' => 'pro'],
+        ]);
+
+        $paidPrice = BillingPrice::query()->create([
+            'billing_product_id' => $paidProduct->id,
+            'key' => 'paid_base_plan_test_monthly',
+            'name' => 'Paid Base Plan — Monthly',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 9900,
+            'stripe_price_id' => null,
+            'tier_key' => 'pro',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => ['plan_key' => 'pro'],
+        ]);
+
+        $freeProduct = BillingProduct::query()->firstOrCreate(
+            ['key' => 'plan_free'],
+            [
+                'name' => 'Free',
+                'description' => 'Free base plan used for customers without an active paid subscription.',
+                'category' => BillingProduct::CATEGORY_BASE_PLAN,
+                'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+                'is_active' => true,
+                'sort_order' => 2,
+                'metadata' => ['plan_key' => 'free', 'features' => ['anbudssok', 'email_varsel']],
+            ]
+        );
+
+        $freePrice = BillingPrice::query()->firstOrCreate(
+            ['key' => 'free_monthly'],
+            [
+                'billing_product_id' => $freeProduct->id,
+                'name' => 'Free — Monthly',
+                'interval' => BillingPrice::INTERVAL_MONTHLY,
+                'currency' => 'nok',
+                'unit_amount' => 0,
+                'stripe_price_id' => null,
+                'tier_key' => 'free',
+                'is_recurring' => true,
+                'is_active' => true,
+                'included_quantity' => 1,
+                'metadata' => ['plan_key' => 'free'],
+            ]
+        );
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $paidProduct->id,
+            'billing_price_id' => $paidPrice->id,
+            'description' => $paidPrice->name,
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => 'system',
+            'metadata' => [
+                'billing_price_key' => $paidPrice->key,
+                'billing_product_key' => $paidProduct->key,
+            ],
+        ]);
+
+        $service->closeAccountBilling($customer, 'immediate');
+        $service->closeAccountBilling($customer, 'immediate');
+
+        $customer->refresh();
+
+        $this->assertSame(Customer::PLAN_FREE, $customer->subscription_plan);
+        $this->assertSame(Customer::BILLING_MONTHLY, $customer->billing_interval);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $paidPrice->id,
+            'status' => 'ended',
+        ]);
+        $this->assertDatabaseMissing('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $paidPrice->id,
+            'status' => 'active',
+        ]);
+
+        $freeLines = CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $freePrice->id)
+            ->where('status', 'active')
+            ->get();
+
+        $this->assertCount(1, $freeLines);
+        $this->assertNull($freeLines->first()->stripe_subscription_item_id);
+        $this->assertSame(['anbudssok', 'email_varsel'], $freeLines->first()->billingProduct->metadata['features'] ?? []);
+    }
+
     public function test_customer_specific_price_lines_are_kept_separate_from_standard_billing_lines(): void
     {
         $customer = $this->createCustomer();
