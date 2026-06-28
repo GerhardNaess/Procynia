@@ -90,6 +90,11 @@ class BillingService
         ];
     }
 
+    public function materializeFreePlanLine(Customer $customer): ?CustomerBillingLine
+    {
+        return $this->syncBasePlanLine($customer, Customer::PLAN_FREE, Customer::BILLING_MONTHLY);
+    }
+
     public function resumeAccountBilling(Customer $customer): array
     {
         $customer = $customer->fresh();
