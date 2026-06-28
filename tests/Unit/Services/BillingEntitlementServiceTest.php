@@ -116,6 +116,119 @@ class BillingEntitlementServiceTest extends TestCase
         $this->assertTrue($service->canUseFeature($customer, 'ai_offer'));
     }
 
+    public function test_customer_has_feature_returns_true_when_feature_exists_in_plan_config_only(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalPlanConfig = config('procynia_plans.pro');
+
+        try {
+            config()->set('procynia_plans.pro.features', ['config_only_test_feature']);
+
+            $customer->forceFill([
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+            ])->save();
+
+            $this->assertTrue($service->customerHasFeature($customer, 'config_only_test_feature'));
+        } finally {
+            config()->set('procynia_plans.pro', $originalPlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_returns_true_when_feature_exists_on_active_catalog_line_only(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->attachBillingLineWithFeature($customer, 'catalog_only_test_feature');
+
+            $this->assertTrue($service->customerHasFeature($customer, 'catalog_only_test_feature'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_returns_false_when_feature_is_missing_from_config_and_catalog(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->assertFalse($service->customerHasFeature($customer, 'missing_test_feature'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_still_returns_true_when_plan_config_provides_feature_even_if_catalog_line_does_not(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalPlanConfig = config('procynia_plans.pro');
+
+        try {
+            config()->set('procynia_plans.pro.features', ['conflict_test_feature']);
+
+            $customer->forceFill([
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+            ])->save();
+
+            $this->attachBillingLineWithoutFeature($customer);
+
+            $this->assertTrue($service->customerHasFeature($customer, 'conflict_test_feature'));
+        } finally {
+            config()->set('procynia_plans.pro', $originalPlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_still_returns_true_when_catalog_line_provides_feature_even_if_plan_config_does_not(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->attachBillingLineWithFeature($customer, 'conflict_test_feature');
+
+            $this->assertTrue($service->customerHasFeature($customer, 'conflict_test_feature'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_does_not_use_price_metadata_features_alone_for_runtime_access(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->attachBillingLineWithFeature(
+                $customer,
+                'missing_test_feature',
+                productMetadata: [],
+                priceMetadata: ['price_only_test_feature']
+            );
+
+            $this->assertFalse($service->customerHasFeature($customer, 'price_only_test_feature'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
     private function createCustomer(string $name = 'Procynia AS'): Customer
     {
         $language = Language::query()->firstOrCreate(
@@ -135,6 +248,64 @@ class BillingEntitlementServiceTest extends TestCase
             'nationality_id' => $nationality->id,
             'is_active' => true,
         ]);
+    }
+
+    private function attachBillingLineWithFeature(
+        Customer $customer,
+        string $featureKey,
+        ?array $productMetadata = null,
+        ?array $priceMetadata = null
+    ): CustomerBillingLine {
+        $product = BillingProduct::query()->create([
+            'key' => $featureKey.'_product',
+            'name' => Str::headline(str_replace('_', ' ', $featureKey)).' product',
+            'description' => 'Test product for '.$featureKey,
+            'category' => BillingProduct::CATEGORY_ADDON,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 99,
+            'metadata' => $productMetadata ?? ['features' => [$featureKey]],
+        ]);
+
+        $price = BillingPrice::query()->create([
+            'billing_product_id' => $product->id,
+            'key' => $featureKey.'_monthly',
+            'name' => Str::headline(str_replace('_', ' ', $featureKey)).' — Monthly',
+            'interval' => BillingPrice::INTERVAL_MONTHLY,
+            'currency' => 'nok',
+            'unit_amount' => 9900,
+            'stripe_price_id' => null,
+            'tier_key' => $featureKey,
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => $priceMetadata ?? ['features' => [$featureKey]],
+        ]);
+
+        return CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $product->id,
+            'billing_price_id' => $price->id,
+            'description' => $price->name,
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => 'system',
+            'metadata' => [
+                'billing_price_key' => $price->key,
+                'billing_product_key' => $product->key,
+            ],
+        ]);
+    }
+
+    private function attachBillingLineWithoutFeature(Customer $customer): CustomerBillingLine
+    {
+        return $this->attachBillingLineWithFeature(
+            $customer,
+            'no_feature_test_line',
+            productMetadata: ['features' => []],
+            priceMetadata: ['features' => []]
+        );
     }
 
     private function useProjectPostgresConnection(): void
