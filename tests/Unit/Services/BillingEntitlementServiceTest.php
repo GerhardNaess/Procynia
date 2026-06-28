@@ -116,6 +116,59 @@ class BillingEntitlementServiceTest extends TestCase
         $this->assertTrue($service->canUseFeature($customer, 'ai_offer'));
     }
 
+    public function test_customer_without_explicit_plan_gets_free_plan_features_from_plan_config_when_no_catalog_lines_exist(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+
+        $this->assertTrue($service->customerHasFeature($customer, 'anbudssok'));
+        $this->assertTrue($service->customerHasFeature($customer, 'email_varsel'));
+    }
+
+    public function test_customer_can_get_free_plan_features_via_active_catalog_line_when_free_config_has_no_features(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalFreePlanConfig = config('procynia_plans.free');
+
+        try {
+            config()->set('procynia_plans.free.features', []);
+
+            $this->attachBillingLineWithFeature(
+                $customer,
+                'free_catalog_line',
+                productMetadata: ['features' => ['anbudssok', 'email_varsel']],
+                priceMetadata: ['features' => []]
+            );
+
+            $this->assertTrue($service->customerHasFeature($customer, 'anbudssok'));
+            $this->assertTrue($service->customerHasFeature($customer, 'email_varsel'));
+        } finally {
+            config()->set('procynia_plans.free', $originalFreePlanConfig);
+        }
+    }
+
+    public function test_customer_has_feature_treats_markedsinnsikt_and_market_insight_as_distinct_keys(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(BillingEntitlementService::class);
+        $originalProPlanConfig = config('procynia_plans.pro');
+
+        try {
+            config()->set('procynia_plans.pro.features', ['markedsinnsikt']);
+
+            $customer->forceFill([
+                'subscription_plan' => Customer::PLAN_PRO,
+                'billing_interval' => Customer::BILLING_MONTHLY,
+            ])->save();
+
+            $this->assertTrue($service->customerHasFeature($customer, 'markedsinnsikt'));
+            $this->assertFalse($service->customerHasFeature($customer, 'market_insight'));
+        } finally {
+            config()->set('procynia_plans.pro', $originalProPlanConfig);
+        }
+    }
+
     public function test_customer_has_feature_returns_true_when_feature_exists_in_plan_config_only(): void
     {
         $customer = $this->createCustomer();
