@@ -46,7 +46,7 @@ return [
         'included_users' => 15,
         'included_ai_credits' => 60,
         'features' => ['anbudssok', 'email_varsel', 'arbeidsomrade', 'rettighetsstyring',
-            'slack_teams', 'flowcase', 'oppstartsmoete', 'markedsinnsikt', 'prioritert_support'],
+            'slack_teams', 'flowcase', 'oppstartsmoete', 'market_insight', 'prioritert_support'],
         'stripe_monthly' => env('STRIPE_PRICE_ULTRA_MONTHLY'),
         'stripe_yearly' => env('STRIPE_PRICE_ULTRA_YEARLY'),
         'trial_days' => 14,

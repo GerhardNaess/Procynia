@@ -148,28 +148,28 @@ class BillingEntitlementServiceTest extends TestCase
         }
     }
 
-    public function test_customer_has_feature_treats_markedsinnsikt_and_market_insight_as_distinct_keys(): void
+    public function test_customer_has_feature_uses_market_insight_as_the_canonical_feature_key_in_plan_config(): void
     {
         $customer = $this->createCustomer();
         $service = app(BillingEntitlementService::class);
         $originalProPlanConfig = config('procynia_plans.pro');
 
         try {
-            config()->set('procynia_plans.pro.features', ['markedsinnsikt']);
+            config()->set('procynia_plans.pro.features', ['market_insight']);
 
             $customer->forceFill([
                 'subscription_plan' => Customer::PLAN_PRO,
                 'billing_interval' => Customer::BILLING_MONTHLY,
             ])->save();
 
-            $this->assertTrue($service->customerHasFeature($customer, 'markedsinnsikt'));
-            $this->assertFalse($service->customerHasFeature($customer, 'market_insight'));
+            $this->assertTrue($service->customerHasFeature($customer, 'market_insight'));
+            $this->assertFalse($service->customerHasFeature($customer, 'markedsinnsikt'));
         } finally {
             config()->set('procynia_plans.pro', $originalProPlanConfig);
         }
     }
 
-    public function test_customer_has_feature_treats_market_insight_catalog_line_as_distinct_from_markedsinnsikt_plan_config(): void
+    public function test_customer_has_feature_uses_market_insight_as_the_canonical_feature_key_on_catalog_lines(): void
     {
         $customer = $this->createCustomer();
         $service = app(BillingEntitlementService::class);
