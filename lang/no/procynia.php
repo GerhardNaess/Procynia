@@ -2165,7 +2165,7 @@ return [
         'summary_hints' => [
             'technical_payment_solution' => 'Viser om kunden har et aktivt abonnement. Dette er ikke det samme som kundens tillegg eller brukertilganger.',
             'payment_status' => 'Viser siste kjente faktura- eller betalingsstatus fra betalingsløsningen.',
-            'active_services' => 'Viser tilleggstjenester som er aktive for kunden.',
+            'active_services' => 'Her ser du hvilke tilleggstjenester som er registrert på kunden.',
             'active_user_levels' => 'Viser aktive brukertilganger som er tildelt brukere i kundemiljøet.',
         ],
         'plan_change' => [
@@ -2216,7 +2216,7 @@ return [
         ],
         'procynia_services' => [
             'heading' => 'Tilleggstjenester',
-            'help' => 'Dette viser tilleggstjenester som er aktive for kunden. Betaling og fakturaer håndteres via betalingsløsningen.',
+            'help' => 'Her ser du hvilke tilleggstjenester som er registrert på kunden.',
             'empty' => 'Ingen tilleggstjenester registrert. Tilleggstjenester beskriver ekstra tjenester som er knyttet til abonnementet, men er ikke økonomisk fasit.',
             'table' => [
                 'service' => 'Tilleggstjenester',
@@ -2301,7 +2301,7 @@ return [
         'no_subscription' => 'Ingen aktivt abonnement er registrert. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.',
         'no_invoices' => 'Ingen fakturaer funnet. Fakturaer og PDF-er vises her når de er opprettet i betalingsløsningen.',
         'hint_subscription' => 'Viser om kunden har et aktivt abonnement, samt neste fornyelse. Betaling og fakturering håndteres av betalingsløsningen.',
-        'hint_procynia_services' => 'Tilleggstjenester beskriver ekstra funksjonalitet som er aktivert for kunden. Dette er Procynias interne oversikt, ikke det samme som fakturagrunnlaget.',
+        'hint_procynia_services' => 'Her ser du hvilke tilleggstjenester som er registrert på kunden.',
         'hint_procynia_levels' => 'Brukertilganger beskriver hvilke brukere som har aktive tilganger. Det er ikke det samme som arbeidsrollen i tilbudsarbeidet.',
         'hint_ai_credits' => 'Viser kundens bruk av AI-funksjoner og eventuelle midlertidige stopp. Brukes til kapasitetsstyring, ikke som direkte fakturagrunnlag.',
     ],

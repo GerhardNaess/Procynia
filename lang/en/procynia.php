@@ -2165,7 +2165,7 @@ return [
         'summary_hints' => [
             'technical_payment_solution' => 'Shows whether the customer has an active subscription. This is not the same as the customer’s add-ons or user access.',
             'payment_status' => 'Shows the latest known invoice or payment status from the payment solution.',
-            'active_services' => 'Shows add-on services that are active for the customer.',
+            'active_services' => 'Here you can see which add-on services are registered on the customer.',
             'active_user_levels' => 'Shows active user access that is assigned to users in the customer environment.',
         ],
         'plan_change' => [
@@ -2216,7 +2216,7 @@ return [
         ],
         'procynia_services' => [
             'heading' => 'Add-on services',
-            'help' => 'This shows add-on services that are active for the customer. Payment and invoices are handled through the payment provider.',
+            'help' => 'Here you can see which add-on services are registered on the customer.',
             'empty' => 'No add-on services registered. Add-on services describe extra services linked to the subscription, but they are not the financial source of truth.',
             'table' => [
                 'service' => 'Add-on services',
@@ -2301,7 +2301,7 @@ return [
         'no_subscription' => 'No active subscription is registered. Contact Procynia if the subscription should be activated or changed.',
         'no_invoices' => 'No invoices found. Invoices and PDFs will appear here when they have been created in the payment provider.',
         'hint_subscription' => 'Shows whether the customer has an active subscription, as well as the next renewal date. Payment and invoicing are handled by the payment provider.',
-        'hint_procynia_services' => 'Add-ons describe extra functionality that is active for the customer. This is Procynia\'s internal overview, not the same as the invoice basis.',
+        'hint_procynia_services' => 'Here you can see which add-on services are registered on the customer.',
         'hint_procynia_levels' => 'User access describes which users have active access. It is not the same as the work role in the bidding process.',
         'hint_ai_credits' => 'Shows the customer\'s use of AI features and any temporary stops. Used for capacity management, not as a direct invoice basis.',
     ],
