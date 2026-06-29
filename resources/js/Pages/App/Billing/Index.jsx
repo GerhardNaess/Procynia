@@ -146,7 +146,7 @@ export default function BillingIndex() {
     const currentPlanLabel = subscription?.plan_label
         ?? customerPlan.plan_label
         ?? planChangeText.current_plan
-        ?? 'Nåværende plan';
+        ?? 'Nåværende abonnement';
     const currentIntervalKey = normalizeKey(subscription?.billing_interval ?? customerPlan.billing_interval ?? 'monthly');
     const canChangePlan = availablePlans.length > 0 && currentPlanKey !== 'enterprise';
     const selectedPlan = availablePlans.find((plan) => normalizeKey(plan.key) === selectedPlanKey) ?? null;
@@ -222,7 +222,7 @@ export default function BillingIndex() {
 
     const stripeSubscriptionValue = hasActiveStripeSubscription
         ? (subscription?.plan_label ?? summaryText.not_available ?? 'Ikke tilgjengelig')
-        : (summaryText.no_active_subscription ?? 'Ingen aktiv betalingskobling');
+        : (summaryText.no_active_subscription ?? 'Ingen aktivt abonnement');
 
     const stripePaymentValue = sortedInvoices.length === 0
         ? (summaryText.not_available ?? 'Ikke tilgjengelig')
@@ -235,7 +235,22 @@ export default function BillingIndex() {
     const currentIntervalLabel = currentIntervalKey === 'yearly'
         ? (planChangeText.yearly ?? 'Årlig')
         : (planChangeText.monthly ?? 'Månedlig');
+    const currentPlanOption = availablePlans.find((plan) => normalizeKey(plan.key) === currentPlanKey) ?? null;
+    const currentPlanIntervalOption = currentPlanOption?.intervals?.find((option) => normalizeKey(option.interval) === currentIntervalKey)
+        ?? currentPlanOption?.intervals?.[0]
+        ?? null;
+    const currentPlanSummary = currentPlanOption ? {
+        label: planChangeText.current_plan ?? 'Nåværende abonnement',
+        name: currentPlanLabel,
+        intervalLabel: currentIntervalLabel,
+        priceLabel: currentPlanIntervalOption?.price_nok !== undefined && currentPlanIntervalOption?.price_nok !== null
+            ? formatPlanIntervalPrice(currentPlanIntervalOption.price_nok, currentPlanIntervalOption.interval)
+            : null,
+        includedUsers: currentPlanOption.included_users ?? null,
+        includedAiCredits: currentPlanOption.included_ai_credits ?? null,
+    } : null;
     const selectedPlanSummary = selectedPlan ? {
+        label: planChangeText.selected_plan ?? 'Valgt abonnement',
         name: selectedPlan.name,
         intervalLabel: selectedIntervalOption?.label
             ?? (normalizeKey(selectedInterval) === 'yearly'
@@ -244,9 +259,20 @@ export default function BillingIndex() {
         priceLabel: selectedIntervalOption
             ? formatPlanIntervalPrice(selectedIntervalOption.price_nok, selectedIntervalOption.interval)
             : null,
+        includedUsers: selectedPlan.included_users ?? null,
+        includedAiCredits: selectedPlan.included_ai_credits ?? null,
     } : null;
     const isSamePlanSelection = normalizeKey(selectedPlanKey) === currentPlanKey
         && normalizeKey(selectedInterval) === currentIntervalKey;
+    const planPreviewSummary = isSamePlanSelection
+        ? (currentPlanSummary ?? selectedPlanSummary)
+        : (selectedPlanSummary ?? currentPlanSummary);
+    const planPreviewIntervalTitle = isSamePlanSelection
+        ? (planChangeText.current_interval ?? 'Nåværende faktureringsperiode')
+        : (planChangeText.selected_interval ?? 'Valgt intervall');
+    const planPreviewIntervalLabel = isSamePlanSelection
+        ? currentIntervalLabel
+        : (selectedPlanSummary?.intervalLabel ?? currentIntervalLabel);
     const canConfirmPlanChange = Boolean(selectedPlanKey && selectedInterval && !isSamePlanSelection);
     const planChangeError = errors.plan ?? errors.interval ?? '';
 
@@ -325,7 +351,7 @@ export default function BillingIndex() {
     };
 
     return (
-        <CustomerAppLayout title={tb.title ?? 'Abonnement og betaling'}>
+        <CustomerAppLayout title={tb.title ?? 'Abonnement'}>
             <div className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
                 {flash?.success && (
                     <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
@@ -341,23 +367,23 @@ export default function BillingIndex() {
                 <header className="space-y-3">
                     <div className="flex items-center gap-3">
                         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
-                            {tb.title ?? 'Abonnement og betaling'}
+                            {tb.title ?? 'Abonnement'}
                         </h1>
                     <PageHelpButton
                         buttonLabel={tb.page_help_button ?? 'Hjelp'}
-                        title={tb.page_help_title ?? 'Om teknisk betalingsløsning og betaling'}
-                        intro={tb.page_help_intro ?? 'Siden gir deg oversikt over teknisk betalingsløsning, betalingsstatus, aktive tjenester og aktive brukernivåer.'}
+                        title={tb.page_help_title ?? 'Om abonnement, tillegg og brukertilganger'}
+                        intro={tb.page_help_intro ?? 'Siden gir deg oversikt over abonnement, tillegg, brukertilganger og betaling.'}
                         sections={[
                             {
                                 title: tb.page_help_section_overview ?? 'Hva du finner her',
                                 items: [
                                     {
-                                        title: tb.page_help_item_subscription_title ?? 'Teknisk betalingsløsning',
-                                        text: tb.page_help_item_subscription_text ?? 'Viser om kunden har en aktiv betalingskobling i den tekniske betalingsløsningen, samt neste fornyelse og betalingsstatus.',
+                                        title: tb.page_help_item_subscription_title ?? 'Abonnement',
+                                        text: tb.page_help_item_subscription_text ?? 'Viser om kunden har et aktivt abonnement, samt neste fornyelse og betalingsstatus.',
                                     },
                                     {
-                                        title: tb.page_help_item_services_title ?? 'Aktive tjenester',
-                                        text: tb.page_help_item_services_text ?? 'Viser aktive Procynia-tjenester og antall brukere per nivå.',
+                                        title: tb.page_help_item_services_title ?? 'Tilleggstjenester',
+                                        text: tb.page_help_item_services_text ?? 'Viser tilleggstjenester som er knyttet til abonnementet.',
                                     },
                                     {
                                         title: tb.page_help_item_invoices_title ?? 'Fakturaer og betalinger',
@@ -378,7 +404,7 @@ export default function BillingIndex() {
 
                 <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                     <SummaryCard
-                        label={summaryText.stripe_subscription ?? 'Teknisk betalingsløsning'}
+                        label={summaryText.stripe_subscription ?? 'Abonnement'}
                         value={stripeSubscriptionValue}
                         hint={summaryHints.technical_payment_solution}
                     />
@@ -388,12 +414,12 @@ export default function BillingIndex() {
                         hint={summaryHints.payment_status}
                     />
                     <SummaryCard
-                        label={summaryText.procynia_services ?? 'Aktive tjenester'}
+                        label={summaryText.procynia_services ?? 'Tilleggstjenester'}
                         value={procyniaServicesValue}
                         hint={summaryHints.active_services}
                     />
                     <SummaryCard
-                        label={summaryText.procynia_levels ?? 'Aktive brukernivåer'}
+                        label={summaryText.procynia_levels ?? 'Brukertilganger'}
                         value={procyniaLevelsValue}
                         hint={summaryHints.active_user_levels}
                     />
@@ -401,16 +427,16 @@ export default function BillingIndex() {
 
                 {showProcyniaStripeWarning && (
                     <AlertBox>
-                            {alertText.services_without_subscription ?? 'Kontoen har aktive Procynia-tjenester eller brukernivåer, men ingen aktiv betalingskobling i den tekniske betalingsløsningen. Kontakt Procynia dersom betalingsoppsettet skal aktiveres eller endres.'}
+                            {alertText.services_without_subscription ?? 'Kontoen har aktive tillegg eller brukertilganger, men ingen aktivt abonnement. Kontakt Procynia dersom abonnementet skal aktiveres eller endres.'}
                     </AlertBox>
                 )}
 
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {subscriptionText.heading ?? 'Teknisk betalingsløsning'}
+                            {subscriptionText.heading ?? 'Abonnement'}
                         </h2>
-                        <InfoHint size="sm" label="Vis forklaring for teknisk betalingsløsning" text={tb.hint_subscription} />
+                        <InfoHint size="sm" label="Vis forklaring for abonnement" text={tb.hint_subscription} />
                     </div>
 
                     {hasActiveStripeSubscription ? (
@@ -427,7 +453,7 @@ export default function BillingIndex() {
                             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm md:grid-cols-2">
                                 {subscription.plan_label && (
                                     <>
-                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Plan'}</dt>
+                                        <dt className="text-slate-500">{subscriptionText.plan ?? 'Abonnement'}</dt>
                                         <dd className="font-medium text-slate-900">{subscription.plan_label}</dd>
                                     </>
                                 )}
@@ -475,7 +501,7 @@ export default function BillingIndex() {
                                         onClick={openPlanChangeModal}
                                         className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
                                     >
-                                        {planChangeText.button ?? 'Endre plan'}
+                                        {planChangeText.button ?? 'Endre abonnement'}
                                     </button>
                                 )}
                                 {subscription.status === 'active' && !subscription.cancel_at_period_end && (
@@ -483,7 +509,7 @@ export default function BillingIndex() {
                                         onClick={() => setConfirmCancel(true)}
                                         className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
                                     >
-                                        {tb.cancel ?? 'Si opp kobling'}
+                                        {tb.cancel ?? 'Si opp abonnement'}
                                     </button>
                                 )}
                                 {subscription.cancel_at_period_end && (
@@ -491,7 +517,7 @@ export default function BillingIndex() {
                                         onClick={() => setConfirmResume(true)}
                                         className="rounded-lg border border-green-200 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-50"
                                     >
-                                        {tb.resume ?? 'Gjenoppta kobling'}
+                                        {tb.resume ?? 'Gjenoppta abonnement'}
                                     </button>
                                 )}
                             </div>
@@ -499,14 +525,42 @@ export default function BillingIndex() {
                     ) : (
                         <div className="mt-4 space-y-3">
                             <p className="text-sm leading-6 text-slate-600">
-                                {subscriptionText.empty ?? 'Ingen aktiv betalingskobling er registrert i den tekniske betalingsløsningen. Kontoen kan likevel ha aktive Procynia-tjenester eller brukernivåer.'}
+                                {subscriptionText.empty ?? 'Ingen aktiv betalingskobling er registrert. Kontoen kan likevel ha aktive tillegg eller brukertilganger.'}
                             </p>
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                                <dl className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+                                    <div>
+                                        <dt className="text-slate-500">
+                                            {planChangeText.current_plan ?? 'Nåværende abonnement'}
+                                        </dt>
+                                        <dd className="mt-1 font-semibold text-slate-900">
+                                            {currentPlanLabel}
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-slate-500">
+                                            {planChangeText.current_interval ?? 'Nåværende faktureringsperiode'}
+                                        </dt>
+                                        <dd className="mt-1 font-semibold text-slate-900">
+                                            {currentIntervalLabel}
+                                        </dd>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <dt className="text-slate-500">
+                                            {subscriptionText.status ?? 'Betalingsstatus'}
+                                        </dt>
+                                        <dd className="mt-1 font-semibold text-slate-900">
+                                            {subscriptionText.no_active_payment_connection ?? 'Ingen aktiv betalingskobling'}
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </div>
                             {canChangePlan && (
                                 <button
                                     onClick={openPlanChangeModal}
                                     className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
                                 >
-                                    {planChangeText.button ?? 'Endre plan'}
+                                    {planChangeText.button ?? 'Endre abonnement'}
                                 </button>
                             )}
                         </div>
@@ -516,12 +570,12 @@ export default function BillingIndex() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {servicesText.heading ?? 'Aktive tjenester'}
+                            {servicesText.heading ?? 'Tilleggstjenester'}
                         </h2>
-                        <InfoHint size="sm" label="Vis forklaring for Tjenester" text={tb.hint_procynia_services} />
+                        <InfoHint size="sm" label="Vis forklaring for tilleggstjenester" text={tb.hint_procynia_services} />
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {servicesText.help ?? 'Dette viser aktive tjenester og faktureringsgrunnlag i Procynia. Fakturaer og betalingsstatus håndteres via betalingsløsningen.'}
+                        {servicesText.help ?? 'Dette viser tilleggstjenester som er aktive for kunden. Betaling og fakturaer håndteres via betalingsløsningen.'}
                     </p>
 
                     {billingLines.length > 0 ? (
@@ -529,10 +583,10 @@ export default function BillingIndex() {
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                                        <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tjeneste'}</th>
+                                        <th className="pb-2 pr-4">{servicesTableText.service ?? 'Tilleggstjenester'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.description ?? 'Beskrivelse'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.quantity ?? 'Antall'}</th>
-                                        <th className="pb-2 pr-4">{servicesTableText.user ?? 'Bruker'}</th>
+                                        <th className="pb-2 pr-4">{servicesTableText.user ?? 'Gjelder for'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.type ?? 'Type'}</th>
                                         <th className="pb-2 pr-4">{servicesTableText.status ?? 'Status'}</th>
                                         <th className="pb-2">{servicesTableText.source ?? 'Kilde'}</th>
@@ -573,7 +627,7 @@ export default function BillingIndex() {
                         </div>
                     ) : (
                         <p className="mt-4 text-sm leading-6 text-slate-600">
-                            {servicesText.empty ?? 'Ingen interne Procynia-linjer registrert. Interne linjer beskriver tjenester, tilgang eller grunnlag for abonnement og betaling, men er ikke økonomisk fasit.'}
+                            {servicesText.empty ?? 'Ingen tilleggstjenester registrert. Tilleggstjenester beskriver ekstra tjenester som er knyttet til abonnementet, men er ikke økonomisk fasit.'}
                         </p>
                     )}
                 </section>
@@ -581,12 +635,12 @@ export default function BillingIndex() {
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-2">
                         <h2 className="text-base font-semibold text-slate-900">
-                            {levelsText.heading ?? 'Aktive brukernivåer'}
+                            {levelsText.heading ?? 'Brukertilganger'}
                         </h2>
-                        <InfoHint size="sm" label="Vis forklaring for Brukernivåer" text={tb.hint_procynia_levels} />
+                        <InfoHint size="sm" label="Vis forklaring for brukertilganger" text={tb.hint_procynia_levels} />
                     </div>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {levelsText.help ?? 'Dette viser hvilke brukere som har aktive produkt- eller KI-nivåer i Procynia.'}
+                        {levelsText.help ?? 'Dette viser hvilke brukere som har aktive brukertilganger i Procynia.'}
                     </p>
 
                     {serviceLevels.length > 0 ? (
@@ -596,7 +650,7 @@ export default function BillingIndex() {
                                     <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
                                         <th className="pb-2 pr-4">{levelsTableText.user ?? 'Bruker'}</th>
                                         <th className="pb-2 pr-4">{levelsTableText.service ?? 'Tjeneste'}</th>
-                                        <th className="pb-2 pr-4">{levelsTableText.level ?? 'Nivå'}</th>
+                                        <th className="pb-2 pr-4">{levelsTableText.level ?? 'Tilgang'}</th>
                                         <th className="pb-2 pr-4">{levelsTableText.status ?? 'Status'}</th>
                                         <th className="pb-2">{levelsTableText.assigned_by ?? 'Tildelt av'}</th>
                                     </tr>
@@ -626,7 +680,7 @@ export default function BillingIndex() {
                         </div>
                     ) : (
                         <p className="mt-4 text-sm leading-6 text-slate-600">
-                            {levelsText.empty ?? 'Ingen Procynia-brukernivåer registrert for kunden.'}
+                            {levelsText.empty ?? 'Ingen brukertilganger registrert for kunden.'}
                         </p>
                     )}
                 </section>
@@ -697,19 +751,14 @@ export default function BillingIndex() {
                         <div className="space-y-2">
                             <h3 className="text-lg font-semibold text-slate-900">
                                 {planChangeStep === 'confirm'
-                                    ? (planChangeText.confirm ?? 'Bekreft planendring')
-                                    : (planChangeText.heading ?? 'Endre plan')}
+                                    ? (planChangeText.confirm ?? 'Bekreft abonnementsendring')
+                                    : (planChangeText.heading ?? 'Endre abonnement')}
                             </h3>
                             <p className="text-sm leading-6 text-slate-600">
                                 {planChangeStep === 'confirm'
-                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre planen.')
-                                    : (planChangeText.description ?? 'Velg en ny plan. Den tekniske betalingsløsningen håndterer koblingen.')}
+                                    ? (planChangeText.confirm_intro ?? 'Du er i ferd med å endre abonnementet.')
+                                    : (planChangeText.description ?? 'Velg et nytt abonnement. Betalingsløsningen håndterer koblingen.')}
                             </p>
-                            {planChangeStep === 'confirm' && (
-                                <p className="text-sm leading-6 text-slate-600">
-                                    {planChangeText.confirm_note ?? 'Endringen behandles via den tekniske betalingsløsningen og kan påvirke videre tilgang.'}
-                                </p>
-                            )}
                         </div>
 
                         {planChangeError && (
@@ -722,20 +771,54 @@ export default function BillingIndex() {
                             <>
                                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                                     <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                        {planChangeText.current_plan ?? 'Nåværende plan'}
+                                        {planPreviewSummary?.label ?? planChangeText.current_plan ?? 'Nåværende abonnement'}
                                     </div>
                                     <div className="mt-2 text-sm font-semibold text-slate-900">
-                                        {currentPlanLabel}
+                                        {planPreviewSummary?.name ?? currentPlanLabel}
                                     </div>
                                     <div className="mt-1 text-sm text-slate-600">
-                                        {planChangeText.current_interval ?? 'Nåværende faktureringsintervall'}: {currentIntervalLabel}
+                                        {planPreviewIntervalTitle}: {planPreviewIntervalLabel}
                                     </div>
+                                    {planPreviewSummary && (
+                                        <dl className="mt-4 grid gap-x-8 gap-y-3 text-sm md:grid-cols-2">
+                                            {planPreviewSummary.priceLabel && (
+                                                <div>
+                                                    <dt className="text-slate-500">
+                                                        {planChangeText.price ?? 'Pris'}
+                                                    </dt>
+                                                    <dd className="mt-1 font-medium text-slate-900">
+                                                        {planPreviewSummary.priceLabel}
+                                                    </dd>
+                                                </div>
+                                            )}
+                                            {planPreviewSummary.includedUsers !== null && planPreviewSummary.includedUsers !== undefined && (
+                                                <div>
+                                                    <dt className="text-slate-500">
+                                                        {subscriptionText.included_users ?? 'Inkluderte brukere'}
+                                                    </dt>
+                                                    <dd className="mt-1 font-medium text-slate-900">
+                                                        {planPreviewSummary.includedUsers}
+                                                    </dd>
+                                                </div>
+                                            )}
+                                            {planPreviewSummary.includedAiCredits !== null && planPreviewSummary.includedAiCredits !== undefined && (
+                                                <div>
+                                                    <dt className="text-slate-500">
+                                                        {subscriptionText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
+                                                    </dt>
+                                                    <dd className="mt-1 font-medium text-slate-900">
+                                                        {planPreviewSummary.includedAiCredits}
+                                                    </dd>
+                                                </div>
+                                            )}
+                                        </dl>
+                                    )}
                                 </div>
 
                                 <div className="mt-5 grid gap-5 lg:grid-cols-2">
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700">
-                                            {planChangeText.select_plan ?? 'Velg ny plan'}
+                                            {planChangeText.select_plan ?? 'Velg nytt abonnement'}
                                         </label>
                                         <select
                                             value={selectedPlanKey}
@@ -755,7 +838,7 @@ export default function BillingIndex() {
 
                                     <div>
                                         <div className="block text-sm font-medium text-slate-700">
-                                            {planChangeText.select_interval ?? 'Velg faktureringsintervall'}
+                                            {planChangeText.select_interval ?? 'Velg faktureringsperiode'}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2">
                                             {selectedPlanIntervals.map((interval) => (
@@ -805,13 +888,10 @@ export default function BillingIndex() {
                         ) : (
                             <>
                                 <AlertBox className="mt-4">
-                                <p className="font-medium">
-                                        {planChangeText.confirm_intro ?? 'Du er i ferd med å endre planen.'}
-                                </p>
-                                <p className="mt-2">
-                                        {planChangeText.confirm_note ?? 'Endringen behandles via den tekniske betalingsløsningen og kan påvirke videre tilgang.'}
-                                </p>
-                            </AlertBox>
+                                    <p className="font-medium leading-6">
+                                        {planChangeText.confirm_note ?? 'Når du bekrefter, oppdateres abonnementet i betalingsløsningen. Det kan endre hvilke tilleggstjenester og brukertilganger som er aktive.'}
+                                    </p>
+                                </AlertBox>
 
                                 {selectedPlanSummary && (
                                     <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900">
@@ -820,13 +900,13 @@ export default function BillingIndex() {
                                         </div>
                                         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
                                             <div className="text-slate-500">
-                                                {planChangeText.from_plan ?? 'Fra plan'}
+                                                {planChangeText.from_plan ?? 'Fra abonnement'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {currentPlanLabel}
                                             </div>
                                             <div className="text-slate-500">
-                                                {planChangeText.to_plan ?? 'Til plan'}
+                                                {planChangeText.to_plan ?? 'Til abonnement'}
                                             </div>
                                             <div className="font-semibold text-slate-900">
                                                 {selectedPlanSummary.name}
@@ -844,6 +924,26 @@ export default function BillingIndex() {
                                                     </div>
                                                     <div className="font-semibold text-slate-900">
                                                         {selectedPlanSummary.priceLabel}
+                                                    </div>
+                                                </>
+                                            )}
+                                            {selectedPlanSummary.includedUsers !== null && selectedPlanSummary.includedUsers !== undefined && (
+                                                <>
+                                                    <div className="text-slate-500">
+                                                        {planChangeText.included_users ?? 'Inkluderte brukere'}
+                                                    </div>
+                                                    <div className="font-semibold text-slate-900">
+                                                        {selectedPlanSummary.includedUsers}
+                                                    </div>
+                                                </>
+                                            )}
+                                            {selectedPlanSummary.includedAiCredits !== null && selectedPlanSummary.includedAiCredits !== undefined && (
+                                                <>
+                                                    <div className="text-slate-500">
+                                                        {planChangeText.included_ai_credits ?? 'Inkluderte KI-tilbud'}
+                                                    </div>
+                                                    <div className="font-semibold text-slate-900">
+                                                        {selectedPlanSummary.includedAiCredits}
                                                     </div>
                                                 </>
                                             )}
@@ -866,7 +966,7 @@ export default function BillingIndex() {
                                             canConfirmPlanChange ? 'bg-blue-600 hover:bg-blue-700' : 'cursor-not-allowed bg-slate-300'
                                         )}
                                     >
-                                        {planChangeText.confirm ?? 'Bekreft planendring'}
+                                        {planChangeText.confirm ?? 'Bekreft abonnementsendring'}
                                     </button>
                                 </div>
                             </>
@@ -877,22 +977,22 @@ export default function BillingIndex() {
 
             <ConfirmDialog
                 isOpen={confirmCancel}
-                title={tb.cancel_confirm_title ?? 'Si opp kobling'}
-                message={tb.cancel_confirm_message ?? 'Den tekniske betalingskoblingen avsluttes automatisk ved slutten av inneværende periode. Du beholder tilgang til da.'}
+                title={tb.cancel_confirm_title ?? 'Si opp abonnement'}
+                message={tb.cancel_confirm_message ?? 'Abonnementet avsluttes automatisk ved slutten av inneværende periode. Du beholder tilgang til da.'}
                 onConfirm={handleCancel}
                 onCancel={() => setConfirmCancel(false)}
-                confirmLabel={tb.cancel ?? 'Si opp kobling'}
+                confirmLabel={tb.cancel ?? 'Si opp abonnement'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
                 danger
             />
 
             <ConfirmDialog
                 isOpen={confirmResume}
-                title={tb.resume_confirm_title ?? 'Gjenoppta kobling'}
-                message={tb.resume_confirm_message ?? 'Oppsigelsen trekkes tilbake og den tekniske betalingskoblingen fortsetter som normalt.'}
+                title={tb.resume_confirm_title ?? 'Gjenoppta abonnement'}
+                message={tb.resume_confirm_message ?? 'Oppsigelsen trekkes tilbake og abonnementet fortsetter som normalt.'}
                 onConfirm={handleResume}
                 onCancel={() => setConfirmResume(false)}
-                confirmLabel={tb.resume ?? 'Gjenoppta kobling'}
+                confirmLabel={tb.resume ?? 'Gjenoppta abonnement'}
                 cancelLabel={tb.cancel_button ?? 'Avbryt'}
             />
         </CustomerAppLayout>

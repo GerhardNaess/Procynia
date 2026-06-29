@@ -112,7 +112,7 @@ export default function InfoHint({
                     id={tooltipId}
                     role="tooltip"
                     className={classNames(
-                        'absolute top-full z-30 mt-2 rounded-2xl border p-4 text-base leading-7 shadow-[0_20px_40px_rgba(15,23,42,0.12)] max-w-[calc(100vw-2rem)]',
+                        'absolute top-full z-30 mt-2 max-w-[calc(100vw-2rem)] rounded-2xl border p-4 font-sans text-base font-normal leading-7 tracking-normal normal-case shadow-[0_20px_40px_rgba(15,23,42,0.12)]',
                         tooltipWidthClass,
                         tooltipColorClass,
                         tooltipAlignClass,
