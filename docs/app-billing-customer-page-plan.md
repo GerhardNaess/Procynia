@@ -2,112 +2,132 @@
 
 ## Mål
 
-Gjør kundesiden `/app/billing` tydelig nok til at en kunde forstår forskjellen på:
+Gjør kundesiden `/app/billing` til en ren kundeside for ett firma, ikke en teknisk eller brukerorientert billing-oversikt.
 
-- `Abonnement` som hovedplan
-- `Tilleggstjenester` som ekstra kostnader eller tjenester utover hovedplanen
-- `Registrerte brukere` som hvilke brukere som har tilgang til funksjoner og tjenester
+Produktmodellen er firmabasert:
 
-Siden skal være enkel å lese, og den skal ikke blande hovedabonnement, tillegg og brukertilganger i samme visning.
+- 1 firma/kunde
+- 1 hovedabonnement
+- flere brukere under samme abonnement
+- felles AI-kvote på firmanivå
+- ekstra AI-pakker kjøpes på firmanivå
+- eventuelle ekstra brukerpakker kjøpes på firmanivå
 
-## Feil som planen skal dekke
+Kundesiden `/app/billing` skal kun handle om:
 
-1. `Ingen aktivt abonnement` vises samtidig som `Ultra årlig` ser ut som en aktiv linje.
-2. `Ultra årlig` vises under `Tilleggstjenester`, selv om det i praksis ser ut som kundens hovedabonnement.
-3. Knappen `Endre abonnement` vises selv når kunden sies å ikke ha aktivt abonnement.
-4. `Tilleggstjenester` blander hovedabonnement og tilleggstjenester.
-5. Kolonnen `Kilde` er intern og bør ikke vises til kunde.
-6. `Beskrivelse` gjentar bare navnet og gir liten eller ingen kundeverdi.
-7. Engangstillegg vises som `Aktiv`, som er uklart for kunden.
-8. `Registrerte brukere` har for mange kolonner.
-9. `Tjeneste` og `Tilgang` i `Registrerte brukere` sier nesten det samme.
-10. `Tildelt av` er intern informasjon og bør trolig ikke vises til kunde.
-11. Pris-/periodeord som `månedlig` lekker inn i `Registrerte brukere`.
-12. Siden forklarer ikke tydelig forskjellen på `Abonnement`, `Tilleggstjenester` og `Registrerte brukere`.
-13. Bekreftelsesdialogen for abonnementsendring gjentar samme budskap og forklarer ikke tydelig hva som faktisk endres.
-14. Infohint-tekster bruker ulik typografi og blir for dominerende når de vises i caps lock.
+- `Abonnement`
+- `Tilleggstjenester`
+- `Fakturering`
+  - utestående beløp
+  - fakturahistorikk
 
-Viktigste hovedfeil:
+Kundesiden skal ikke vise:
 
-- `Ultra årlig` må ikke vises som `Tilleggstjeneste` hvis det egentlig er kundens hovedabonnement.
+- teknisk betalingskobling
+- Stripe/Cashier-status
+- brukertilganger
+- registrerte brukere
+- brukerabonnementer
+- Pro/Max/Ultra per bruker
 
-## Prinsipper for ny visning
+## Kartleggingsfunn
 
-- Kundesiden skal bruke korte, tydelige begreper.
-- Hovedabonnement skal stå tydelig separat fra andre tjenester.
-- Tilleggstjenester skal bare vise reelle tillegg utover hovedplanen.
-- Registrerte brukere skal vise hvem som har tilgang, ikke intern billing- eller betalingsdetalj.
-- Når kunden har ekstra AI-kapasitet, skal den vises som firma-tillegg eller AI-pakke, ikke som et separat brukerabonnement.
-- Registrerte brukere skal ikke presenteres som Pro/Max/Ultra-abonnementer per bruker.
-- Bekreftelsesdialogen for abonnementsendring skal være kort og konkret: den skal forklare at endringen oppdaterer abonnementet og kan påvirke hvilke tilleggstjenester og brukertilganger som er aktive, uten å gjenta samme melding flere ganger.
-- Intern teknikk som `Kilde`, Stripe-id-er, billing-begreper og betalingsprovider-termer skal skjules når de ikke er nødvendige for kunden.
-- Engangstillegg skal beskrives som type tillegg, ikke som egen hovedkategori.
-- Infohint og hjelpetekster skal bruke normal setningstekst og samme typografi på hele siden, slik at de støtter innholdet uten å dominere visuelt.
+- `/app/billing` bygger i dag på `Customer` snapshots og aktive `CustomerBillingLine`-rader.
+- Hovedabonnement kommer fra aktiv baseplanlinje.
+- Inkludert AI vises i dag fra `customers.included_ai_credits`.
+- Operativ entitlement-logikk prioriterer `billing_prices.included_ai_offers` før customer snapshot og config.
+- Ekstra AI-pakker på firmanivå er ikke tydelig modellert ennå.
+- Ekstra brukere finnes delvis via `user_seat`.
+- `/app/billing` er i dag system-owner-only og må bli en ekte kundeside med riktig tilgangsstyring.
 
-## Produktregel: ett abonnement per firma
+## Faseinndeling
 
-- Kunden/firmaet har ett hovedabonnement, for eksempel Pro, Max eller Ultra.
-- Alle brukere følger kundens hovedabonnement.
-- Brukere skal ikke vises med egne Pro/Max/Ultra-abonnementer.
-- Ekstra AI-kapasitet skal vises som firma-tillegg eller AI-pakke, ikke som brukerabonnement.
-- Registrerte brukere skal kun vise hvilke brukere som har tilgang til hvilke funksjoner eller roller.
-- Prisnavn, periodeord og pakkeord som `Pro`, `Max`, `Ultra`, `månedlig` og `årlig` skal ikke lekke inn i Registrerte brukere.
+### 1. Gjør `/app/billing` til ekte kundeside med riktig tilgangsstyring
 
-## 1. Abonnement
-
-Abonnement-delen skal vise kundens hovedplan, og bare den.
-
-- Hovedabonnementet må identifiseres fra den mest autoritative kundedataen, ikke bare fra aktive linjer.
-- Dersom kunden har et faktisk abonnement, skal det vises her som hovedabonnement, for eksempel `Ultra årlig`.
-- Dersom kunden ikke har et abonnement, skal teksten `Ingen aktivt abonnement` bare vises når det faktisk ikke finnes et aktivt abonnement.
-- Knappen `Endre abonnement` skal bare vises når det finnes et abonnement som kan endres, eller når vi bevisst vil tilby opprettelse av nytt abonnement.
-- `Abonnement`-delen skal ikke gjenta tilleggstjenester eller brukertilganger.
-- Tekster som nevner teknisk betalingsløsning skal kun brukes hvis de hjelper kunden å forstå abonnementets status, ikke som hovedbegrep.
-- Endringsdialogen for abonnement skal vise selve abonnementet, faktureringsperioden og relevante betingelser som inkluderte brukere og eventuelle andre planvilkår før endringen bekreftes.
-- Valgsteget i abonnementsdialogen skal oppdatere samme informasjonsboks når brukeren velger ny plan, slik at kunden ser detaljene for valgt abonnement uten at en ekstra boks dukker opp under.
+- Tilgangen skal knyttes til kunde/firma og riktig rolle, ikke bare system owner.
+- Siden skal kunne brukes av kundeansvarlige uten å eksponere interne admin- eller betalingsdetaljer.
+- Denne fasen kommer før all UI-opprydding, slik at den nye siden har riktig målgruppe fra start.
 
 Trolig senere endring:
 
-- `resources/js/Pages/App/Billing/Index.jsx` må få tydeligere skille mellom `subscription` og øvrige kundelinjer.
-- `app/Http/Controllers/App/BillingController.php` kan måtte levere et mer strukturert payload for hovedabonnement.
-- `app/Services/Billing/BillingService.php` og `app/Services/Billing/BillingEntitlementService.php` kan måtte brukes til å avgjøre hva som faktisk er hovedabonnementet.
+- `app/Http/Controllers/App/BillingController.php`
+- `resources/js/Pages/App/Billing/Index.jsx`
+- eventuelt policy/gate eller tilsvarende tilgangssjekk i app-laget
+- `tests/Feature/App/BillingControllerTest.php`
 
-## 2. Tilleggstjenester
+### 2. Rydd datakilde for abonnement og inkludert AI-kapasitet
 
-Tilleggstjenester skal bare vise ting som kommer i tillegg til hovedabonnementet. I UI skal denne delen hete `Tilleggstjenester`, ikke `Tillegg`.
-
-- Hovedabonnementet må filtreres bort fra denne listen.
-- Dersom `Ultra årlig` er hovedabonnementet, skal det ikke vises som tilleggstjeneste.
-- Kolonnen `Kilde` skal fjernes fra kundevisningen.
-- `Beskrivelse` skal fjernes dersom den bare gjentar tjenestenavnet, eller erstattes med en faktisk nyttig forklaring.
-- Engangstillegg skal merkes tydelig som `Engang`, ikke bare som `Aktiv`.
-- Tilleggstjenester skal bruke kundevendte ord som forklarer hva tjenesten er og hva kunden får.
-- Intern billing-terminologi skal ikke vises i tabellen.
-
-Trolig senere endring:
-
-- `resources/js/Pages/App/Billing/Index.jsx` må bygge en egen visning for reelle tilleggstjenester.
-- `BillingController` kan måtte sende en allerede filtrert liste med tilleggstjenester.
-- Eventuelt må `BillingService` eller `BillingEntitlementService` hjelpe til med å skille hovedabonnement fra tillegg.
-
-## 3. Registrerte brukere
-
-Registrerte brukere skal vise hvem som har tilgang til tjenester eller nivåer, og ikke mer enn nødvendig.
-
-- Tabellen bør ha færre kolonner enn i dag.
-- `Tjeneste` og `Tilgang` bør ikke stå som to nesten like kolonner.
-- `Tildelt av` bør fjernes fra kundevisningen dersom den bare er intern kontrollinformasjon.
-- Pris-/periodeord som `månedlig` skal ikke vises her.
-- Registrerte brukere skal forklare aktiv tilgang, ikke intern produktstruktur.
-- Det bør være tydelig hvilken bruker tilgangen gjelder for, og hva tilgangen faktisk er.
+- Hovedabonnement skal utledes fra aktiv baseplanlinje og vises som firmaets primære abonnement.
+- Kundeprofilens snapshot-felter skal ikke være førstevalg når aktive billing-linjer finnes.
+- Inkludert AI skal ha én tydelig prioritet:
+  - først eksplisitte entitlements fra `billing_prices.included_ai_offers`
+  - deretter customer snapshot
+  - deretter config fallback
+- Dette må støtte en firmabasert AI-kvote, ikke per-bruker-planer.
+- Ekstra AI-pakker må kunne representeres som firma-tillegg, ikke som brukerabonnementer.
 
 Trolig senere endring:
 
-- `resources/js/Pages/App/Billing/Index.jsx` må redusere kolonner og forenkle radinnholdet.
-- `app/Http/Controllers/App/BillingController.php` kan måtte levere en enklere og tydeligere `service_levels`-payload.
-- `lang/no/procynia.php` og `lang/en/procynia.php` må justeres slik at språk og kolonner matcher den nye visningen.
+- `app/Services/Billing/BillingService.php`
+- `app/Services/Billing/BillingEntitlementService.php`
+- `app/Http/Controllers/App/BillingController.php`
+- `tests/Unit/Services/BillingServiceTest.php`
+- `tests/Unit/Services/BillingEntitlementServiceTest.php`
 
-## 4. Filer som sannsynligvis må endres senere
+### 3. Klassifiser Tilleggstjenester kundevendt
+
+- Tilleggstjenester skal bare vise reelle tillegg utover hovedabonnementet.
+- Intern teknikk, Stripe/Cashier-termer og kildeinfo skal skjules.
+- Engangstillegg og abonnementstillegg skal beskrives kundevendt.
+- Eventuelle ekstra AI-pakker og ekstra brukerpakker skal kunne havne her som firma-tillegg når de er modellert, men uten å vise brukerlister.
+
+Trolig senere endring:
+
+- `resources/js/Pages/App/Billing/Index.jsx`
+- `app/Http/Controllers/App/BillingController.php`
+- eventuelt `app/Services/Billing/BillingService.php`
+- `lang/no/procynia.php`
+- `lang/en/procynia.php`
+
+### 4. Vis fakturering kundevendt med utestående beløp og fakturahistorikk
+
+- Fakturering-delen skal vise kundens utestående beløp tydelig.
+- Historikken skal vise fakturaer på en måte som er forståelig for kunde.
+- Siden skal ikke vise teknisk betalingskobling eller intern provider-status.
+- Denne delen skal være lesbar også når kunden ikke har aktivt abonnement.
+
+Trolig senere endring:
+
+- `resources/js/Pages/App/Billing/Index.jsx`
+- `app/Http/Controllers/App/BillingController.php`
+- eventuelt billing-relaterte views/transformers som bygger invoice payload
+
+### 5. Planlegg firmabasert modell for ekstra AI-pakker, men ikke implementer nå
+
+- Ekstra AI-pakker skal forstås som firmaets samlede kapasitet.
+- Når dette implementeres, skal det påvirke kundens totale AI-kvote på tvers av brukere.
+- Modellen må støtte kjøp, fornyelse og visning uten å blande inn brukerabonnementer.
+
+Trolig senere endring:
+
+- billing entitlement / subscription model
+- `CustomerBillingLine`-payload
+- `BillingService` og eventuell ny add-on modell
+- admin-flate for drift eller kundeadministrasjon ved behov
+
+### 6. Planlegg eventuell visning av ekstra brukerpakker, men ikke vis registrerte brukere eller brukerrettigheter
+
+- Ekstra brukerpakker skal være en firma-ressurs, ikke en per-bruker planvisning.
+- `/app/billing` skal ikke vise registrerte brukere, brukerabonnementer eller detaljerte brukerrettigheter.
+- Hvis det senere blir behov for å vise ekstra brukerpakker, skal det være som en firmabasert kapasitet eller add-on.
+
+Trolig senere endring:
+
+- `resources/js/Pages/App/Billing/Index.jsx`
+- `app/Http/Controllers/App/BillingController.php`
+- `app/Services/Billing/BillingEntitlementService.php`
+
+## Filer som sannsynligvis må endres senere
 
 - `resources/js/Pages/App/Billing/Index.jsx`
 - `app/Http/Controllers/App/BillingController.php`
@@ -119,7 +139,7 @@ Trolig senere endring:
 - `tests/Unit/Services/BillingServiceTest.php`
 - `tests/Unit/Services/BillingEntitlementServiceTest.php`
 
-## 5. Tester som må kjøres senere
+## Tester som må kjøres senere
 
 - `docker compose exec -T app php artisan test tests/Feature/App/BillingControllerTest.php`
 - `docker compose exec -T app php artisan test tests/Unit/Services/BillingServiceTest.php`
@@ -129,15 +149,15 @@ Testene bør senere kontrollere at:
 
 - hovedabonnement vises riktig når det finnes
 - `Ingen aktivt abonnement` bare vises når det faktisk mangler abonnement
-- `Ultra årlig` ikke havner som tillegg hvis det er hovedabonnement
-- kolonnen `Kilde` er borte
-- `Registrerte brukere` har færre og tydeligere kolonner
+- `Tilleggstjenester` ikke viser hovedabonnementet
+- fakturering viser utestående beløp og historikk kundevendt
 - kundevisningen ikke lekker intern billing-terminologi
+- registrerte brukere og brukerrettigheter ikke vises som del av kundesiden
 
 ## Avgrensning
 
 - Denne planen gjelder kun kundesiden `/app/billing`.
 - Den skal ikke påvirke admin/Filament.
-- Den skal ikke endre datamodell, Stripe/Cashier, billing service-logikk eller kommersiell logikk.
+- Den skal ikke endre datamodell, Stripe/Cashier, billing service-logikk eller kommersiell logikk før planlagt kodeoppgave.
 - Den skal ikke foreslå commit i seg selv.
 - Den er kun et plan- og avklaringsdokument for senere opprydding.
