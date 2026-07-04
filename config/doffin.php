@@ -2,6 +2,7 @@
 
 return [
     'scheduled_import_enabled' => env('DOFFIN_SCHEDULED_IMPORT_ENABLED', false),
+    'watch_inbox_discovery_enabled' => env('DOFFIN_WATCH_INBOX_DISCOVERY_ENABLED', false),
     'base_url' => env('DOFFIN_BASE_URL'),
     'search_endpoint' => env('DOFFIN_SEARCH_ENDPOINT', '/public/v2/search'),
     'download_endpoint' => env('DOFFIN_DOWNLOAD_ENDPOINT', '/public/v2/download'),

@@ -23,7 +23,7 @@ class DoffinAutomaticImport extends Page implements HasForms
 
     protected string $view = 'filament.pages.doffin-automatic-import';
 
-    protected static ?string $navigationLabel = 'Doffin automatisk import';
+    protected static ?string $navigationLabel = 'Doffin automatisering';
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
 
@@ -34,9 +34,9 @@ class DoffinAutomaticImport extends Page implements HasForms
     public array $data = [];
 
     /**
-     * @var array<string, bool|string|null>
+     * @var array<string, array<string, bool|string|null>>
      */
-    public array $statusSummary = [];
+    public array $statusSummaries = [];
 
     public ?string $lastError = null;
 
@@ -47,12 +47,12 @@ class DoffinAutomaticImport extends Page implements HasForms
 
     public function getTitle(): string
     {
-        return 'Doffin automatisk import';
+        return 'Doffin automatisering';
     }
 
     public function getSubheading(): ?string
     {
-        return 'Styr om den planlagte Doffin-importen får kjøre i dette miljøet.';
+        return 'Styr planlagt Doffin-batchimport og watch inbox discovery i dette miljøet.';
     }
 
     public function mount(): void
@@ -64,11 +64,17 @@ class DoffinAutomaticImport extends Page implements HasForms
     {
         return $schema
             ->components([
-                Section::make('Planlagt import')
+                Section::make('Doffin batch-import')
                     ->schema([
                         Toggle::make('scheduled_import_enabled')
-                            ->label('Aktiver planlagt import')
+                            ->label('Aktiver planlagt batch-import')
                             ->helperText('Krever miljøbryter, admin-bryter og gyldig Doffin API-konfigurasjon.'),
+                    ]),
+                Section::make('Doffin overvåkningsprofiler / watch inbox discovery')
+                    ->schema([
+                        Toggle::make('watch_inbox_discovery_enabled')
+                            ->label('Aktiver watch inbox discovery')
+                            ->helperText('Krever miljøbryter, admin-bryter og gyldig lokal/test Doffin API-konfigurasjon.'),
                     ]),
             ])
             ->statePath('data');
@@ -79,9 +85,10 @@ class DoffinAutomaticImport extends Page implements HasForms
         $service = app(DoffinImportControlService::class);
         $setting = $service->getSetting();
 
-        $this->statusSummary = $service->statusSummary();
+        $this->statusSummaries = $service->automationStatusSummary();
         $this->form->fill([
             'scheduled_import_enabled' => $setting->scheduled_import_enabled,
+            'watch_inbox_discovery_enabled' => $setting->watch_inbox_discovery_enabled,
         ]);
     }
 
@@ -91,15 +98,18 @@ class DoffinAutomaticImport extends Page implements HasForms
 
         try {
             $data = $this->form->getState();
-            $enabled = (bool) Arr::get($data, 'scheduled_import_enabled', false);
+            $scheduledImportEnabled = (bool) Arr::get($data, 'scheduled_import_enabled', false);
+            $watchInboxDiscoveryEnabled = (bool) Arr::get($data, 'watch_inbox_discovery_enabled', false);
 
-            app(DoffinImportControlService::class)->setScheduledImportEnabled($enabled, auth()->user());
+            $service = app(DoffinImportControlService::class);
+            $service->setScheduledImportEnabled($scheduledImportEnabled, auth()->user());
+            $service->setWatchInboxDiscoveryEnabled($watchInboxDiscoveryEnabled, auth()->user());
             $this->loadState();
 
             Notification::make()
-                ->title('Doffin automatisk import oppdatert')
+                ->title('Doffin automatisering oppdatert')
                 ->success()
-                ->body($enabled ? 'Planlagt import er slått på.' : 'Planlagt import er slått av.')
+                ->body('Planlagte Doffin-brytere er lagret.')
                 ->send();
         } catch (Throwable $throwable) {
             $this->handleFailure($throwable);
@@ -111,7 +121,7 @@ class DoffinAutomaticImport extends Page implements HasForms
         $this->lastError = $throwable->getMessage();
 
         Notification::make()
-            ->title('Doffin automatisk import feilet')
+            ->title('Doffin automatisering feilet')
             ->danger()
             ->body($this->lastError)
             ->send();

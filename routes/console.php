@@ -15,9 +15,11 @@ if (config('doffin.scheduled_import_enabled')) {
         ->withoutOverlapping();
 }
 
-Schedule::command('doffin:watch-inbox-discover')
-    ->dailyAt('01:15')
-    ->withoutOverlapping();
+if (config('doffin.watch_inbox_discovery_enabled')) {
+    Schedule::command('doffin:watch-inbox-discover --trigger=scheduler')
+        ->dailyAt('01:15')
+        ->withoutOverlapping();
+}
 
 Schedule::command('ops:scheduler-heartbeat')->everyMinute();
 Schedule::command('procynia:backup')->hourly()->withoutOverlapping();

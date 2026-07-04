@@ -51,7 +51,7 @@ class DoffinAutomaticImportPageTest extends TestCase
         $this->actingAs($admin)
             ->get(DoffinAutomaticImport::getUrl())
             ->assertOk()
-            ->assertSee('Doffin automatisk import');
+            ->assertSee('Doffin automatisering');
     }
 
     public function test_customer_admin_cannot_access_the_page(): void
@@ -79,17 +79,20 @@ class DoffinAutomaticImportPageTest extends TestCase
 
         DoffinImportSetting::query()->create([
             'scheduled_import_enabled' => false,
+            'watch_inbox_discovery_enabled' => false,
         ]);
 
         Livewire::actingAs($admin)
             ->test(DoffinAutomaticImport::class)
             ->set('data.scheduled_import_enabled', true)
+            ->set('data.watch_inbox_discovery_enabled', true)
             ->call('save');
 
         $setting = DoffinImportSetting::first();
 
         $this->assertNotNull($setting);
         $this->assertTrue($setting->scheduled_import_enabled);
+        $this->assertTrue($setting->watch_inbox_discovery_enabled);
         $this->assertSame($admin->id, $setting->updated_by);
     }
 

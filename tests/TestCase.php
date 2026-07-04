@@ -52,6 +52,17 @@ abstract class TestCase extends BaseTestCase
             'DB_USERNAME' => 'gehard',
             'DB_PASSWORD' => 'Opaque01',
             'QUEUE_CONNECTION' => 'sync',
+            'STRIPE_KEY' => 'pk_test_procynia',
+            'STRIPE_SECRET' => 'sk_test_procynia',
+            'STRIPE_WEBHOOK_SECRET' => 'whsec_test_procynia',
+            'STRIPE_PLAN_MONTHLY' => 'price_test_plan_monthly',
+            'STRIPE_PLAN_YEARLY' => 'price_test_plan_yearly',
+            'STRIPE_PRICE_PRO_MONTHLY' => 'price_test_pro_monthly',
+            'STRIPE_PRICE_PRO_YEARLY' => 'price_test_pro_yearly',
+            'STRIPE_PRICE_MAX_MONTHLY' => 'price_test_max_monthly',
+            'STRIPE_PRICE_MAX_YEARLY' => 'price_test_max_yearly',
+            'STRIPE_PRICE_ULTRA_MONTHLY' => 'price_test_ultra_monthly',
+            'STRIPE_PRICE_ULTRA_YEARLY' => 'price_test_ultra_yearly',
         ];
 
         foreach ($defaults as $key => $value) {

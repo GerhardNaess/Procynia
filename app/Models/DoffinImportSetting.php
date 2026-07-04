@@ -9,6 +9,7 @@ class DoffinImportSetting extends Model
 {
     protected $fillable = [
         'scheduled_import_enabled',
+        'watch_inbox_discovery_enabled',
         'updated_by',
     ];
 
@@ -16,6 +17,7 @@ class DoffinImportSetting extends Model
     {
         return [
             'scheduled_import_enabled' => 'boolean',
+            'watch_inbox_discovery_enabled' => 'boolean',
         ];
     }
 

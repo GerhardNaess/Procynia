@@ -14,12 +14,50 @@ class DoffinWatchProfileInboxDiscoveryService
 {
     public function __construct(
         private readonly DoffinLiveSearchService $liveSearchService,
+        private readonly DoffinImportControlService $importControlService,
     ) {
     }
 
-    public function run(?int $watchProfileId = null): array
+    public function run(?int $watchProfileId = null, string $trigger = 'manual'): array
     {
+        $skipReason = $this->importControlService->watchInboxDiscoverySkipReason();
+
+        if ($skipReason !== null) {
+            $environmentEnabled = $this->importControlService->isWatchInboxDiscoveryEnvironmentEnabled();
+            $adminEnabled = $environmentEnabled ? $this->importControlService->isWatchInboxDiscoveryAdminEnabled() : null;
+            $apiConfigured = $environmentEnabled && $adminEnabled
+                ? $this->importControlService->hasRequiredWatchInboxDiscoveryApiConfiguration()
+                : null;
+
+            Log::info('[DOFFIN][watch-inbox] Scheduled watch inbox discovery skipped.', [
+                'trigger' => $trigger,
+                'watch_profile_id' => $watchProfileId,
+                'skip_reason' => $skipReason,
+                'skip_reason_label' => $this->importControlService->watchInboxDiscoverySkipReasonLabel($skipReason),
+                'environment_enabled' => $environmentEnabled,
+                'admin_enabled' => $adminEnabled,
+                'api_configured' => $apiConfigured,
+            ]);
+
+            return [
+                'status' => 'skipped',
+                'skip_reason' => $skipReason,
+                'skip_reason_label' => $this->importControlService->watchInboxDiscoverySkipReasonLabel($skipReason),
+                'trigger' => $trigger,
+                'profiles_processed' => 0,
+                'profiles_failed' => 0,
+                'records_seen' => 0,
+                'records_created' => 0,
+                'records_updated' => 0,
+                'created_record_ids' => [],
+            ];
+        }
+
         $summary = [
+            'status' => 'success',
+            'skip_reason' => null,
+            'skip_reason_label' => null,
+            'trigger' => $trigger,
             'profiles_processed' => 0,
             'profiles_failed' => 0,
             'records_seen' => 0,

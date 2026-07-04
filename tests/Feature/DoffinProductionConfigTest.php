@@ -62,4 +62,15 @@ class DoffinProductionConfigTest extends TestCase
             );
         }
     }
+
+    public function test_env_example_defaults_watch_inbox_discovery_to_disabled(): void
+    {
+        $content = file_get_contents(base_path('.env.example'));
+
+        $this->assertStringContainsString(
+            'DOFFIN_WATCH_INBOX_DISCOVERY_ENABLED=false',
+            $content,
+            '.env.example must document watch inbox discovery as disabled by default',
+        );
+    }
 }

@@ -5,10 +5,11 @@ namespace App\Console\Commands;
 use App\Services\Doffin\DoffinWatchProfileInboxDiscoveryService;
 use App\Services\Doffin\DoffinWatchInboxDigestService;
 use Illuminate\Console\Command;
+use RuntimeException;
 
 class DoffinWatchInboxDiscover extends Command
 {
-    protected $signature = 'doffin:watch-inbox-discover';
+    protected $signature = 'doffin:watch-inbox-discover {--trigger=manual}';
 
     protected $description = 'Run nightly Doffin live discovery for all active watch profiles and upsert scoped inbox records.';
 
@@ -17,10 +18,23 @@ class DoffinWatchInboxDiscover extends Command
         DoffinWatchInboxDigestService $digestService,
     ): int
     {
-        $summary = $service->run();
+        $trigger = $this->resolveTrigger();
+
+        $this->line('Starting Doffin watch inbox discovery.');
+        $this->line("trigger: {$trigger}");
+
+        $summary = $service->run(null, $trigger);
+
+        if (($summary['status'] ?? null) === 'skipped') {
+            $this->info('Doffin watch inbox discovery skipped.');
+            $this->line((string) ($summary['skip_reason_label'] ?? 'Watch inbox discovery is disabled.'));
+
+            return self::SUCCESS;
+        }
+
         $digestSummary = $digestService->createAlertsForCreatedRecordIds($summary['created_record_ids'] ?? []);
 
-        $this->info('Watch inbox discovery completed.');
+        $this->info('Doffin watch inbox discovery completed.');
         $this->line('profiles_processed: '.$summary['profiles_processed']);
         $this->line('profiles_failed: '.$summary['profiles_failed']);
         $this->line('records_seen: '.$summary['records_seen']);
@@ -36,5 +50,16 @@ class DoffinWatchInboxDiscover extends Command
         return $summary['profiles_failed'] > 0 || $digestSummary['alerts_failed'] > 0
             ? self::FAILURE
             : self::SUCCESS;
+    }
+
+    private function resolveTrigger(): string
+    {
+        $trigger = (string) $this->option('trigger');
+
+        if (! in_array($trigger, ['manual', 'scheduler'], true)) {
+            throw new RuntimeException('The --trigger option must be either manual or scheduler.');
+        }
+
+        return $trigger;
     }
 }

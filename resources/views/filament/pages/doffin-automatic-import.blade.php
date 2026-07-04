@@ -1,64 +1,136 @@
 <x-filament-panels::page>
     @php
-        $envEnabled = (bool) ($statusSummary['environment_enabled'] ?? false);
-        $adminEnabled = (bool) ($statusSummary['admin_enabled'] ?? false);
-        $apiConfigured = (bool) ($statusSummary['api_configured'] ?? false);
-        $effectiveEnabled = (bool) ($statusSummary['enabled'] ?? false);
-        $skipReasonLabel = (string) ($statusSummary['skip_reason_label'] ?? '');
+        $batchSummary = (array) ($statusSummaries['scheduled_import'] ?? []);
+        $watchSummary = (array) ($statusSummaries['watch_inbox_discovery'] ?? []);
 
         $okBadge = 'bg-success-50 text-success-700 ring-1 ring-inset ring-success-200';
         $errBadge = 'bg-danger-50 text-danger-700 ring-1 ring-inset ring-danger-200';
         $warnBadge = 'bg-warning-50 text-warning-700 ring-1 ring-inset ring-warning-200';
     @endphp
 
-    <div class="mx-auto max-w-4xl space-y-6">
+    <div class="mx-auto max-w-6xl space-y-6">
         <section class="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
             <div class="space-y-3">
                 <p class="text-sm font-medium text-gray-500">Doffin driftkontroll</p>
                 <div class="space-y-2">
-                    <h2 class="text-3xl font-semibold tracking-tight text-gray-950">Doffin automatisk import</h2>
+                    <h2 class="text-3xl font-semibold tracking-tight text-gray-950">Doffin automatisering</h2>
                     <p class="max-w-2xl text-sm leading-6 text-gray-600">
-                        Hold planlagt Doffin-import av eller på uten å endre kode. Når bryteren er av, hopper scheduler stille over uten API-kall.
+                        Hold planlagt Doffin-batchimport og watch inbox discovery av eller på uten å endre kode.
                     </p>
                 </div>
             </div>
 
-            <div class="mt-6 grid gap-3 md:grid-cols-4">
-                <div class="rounded-2xl bg-gray-50 px-4 py-3">
-                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Miljøbryter</div>
-                    <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $envEnabled ? $okBadge : $errBadge }}">
-                        {{ $envEnabled ? 'På' : 'Av' }}
+            <div class="mt-6 grid gap-4 xl:grid-cols-2">
+                <div class="rounded-2xl bg-gray-50 p-5">
+                    @php
+                        $batchEnvEnabled = (bool) ($batchSummary['environment_enabled'] ?? false);
+                        $batchAdminEnabled = (bool) ($batchSummary['admin_enabled'] ?? false);
+                        $batchApiConfigured = (bool) ($batchSummary['api_configured'] ?? false);
+                        $batchEffectiveEnabled = (bool) ($batchSummary['enabled'] ?? false);
+                        $batchSkipReasonLabel = (string) ($batchSummary['skip_reason_label'] ?? '');
+                    @endphp
+
+                    <div class="space-y-2">
+                        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Doffin batch-import</p>
+                        <h3 class="text-lg font-semibold text-gray-950">Planlagt import</h3>
+                        <p class="text-sm leading-6 text-gray-600">
+                            Standard arbeidsflyt for automatisk import av nye kunngjøringer.
+                        </p>
                     </div>
+
+                    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Miljø</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchEnvEnabled ? $okBadge : $errBadge }}">
+                                {{ $batchEnvEnabled ? 'På' : 'Av' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Admin</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchAdminEnabled ? $okBadge : $errBadge }}">
+                                {{ $batchAdminEnabled ? 'På' : 'Av' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">API</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchApiConfigured ? $okBadge : $warnBadge }}">
+                                {{ $batchApiConfigured ? 'Klar' : 'Mangler' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Status</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $batchEffectiveEnabled ? $okBadge : $warnBadge }}">
+                                {{ $batchEffectiveEnabled ? 'Aktiv' : 'Stoppet' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (! $batchEffectiveEnabled && $batchSkipReasonLabel !== '')
+                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+                            <span class="font-semibold">Planlagt batch-import er ikke aktiv.</span>
+                            <span class="block mt-1">{{ $batchSkipReasonLabel }}</span>
+                        </div>
+                    @endif
                 </div>
 
-                <div class="rounded-2xl bg-gray-50 px-4 py-3">
-                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Admin-bryter</div>
-                    <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $adminEnabled ? $okBadge : $errBadge }}">
-                        {{ $adminEnabled ? 'På' : 'Av' }}
-                    </div>
-                </div>
+                <div class="rounded-2xl bg-gray-50 p-5">
+                    @php
+                        $watchEnvEnabled = (bool) ($watchSummary['environment_enabled'] ?? false);
+                        $watchAdminEnabled = (bool) ($watchSummary['admin_enabled'] ?? false);
+                        $watchApiConfigured = (bool) ($watchSummary['api_configured'] ?? false);
+                        $watchEffectiveEnabled = (bool) ($watchSummary['enabled'] ?? false);
+                        $watchSkipReasonLabel = (string) ($watchSummary['skip_reason_label'] ?? '');
+                    @endphp
 
-                <div class="rounded-2xl bg-gray-50 px-4 py-3">
-                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">API-konfig</div>
-                    <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $apiConfigured ? $okBadge : $warnBadge }}">
-                        {{ $apiConfigured ? 'Klar' : 'Mangler' }}
+                    <div class="space-y-2">
+                        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Doffin overvåkningsprofiler</p>
+                        <h3 class="text-lg font-semibold text-gray-950">Watch inbox discovery</h3>
+                        <p class="text-sm leading-6 text-gray-600">
+                            Automatisk søk etter nye treff for aktive watch-profiler.
+                        </p>
                     </div>
-                </div>
 
-                <div class="rounded-2xl bg-gray-50 px-4 py-3">
-                    <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Effektiv status</div>
-                    <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $effectiveEnabled ? $okBadge : $warnBadge }}">
-                        {{ $effectiveEnabled ? 'Aktiv' : 'Stoppet' }}
+                    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Miljø</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchEnvEnabled ? $okBadge : $errBadge }}">
+                                {{ $watchEnvEnabled ? 'På' : 'Av' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Admin</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchAdminEnabled ? $okBadge : $errBadge }}">
+                                {{ $watchAdminEnabled ? 'På' : 'Av' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">API</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchApiConfigured ? $okBadge : $warnBadge }}">
+                                {{ $watchApiConfigured ? 'Klar' : 'Mangler' }}
+                            </div>
+                        </div>
+
+                        <div class="rounded-2xl bg-white px-4 py-3">
+                            <div class="text-xs font-semibold uppercase tracking-[0.12em] text-gray-500">Status</div>
+                            <div class="mt-1.5 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ $watchEffectiveEnabled ? $okBadge : $warnBadge }}">
+                                {{ $watchEffectiveEnabled ? 'Aktiv' : 'Stoppet' }}
+                            </div>
+                        </div>
                     </div>
+
+                    @if (! $watchEffectiveEnabled && $watchSkipReasonLabel !== '')
+                        <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
+                            <span class="font-semibold">Watch inbox discovery er ikke aktiv.</span>
+                            <span class="block mt-1">{{ $watchSkipReasonLabel }}</span>
+                        </div>
+                    @endif
                 </div>
             </div>
-
-            @if (! $effectiveEnabled && $skipReasonLabel !== '')
-                <div class="mt-4 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-800">
-                    <span class="font-semibold">Planlagt import er ikke aktiv.</span>
-                    <span class="block mt-1">{{ $skipReasonLabel }}</span>
-                </div>
-            @endif
 
             <form wire:submit="save" class="mt-8 space-y-6">
                 {{ $this->form }}
@@ -70,7 +142,7 @@
                         wire:target="save"
                         size="lg"
                     >
-                        <span wire:loading.remove wire:target="save">Lagre bryteren</span>
+                        <span wire:loading.remove wire:target="save">Lagre brytere</span>
                         <span wire:loading.inline-flex wire:target="save" class="items-center gap-2">
                             <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <circle cx="12" cy="12" r="9" class="opacity-30" stroke="currentColor" stroke-width="3"></circle>
@@ -81,7 +153,7 @@
                     </x-filament::button>
 
                     <p class="text-sm text-gray-500">
-                        Scheduler må fortsatt ha gyldig Doffin API-konfigurasjon før en planlagt kjøring får kontakte API-et.
+                        Begge brytere krever gyldig lokal eller test Doffin API-konfigurasjon før en planlagt kjøring får kontakte API-et.
                     </p>
                 </div>
             </form>

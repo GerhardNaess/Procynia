@@ -41,7 +41,7 @@ class AdminNavigationLabelsTest extends TestCase
     public function test_drift_navigation_labels_are_norwegian(): void
     {
         $this->assertSame('Sikkerhetskopi og gjenoppretting', BackupRecovery::getNavigationLabel());
-        $this->assertSame('Doffin automatisk import', DoffinAutomaticImport::getNavigationLabel());
+        $this->assertSame('Doffin automatisering', DoffinAutomaticImport::getNavigationLabel());
         $this->assertSame('Importkjøringer', DoffinImportRunResource::getNavigationLabel());
         $this->assertSame('Synkroniseringslogg', SyncLogResource::getNavigationLabel());
     }

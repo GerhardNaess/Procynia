@@ -3,6 +3,7 @@
 namespace Tests\Feature\App;
 
 use App\Models\Customer;
+use App\Models\DoffinImportSetting;
 use App\Models\Department;
 use App\Models\User;
 use App\Models\WatchProfile;
@@ -34,6 +35,7 @@ class WatchProfileInboxDiscoveryTest extends TestCase
         $this->withoutMiddleware(VerifyCsrfToken::class);
 
         $this->createSchema();
+        $this->enableWatchInboxDiscovery();
     }
 
     protected function tearDown(): void
@@ -344,6 +346,14 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('doffin_import_settings', function (Blueprint $table): void {
+            $table->id();
+            $table->boolean('scheduled_import_enabled')->default(false);
+            $table->boolean('watch_inbox_discovery_enabled')->default(false);
+            $table->foreignId('updated_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+        });
+
         Schema::create('watch_profile_cpv_codes', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('watch_profile_id');
@@ -411,6 +421,19 @@ class WatchProfileInboxDiscoveryTest extends TestCase
             $table->timestamp('read_at')->nullable();
             $table->timestamps();
         });
+    }
+
+    private function enableWatchInboxDiscovery(): void
+    {
+        config([
+            'doffin.watch_inbox_discovery_enabled' => true,
+            'doffin.api_key' => 'test-watch-key',
+        ]);
+
+        DoffinImportSetting::query()->create([
+            'scheduled_import_enabled' => false,
+            'watch_inbox_discovery_enabled' => true,
+        ]);
     }
 
     private function createCustomer(string $name): Customer
