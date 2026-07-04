@@ -14,6 +14,7 @@ class DoffinBatchImportService
         private readonly DoffinClient $client,
         private readonly DoffinImportService $importService,
         private readonly DoffinNoticePipelineService $pipelineService,
+        private readonly DoffinImportControlService $importControlService,
     ) {
     }
 
@@ -21,6 +22,49 @@ class DoffinBatchImportService
     {
         if ($limit < 1) {
             throw new RuntimeException('The batch import limit must be a positive integer.');
+        }
+
+        if ($trigger === 'scheduler') {
+            $skipReason = $this->importControlService->scheduledImportSkipReason();
+
+            if ($skipReason !== null) {
+                $environmentEnabled = $this->importControlService->isEnvironmentEnabled();
+                $adminEnabled = $environmentEnabled ? $this->importControlService->isAdminEnabled() : null;
+                $apiConfigured = $environmentEnabled && $adminEnabled
+                    ? $this->importControlService->hasRequiredApiConfiguration()
+                    : null;
+
+                Log::info('[DOFFIN][scheduler] Scheduled batch import skipped.', [
+                    'requested_limit' => $limit,
+                    'trigger' => $trigger,
+                    'skip_reason' => $skipReason,
+                    'skip_reason_label' => $this->importControlService->scheduledImportSkipReasonLabel($skipReason),
+                    'environment_enabled' => $environmentEnabled,
+                    'admin_enabled' => $adminEnabled,
+                    'api_configured' => $apiConfigured,
+                ]);
+
+                return [
+                    'requested_limit' => $limit,
+                    'found_count' => 0,
+                    'found_notice_ids' => [],
+                    'processed_count' => 0,
+                    'processed_notice_ids' => [],
+                    'success_count' => 0,
+                    'fetched_count' => 0,
+                    'created_count' => 0,
+                    'updated_count' => 0,
+                    'skipped_count' => 0,
+                    'failed_count' => 0,
+                    'imported_notice_ids' => [],
+                    'failed_notice_ids' => [],
+                    'failures' => [],
+                    'completed_steps' => [],
+                    'status' => 'skipped',
+                    'skip_reason' => $skipReason,
+                    'skip_reason_label' => $this->importControlService->scheduledImportSkipReasonLabel($skipReason),
+                ];
+            }
         }
 
         $startedAt = now();

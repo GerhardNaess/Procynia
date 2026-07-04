@@ -163,6 +163,13 @@ npm run build
 - Quick checks: `docker compose ps`, `php artisan about`, `php artisan config:clear`, `php artisan cache:clear`, and `storage/logs/laravel.log`.
 - Keep production secrets out of `.env` and out of documentation.
 
+### Doffin scheduled import
+
+- Scheduled Doffin import is off by default in local dev.
+- Enable it only with `DOFFIN_SCHEDULED_IMPORT_ENABLED=true` and the admin toggle in `/admin`.
+- A scheduled run still needs a valid local or test Doffin API key before it can call the API.
+- Do not use production secrets in local Doffin configuration.
+
 ## Secrets and Env
 
 `docker-compose.yml` never contains real credentials. All secrets are read from

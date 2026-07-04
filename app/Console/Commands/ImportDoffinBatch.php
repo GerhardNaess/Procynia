@@ -34,6 +34,13 @@ class ImportDoffinBatch extends Command
                 };
             }, $trigger);
 
+            if (($result['status'] ?? null) === 'skipped') {
+                $this->info('Doffin batch import skipped.');
+                $this->line((string) ($result['skip_reason_label'] ?? 'Scheduled Doffin import is disabled.'));
+
+                return self::SUCCESS;
+            }
+
             $this->info('Doffin batch import completed.');
             $this->line('found_count: '.$result['found_count']);
             $this->line('processed_count: '.$result['processed_count']);

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\BackupRecovery;
+use App\Filament\Pages\DoffinAutomaticImport;
 use App\Models\AdminPageHelp;
 use App\Filament\Pages\AdminNotifications;
 use App\Filament\Pages\Incidents;
@@ -69,11 +70,13 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Drift', QueueScheduler::getNavigationGroup());
             $this->assertSame('Drift', Incidents::getNavigationGroup());
             $this->assertSame('Drift', BackupRecovery::getNavigationGroup());
+            $this->assertSame('Drift', DoffinAutomaticImport::getNavigationGroup());
             $this->assertSame('Drift', OperationalRunbookResource::getNavigationGroup());
             $this->assertSame('Drift', DoffinImportRunResource::getNavigationGroup());
             $this->assertSame('Drift', SyncLogResource::getNavigationGroup());
 
             $this->assertFalse(QueueScheduler::shouldRegisterNavigation());
+            $this->assertTrue(DoffinAutomaticImport::shouldRegisterNavigation());
             $this->assertTrue(DoffinImportRunResource::shouldRegisterNavigation());
             $this->assertTrue(SyncLogResource::shouldRegisterNavigation());
 
@@ -83,10 +86,12 @@ class DriftPagesTest extends TestCase
             $this->assertSame('Varsler', AdminNotifications::getNavigationLabel());
             $this->assertSame('Incidents', Incidents::getNavigationLabel());
             $this->assertSame('Sikkerhetskopi og gjenoppretting', BackupRecovery::getNavigationLabel());
+            $this->assertSame('Doffin automatisk import', DoffinAutomaticImport::getNavigationLabel());
             $this->assertSame('Driftsrutiner', OperationalRunbookResource::getNavigationLabel());
             $this->assertSame('Importkjøringer', DoffinImportRunResource::getNavigationLabel());
             $this->assertSame('Synkroniseringslogg', SyncLogResource::getNavigationLabel());
 
+            $this->assertSame(6, DoffinAutomaticImport::getNavigationSort());
             $this->assertSame(7, DoffinImportRunResource::getNavigationSort());
             $this->assertSame(8, SyncLogResource::getNavigationSort());
 
@@ -108,6 +113,7 @@ class DriftPagesTest extends TestCase
         $this->actingAs($admin)->get(QueueScheduler::getUrl())->assertOk()->assertSee('Queue and scheduler');
         $this->actingAs($admin)->get(Incidents::getUrl())->assertOk()->assertSee('Incidents');
         $this->actingAs($admin)->get(BackupRecovery::getUrl())->assertOk()->assertSee('Sikkerhetskopi og gjenoppretting');
+        $this->actingAs($admin)->get(DoffinAutomaticImport::getUrl())->assertOk()->assertSee('Doffin automatisk import');
     }
 
     public function test_system_status_page_help_is_seeded_by_migration(): void
@@ -208,6 +214,7 @@ class DriftPagesTest extends TestCase
         $this->assertFalse(QueueScheduler::canAccess());
         $this->assertFalse(Incidents::canAccess());
         $this->assertFalse(BackupRecovery::canAccess());
+        $this->assertFalse(DoffinAutomaticImport::canAccess());
         $this->assertFalse(OperationalRunbookResource::canAccess());
     }
 

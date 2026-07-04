@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\DoffinHarvest;
+use App\Filament\Pages\DoffinAutomaticImport;
 use App\Filament\Pages\DoffinSupplierHarvest;
 use App\Filament\Pages\Incidents;
 use App\Filament\Pages\Monitoring;
@@ -24,6 +25,7 @@ class HiddenAdminNavigationTest extends TestCase
 
     public function test_active_operational_pages_remain_registered_for_navigation(): void
     {
+        $this->assertTrue(DoffinAutomaticImport::shouldRegisterNavigation());
         $this->assertTrue(DoffinSupplierHarvest::shouldRegisterNavigation());
         $this->assertTrue(SystemStatus::shouldRegisterNavigation());
     }

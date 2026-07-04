@@ -3,6 +3,7 @@
 namespace Tests\Feature\Console;
 
 use App\Models\DoffinImportRun;
+use App\Models\DoffinImportSetting;
 use App\Services\Doffin\DoffinBatchImportService;
 use App\Services\Doffin\DoffinImportService;
 use App\Services\Doffin\DoffinNoticePipelineService;
@@ -94,6 +95,75 @@ class DoffinBatchImportTest extends TestCase
         ]);
 
         Http::assertSentCount(1);
+    }
+
+    public function test_command_skips_scheduler_trigger_when_the_environment_flag_is_disabled(): void
+    {
+        config([
+            'doffin.scheduled_import_enabled' => false,
+            'doffin.base_url' => 'https://betaapi.doffin.no',
+            'doffin.api_key' => 'test-key',
+        ]);
+
+        Http::fake();
+
+        $exitCode = Artisan::call('doffin:import-batch', [
+            '--limit' => 1,
+            '--trigger' => 'scheduler',
+        ]);
+
+        $output = Artisan::output();
+
+        $this->assertSame(0, $exitCode);
+        $this->assertStringContainsString('Doffin batch import skipped.', $output);
+        $this->assertDatabaseCount('doffin_import_runs', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_service_skips_scheduler_trigger_when_the_admin_toggle_is_disabled(): void
+    {
+        config([
+            'doffin.scheduled_import_enabled' => true,
+            'doffin.base_url' => 'https://betaapi.doffin.no',
+            'doffin.api_key' => 'test-key',
+        ]);
+
+        DoffinImportSetting::query()->create([
+            'scheduled_import_enabled' => false,
+        ]);
+
+        Http::fake();
+
+        $result = app(DoffinBatchImportService::class)->importBatch(1, null, 'scheduler');
+
+        $this->assertSame('skipped', $result['status']);
+        $this->assertSame('admin_disabled', $result['skip_reason']);
+        $this->assertSame('Admin-bryteren er av.', $result['skip_reason_label']);
+        $this->assertDatabaseCount('doffin_import_runs', 0);
+        Http::assertNothingSent();
+    }
+
+    public function test_service_skips_scheduler_trigger_when_the_api_key_is_missing(): void
+    {
+        config([
+            'doffin.scheduled_import_enabled' => true,
+            'doffin.base_url' => 'https://betaapi.doffin.no',
+            'doffin.api_key' => null,
+        ]);
+
+        DoffinImportSetting::query()->create([
+            'scheduled_import_enabled' => true,
+        ]);
+
+        Http::fake();
+
+        $result = app(DoffinBatchImportService::class)->importBatch(1, null, 'scheduler');
+
+        $this->assertSame('skipped', $result['status']);
+        $this->assertSame('api_missing', $result['skip_reason']);
+        $this->assertSame('Doffin API-konfigurasjonen er ufullstendig.', $result['skip_reason_label']);
+        $this->assertDatabaseCount('doffin_import_runs', 0);
+        Http::assertNothingSent();
     }
 
     public function test_service_marks_run_failed_after_transient_search_failures_and_logs_warning(): void

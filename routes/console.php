@@ -9,9 +9,11 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('doffin:import-batch --trigger=scheduler')
-    ->hourly()
-    ->withoutOverlapping();
+if (config('doffin.scheduled_import_enabled')) {
+    Schedule::command('doffin:import-batch --trigger=scheduler')
+        ->hourly()
+        ->withoutOverlapping();
+}
 
 Schedule::command('doffin:watch-inbox-discover')
     ->dailyAt('01:15')

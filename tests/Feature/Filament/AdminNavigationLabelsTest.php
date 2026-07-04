@@ -7,6 +7,7 @@ use App\Filament\Pages\AiProfitability;
 use App\Filament\Pages\BackupRecovery;
 use App\Filament\Pages\BillingOverview;
 use App\Filament\Pages\CsvImport;
+use App\Filament\Pages\DoffinAutomaticImport;
 use App\Filament\Pages\DoffinSupplierHarvest;
 use App\Filament\Resources\BillingPriceResource;
 use App\Filament\Resources\CustomerUserServiceLevelResource;
@@ -40,6 +41,7 @@ class AdminNavigationLabelsTest extends TestCase
     public function test_drift_navigation_labels_are_norwegian(): void
     {
         $this->assertSame('Sikkerhetskopi og gjenoppretting', BackupRecovery::getNavigationLabel());
+        $this->assertSame('Doffin automatisk import', DoffinAutomaticImport::getNavigationLabel());
         $this->assertSame('Importkjøringer', DoffinImportRunResource::getNavigationLabel());
         $this->assertSame('Synkroniseringslogg', SyncLogResource::getNavigationLabel());
     }
