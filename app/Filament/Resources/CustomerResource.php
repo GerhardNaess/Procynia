@@ -120,7 +120,7 @@ class CustomerResource extends Resource
             ->recordActions([
                 \Filament\Actions\EditAction::make(),
                 \Filament\Actions\Action::make('billing')
-                    ->label('Fakturering')
+                    ->label('Abonnement og tjenester')
                     ->icon('heroicon-o-credit-card')
                     ->url(fn (Customer $record) => static::getUrl('billing', ['record' => $record])),
             ]);

@@ -14,7 +14,7 @@ class EditCustomer extends EditRecord
     {
         return [
             Action::make('billing')
-                ->label('Fakturering')
+                ->label('Abonnement og tjenester')
                 ->icon('heroicon-o-credit-card')
                 ->url(fn () => CustomerResource::getUrl('billing', ['record' => $this->record])),
         ];

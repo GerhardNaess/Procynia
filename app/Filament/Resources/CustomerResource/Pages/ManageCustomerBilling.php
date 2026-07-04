@@ -73,12 +73,12 @@ class ManageCustomerBilling extends Page
 
     public function getTitle(): string
     {
-        return 'Kundens avtale og fakturering — ' . $this->record->name;
+        return 'Abonnement og tjenester — ' . $this->record->name;
     }
 
     public function getSubheading(): string
     {
-        return 'Se hva kunden har kjøpt, hva som skal faktureres og om kunden er fakturert. Tekniske detaljer ligger lenger ned på siden.';
+        return 'Her administrerer du kundens abonnement, tilleggstjenester og brukertilganger. Tekniske detaljer ligger lenger ned på siden.';
     }
 
     public function getPageClasses(): array
@@ -114,7 +114,7 @@ class ManageCustomerBilling extends Page
 
             ActionGroup::make([
                 Action::make('assign_plan')
-                    ->label('Endre avtale')
+                    ->label('Endre abonnement')
                     ->icon('heroicon-o-credit-card')
                     ->form([
                         Select::make('plan')
@@ -168,13 +168,13 @@ class ManageCustomerBilling extends Page
                         }
                     }),
             ])
-                ->label('Avtale')
+                ->label('Abonnement')
                 ->icon('heroicon-o-adjustments-horizontal')
                 ->button(),
 
             ActionGroup::make([
                 Action::make('assign_service_level')
-                    ->label('Tildel Procynia-brukernivå')
+                    ->label('Tildel brukertilgang')
                     ->icon('heroicon-o-user-plus')
                     ->form([
                         Select::make('user_id')
@@ -212,7 +212,7 @@ class ManageCustomerBilling extends Page
                     }),
 
                 Action::make('remove_service_level')
-                    ->label('Fjern Procynia-brukernivå')
+                    ->label('Fjern brukertilgang')
                     ->icon('heroicon-o-user-minus')
                     ->color('warning')
                     ->requiresConfirmation()
@@ -250,13 +250,13 @@ class ManageCustomerBilling extends Page
                         }
                     }),
             ])
-                ->label('Procynia-tilgang')
+                ->label('Brukertilganger')
                 ->icon('heroicon-o-users')
                 ->button(),
 
             ActionGroup::make([
                 Action::make('add_recurring_line')
-                    ->label('Legg til intern billing-linje')
+                    ->label('Legg til tilleggstjeneste')
                     ->icon('heroicon-o-plus')
                     ->form([
                         Select::make('billing_price_id')
@@ -305,7 +305,7 @@ class ManageCustomerBilling extends Page
                     }),
 
                 Action::make('add_one_time_charge')
-                    ->label('Legg til intern engangslinje')
+                    ->label('Legg til engangstillegg')
                     ->icon('heroicon-o-receipt-percent')
                     ->form([
                         Select::make('billing_price_id')
@@ -355,7 +355,7 @@ class ManageCustomerBilling extends Page
                     }),
 
                 Action::make('invoice_one_time_charges')
-                    ->label('Fakturer ventende interne engangslinjer via Stripe')
+                    ->label('Fakturer ventende engangstillegg via Stripe')
                     ->icon('heroicon-o-currency-dollar')
                     ->color('success')
                     ->action(function (): void {
@@ -376,7 +376,7 @@ class ManageCustomerBilling extends Page
                         }
                     }),
             ])
-                ->label('Interne billing-linjer')
+                ->label('Tilleggstjenester')
                 ->icon('heroicon-o-banknotes')
                 ->button(),
 
@@ -587,7 +587,7 @@ class ManageCustomerBilling extends Page
 
             ActionGroup::make([
                 Action::make('remove_recurring_line')
-                    ->label('Fjern intern billing-linje')
+                    ->label('Fjern tilleggstjeneste')
                     ->icon('heroicon-o-minus')
                     ->color('warning')
                     ->requiresConfirmation()
@@ -605,12 +605,12 @@ class ManageCustomerBilling extends Page
                             $this->refreshBillingData();
 
                             Notification::make()
-                                ->title('Intern billing-linje fjernet')
+                                ->title('Tilleggstjeneste fjernet')
                                 ->success()
                                 ->send();
                         } catch (Throwable $e) {
                             Notification::make()
-                                ->title('Feil ved fjerning av intern billing-linje')
+                                ->title('Feil ved fjerning av tilleggstjeneste')
                                 ->body($e->getMessage())
                                 ->danger()
                                 ->send();
