@@ -152,6 +152,17 @@ npm run build
 - `public/storage` is served directly by Nginx through an explicit alias, so no storage-link bootstrap step is required.
 - Host runtime commands such as `php artisan serve`, `php artisan queue:work database`, and `php artisan schedule:work` are legacy troubleshooting tools, not the normal runtime path.
 
+### Common local runtime pitfalls
+
+- `.env` is local and gitignored. Use `.env.example` as the baseline, and make sure `APP_KEY` exists before booting the app.
+- `MissingAppKeyException` usually means `APP_KEY` is missing or Laravel is not reading the expected local env file.
+- Use `http://localhost:8080` for the normal Docker runtime. `http://127.0.0.1:8080` can hit host/XAMPP PHP instead of Docker, which means a different runtime.
+- Inside Docker, Redis should use `REDIS_HOST=redis` and `REDIS_PORT=6379`.
+- Host-based debugging is an exception. If you deliberately run against host PHP, Redis may need `REDIS_HOST=127.0.0.1` and the exposed host port, for example `6380`.
+- `getaddrinfo for redis failed` usually means the runtime is trying to use the Docker service name `redis` outside the Docker network.
+- Quick checks: `docker compose ps`, `php artisan about`, `php artisan config:clear`, `php artisan cache:clear`, and `storage/logs/laravel.log`.
+- Keep production secrets out of `.env` and out of documentation.
+
 ## Secrets and Env
 
 `docker-compose.yml` never contains real credentials. All secrets are read from
