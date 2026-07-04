@@ -6,7 +6,6 @@ use App\Models\BillingPrice;
 use App\Models\BillingProduct;
 use App\Models\Customer;
 use App\Models\CustomerBillingLine;
-use App\Models\CustomerUserServiceLevel;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -40,10 +39,57 @@ class BillingControllerTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_system_owner_can_view_billing_page_with_lines_and_service_levels(): void
+    public function test_system_owner_can_view_billing_page_with_lines_and_subscription(): void
     {
         $context = $this->systemOwnerContext();
         $customer = $context['customer'];
+        $customer->update([
+            'included_users' => 15,
+            'included_ai_credits' => 60,
+        ]);
+
+        $baseProduct = BillingProduct::query()->create([
+            'key' => 'base_plan_ultra',
+            'name' => 'Ultra',
+            'description' => 'Hovedabonnementet til kunden.',
+            'category' => BillingProduct::CATEGORY_BASE_PLAN,
+            'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+            'is_active' => true,
+            'sort_order' => 1,
+            'metadata' => ['plan_key' => 'ultra'],
+        ]);
+
+        $basePrice = BillingPrice::query()->create([
+            'billing_product_id' => $baseProduct->id,
+            'key' => 'base_plan_ultra_yearly',
+            'name' => 'Ultra årlig',
+            'interval' => BillingPrice::INTERVAL_YEARLY,
+            'currency' => 'nok',
+            'unit_amount' => 5192100,
+            'stripe_price_id' => 'price_test_ultra_yearly',
+            'tier_key' => 'ultra',
+            'is_recurring' => true,
+            'is_active' => true,
+            'included_quantity' => 1,
+            'metadata' => ['plan_key' => 'ultra'],
+        ]);
+
+        CustomerBillingLine::query()->create([
+            'customer_id' => $customer->id,
+            'billing_product_id' => $baseProduct->id,
+            'billing_price_id' => $basePrice->id,
+            'description' => $basePrice->name,
+            'quantity' => 1,
+            'status' => 'active',
+            'starts_at' => now(),
+            'source' => 'system',
+            'metadata' => [
+                'billing_price_key' => $basePrice->key,
+                'billing_product_key' => $baseProduct->key,
+                'plan_key' => 'ultra',
+                'billing_interval' => BillingPrice::INTERVAL_YEARLY,
+            ],
+        ]);
 
         $product = BillingProduct::query()->create([
             'key' => 'addon_ai_offer',
@@ -86,38 +132,47 @@ class BillingControllerTest extends TestCase
             ],
         ]);
 
-        $user = User::query()->create([
-            'name' => 'Billing Bruker',
-            'email' => 'billing.bruker@example.test',
-            'password' => bcrypt('SecretPass123!'),
-            'role' => User::ROLE_USER,
-            'bid_role' => User::BID_ROLE_CONTRIBUTOR,
-            'customer_id' => $customer->id,
-            'is_active' => true,
-        ]);
+        $response = $this->actingAs($context['owner'])->get('/app/billing');
 
-        CustomerUserServiceLevel::query()->create([
-            'customer_id' => $customer->id,
-            'user_id' => $user->id,
-            'billing_product_id' => $product->id,
-            'billing_price_id' => $price->id,
-            'level_key' => 'ai_offer',
-            'status' => 'active',
-            'assigned_by' => $context['owner']->id,
-            'starts_at' => now(),
-            'metadata' => [
-                'billing_price_key' => $price->key,
-                'billing_product_key' => $product->key,
-            ],
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $page) use ($price): bool {
+            $billingLines = collect(data_get($page, 'props.billing_lines', []));
+
+            return data_get($page, 'component') === 'App/Billing/Index'
+                && data_get($page, 'props.subscription.plan_label') === 'Ultra'
+                && data_get($page, 'props.subscription.plan') === 'ultra'
+                && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
+                && data_get($page, 'props.subscription.included_users') === 15
+                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && data_get($page, 'props.subscription.cancel_at_period_end') === false
+                && $billingLines->contains(fn (array $line): bool => $line['billing_price_key'] === $price->key && $line['quantity'] === 2)
+                && $billingLines->doesntContain(fn (array $line): bool => $line['billing_price_key'] === 'base_plan_ultra_yearly');
+        });
+    }
+
+    public function test_system_owner_sees_registered_subscription_from_local_plan_with_commercial_details(): void
+    {
+        $context = $this->systemOwnerContext();
+        $customer = $context['customer'];
+
+        $customer->update([
+            'subscription_plan' => Customer::PLAN_ULTRA,
+            'billing_interval' => Customer::BILLING_YEARLY,
+            'included_users' => 15,
+            'included_ai_credits' => 60,
         ]);
 
         $response = $this->actingAs($context['owner'])->get('/app/billing');
 
         $response->assertOk();
-        $response->assertViewHas('page', function (array $page) use ($price, $user): bool {
+        $response->assertViewHas('page', function (array $page): bool {
             return data_get($page, 'component') === 'App/Billing/Index'
-                && collect(data_get($page, 'props.billing_lines', []))->contains(fn (array $line): bool => $line['billing_price_key'] === $price->key && $line['quantity'] === 2)
-                && collect(data_get($page, 'props.service_levels', []))->contains(fn (array $level): bool => $level['billing_price_key'] === $price->key && $level['user_name'] === $user->name);
+                && data_get($page, 'props.subscription.plan') === 'ultra'
+                && data_get($page, 'props.subscription.plan_label') === 'Ultra'
+                && data_get($page, 'props.subscription.billing_interval') === BillingPrice::INTERVAL_YEARLY
+                && data_get($page, 'props.subscription.included_users') === 15
+                && data_get($page, 'props.subscription.included_ai_credits') === 60
+                && data_get($page, 'props.subscription.cancel_at_period_end') === false;
         });
     }
 

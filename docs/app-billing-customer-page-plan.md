@@ -6,7 +6,7 @@ Gjør kundesiden `/app/billing` tydelig nok til at en kunde forstår forskjellen
 
 - `Abonnement` som hovedplan
 - `Tilleggstjenester` som ekstra kostnader eller tjenester utover hovedplanen
-- `Brukertilganger` som hvilke brukere som har tilgang til funksjoner og tjenester
+- `Registrerte brukere` som hvilke brukere som har tilgang til funksjoner og tjenester
 
 Siden skal være enkel å lese, og den skal ikke blande hovedabonnement, tillegg og brukertilganger i samme visning.
 
@@ -19,11 +19,11 @@ Siden skal være enkel å lese, og den skal ikke blande hovedabonnement, tillegg
 5. Kolonnen `Kilde` er intern og bør ikke vises til kunde.
 6. `Beskrivelse` gjentar bare navnet og gir liten eller ingen kundeverdi.
 7. Engangstillegg vises som `Aktiv`, som er uklart for kunden.
-8. `Brukertilganger` har for mange kolonner.
-9. `Tjeneste` og `Tilgang` i `Brukertilganger` sier nesten det samme.
+8. `Registrerte brukere` har for mange kolonner.
+9. `Tjeneste` og `Tilgang` i `Registrerte brukere` sier nesten det samme.
 10. `Tildelt av` er intern informasjon og bør trolig ikke vises til kunde.
-11. Pris-/periodeord som `månedlig` lekker inn i `Brukertilganger`.
-12. Siden forklarer ikke tydelig forskjellen på `Abonnement`, `Tilleggstjenester` og `Brukertilganger`.
+11. Pris-/periodeord som `månedlig` lekker inn i `Registrerte brukere`.
+12. Siden forklarer ikke tydelig forskjellen på `Abonnement`, `Tilleggstjenester` og `Registrerte brukere`.
 13. Bekreftelsesdialogen for abonnementsendring gjentar samme budskap og forklarer ikke tydelig hva som faktisk endres.
 14. Infohint-tekster bruker ulik typografi og blir for dominerende når de vises i caps lock.
 
@@ -36,11 +36,22 @@ Viktigste hovedfeil:
 - Kundesiden skal bruke korte, tydelige begreper.
 - Hovedabonnement skal stå tydelig separat fra andre tjenester.
 - Tilleggstjenester skal bare vise reelle tillegg utover hovedplanen.
-- Brukertilganger skal vise hvem som har tilgang, ikke intern billing- eller betalingsdetalj.
+- Registrerte brukere skal vise hvem som har tilgang, ikke intern billing- eller betalingsdetalj.
+- Når kunden har ekstra AI-kapasitet, skal den vises som firma-tillegg eller AI-pakke, ikke som et separat brukerabonnement.
+- Registrerte brukere skal ikke presenteres som Pro/Max/Ultra-abonnementer per bruker.
 - Bekreftelsesdialogen for abonnementsendring skal være kort og konkret: den skal forklare at endringen oppdaterer abonnementet og kan påvirke hvilke tilleggstjenester og brukertilganger som er aktive, uten å gjenta samme melding flere ganger.
 - Intern teknikk som `Kilde`, Stripe-id-er, billing-begreper og betalingsprovider-termer skal skjules når de ikke er nødvendige for kunden.
 - Engangstillegg skal beskrives som type tillegg, ikke som egen hovedkategori.
 - Infohint og hjelpetekster skal bruke normal setningstekst og samme typografi på hele siden, slik at de støtter innholdet uten å dominere visuelt.
+
+## Produktregel: ett abonnement per firma
+
+- Kunden/firmaet har ett hovedabonnement, for eksempel Pro, Max eller Ultra.
+- Alle brukere følger kundens hovedabonnement.
+- Brukere skal ikke vises med egne Pro/Max/Ultra-abonnementer.
+- Ekstra AI-kapasitet skal vises som firma-tillegg eller AI-pakke, ikke som brukerabonnement.
+- Registrerte brukere skal kun vise hvilke brukere som har tilgang til hvilke funksjoner eller roller.
+- Prisnavn, periodeord og pakkeord som `Pro`, `Max`, `Ultra`, `månedlig` og `årlig` skal ikke lekke inn i Registrerte brukere.
 
 ## 1. Abonnement
 
@@ -79,15 +90,15 @@ Trolig senere endring:
 - `BillingController` kan måtte sende en allerede filtrert liste med tilleggstjenester.
 - Eventuelt må `BillingService` eller `BillingEntitlementService` hjelpe til med å skille hovedabonnement fra tillegg.
 
-## 3. Brukertilganger
+## 3. Registrerte brukere
 
-Brukertilganger skal vise hvem som har tilgang til tjenester eller nivåer, og ikke mer enn nødvendig.
+Registrerte brukere skal vise hvem som har tilgang til tjenester eller nivåer, og ikke mer enn nødvendig.
 
 - Tabellen bør ha færre kolonner enn i dag.
 - `Tjeneste` og `Tilgang` bør ikke stå som to nesten like kolonner.
 - `Tildelt av` bør fjernes fra kundevisningen dersom den bare er intern kontrollinformasjon.
 - Pris-/periodeord som `månedlig` skal ikke vises her.
-- Brukertilganger skal forklare aktiv tilgang, ikke intern produktstruktur.
+- Registrerte brukere skal forklare aktiv tilgang, ikke intern produktstruktur.
 - Det bør være tydelig hvilken bruker tilgangen gjelder for, og hva tilgangen faktisk er.
 
 Trolig senere endring:
@@ -120,7 +131,7 @@ Testene bør senere kontrollere at:
 - `Ingen aktivt abonnement` bare vises når det faktisk mangler abonnement
 - `Ultra årlig` ikke havner som tillegg hvis det er hovedabonnement
 - kolonnen `Kilde` er borte
-- `Brukertilganger` har færre og tydeligere kolonner
+- `Registrerte brukere` har færre og tydeligere kolonner
 - kundevisningen ikke lekker intern billing-terminologi
 
 ## Avgrensning

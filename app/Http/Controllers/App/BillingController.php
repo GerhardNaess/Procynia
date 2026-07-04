@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Models\BillingProduct;
 use App\Models\Customer;
 use App\Services\Billing\BillingService;
 use App\Services\SubscriptionService;
@@ -24,27 +25,23 @@ class BillingController extends Controller
         $customer = $user->customer;
         $billingService = app(BillingService::class);
         $availablePlans = $this->availablePlanOptions($customer);
-        $subscription = $customer->subscription('default');
+        $activeBillingLines = $billingService->activeBillingLines($customer);
+        $basePlanLines = $activeBillingLines->filter(fn ($line): bool => $line->billingProduct?->category === BillingProduct::CATEGORY_BASE_PLAN);
+        $basePlanLine = $basePlanLines->sortByDesc(fn ($line): int => $line->created_at?->timestamp ?? 0)->first();
+        $planKey = data_get($basePlanLine?->metadata, 'plan_key') ?? $customer->subscription_plan ?? Customer::PLAN_FREE;
+        $hasRegisteredSubscription = $basePlanLine !== null || $planKey !== Customer::PLAN_FREE;
 
         $subscriptionData = null;
 
-        if ($subscription) {
-            $stripeSubscription = rescue(
-                fn () => $subscription->asStripeSubscription(),
-                null,
-                false,
-            );
-
+        if ($hasRegisteredSubscription) {
             $subscriptionData = [
-                'status' => $subscription->stripe_status,
-                'plan' => $customer->subscription_plan,
-                'plan_label' => $customer->planName(),
-                'billing_interval' => $customer->billing_interval,
-                'current_period_end' => $stripeSubscription
-                    ? date('Y-m-d', $stripeSubscription->current_period_end)
-                    : null,
-                'cancel_at_period_end' => $stripeSubscription?->cancel_at_period_end ?? false,
-                'trial_ends_at' => $customer->trial_ends_at?->toDateString(),
+                'status' => $basePlanLine?->status === 'pending_cancel'
+                    ? 'active'
+                    : ($basePlanLine?->status ?? 'active'),
+                'plan' => $planKey,
+                'plan_label' => config("procynia_plans.{$planKey}.name", $customer->planName()),
+                'billing_interval' => $basePlanLine?->billingPrice?->interval ?? $customer->billing_interval,
+                'cancel_at_period_end' => $basePlanLine?->status === 'pending_cancel',
                 'included_users' => $customer->included_users,
                 'included_ai_credits' => $customer->included_ai_credits,
             ];
@@ -68,7 +65,8 @@ class BillingController extends Controller
             false,
         );
 
-        $billingLines = $billingService->activeBillingLines($customer)
+        $billingLines = $activeBillingLines
+            ->reject(fn ($line): bool => $line->billingProduct?->category === BillingProduct::CATEGORY_BASE_PLAN)
             ->map(fn ($line) => [
                 'id' => $line->id,
                 'description' => $line->description,
@@ -90,31 +88,12 @@ class BillingController extends Controller
             ->values()
             ->all();
 
-        $serviceLevels = $billingService->activeServiceLevels($customer)
-            ->map(fn ($level) => [
-                'id' => $level->id,
-                'user_id' => $level->user_id,
-                'user_name' => $level->user?->name,
-                'billing_product' => $level->billingProduct?->name,
-                'billing_product_key' => $level->billingProduct?->key,
-                'billing_price' => $level->billingPrice?->name,
-                'billing_price_key' => $level->billingPrice?->key,
-                'level_key' => $level->level_key,
-                'status' => $level->status,
-                'assigned_by' => $level->assignedByUser?->name,
-                'starts_at' => $level->starts_at?->toDateString(),
-                'ends_at' => $level->ends_at?->toDateString(),
-            ])
-            ->values()
-            ->all();
-
         return Inertia::render('App/Billing/Index', [
             'customer_plan' => $this->customerPlanContext($customer),
             'available_plans' => $availablePlans,
             'subscription' => $subscriptionData,
             'invoices' => $invoices,
             'billing_lines' => $billingLines,
-            'service_levels' => $serviceLevels,
         ]);
     }
 
