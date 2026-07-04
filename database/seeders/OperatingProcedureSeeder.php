@@ -14,6 +14,10 @@ class OperatingProcedureSeeder extends Seeder
      */
     public function run(): void
     {
+        if (! Schema::hasTable('operational_runbooks')) {
+            return;
+        }
+
         $this->seedCategories();
 
         $this->seedRunbook(

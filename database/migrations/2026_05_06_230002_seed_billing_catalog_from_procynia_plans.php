@@ -53,7 +53,7 @@ return new class extends Migration
             foreach (['monthly', 'yearly'] as $interval) {
                 $priceKey = "{$planKey}_{$interval}";
                 $priceAmount = $plan["{$interval}_price_nok"] ?? null;
-                $stripePriceId = $plan["stripe_{$interval}"] ?? null;
+                $stripePriceId = $this->normalizeStripePriceId($plan["stripe_{$interval}"] ?? null);
 
                 DB::table('billing_prices')->insert([
                     'billing_product_id' => $productId,
@@ -76,6 +76,21 @@ return new class extends Migration
                 ]);
             }
         }
+    }
+
+    private function normalizeStripePriceId(mixed $stripePriceId): ?string
+    {
+        if (! is_string($stripePriceId)) {
+            return null;
+        }
+
+        $stripePriceId = trim($stripePriceId);
+
+        if ($stripePriceId === '' || $stripePriceId === 'price_') {
+            return null;
+        }
+
+        return $stripePriceId;
     }
 
     public function down(): void
