@@ -4,11 +4,19 @@ namespace Tests\Unit;
 
 use App\Services\Doffin\DoffinLiveSearchService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class DoffinLiveSearchServiceTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Cache::flush();
+    }
+
     public function test_it_returns_live_doffin_hits_for_domstoladministrasjonen(): void
     {
         Http::fake([
@@ -423,6 +431,15 @@ class DoffinLiveSearchServiceTest extends TestCase
             'status' => 'active',
         ], 1, 2);
 
+        app(DoffinLiveSearchService::class)->search([
+            'q' => 'helse nord',
+            'keywords' => 'pasvik',
+            'organization_name' => 'Domstoladministrasjonen',
+            'cpv' => '90910000',
+            'publication_period' => '30',
+            'status' => 'active',
+        ], 2, 2);
+
         Carbon::setTestNow();
 
         Http::assertSentCount(3);
@@ -812,7 +829,7 @@ class DoffinLiveSearchServiceTest extends TestCase
             'status' => '',
         ], 2, 1);
 
-        Http::assertSentCount(4);
+        Http::assertSentCount(2);
 
         $this->assertSame(1, $pageOneResult['page']);
         $this->assertSame(2, $pageTwoResult['page']);

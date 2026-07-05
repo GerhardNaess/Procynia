@@ -5,6 +5,7 @@ namespace App\Services\Doffin;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -46,16 +47,7 @@ class DoffinLiveSearchService
         $buyerFallbackUsed = false;
 
         if ($organizationName !== '') {
-            $buyerLookupResponse = $this->postSearch([
-                'numHitsPerPage' => 50,
-                'page' => 1,
-                'searchString' => $organizationName,
-                'sortBy' => 'RELEVANCE',
-                'facets' => $this->facets('', '', [], [], []),
-            ], 'buyer_lookup', [
-                'organization_name' => $organizationName,
-                'query' => $query,
-            ]);
+            $buyerLookupResponse = $this->cachedBuyerLookupResponse($organizationName, $query);
 
             if (! ($buyerLookupResponse['ok'] ?? true)) {
                 if (($buyerLookupResponse['error_type'] ?? null) === 'invalid_request') {
@@ -78,22 +70,8 @@ class DoffinLiveSearchService
             }
         }
 
-        $payload = $this->buildSearchPayload(
-            $query,
-            $organizationName,
-            $publicationDateFrom,
-            $publicationDateTo,
-            $buyerIds,
-            $cpvCodes,
-            $status,
-        );
-
         if ($keywords === []) {
-            return $this->fetchSinglePageSearch($payload, $page, $perPage, $buyerFallbackUsed);
-        }
-
-        if ($keywordsMode === 'any') {
-            return $this->harvestDiscoveryUnionSearch(
+            $payload = $this->buildSearchPayload(
                 $query,
                 $organizationName,
                 $publicationDateFrom,
@@ -101,20 +79,30 @@ class DoffinLiveSearchService
                 $buyerIds,
                 $cpvCodes,
                 $status,
-                $keywords,
-                $page,
-                $perPage,
-                $buyerFallbackUsed,
             );
+
+            return $this->fetchSinglePageSearch($payload, $page, $perPage, $buyerFallbackUsed);
         }
 
-        return $this->harvestAndFilterKeywordSearch(
-            $payload,
+        $searchResult = $this->cachedKeywordSearchResult(
+            $query,
+            $organizationName,
+            $publicationDateFrom,
+            $publicationDateTo,
+            $buyerIds,
+            $cpvCodes,
+            $status,
             $keywords,
+            $keywordsMode,
+            $perPage,
+            $buyerFallbackUsed,
+        );
+
+        return $this->paginateSearchResult(
+            $searchResult,
             $page,
             $perPage,
             $buyerFallbackUsed,
-            $keywordsMode,
         );
     }
 
@@ -229,6 +217,38 @@ class DoffinLiveSearchService
         ]);
     }
 
+    private function cachedBuyerLookupResponse(string $organizationName, string $query): array
+    {
+        $cacheKey = $this->buyerLookupCacheKey($organizationName);
+        $cachedResponse = Cache::get($cacheKey);
+
+        if (is_array($cachedResponse)) {
+            return $cachedResponse;
+        }
+
+        $response = $this->postSearch([
+            'numHitsPerPage' => 50,
+            'page' => 1,
+            'searchString' => $organizationName,
+            'sortBy' => 'RELEVANCE',
+            'facets' => $this->facets('', '', [], [], []),
+        ], 'buyer_lookup', [
+            'organization_name' => $organizationName,
+            'query' => $query,
+        ]);
+
+        if (($response['ok'] ?? false) === true) {
+            Cache::put($cacheKey, $response, now()->addMinutes(5));
+        }
+
+        return $response;
+    }
+
+    private function buyerLookupCacheKey(string $organizationName): string
+    {
+        return 'doffin:buyer-lookup:v1:'.sha1(Str::lower(Str::squish($organizationName)));
+    }
+
     private function fetchSinglePageSearch(array $payload, int $page, int $perPage, bool $fallbackUsed = false): array
     {
         $response = $this->postSearch($payload + [
@@ -254,10 +274,133 @@ class DoffinLiveSearchService
         return $response;
     }
 
+    private function cachedKeywordSearchResult(
+        string $query,
+        string $organizationName,
+        string $publicationDateFrom,
+        string $publicationDateTo,
+        array $buyerIds,
+        array $cpvCodes,
+        ?string $status,
+        array $keywords,
+        string $keywordsMode,
+        int $perPage,
+        bool $fallbackUsed = false,
+    ): array {
+        $cacheKey = $this->keywordSearchCacheKey(
+            $query,
+            $organizationName,
+            $publicationDateFrom,
+            $publicationDateTo,
+            $buyerIds,
+            $cpvCodes,
+            $status,
+            $keywords,
+            $keywordsMode,
+        );
+
+        $cachedResult = Cache::get($cacheKey);
+
+        if (is_array($cachedResult)) {
+            return $cachedResult;
+        }
+
+        $payload = $this->buildSearchPayload(
+            $query,
+            $organizationName,
+            $publicationDateFrom,
+            $publicationDateTo,
+            $buyerIds,
+            $cpvCodes,
+            $status,
+        );
+
+        $searchResult = $keywordsMode === 'any'
+            ? $this->harvestDiscoveryUnionSearch(
+                $query,
+                $organizationName,
+                $publicationDateFrom,
+                $publicationDateTo,
+                $buyerIds,
+                $cpvCodes,
+                $status,
+                $keywords,
+                $perPage,
+                $fallbackUsed,
+            )
+            : $this->harvestAndFilterKeywordSearch(
+                $payload,
+                $keywords,
+                $perPage,
+                $fallbackUsed,
+                $keywordsMode,
+            );
+
+        if (($searchResult['ok'] ?? false) === true) {
+            Cache::put($cacheKey, $searchResult, now()->addMinutes(5));
+        }
+
+        return $searchResult;
+    }
+
+    private function paginateSearchResult(array $searchResult, int $page, int $perPage, bool $fallbackUsed = false): array
+    {
+        if (! ($searchResult['ok'] ?? true)) {
+            return $this->markFallbackUsed($searchResult, $fallbackUsed);
+        }
+
+        $hits = $this->normalizeHits($searchResult['hits'] ?? []);
+        $total = count($hits);
+        $currentPage = max(1, min($page, max(1, (int) ceil($total / $perPage))));
+        $offset = ($currentPage - 1) * $perPage;
+
+        return $this->successResponse(
+            array_slice($hits, $offset, $perPage),
+            $currentPage,
+            $perPage,
+            $total,
+            $total,
+            $fallbackUsed || (bool) ($searchResult['fallback_used'] ?? false),
+            $searchResult['meta'] ?? [],
+        );
+    }
+
+    /**
+     * @param  array<int, string>  $keywords
+     */
+    private function keywordSearchCacheKey(
+        string $query,
+        string $organizationName,
+        string $publicationDateFrom,
+        string $publicationDateTo,
+        array $buyerIds,
+        array $cpvCodes,
+        ?string $status,
+        array $keywords,
+        string $keywordsMode,
+    ): string {
+        $scope = [
+            'query' => $query,
+            'organization_name' => $organizationName,
+            'publication_date_from' => $publicationDateFrom,
+            'publication_date_to' => $publicationDateTo,
+            'buyer_ids' => array_values(array_unique(array_map(static fn (mixed $value): string => (string) $value, $buyerIds))),
+            'cpv_codes' => array_values(array_unique(array_map(static fn (mixed $value): string => (string) $value, $cpvCodes))),
+            'status' => $status,
+            'keywords' => array_values(array_unique(array_map(static fn (string $keyword): string => Str::lower(Str::squish($keyword)), $keywords))),
+            'keywords_mode' => $keywordsMode,
+        ];
+
+        sort($scope['buyer_ids']);
+        sort($scope['cpv_codes']);
+        sort($scope['keywords']);
+
+        return 'doffin:live-search:v1:'.sha1(json_encode($scope, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+    }
+
     private function harvestAndFilterKeywordSearch(
         array $payload,
         array $keywords,
-        int $page,
         int $perPage,
         bool $fallbackUsed = false,
         string $keywordsMode = 'all',
@@ -270,11 +413,13 @@ class DoffinLiveSearchService
         }
 
         $filteredHits = $this->filterResultsByKeywords($searchResult['hits'] ?? [], $keywords, $keywordsMode);
-        $filteredTotal = count($filteredHits);
-        $currentPage = max(1, min($page, max(1, (int) ceil($filteredTotal / $perPage))));
-        $offset = ($currentPage - 1) * $perPage;
 
-        return $this->successResponse(array_slice($filteredHits, $offset, $perPage), $currentPage, $perPage, $filteredTotal, $filteredTotal, $fallbackUsed, $searchResult['meta'] ?? []);
+        return [
+            'ok' => true,
+            'hits' => $filteredHits,
+            'meta' => $searchResult['meta'] ?? [],
+            'fallback_used' => $fallbackUsed,
+        ];
     }
 
     private function harvestDiscoveryUnionSearch(
@@ -286,7 +431,6 @@ class DoffinLiveSearchService
         array $cpvCodes,
         ?string $status,
         array $keywords,
-        int $page,
         int $perPage,
         bool $fallbackUsed = false,
     ): array
@@ -344,11 +488,13 @@ class DoffinLiveSearchService
         }
 
         $deduplicatedHits = $this->deduplicateHits($allHits);
-        $total = count($deduplicatedHits);
-        $currentPage = max(1, min($page, max(1, (int) ceil($total / $perPage))));
-        $offset = ($currentPage - 1) * $perPage;
 
-        return $this->successResponse(array_slice($deduplicatedHits, $offset, $perPage), $currentPage, $perPage, $total, $total, $fallbackUsed, $meta);
+        return [
+            'ok' => true,
+            'hits' => $deduplicatedHits,
+            'meta' => $meta,
+            'fallback_used' => $fallbackUsed,
+        ];
     }
 
     private function harvestSearchPages(array $payload, int $perPage, bool $fallbackUsed = false): array
