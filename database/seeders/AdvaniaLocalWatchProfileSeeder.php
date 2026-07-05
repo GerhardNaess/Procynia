@@ -17,6 +17,20 @@ class AdvaniaLocalWatchProfileSeeder extends Seeder
 
     private const CUSTOMER_SLUG = 'advania-norge-as';
 
+    private const DEPARTMENT_NAME = 'MSP';
+
+    private const WATCH_PROFILE_NAME = 'IT drift - samlet';
+
+    private const LEGACY_PROFILE_NAMES = [
+        'IT drift og forvaltning',
+        'Servicedesk og brukerstøtte',
+        'Infrastruktur og datasenter',
+        'Nettverk og kommunikasjon',
+        'Sikkerhet og SOC',
+        'Sky og Microsoft 365',
+        'Backup, beredskap og recovery',
+    ];
+
     public function run(): void
     {
         if (! app()->environment(['local', 'development'])) {
@@ -24,24 +38,26 @@ class AdvaniaLocalWatchProfileSeeder extends Seeder
         }
 
         // Intentionally manual-only: keep this Advania-specific watch profile set out of DatabaseSeeder
-        // so generic seeding stays unchanged and the profiles are only added for local/dev reseeds.
+        // so generic seeding stays unchanged and the profile is only added for local/dev reseeds.
         DB::transaction(function (): void {
             $customer = $this->resolveCustomer();
             $mspDepartment = $this->resolveDepartment(
                 $customer,
-                'MSP',
+                self::DEPARTMENT_NAME,
                 'Avdeling for IT-drift og forvaltning',
             );
 
-            foreach ($this->profiles() as $profile) {
-                $this->upsertWatchProfile(
-                    customer: $customer,
-                    department: $mspDepartment,
-                    name: $profile['name'],
-                    description: $profile['description'],
-                    keywords: $profile['keywords'],
-                );
-            }
+            $this->removeLegacyProfiles($customer, $mspDepartment);
+
+            $profile = $this->upsertWatchProfile(
+                customer: $customer,
+                department: $mspDepartment,
+                name: self::WATCH_PROFILE_NAME,
+                description: 'Samlet watch list for IT-drift, forvaltning, support, infrastruktur og sikkerhet.',
+                keywords: $this->keywords(),
+            );
+
+            $this->syncCpvCodes($profile, $this->cpvRules());
         });
     }
 
@@ -83,97 +99,145 @@ class AdvaniaLocalWatchProfileSeeder extends Seeder
     }
 
     /**
-     * @return array<int, array{name:string,description:string,keywords:array<int, string>}>
+     * @return array<int, string>
      */
-    private function profiles(): array
+    private function keywords(): array
     {
         return [
-            [
-                'name' => 'IT drift og forvaltning',
-                'description' => 'Fanger anbud om drift, forvaltning og løpende tjenesteleveranse.',
-                'keywords' => [
-                    'drift',
-                    'forvaltning',
-                    'it-drift',
-                    'it drift',
-                    'tjenestedrift',
-                    'driftsavtale',
-                    'applikasjonsdrift',
-                ],
-            ],
-            [
-                'name' => 'Servicedesk og brukerstøtte',
-                'description' => 'Fanger anbud om servicedesk, førstelinje og brukerstøtte.',
-                'keywords' => [
-                    'servicedesk',
-                    'brukerstøtte',
-                    'support',
-                    'førstelinje',
-                    'itil',
-                    'hendelseshåndtering',
-                ],
-            ],
-            [
-                'name' => 'Infrastruktur og datasenter',
-                'description' => 'Fanger anbud om serverdrift, datasenter, lagring og virtualisering.',
-                'keywords' => [
-                    'serverdrift',
-                    'infrastruktur',
-                    'datasenter',
-                    'lagring',
-                    'backup',
-                    'virtualisering',
-                ],
-            ],
-            [
-                'name' => 'Nettverk og kommunikasjon',
-                'description' => 'Fanger anbud om nettverksdrift, brannmur og kommunikasjonstjenester.',
-                'keywords' => [
-                    'nettverk',
-                    'lan',
-                    'wan',
-                    'brannmur',
-                    'wifi',
-                    'sd-wan',
-                    'nettverksdrift',
-                ],
-            ],
-            [
-                'name' => 'Sikkerhet og SOC',
-                'description' => 'Fanger anbud om sikkerhetsovervåkning, hendelsesrespons og SOC.',
-                'keywords' => [
-                    'soc',
-                    'sikkerhetsovervåkning',
-                    'hendelsesrespons',
-                    'sårbarhet',
-                    'cybersikkerhet',
-                    'siem',
-                ],
-            ],
-            [
-                'name' => 'Sky og Microsoft 365',
-                'description' => 'Fanger anbud om Azure, Microsoft 365 og skydrift.',
-                'keywords' => [
-                    'azure',
-                    'microsoft 365',
-                    'entra id',
-                    'intune',
-                    'tenant',
-                    'skydrift',
-                ],
-            ],
-            [
-                'name' => 'Backup, beredskap og recovery',
-                'description' => 'Fanger anbud om backup, gjenoppretting, beredskap og kontinuitet.',
-                'keywords' => [
-                    'backup',
-                    'restore',
-                    'disaster recovery',
-                    'beredskap',
-                    'kontinuitet',
-                ],
-            ],
+            'IT drift',
+            'IT-drift',
+            'forvaltning',
+            'driftstjenester',
+            'managed services',
+            'applikasjonsdrift',
+            'tjenestedrift',
+            'servicedesk',
+            'brukerstøtte',
+            'support',
+            'helpdesk',
+            'ITIL',
+            'hendelseshåndtering',
+            'infrastruktur',
+            'serverdrift',
+            'datasenter',
+            'virtualisering',
+            'lagring',
+            'nettverk',
+            'nettverksdrift',
+            'LAN',
+            'WAN',
+            'WiFi',
+            'brannmur',
+            'SD-WAN',
+            'SOC',
+            'sikkerhetsovervåkning',
+            'cybersikkerhet',
+            'SIEM',
+            'hendelsesrespons',
+            'Azure',
+            'Microsoft 365',
+            'Entra ID',
+            'Intune',
+            'skydrift',
+            'tenant',
+            'backup',
+            'restore',
+            'disaster recovery',
+            'beredskap',
+            'kontinuitet',
         ];
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function cpvRules(): array
+    {
+        return [
+            '72000000' => 20,
+            '72250000' => 20,
+            '72253000' => 20,
+            '72253100' => 20,
+            '72253200' => 20,
+            '72261000' => 20,
+            '72267000' => 20,
+            '72267100' => 20,
+            '72315000' => 20,
+            '72315100' => 20,
+            '72315200' => 20,
+            '72500000' => 20,
+            '72510000' => 20,
+            '72511000' => 20,
+            '72514000' => 20,
+            '72514100' => 20,
+            '72514300' => 20,
+            '72590000' => 20,
+            '72591000' => 20,
+            '72600000' => 20,
+            '72610000' => 20,
+            '72611000' => 20,
+            '72700000' => 20,
+            '72710000' => 20,
+            '72720000' => 20,
+            '72900000' => 20,
+            '72910000' => 20,
+            '50312000' => 12,
+            '50312300' => 12,
+            '50312600' => 12,
+            '50330000' => 12,
+            '50332000' => 12,
+            '64200000' => 14,
+            '64210000' => 14,
+            '64215000' => 14,
+            '64216000' => 14,
+            '64216110' => 14,
+            '64220000' => 14,
+            '30200000' => 10,
+            '30210000' => 10,
+            '30230000' => 10,
+            '32400000' => 10,
+            '32410000' => 10,
+            '32420000' => 10,
+            '32424000' => 10,
+            '48000000' => 10,
+            '48200000' => 10,
+            '48210000' => 10,
+            '48220000' => 10,
+            '48730000' => 10,
+            '48760000' => 10,
+            '48800000' => 10,
+            '48820000' => 10,
+            '48821000' => 10,
+        ];
+    }
+
+    private function removeLegacyProfiles(Customer $customer, Department $department): void
+    {
+        WatchProfile::query()
+            ->where('customer_id', $customer->id)
+            ->where('department_id', $department->id)
+            ->whereNull('user_id')
+            ->whereIn('name', self::LEGACY_PROFILE_NAMES)
+            ->delete();
+    }
+
+    /**
+     * @param  array<string, int>  $cpvRules
+     */
+    private function syncCpvCodes(WatchProfile $profile, array $cpvRules): void
+    {
+        $desiredCpvCodes = array_keys($cpvRules);
+
+        $profile->cpvCodes()
+            ->whereNotIn('cpv_code', $desiredCpvCodes)
+            ->delete();
+
+        foreach ($cpvRules as $cpvCode => $weight) {
+            $profile->cpvCodes()->updateOrCreate(
+                ['cpv_code' => $cpvCode],
+                ['weight' => $weight],
+            );
+        }
     }
 
     /**
@@ -190,6 +254,7 @@ class AdvaniaLocalWatchProfileSeeder extends Seeder
         $existing = WatchProfile::query()
             ->where('customer_id', $customer->id)
             ->where('department_id', $department->id)
+            ->whereNull('user_id')
             ->whereRaw('LOWER(name) = ?', [Str::lower($normalizedName)])
             ->first();
 
