@@ -252,6 +252,18 @@ class User extends Authenticatable implements FilamentUser
         return $this->resolvedBidManagerScope() !== null || $this->resolvedBidRole() === self::BID_ROLE_CONTRIBUTOR;
     }
 
+    public function canManageCustomerBilling(): bool
+    {
+        if (! $this->canAccessCustomerFrontend()) {
+            return false;
+        }
+
+        return in_array($this->resolvedBidRole(), [
+            self::BID_ROLE_SYSTEM_OWNER,
+            self::BID_ROLE_BID_MANAGER,
+        ], true);
+    }
+
     public function canViewAllCasesViaSettings(): bool
     {
         if (! $this->canAccessCustomerFrontend() || $this->customer_id === null) {

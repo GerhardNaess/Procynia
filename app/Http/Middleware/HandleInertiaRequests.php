@@ -48,6 +48,7 @@ class HandleInertiaRequests extends Middleware
                     'primary_affiliation_scope_label' => $user->primary_affiliation_scope_label,
                     'is_system_owner' => $user->isSystemOwner(),
                     'is_bid_manager' => $user->isBidManager(),
+                    'can_manage_customer_billing' => $user->canManageCustomerBilling(),
                     'can_manage_customer_users' => $this->customerContext->canManageCustomerUsers($user),
                     'can_manage_customer_departments' => $this->customerContext->canCreateCustomerDepartments($user),
                     'can_manage_watch_profiles' => $user->canAccessCustomerFrontend(),

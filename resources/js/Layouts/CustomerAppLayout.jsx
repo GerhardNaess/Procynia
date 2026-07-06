@@ -102,7 +102,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
     const aiUsageHref = '/app/ai/knowledge-base/ai-usage';
     const watchProfilesHref = user?.can_manage_watch_profiles ? '/app/watch-profiles' : null;
     const environmentHref = user?.can_manage_customer_users ? '/app/customer-environment' : null;
-    const billingHref = user?.is_system_owner ? '/app/billing' : null;
+    const billingHref = user?.can_manage_customer_billing ? '/app/billing' : null;
 
     const activeMainArea = (() => {
         if (pathname === '/app') {

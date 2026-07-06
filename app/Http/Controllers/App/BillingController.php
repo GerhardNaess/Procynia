@@ -20,7 +20,7 @@ class BillingController extends Controller
     {
         $user = $request->user();
 
-        abort_unless($user->isSystemOwner(), 403);
+        abort_unless($user->canManageCustomerBilling(), 403);
 
         $customer = $user->customer;
         $billingService = app(BillingService::class);
@@ -101,7 +101,7 @@ class BillingController extends Controller
     {
         $user = $request->user();
 
-        abort_unless($user->isSystemOwner(), 403);
+        abort_unless($user->canManageCustomerBilling(), 403);
 
         app(SubscriptionService::class)->cancel($user->customer);
 
@@ -114,7 +114,7 @@ class BillingController extends Controller
     {
         $user = $request->user();
 
-        abort_unless($user->isSystemOwner(), 403);
+        abort_unless($user->canManageCustomerBilling(), 403);
 
         app(SubscriptionService::class)->resume($user->customer);
 
@@ -127,7 +127,7 @@ class BillingController extends Controller
     {
         $user = $request->user();
 
-        abort_unless($user->isSystemOwner(), 403);
+        abort_unless($user->canManageCustomerBilling(), 403);
 
         $customer = $user->customer;
         abort_unless($customer instanceof Customer, 404);
