@@ -1,5 +1,5 @@
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CpvSelector from './CpvSelector';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import AlertBox from '../../../Components/App/AlertBox';
@@ -818,6 +818,8 @@ export default function NoticeIndex({
     const isHistoryMode = mode === 'history';
     const isAlertsTab = isLiveMode && tab === 'alerts';
     const isSavedOrHistoryMode = mode === 'saved' || mode === 'history';
+    const liveSearchResultsRef = useRef(null);
+    const shouldScrollToLiveSearchResultsRef = useRef(false);
     const worklistFilterOptions = isHistoryMode
         ? [{ value: '', label: noticesText.worklistFilterAllTypes }, ...historyTypeOptions]
         : bidStatusOptions;
@@ -855,6 +857,7 @@ export default function NoticeIndex({
     const totalHits = normalizeCount(notices?.meta?.numHitsTotal ?? notices?.meta?.total ?? 0);
     const accessibleHits = normalizeCount(notices?.meta?.numHitsAccessible ?? notices?.meta?.total ?? 0);
     const visibleHits = normalizeCount(notices?.data?.length ?? 0);
+    const liveSearchCurrentPage = isLiveMode ? Number(notices?.meta?.current_page ?? 1) : 1;
     const emptyState = emptyStateContent(mode, hasAppliedSearch, hasAppliedRefinements, totalHits, visibleHits, liveSearchError, noticesText);
     const isCappedLiveSearch = isLiveMode && liveSearchError === '' && Boolean(notices?.meta?.is_capped) && totalHits > accessibleHits;
     const liveSearchHeading = liveSearchError !== ''
@@ -906,6 +909,38 @@ export default function NoticeIndex({
             historyForm.clearErrors();
         }
     }, [isHistoryMode]);
+
+    useEffect(() => {
+        if (!isLiveMode || !shouldScrollToLiveSearchResultsRef.current || !liveSearchResultsRef.current) {
+            return;
+        }
+
+        shouldScrollToLiveSearchResultsRef.current = false;
+
+        liveSearchResultsRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+        });
+    }, [isLiveMode, liveSearchCurrentPage]);
+
+    const goToNoticePage = (url) => {
+        if (!url) {
+            return;
+        }
+
+        if (isLiveMode) {
+            shouldScrollToLiveSearchResultsRef.current = true;
+
+            router.visit(url, {
+                preserveScroll: true,
+                preserveState: true,
+            });
+
+            return;
+        }
+
+        router.visit(url);
+    };
 
     const saveNotice = (notice) => {
         router.post(
@@ -1827,7 +1862,7 @@ export default function NoticeIndex({
                             </section>
                         ) : null}
 
-                        <section className="space-y-3.5">
+                        <section ref={liveSearchResultsRef} id="doffin-results" className="scroll-mt-28 space-y-3.5">
                             <div className="space-y-1">
                                 <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                                     {source?.label}
@@ -2787,7 +2822,7 @@ export default function NoticeIndex({
                                 <button
                                     type="button"
                                     disabled={!notices.meta.prev_page_url}
-                                    onClick={() => notices.meta.prev_page_url && router.visit(notices.meta.prev_page_url)}
+                                    onClick={() => goToNoticePage(notices.meta.prev_page_url)}
                                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     {common.previous}
@@ -2795,7 +2830,7 @@ export default function NoticeIndex({
                                 <button
                                     type="button"
                                     disabled={!notices.meta.next_page_url}
-                                    onClick={() => notices.meta.next_page_url && router.visit(notices.meta.next_page_url)}
+                                    onClick={() => goToNoticePage(notices.meta.next_page_url)}
                                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     {common.next}
