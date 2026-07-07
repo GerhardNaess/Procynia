@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
+use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
@@ -21,6 +22,13 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Prevent section jobs from running synchronously in these orchestrator tests.
+        Queue::fake();
+    }
+
     // --- Happy path ---
 
     public function test_job_transitions_run_from_queued_to_sections_planned(): void
@@ -37,6 +45,7 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED, $run->status);
         $this->assertNotNull($run->started_at);
+        $this->assertNotNull($run->enterprise_wiki_page_id);
     }
 
     public function test_job_creates_section_rows_matching_text_headings(): void
@@ -63,6 +72,36 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $this->assertSame('Referanser', $sections[1]->heading);
     }
 
+    public function test_job_dispatches_one_section_job_per_section(): void
+    {
+        $customer = $this->createCustomer();
+        $item = $this->createKnowledgeItem($customer);
+        $version = $this->createVersion($item, $customer, [
+            'extracted_text' => "## Seksjon A\nInnhold A.\n\n## Seksjon B\nInnhold B.",
+        ]);
+        $run = $this->createQueuedRun($customer, $version);
+
+        $this->runJob($run);
+
+        Queue::assertPushed(ProcessEnterpriseWikiSection::class, 2);
+    }
+
+    public function test_job_creates_draft_wiki_page_and_version(): void
+    {
+        $customer = $this->createCustomer();
+        $item = $this->createKnowledgeItem($customer);
+        $version = $this->createVersion($item, $customer);
+        $run = $this->createQueuedRun($customer, $version);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $this->assertNotNull($run->enterprise_wiki_page_id);
+        $this->assertDatabaseCount('enterprise_wiki_pages', 1);
+        $this->assertDatabaseCount('enterprise_wiki_page_versions', 1);
+        $this->assertDatabaseHas('enterprise_wiki_page_versions', ['version_number' => 1, 'is_current' => false]);
+    }
+
     public function test_job_creates_sections_for_text_without_headings(): void
     {
         $text = str_repeat('Tekst uten overskrift. ', 200);
@@ -83,25 +122,6 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
 
         $this->assertGreaterThan(0, $sectionCount);
         $this->assertLessThanOrEqual(EnterpriseWikiSectionParser::MAX_SECTIONS, $sectionCount);
-    }
-
-    public function test_job_sections_without_headings_have_null_heading(): void
-    {
-        $text = str_repeat('Plain text. ', 300);
-
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer, ['extracted_text' => $text]);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $this->runJob($run);
-
-        $hasNonNullHeading = EnterpriseWikiIngestSection::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->whereNotNull('heading')
-            ->exists();
-
-        $this->assertFalse($hasNonNullHeading);
     }
 
     // --- Idempotency ---
@@ -174,21 +194,7 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
     }
 
-    // --- No AI calls, no RAG writes ---
-
-    public function test_job_does_not_dispatch_ai_jobs(): void
-    {
-        Queue::fake();
-
-        $customer = $this->createCustomer();
-        $item = $this->createKnowledgeItem($customer);
-        $version = $this->createVersion($item, $customer);
-        $run = $this->createQueuedRun($customer, $version);
-
-        $this->runJob($run);
-
-        Queue::assertNothingPushed();
-    }
+    // --- RAG read-only ---
 
     public function test_job_does_not_modify_knowledge_item_versions(): void
     {

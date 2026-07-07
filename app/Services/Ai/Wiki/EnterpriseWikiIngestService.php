@@ -56,7 +56,7 @@ class EnterpriseWikiIngestService
         $version = KnowledgeItemVersion::query()
             ->where('id', $versionId)
             ->where('customer_id', $customerId)
-            ->select(['id', 'knowledge_item_id', 'customer_id', 'approval_status', 'is_current', 'extracted_text', 'file_hash_sha256'])
+            ->select(['id', 'knowledge_item_id', 'customer_id', 'approval_status', 'is_current', 'extracted_text', 'file_hash_sha256', 'original_filename'])
             ->first();
 
         if ($version === null) {

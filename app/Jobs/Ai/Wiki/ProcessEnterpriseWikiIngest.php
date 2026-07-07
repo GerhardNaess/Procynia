@@ -4,6 +4,9 @@ namespace App\Jobs\Ai\Wiki;
 
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\KnowledgeItem;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use Illuminate\Bus\Queueable;
@@ -13,6 +16,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
 
@@ -76,20 +80,58 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
                 return;
             }
 
-            // Persist the section plan and advance run status atomically.
-            // Section AI processing (phase 1E) will pick up runs in STATUS_SECTIONS_PLANNED.
-            DB::transaction(function () use ($run, $sections): void {
+            $knowledgeItem = KnowledgeItem::query()
+                ->where('id', $version->knowledge_item_id)
+                ->select(['id', 'title'])
+                ->first();
+
+            $pageTitle = $knowledgeItem?->title ?? 'Wiki-side';
+
+            // Persist draft page/version, section plan, and advance run status atomically.
+            // Claims require non-null page/version FKs, so the draft shell must exist
+            // before any ProcessEnterpriseWikiSection job runs.
+            $sectionIds = DB::transaction(function () use ($run, $sections, $pageTitle): array {
+                $page = EnterpriseWikiPage::query()->create([
+                    'customer_id' => $run->customer_id,
+                    'slug' => 'wiki-draft-' . $run->id,
+                    'title' => $pageTitle,
+                    'status' => EnterpriseWikiPage::STATUS_DRAFT,
+                    'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+                    'last_source_hash' => $run->source_hash,
+                ]);
+
+                EnterpriseWikiPageVersion::query()->create([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'version_number' => 1,
+                    'is_current' => false,
+                ]);
+
+                $run->update([
+                    'enterprise_wiki_page_id' => $page->id,
+                    'status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+                ]);
+
+                $sectionIds = [];
+
                 foreach ($sections as $index => $section) {
-                    EnterpriseWikiIngestSection::query()->create([
+                    $row = EnterpriseWikiIngestSection::query()->create([
                         'enterprise_wiki_ingest_run_id' => $run->id,
                         'section_index' => $index,
                         'heading' => $section['heading'],
                         'status' => EnterpriseWikiIngestSection::STATUS_PENDING,
                     ]);
+
+                    $sectionIds[] = $row->id;
                 }
 
-                $run->update(['status' => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED]);
+                return $sectionIds;
             });
+
+            // Dispatch section jobs outside the transaction so DB rows are committed
+            // before workers pick them up. Each job processes one section independently.
+            foreach ($sectionIds as $sectionId) {
+                ProcessEnterpriseWikiSection::dispatch($sectionId);
+            }
 
             Log::info(sprintf(
                 '[WIKI_INGEST][SECTIONS_PLANNED] run_id=%d sections=%d customer_id=%d source_id=%d',
