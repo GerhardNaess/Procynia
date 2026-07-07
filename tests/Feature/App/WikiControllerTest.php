@@ -1,0 +1,342 @@
+<?php
+
+namespace Tests\Feature\App;
+
+use App\Models\Customer;
+use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
+use App\Models\Language;
+use App\Models\Nationality;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+/**
+ * Phase 2A: read-only wiki controller tests.
+ *
+ * Visibility rules (from plan §5.3):
+ *   approved            → all authenticated customer users
+ *   draft/pending_review → System Owner and Bid Manager only
+ *   rejected/archived   → not listed (not in plan's visibility table)
+ *
+ * No approve/reject actions exist in phase 2 — those are phase 3.
+ */
+class WikiControllerTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+    }
+
+    // =========================================================================
+    // index() — visibility
+    // =========================================================================
+
+    public function test_contributor_sees_approved_pages_in_index(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Iso-side');
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+            $pages = data_get($inertia, 'props.pages', []);
+
+            return data_get($inertia, 'component') === 'App/Wiki/Index'
+                && collect($pages)->contains(fn(array $p) => $p['id'] === $page->id);
+        });
+    }
+
+    public function test_contributor_does_not_see_draft_pages_in_index(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast-side');
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+
+            return ! $pages->contains(fn(array $p) => $p['id'] === $draft->id);
+        });
+    }
+
+    public function test_contributor_does_not_see_pending_review_pages_in_index(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $pending = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Under-review-side');
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($pending): bool {
+            $pages = collect(data_get($inertia, 'props.pages', []));
+
+            return ! $pages->contains(fn(array $p) => $p['id'] === $pending->id);
+        });
+    }
+
+    public function test_system_owner_sees_draft_and_pending_review_pages_in_index(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Mitt utkast');
+        $pending = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Til gjennomgang');
+        $approved = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+
+        $response = $this->actingAs($owner)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft, $pending, $approved): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return $ids->contains($draft->id)
+                && $ids->contains($pending->id)
+                && $ids->contains($approved->id);
+        });
+    }
+
+    public function test_bid_manager_sees_draft_and_pending_review_pages_in_index(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'BM utkast');
+        $pending = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM review');
+
+        $response = $this->actingAs($manager)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft, $pending): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return $ids->contains($draft->id) && $ids->contains($pending->id);
+        });
+    }
+
+    // =========================================================================
+    // index() — customer isolation
+    // =========================================================================
+
+    public function test_index_does_not_leak_other_customer_pages(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Vår side');
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_APPROVED, 'Fremmed side');
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownPage, $foreignPage): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+
+            return $ids->contains($ownPage->id) && ! $ids->contains($foreignPage->id);
+        });
+    }
+
+    // =========================================================================
+    // show() — basic returns
+    // =========================================================================
+
+    public function test_show_returns_page_with_claims_and_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO 9001-kompetanse');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Vi er ISO 9001-sertifisert.');
+        $ref = $this->createSourceReference($claim, 'kompetanse.docx', 'ISO sertifisert siden 2020.');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page, $version, $claim, $ref): bool {
+            $component = data_get($inertia, 'component');
+            $props = data_get($inertia, 'props');
+            $claims = data_get($props, 'claims', []);
+            $firstClaim = $claims[0] ?? null;
+            $firstRef = ($firstClaim['source_references'] ?? [])[0] ?? null;
+
+            return $component === 'App/Wiki/Show'
+                && data_get($props, 'page.id') === $page->id
+                && data_get($props, 'current_version.id') === $version->id
+                && count($claims) === 1
+                && ($firstClaim['claim_text'] ?? null) === $claim->claim_text
+                && ($firstClaim['approval_status'] ?? null) === EnterpriseWikiClaim::APPROVAL_STATUS_PENDING
+                && ($firstRef['source_label'] ?? null) === $ref->source_label
+                && ($firstRef['excerpt'] ?? null) === $ref->excerpt;
+        });
+    }
+
+    public function test_show_returns_404_for_unknown_slug(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+
+        $this->actingAs($user)->get('/app/wiki/finnes-ikke')->assertNotFound();
+    }
+
+    // =========================================================================
+    // show() — visibility by status
+    // =========================================================================
+
+    public function test_show_returns_404_for_draft_page_to_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast kun for SO');
+
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+    }
+
+    public function test_show_returns_404_for_pending_review_page_to_contributor(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Under review');
+
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+    }
+
+    public function test_system_owner_can_view_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Til godkjenning');
+
+        $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    // =========================================================================
+    // show() — customer isolation
+    // =========================================================================
+
+    public function test_show_enforces_customer_isolation(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_APPROVED, 'Fremmed wiki');
+
+        $this->actingAs($user)->get('/app/wiki/'.$foreignPage->slug)->assertNotFound();
+    }
+
+    // =========================================================================
+    // Phase 2A only — no approve/reject routes
+    // =========================================================================
+
+    public function test_no_approve_route_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Godkjenningstest');
+
+        // PATCH /app/wiki/{slug}/approve must not exist (that is phase 3)
+        $this->actingAs($owner)->patch('/app/wiki/'.$page->slug.'/approve')->assertNotFound();
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private function createCustomer(string $name = 'Testkunde AS'): Customer
+    {
+        $language = Language::query()->firstOrCreate(
+            ['code' => 'no'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],
+        );
+
+        $nationality = Nationality::query()->firstOrCreate(
+            ['code' => 'NO'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO'],
+        );
+
+        return Customer::query()->create([
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
+            'billing_interval' => Customer::BILLING_MONTHLY,
+            'is_active' => true,
+        ]);
+    }
+
+    private function createUser(Customer $customer, string $bidRole): User
+    {
+        return User::query()->create([
+            'name' => 'Test User',
+            'email' => Str::lower(Str::random(8)).'@test.invalid',
+            'password' => bcrypt('secret'),
+            'role' => User::ROLE_USER,
+            'bid_role' => $bidRole,
+            'customer_id' => $customer->id,
+            'is_active' => true,
+        ]);
+    }
+
+    private function createPage(Customer $customer, string $status, string $title): EnterpriseWikiPage
+    {
+        return EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
+            'title' => $title,
+            'status' => $status,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    private function createVersion(EnterpriseWikiPage $page, bool $isCurrentTrue = false): EnterpriseWikiPageVersion
+    {
+        return EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'version_number' => 1,
+            'is_current' => $isCurrentTrue,
+            'content_markdown' => '# '.$page->title,
+        ]);
+    }
+
+    private function createClaim(
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        string $text,
+    ): EnterpriseWikiClaim {
+        return EnterpriseWikiClaim::query()->create([
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'claim_text' => $text,
+            'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+            'conflict_flag' => false,
+            'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+            'position_order' => 0,
+        ]);
+    }
+
+    private function createSourceReference(
+        EnterpriseWikiClaim $claim,
+        string $label,
+        string $excerpt,
+    ): EnterpriseWikiSourceReference {
+        return EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+            'source_id' => 1,
+            'source_label' => $label,
+            'source_hash' => str_pad('h', 64, '0'),
+            'excerpt' => $excerpt,
+        ]);
+    }
+}

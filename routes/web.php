@@ -20,6 +20,7 @@ use App\Http\Controllers\App\WatchProfileController;
 use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
+use App\Http\Controllers\App\WikiController;
 use App\Http\Controllers\Health\DocumentHealthController;
 use App\Http\Controllers\Health\IntegrationHealthController;
 use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
@@ -297,4 +298,10 @@ Route::prefix('app')
         // Go/No-go assessment persistence (all users with case access)
         Route::patch('/notices/saved/{savedNotice}/go-no-go-assessment', [GoNoGoAssessmentController::class, 'upsert'])
             ->name('notices.saved.go-no-go-assessment.upsert');
+
+        // Enterprise Wiki (read-only, fase 2)
+        Route::prefix('/wiki')->name('wiki.')->group(function (): void {
+            Route::get('/', [WikiController::class, 'index'])->name('index');
+            Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
+        });
     });
