@@ -21,6 +21,7 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\WikiController;
+use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Health\DocumentHealthController;
 use App\Http\Controllers\Health\IntegrationHealthController;
 use App\Http\Controllers\Ops\QueueHeartbeatHealthController;
@@ -299,9 +300,10 @@ Route::prefix('app')
         Route::patch('/notices/saved/{savedNotice}/go-no-go-assessment', [GoNoGoAssessmentController::class, 'upsert'])
             ->name('notices.saved.go-no-go-assessment.upsert');
 
-        // Enterprise Wiki (fase 2-3)
+        // Enterprise Wiki (fase 2-3, 4A)
         Route::prefix('/wiki')->name('wiki.')->group(function (): void {
             Route::get('/', [WikiController::class, 'index'])->name('index');
+            Route::post('/sources', [WikiSourceController::class, 'store'])->name('sources.store');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
