@@ -836,10 +836,7 @@ class KnowledgeChunkMetadataGenerationService
                 if (method_exists($container, 'bound') && $container->bound('config')) {
                     $config = $container->make('config');
 
-                    $model = trim((string) $config->get(
-                        'services.openai.requirement_answer_model',
-                        $config->get('services.openai.model', $model),
-                    ));
+                    $model = trim((string) $config->get('services.openai.model', $model));
                 }
             }
         } catch (Throwable) {

@@ -241,6 +241,44 @@ class KnowledgeChunkMetadataGenerationServiceTest extends TestCase
         $this->assertSame(100, $chunk->end_offset);
     }
 
+    public function test_metadata_generation_uses_services_openai_model_not_requirement_answer_model(): void
+    {
+        [$document, $chunk] = $this->fixtureBundle();
+
+        config(['services.openai.model' => 'gpt-4.1-mini']);
+        config(['services.openai.requirement_answer_model' => 'gpt-5']);
+
+        $capturedPayload = null;
+
+        $client = Mockery::mock(OpenAiClient::class);
+        $client->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload) {
+                $capturedPayload = $payload;
+
+                return [
+                    'id' => 'resp_model_lock_test',
+                    'output_text' => json_encode([
+                        'service_product_tag' => 'samhandling',
+                        'theme_tag' => 'driftsmodell',
+                        'topic' => 'møtestruktur',
+                        'sub_topic' => 'operativ oppfølging',
+                        'keywords' => [],
+                        'matched_terms' => [],
+                        'summary_for_retrieval' => 'Test summary.',
+                        'new_term_suggestions' => [],
+                        'confidence_score' => 0.9,
+                    ], JSON_UNESCAPED_UNICODE),
+                ];
+            });
+        $this->app->instance(OpenAiClient::class, $client);
+
+        app(KnowledgeChunkMetadataGenerationService::class)->generateForChunk($document, $chunk);
+
+        $this->assertIsArray($capturedPayload);
+        $this->assertSame('gpt-4.1-mini', $capturedPayload['model']);
+    }
+
     public function test_it_returns_failed_metadata_when_openai_throws_and_preserves_chunk_content_for_embedding(): void
     {
         [$document, $chunk] = $this->fixtureBundle();
