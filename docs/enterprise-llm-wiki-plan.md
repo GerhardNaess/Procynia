@@ -1,8 +1,10 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.1 (utkast)
+Versjon: 0.2
 Dato: 2026-07-07
 Status: Fase 0 fullført / Fase 1 fullført (2026-07-07)
+
+> **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
 ---
 
@@ -49,9 +51,11 @@ Alle nye tabeller bruker prefikset `enterprise_wiki_` for å markere tydelig sep
 
 ---
 
-## 3. Første read-only kilde
+## 3. Kildearkitektur
 
-**Pilot-kilde:** `KnowledgeItemVersion.extracted_text`
+### 3.1 Midlertidig bootstrap-kilde (Fase 1 — skal ikke være permanent primærflyt)
+
+**Bootstrap-kilde:** `KnowledgeItemVersion.extracted_text`
 
 Vilkår for lesing:
 
@@ -59,13 +63,40 @@ Vilkår for lesing:
 - `is_current = true`
 - Kun for kunder med `ai_usage_enabled = true` på det tilknyttede `KnowledgeItem`
 
-Ingen re-ekstraksjon av dokumenttekst i pilot. `extracted_text` er allerede prosessert og godkjent av mennesker — dette er den sikreste og enkleste inngangen.
+Ingen re-ekstraksjon av dokumenttekst i pilot. `extracted_text` er allerede prosessert og godkjent av mennesker — dette er den enkleste inngangen for å verifisere at Wiki-pipeline fungerer.
 
-Fremtidige faser kan legge til:
+> **Viktig begrensning:** Denne tilnærmingen bruker Kunnskapsbase som datakilde og skaper dermed en implisitt kobling mellom de to systemene. Det er **ikke** ønsket langsiktig arkitektur. Så snart Fase 4A er implementert, skal `KnowledgeItemVersion`-ingest degraderes til en eksplisitt legacy/import-kommando og ikke eksponeres som primærflyt i UI.
 
-- Fase 2: `SavedNoticeAiDocument.extracted_text` (saksdokumenter)
-- Fase 3: `Notice`-data og CPV-mønstre fra Doffin
-- Fase 4: Egne runbooks og prosessdokumenter
+### 3.2 Ønsket primærflyt (Fase 4A — Enterprise Wiki egne kilder)
+
+Enterprise Wiki skal ha sin **egen** upload/import-flyt, fullstendig uavhengig av `KnowledgeItem`, `KnowledgeItemVersion` og `KnowledgeItemChunk`.
+
+```
+Enterprise Wiki source upload/import
+→ Enterprise Wiki extraction (tekstekstraksjon fra docx/pdf)
+→ Enterprise Wiki sections (splitt i seksjoner)
+→ Enterprise Wiki claims (AI genererer strukturerte påstander)
+→ Enterprise Wiki source references (kildebevis per påstand)
+→ Enterprise Wiki page pending_review (klar for menneskelig godkjenning)
+```
+
+Primærkilder i Fase 4A:
+
+- `EnterpriseWikiDocument` — ny modell (se Fase 4A), ingen FK mot Kunnskapsbase
+- `source_type = 'enterprise_wiki_document'` på `enterprise_wiki_source_references`
+- `source_type = 'enterprise_wiki_document'` på `enterprise_wiki_ingest_runs`
+
+Mulige tilleggskilder i senere faser (egne vurderinger — krever ikke Kunnskapsbase):
+
+- `SavedNoticeAiDocument.extracted_text` (saksdokumenter fra AI-workspace)
+- `Notice`-data og CPV-mønstre fra Doffin
+- Ekstern URL-import eller manuell tekstinput
+
+### 3.3 Kunnskapsbase som eventuell legacy-importkilde
+
+`KnowledgeItemVersion`-ingest beholdes etter Fase 4A, men **kun** som en eksplisitt Artisan-kommando for migrering og import av eksisterende Kunnskapsbase-innhold inn i Wiki. Det skal ikke være en flyt brukere kan starte fra UI uten tydelig "importer fra Kunnskapsbase"-merking.
+
+Kunnskapsbase og Enterprise Wiki er separate systemer. Ingen automatisk synkronisering.
 
 ---
 
@@ -286,14 +317,18 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 
 ---
 
-## 7. Wiki-ingest-flyt (pilot)
+## 7. Wiki-ingest-flyt
+
+### 7.1 Flyt A: Bootstrap/import via Kunnskapsbase (midlertidig — Fase 1)
+
+> **Status:** Implementert og fungerende. Regnes som midlertidig bootstrap — skal ikke promoteres til permanent primærflyt i UI. Se §3.1 for begrensningsbeskrivelse.
 
 ```
 1. Bruker velger en godkjent KnowledgeItemVersion
    └─ Filtert: approval_status = 'approved' AND is_current = true
    └─ Kunden må ha ai_usage_enabled = true
 
-2. Manuell trigger: Artisan-kommando eller fremtidig UI-knapp
+2. Manuell trigger: Artisan-kommando (php artisan wiki:ingest --customer=X --version-id=Y)
    └─ Oppretter enterprise_wiki_ingest_runs med status = queued
 
 3. Orchestrator-jobb startes (ProcessEnterpriseWikiIngest)
@@ -306,18 +341,7 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 
 4. Per-seksjon-jobb (ProcessEnterpriseWikiSection)
    └─ AI mottar: seksjonstekst + instruksjon om JSON-output
-   └─ AI returnerer:
-       {
-         "proposed_topic": "...",
-         "claims": [
-           {
-             "text": "...",
-             "confidence": "high|medium|low|uncertain",
-             "excerpt": "...",
-             "conflict_note": null
-           }
-         ]
-       }
+   └─ AI returnerer strukturert JSON med claim-liste
    └─ Backend validerer JSON-schema
    └─ Backend oppretter enterprise_wiki_claims-rader
    └─ Backend oppretter enterprise_wiki_source_references per claim
@@ -334,7 +358,35 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 6. Ingen wiki-output kobles til eksisterende RAG, kravsvar eller AI workspace
 ```
 
+### 7.2 Ønsket primærflyt: Enterprise Wiki egne kilder (Fase 4A)
+
+```
+1. Bruker laster opp dokument direkte i Enterprise Wiki
+   └─ Egen upload-route: POST /app/wiki/sources
+   └─ Oppretter EnterpriseWikiDocument (ny modell — ingen FK mot KnowledgeItem)
+   └─ Lagrer fil, filnavn, SHA-256, customer_id
+
+2. Tekstekstraksjon (Enterprise Wiki extraction)
+   └─ Samme tekstekstraksjons-metoder som Kunnskapsbase (docx/pdf)
+   └─ Men lagret i EnterpriseWikiDocument, ikke KnowledgeItemVersion
+   └─ Ingen chunking — fulltext for seksjonsbasert splitting
+
+3. Manuell trigger: UI-knapp i Enterprise Wiki
+   └─ Oppretter enterprise_wiki_ingest_runs
+       (source_type = 'enterprise_wiki_document', source_id = EnterpriseWikiDocument.id)
+
+4. Orchestrator → Per-seksjon → Finalize
+   └─ Identisk flyt som Flyt A, men kilde er EnterpriseWikiDocument
+   └─ source_references bruker source_type = 'enterprise_wiki_document'
+   └─ Ingen lesing av KnowledgeItem, KnowledgeItemVersion eller KnowledgeItemChunk
+
+5. Wiki-side → pending_review → godkjenning
+   └─ Identisk godkjenningsflyt som Flyt A
+```
+
 **Viktig prinsipp:** AI returnerer JSON med claim-liste. AI returnerer aldri friformulert markdown direkte. Backend assembler wiki-siden fra strukturert output. Dette speiler chunking-filosofien i `docs/chunking-strategy.md`.
+
+Når Flyt B er implementert, skal `enterprise_wiki_ingest_runs.source_type`-enum utvides med `enterprise_wiki_document`. Eksisterende `knowledge_item_version`-verdier beholdes for historikk og legacy-import.
 
 ---
 
@@ -471,7 +523,36 @@ Avvik fra opprinnelig plan:
 - Eventuelt: godkjenning per enkeltpåstand (avhenger av beslutning i §11)
 - Historikk: vis alle versjoner av en side
 
-### Fase 4 — Lint og helsekontroll
+### Fase 4A — Enterprise Wiki egne kilder
+
+> **Korrekt langsiktig arkitektur.** Etter denne fasen er Enterprise Wiki et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG.
+
+Ny modell og tabell:
+
+- `EnterpriseWikiDocument` — ny kilde-modell med `customer_id`, `original_filename`, `file_path`, `extracted_text`, `file_hash_sha256`, `uploaded_by_user_id`, `document_status`
+- Ingen FK mot `knowledge_items`, `knowledge_item_versions` eller `knowledge_item_chunks`
+- Tabell: `enterprise_wiki_documents` (prefix bevart)
+
+Upload/import-flyt:
+
+- Ny route: `POST /app/wiki/sources` — bruker laster opp dokument direkte i Enterprise Wiki
+- Tekstekstraksjon: gjenbruker eksisterende ekstraksjonsmekanisme (docx/pdf) — resultatet lagres på `EnterpriseWikiDocument`, ikke i Kunnskapsbase
+- Trigger: UI-knapp i Enterprise Wiki for å starte ingest fra eget dokument
+
+Ingest-tilpasninger:
+
+- `enterprise_wiki_ingest_runs.source_type` utvides med `enterprise_wiki_document`
+- `enterprise_wiki_source_references.source_type` utvides med `enterprise_wiki_document`
+- Eksisterende `knowledge_item_version`-verdier beholdes for historikk og legacy-import
+- Ingen endring av eksisterende `ProcessEnterpriseWikiIngest` — ny `source_type`-gren legges til
+
+Etter Fase 4A:
+
+- `KnowledgeItemVersion`-ingest (Flyt A) finnes kun som legacy/import-kommando (`php artisan wiki:ingest`)
+- Kommandoen er ikke eksponert i UI uten tydelig "importer fra Kunnskapsbase"-merking
+- Wiki og Kunnskapsbase er separate systemer — ingen automatisk synkronisering
+
+### Fase 4B — Lint og helsekontroll
 - Lint-kontroller beskrevet i §9
 - `enterprise_wiki_lint_findings`-tabell
 - Helseindikator per side i UI
@@ -490,16 +571,29 @@ Avvik fra opprinnelig plan:
 
 ---
 
-## Appendix A — Modellreferanser (read-only)
+## Appendix A — Modellreferanser
 
-Disse eksisterende modellene leses av wiki-systemet, men endres ikke:
+### A.1 Midlertidige read-only referanser (bootstrap/import — Flyt A)
+
+Disse eksisterende modellene leses kun av `wiki:ingest`-kommandoen (Flyt A). De er **ikke** del av den ønskede primærflyten og skal ikke legges til i ny Wiki-kode.
 
 | Modell | Felt som leses | Bruk |
 |---|---|---|
-| `KnowledgeItemVersion` | `extracted_text`, `approval_status`, `is_current`, `original_filename`, `file_hash_sha256` | Primærkilde for pilot-ingest |
-| `KnowledgeItem` | `ai_usage_enabled`, `title`, `customer_id` | Tilgangskontroll og visningsnavn |
+| `KnowledgeItemVersion` | `extracted_text`, `approval_status`, `is_current`, `original_filename`, `file_hash_sha256` | Bootstrap-ingest (midlertidig — se §3.1) |
+| `KnowledgeItem` | `ai_usage_enabled`, `title`, `customer_id` | Tilgangskontroll og visningsnavn for bootstrap |
+
+### A.2 Alltid-tilgjengelige modeller
+
+| Modell | Felt som leses | Bruk |
+|---|---|---|
 | `Customer` | `id`, `language` | Kundeisolasjon og språkvalg |
 | `User` | `role`, `bid_role` | Rollestyring |
+
+### A.3 Egne Wiki-modeller (primærflyt — Fase 4A)
+
+| Modell | Tabell | Bruk |
+|---|---|---|
+| `EnterpriseWikiDocument` | `enterprise_wiki_documents` | Primærkilde etter Fase 4A — ingen FK mot Kunnskapsbase |
 
 ---
 
