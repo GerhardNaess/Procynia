@@ -4,12 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EnterpriseWikiIngestRun extends Model
 {
     public const STATUS_QUEUED = 'queued';
 
     public const STATUS_RUNNING = 'running';
+
+    public const STATUS_SECTIONS_PLANNED = 'sections_planned';
 
     public const STATUS_COMPLETED = 'completed';
 
@@ -18,6 +21,7 @@ class EnterpriseWikiIngestRun extends Model
     public const STATUSES = [
         self::STATUS_QUEUED,
         self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
         self::STATUS_COMPLETED,
         self::STATUS_FAILED,
     ];
@@ -78,6 +82,11 @@ class EnterpriseWikiIngestRun extends Model
     public function page(): BelongsTo
     {
         return $this->belongsTo(EnterpriseWikiPage::class, 'enterprise_wiki_page_id');
+    }
+
+    public function sections(): HasMany
+    {
+        return $this->hasMany(EnterpriseWikiIngestSection::class, 'enterprise_wiki_ingest_run_id');
     }
 
     public function isTerminal(): bool
