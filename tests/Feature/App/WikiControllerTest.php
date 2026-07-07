@@ -16,14 +16,20 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Phase 2A: read-only wiki controller tests.
+ * Phase 2A–3A: wiki controller tests.
  *
  * Visibility rules (from plan §5.3):
- *   approved            → all authenticated customer users
- *   draft/pending_review → System Owner and Bid Manager only
- *   rejected/archived   → not listed (not in plan's visibility table)
+ *   approved                    → all authenticated customer users
+ *   draft / pending_review      → System Owner and Bid Manager only
+ *   rejected                    → System Owner only (phase 3A addition)
  *
- * No approve/reject actions exist in phase 2 — those are phase 3.
+ * Status transitions (phase 3A, System Owner only):
+ *   submit: draft → pending_review | rejected → draft
+ *   approve: pending_review → approved
+ *   reject: pending_review → rejected
+ *
+ * Bid Manager as approver is deferred to a later phase (plan §5.3, §11 #2).
+ * Claim-level approval is out of scope for phase 3A.
  */
 class WikiControllerTest extends TestCase
 {
@@ -235,17 +241,291 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
-    // Phase 2A only — no approve/reject routes
+    // show() — System Owner visibility of rejected pages (phase 3A)
     // =========================================================================
 
-    public function test_no_approve_route_exists(): void
+    public function test_system_owner_can_view_rejected_page(): void
     {
         $customer = $this->createCustomer();
         $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
-        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Godkjenningstest');
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_REJECTED, 'Avvist side');
 
-        // PATCH /app/wiki/{slug}/approve must not exist (that is phase 3)
-        $this->actingAs($owner)->patch('/app/wiki/'.$page->slug.'/approve')->assertNotFound();
+        $this->actingAs($owner)->get('/app/wiki/'.$page->slug)->assertOk();
+    }
+
+    public function test_contributor_cannot_view_rejected_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_REJECTED, 'Avvist for bidrag');
+
+        $this->actingAs($user)->get('/app/wiki/'.$page->slug)->assertNotFound();
+    }
+
+    // =========================================================================
+    // submit() — draft → pending_review | rejected → draft
+    // =========================================================================
+
+    public function test_system_owner_can_submit_draft_to_pending_review(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Send til gjennomgang');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_system_owner_can_reopen_rejected_page_to_draft(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_REJECTED, 'Gjenåpne avvist');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+    }
+
+    public function test_submit_from_approved_status_returns_422(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Allerede godkjent');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertStatus(422);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+    }
+
+    public function test_contributor_cannot_submit_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Submit av bidragsyter');
+
+        $this->actingAs($user)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+    }
+
+    public function test_bid_manager_cannot_submit_page_in_pilot(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Submit av BM');
+
+        $this->actingAs($manager)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertForbidden();
+    }
+
+    public function test_submit_enforces_customer_isolation(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_DRAFT, 'Fremmed utkast');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$foreignPage->slug.'/submit')
+            ->assertNotFound();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $foreignPage->fresh()->status);
+    }
+
+    // =========================================================================
+    // approve() — pending_review → approved
+    // =========================================================================
+
+    public function test_system_owner_can_approve_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Godkjenn meg');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_APPROVED, $page->fresh()->status);
+    }
+
+    public function test_approve_sets_reviewed_fields_on_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Reviewed felt');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertRedirect();
+
+        $fresh = $page->fresh();
+        $this->assertNotNull($fresh->reviewed_at);
+        $this->assertSame($owner->id, $fresh->reviewed_by_user_id);
+    }
+
+    public function test_contributor_cannot_approve_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Bidragsyter godkjenner');
+
+        $this->actingAs($user)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_bid_manager_cannot_approve_page_in_pilot(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM godkjenner');
+
+        $this->actingAs($manager)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_approve_of_draft_page_returns_422(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Godkjenn utkast');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertStatus(422);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+    }
+
+    public function test_approve_enforces_customer_isolation(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Fremmed godkjenning');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$foreignPage->slug.'/approve')
+            ->assertNotFound();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $foreignPage->fresh()->status);
+    }
+
+    // =========================================================================
+    // reject() — pending_review → rejected
+    // =========================================================================
+
+    public function test_system_owner_can_reject_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Avvis meg');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertRedirect();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_REJECTED, $page->fresh()->status);
+    }
+
+    public function test_reject_sets_reviewed_fields_on_page(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Avvis felt');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertRedirect();
+
+        $fresh = $page->fresh();
+        $this->assertNotNull($fresh->reviewed_at);
+        $this->assertSame($owner->id, $fresh->reviewed_by_user_id);
+    }
+
+    public function test_contributor_cannot_reject_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Bidragsyter avviser');
+
+        $this->actingAs($user)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_bid_manager_cannot_reject_page_in_pilot(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM avviser');
+
+        $this->actingAs($manager)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertForbidden();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $page->fresh()->status);
+    }
+
+    public function test_reject_of_draft_page_returns_422(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Avvis utkast');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertStatus(422);
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_DRAFT, $page->fresh()->status);
+    }
+
+    public function test_reject_enforces_customer_isolation(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $otherCustomer = $this->createCustomer('Annen kunde');
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignPage = $this->createPage($otherCustomer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Fremmed avvisning');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$foreignPage->slug.'/reject')
+            ->assertNotFound();
+
+        $this->assertSame(EnterpriseWikiPage::STATUS_PENDING_REVIEW, $foreignPage->fresh()->status);
+    }
+
+    // =========================================================================
+    // No claim-level approve/reject routes (phase 3A scope boundary)
+    // =========================================================================
+
+    public function test_no_claim_approve_route_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Claim-route-test');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/claims/approve')
+            ->assertNotFound();
     }
 
     // =========================================================================

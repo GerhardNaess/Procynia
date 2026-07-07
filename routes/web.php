@@ -299,9 +299,12 @@ Route::prefix('app')
         Route::patch('/notices/saved/{savedNotice}/go-no-go-assessment', [GoNoGoAssessmentController::class, 'upsert'])
             ->name('notices.saved.go-no-go-assessment.upsert');
 
-        // Enterprise Wiki (read-only, fase 2)
+        // Enterprise Wiki (fase 2-3)
         Route::prefix('/wiki')->name('wiki.')->group(function (): void {
             Route::get('/', [WikiController::class, 'index'])->name('index');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
+            Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
+            Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
+            Route::patch('/{slug}/reject', [WikiController::class, 'reject'])->name('reject');
         });
     });

@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Support\CustomerContext;
+use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -99,6 +100,103 @@ class WikiController extends Controller
         ]);
     }
 
+    /**
+     * Submit a page for review (draft → pending_review)
+     * or reopen a rejected page for editing (rejected → draft).
+     *
+     * Restricted to System Owner in pilot. Broader submit roles can be
+     * considered in a future phase once the approval flow is validated.
+     */
+    public function submit(string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+
+        if (! $user?->isSystemOwner()) {
+            abort(403);
+        }
+
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        if ($page->status === EnterpriseWikiPage::STATUS_DRAFT) {
+            $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+        } elseif ($page->status === EnterpriseWikiPage::STATUS_REJECTED) {
+            $page->status = EnterpriseWikiPage::STATUS_DRAFT;
+        } else {
+            abort(422);
+        }
+
+        $page->save();
+
+        return redirect()->route('app.wiki.show', $page->slug);
+    }
+
+    /**
+     * Approve a page in pending_review → approved.
+     * System Owner only (pilot). Bid Manager as approver deferred to later phase.
+     */
+    public function approve(string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+
+        if (! $user?->isSystemOwner()) {
+            abort(403);
+        }
+
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            abort(422);
+        }
+
+        $page->status = EnterpriseWikiPage::STATUS_APPROVED;
+        $page->reviewed_at = now();
+        $page->reviewed_by_user_id = $user->id;
+        $page->save();
+
+        return redirect()->route('app.wiki.show', $page->slug);
+    }
+
+    /**
+     * Reject a page in pending_review → rejected.
+     * System Owner only (pilot).
+     */
+    public function reject(string $slug): RedirectResponse
+    {
+        $user = $this->customerContext->currentUser();
+
+        if (! $user?->isSystemOwner()) {
+            abort(403);
+        }
+
+        $customerId = $this->customerContext->currentCustomerId();
+
+        $page = EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->where('slug', $slug)
+            ->first() ?? abort(404);
+
+        if ($page->status !== EnterpriseWikiPage::STATUS_PENDING_REVIEW) {
+            abort(422);
+        }
+
+        $page->status = EnterpriseWikiPage::STATUS_REJECTED;
+        $page->reviewed_at = now();
+        $page->reviewed_by_user_id = $user->id;
+        $page->save();
+
+        return redirect()->route('app.wiki.show', $page->slug);
+    }
+
     /** @return list<string> */
     private function visibleStatuses(?User $user): array
     {
@@ -107,6 +205,10 @@ class WikiController extends Controller
         if ($user?->isSystemOwner() || $user?->isBidManager()) {
             $statuses[] = EnterpriseWikiPage::STATUS_DRAFT;
             $statuses[] = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+        }
+
+        if ($user?->isSystemOwner()) {
+            $statuses[] = EnterpriseWikiPage::STATUS_REJECTED;
         }
 
         return $statuses;
