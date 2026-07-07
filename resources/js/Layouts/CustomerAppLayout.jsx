@@ -150,6 +150,10 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
             return 'environment';
         }
 
+        if (pathname.startsWith('/app/wiki')) {
+            return 'wiki';
+        }
+
         if (pathname.startsWith('/app/billing')) {
             return 'billing';
         }
@@ -168,6 +172,7 @@ export default function CustomerAppLayout({ children, title, showPageTitle = tru
         { key: 'worklist', label: translations.frontend.worklist_nav, href: buildHref('/app/notices', { mode: 'saved' }) },
         { key: 'info-center', label: translations.frontend.infosenter_nav, href: '/app/info-center' },
         { key: 'ai', label: navigation.ai, href: '/app/ai' },
+        { key: 'wiki', label: translations.wiki?.nav ?? 'Wiki', href: '/app/wiki' },
         { key: 'suppliers', label: navigation.competitors, href: '/app/suppliers' },
         ...(watchProfilesHref ? [{ key: 'watch-profiles', label: navigation.watch_lists, href: watchProfilesHref }] : []),
         ...(environmentHref ? [{ key: 'environment', label: navigation.customer_environment, href: environmentHref }] : []),
