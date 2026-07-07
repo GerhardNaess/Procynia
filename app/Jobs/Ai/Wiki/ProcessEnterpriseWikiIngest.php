@@ -16,7 +16,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
 
@@ -63,12 +62,24 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
         }
 
         try {
-            // Read-only access to KnowledgeItemVersion via the ingest service.
-            // No writes to knowledge_items, knowledge_item_versions, or knowledge_item_chunks.
-            $version = $service->resolveApprovedVersion($run->customer_id, $run->source_id);
-            $service->validateExtractedTextSize((string) $version->extracted_text);
+            if ($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+                $document = $service->resolveDocumentForIngest($run->customer_id, $run->source_id);
+                $service->validateExtractedTextSize((string) $document->extracted_text);
+                $sections = $parser->splitIntoSections((string) $document->extracted_text);
+                $pageTitle = $document->original_filename ?? 'Wiki-side';
+            } else {
+                // knowledge_item_version path (legacy/bootstrap — Kunnskapsbase-import)
+                $version = $service->resolveApprovedVersion($run->customer_id, $run->source_id);
+                $service->validateExtractedTextSize((string) $version->extracted_text);
+                $sections = $parser->splitIntoSections((string) $version->extracted_text);
 
-            $sections = $parser->splitIntoSections((string) $version->extracted_text);
+                $knowledgeItem = KnowledgeItem::query()
+                    ->where('id', $version->knowledge_item_id)
+                    ->select(['id', 'title'])
+                    ->first();
+
+                $pageTitle = $knowledgeItem?->title ?? 'Wiki-side';
+            }
 
             if (empty($sections)) {
                 $run->update([
@@ -79,13 +90,6 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
 
                 return;
             }
-
-            $knowledgeItem = KnowledgeItem::query()
-                ->where('id', $version->knowledge_item_id)
-                ->select(['id', 'title'])
-                ->first();
-
-            $pageTitle = $knowledgeItem?->title ?? 'Wiki-side';
 
             // Persist draft page/version, section plan, and advance run status atomically.
             // Claims require non-null page/version FKs, so the draft shell must exist

@@ -5,6 +5,7 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
@@ -391,5 +392,87 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
             'heading' => 'Kompetanse',
             'status' => EnterpriseWikiIngestSection::STATUS_PENDING,
         ], $overrides));
+    }
+
+    // =========================================================================
+    // enterprise_wiki_document path
+    // =========================================================================
+
+    public function test_job_stores_source_reference_with_enterprise_wiki_document_source_type(): void
+    {
+        ['run' => $run, 'section' => $section] = $this->createDocumentScaffold();
+
+        $aiClient = $this->mockAiClient([
+            ['text' => 'Vi er ISO 9001-sertifisert.', 'confidence' => 'high', 'excerpt' => 'ISO 9001-sertifisert siden 2015.'],
+        ]);
+
+        $this->runSection($section, $aiClient);
+
+        $this->assertDatabaseCount('enterprise_wiki_claims', 1);
+
+        $claim = EnterpriseWikiClaim::query()->first();
+        $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
+        $this->assertDatabaseHas('enterprise_wiki_source_references', [
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type'              => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id'                => $run->source_id,
+            'source_label'             => 'kompetanse.pdf',
+        ]);
+    }
+
+    public function test_document_path_does_not_create_knowledge_item_version_source_references(): void
+    {
+        ['section' => $section] = $this->createDocumentScaffold();
+
+        $aiClient = $this->mockAiClient([
+            ['text' => 'Et krav.', 'confidence' => 'medium', 'excerpt' => 'Kildeutdrag.'],
+        ]);
+
+        $this->runSection($section, $aiClient);
+
+        $this->assertDatabaseMissing('enterprise_wiki_source_references', [
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+        ]);
+    }
+
+    // ─── Document scaffold helpers ────────────────────────────────────────────
+
+    /**
+     * @return array{customer: Customer, document: EnterpriseWikiDocument, run: EnterpriseWikiIngestRun, page: EnterpriseWikiPage, pageVersion: EnterpriseWikiPageVersion, section: EnterpriseWikiIngestSection}
+     */
+    private function createDocumentScaffold(array $sectionOverrides = []): array
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocumentRecord($customer);
+        $run = $this->createDocumentRun($customer, $document);
+        [$page, $pageVersion] = $this->createDraftPage($customer, $run);
+        $section = $this->createSection($run, $sectionOverrides);
+
+        return compact('customer', 'document', 'run', 'page', 'pageVersion', 'section');
+    }
+
+    private function createDocumentRecord(Customer $customer, array $overrides = []): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create(array_merge([
+            'customer_id'       => $customer->id,
+            'original_filename' => 'kompetanse.pdf',
+            'file_path'         => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256'  => hash('sha256', Str::random(32)),
+            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'extracted_text'    => "## Kompetanse\nVi leverer ISO 9001-sertifisert service.",
+        ], $overrides));
+    }
+
+    private function createDocumentRun(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid'         => (string) Str::uuid(),
+            'customer_id'  => $customer->id,
+            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id'    => $document->id,
+            'source_hash'  => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status'       => EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+        ]);
     }
 }

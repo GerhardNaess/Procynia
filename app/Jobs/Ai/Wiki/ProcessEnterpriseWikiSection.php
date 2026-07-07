@@ -86,10 +86,19 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                 return;
             }
 
-            // Read-only: resolve approved KnowledgeItemVersion and extract its text.
-            $version = $ingestService->resolveApprovedVersion($run->customer_id, $run->source_id);
+            if ($run->source_type === EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+                $document = $ingestService->resolveDocumentForIngest($run->customer_id, $run->source_id);
+                $allSections = $parser->splitIntoSections((string) $document->extracted_text);
+                $sourceLabel = $document->original_filename ?? sprintf('enterprise_wiki_document:%d', $document->id);
+                $refSourceType = EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT;
+            } else {
+                // knowledge_item_version path (legacy/bootstrap — Kunnskapsbase-import)
+                $version = $ingestService->resolveApprovedVersion($run->customer_id, $run->source_id);
+                $allSections = $parser->splitIntoSections((string) $version->extracted_text);
+                $sourceLabel = $version->original_filename ?? sprintf('knowledge_item_version:%d', $version->id);
+                $refSourceType = EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION;
+            }
 
-            $allSections = $parser->splitIntoSections((string) $version->extracted_text);
             $sectionData = $allSections[$section->section_index] ?? null;
 
             if ($sectionData === null) {
@@ -119,10 +128,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                 fn(array $c) => $c['excerpt'] !== '',
             ));
 
-            $sourceLabel = $version->original_filename
-                ?? sprintf('knowledge_item_version:%d', $version->id);
-
-            DB::transaction(function () use ($run, $pageVersion, $section, $validClaims, $sourceLabel): void {
+            DB::transaction(function () use ($run, $pageVersion, $section, $validClaims, $sourceLabel, $refSourceType): void {
                 $order = 0;
 
                 foreach ($validClaims as $claim) {
@@ -138,7 +144,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
 
                     EnterpriseWikiSourceReference::query()->create([
                         'enterprise_wiki_claim_id' => $claimRecord->id,
-                        'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+                        'source_type' => $refSourceType,
                         'source_id' => $run->source_id,
                         'source_label' => $sourceLabel,
                         'source_hash' => $run->source_hash ?? '',

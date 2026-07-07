@@ -5,6 +5,7 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\KnowledgeItem;
@@ -292,6 +293,118 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
             'source_hash' => str_pad('hash', 64, '0'),
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
+        ]);
+    }
+
+    // =========================================================================
+    // enterprise_wiki_document path
+    // =========================================================================
+
+    public function test_job_handles_enterprise_wiki_document_source_type_and_plans_sections(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'extracted_text' => "## Kompetanse\nVi leverer ISO 9001.\n\n## Referanser\nSe vedlegg.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED, $run->status);
+        $this->assertNotNull($run->enterprise_wiki_page_id);
+
+        $sections = EnterpriseWikiIngestSection::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->orderBy('section_index')
+            ->get();
+
+        $this->assertCount(2, $sections);
+        $this->assertSame('Kompetanse', $sections[0]->heading);
+        $this->assertSame('Referanser', $sections[1]->heading);
+
+        Queue::assertPushed(ProcessEnterpriseWikiSection::class, 2);
+    }
+
+    public function test_job_uses_original_filename_as_page_title_for_document_source(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'selskapsinfo.pdf',
+            'extracted_text'    => "## Om oss\nVi er et selskap.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertSame('selskapsinfo.pdf', $page->title);
+    }
+
+    public function test_job_marks_run_failed_when_document_not_found_for_source_type(): void
+    {
+        $customer = $this->createCustomer();
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid'         => (string) Str::uuid(),
+            'customer_id'  => $customer->id,
+            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id'    => 99999,
+            'source_hash'  => 'nonexistent',
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status'       => EnterpriseWikiIngestRun::STATUS_QUEUED,
+        ]);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
+        $this->assertNotEmpty($run->error_message);
+        $this->assertDatabaseCount('enterprise_wiki_ingest_sections', 0);
+    }
+
+    public function test_job_marks_run_failed_when_document_is_not_extracted(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING,
+            'extracted_text'  => null,
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
+        $this->assertNotEmpty($run->error_message);
+    }
+
+    // ─── Document helpers ─────────────────────────────────────────────────────
+
+    private function createExtractedDocument(Customer $customer, array $overrides = []): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create(array_merge([
+            'customer_id'       => $customer->id,
+            'original_filename' => 'test.pdf',
+            'file_path'         => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256'  => hash('sha256', Str::random(32)),
+            'document_status'   => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            'extracted_text'    => "## Seksjon A\nNoe innhold.\n\n## Seksjon B\nMer innhold.",
+        ], $overrides));
+    }
+
+    private function createQueuedRunForDocument(Customer $customer, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid'         => (string) Str::uuid(),
+            'customer_id'  => $customer->id,
+            'source_type'  => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id'    => $document->id,
+            'source_hash'  => hash('sha256', "enterprise_wiki_document:{$document->id}:{$document->file_hash_sha256}"),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status'       => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
     }
 }

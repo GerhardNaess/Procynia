@@ -3,6 +3,7 @@
 namespace App\Services\Ai\Wiki;
 
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\KnowledgeItem;
@@ -176,5 +177,61 @@ class EnterpriseWikiIngestService
             'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
         ]);
+    }
+
+    /**
+     * Resolve an EnterpriseWikiDocument eligible for wiki ingest.
+     * Requires document_status = 'extracted' and non-empty extracted_text.
+     *
+     * @throws InvalidArgumentException for any validation failure
+     */
+    public function resolveDocumentForIngest(int $customerId, int $documentId): EnterpriseWikiDocument
+    {
+        $document = EnterpriseWikiDocument::query()
+            ->where('id', $documentId)
+            ->where('customer_id', $customerId)
+            ->select(['id', 'customer_id', 'original_filename', 'file_hash_sha256', 'extracted_text', 'document_status'])
+            ->first();
+
+        if ($document === null) {
+            throw new InvalidArgumentException(
+                "EnterpriseWikiDocument [{$documentId}] not found for customer [{$customerId}]."
+            );
+        }
+
+        if ($document->document_status !== EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
+            throw new InvalidArgumentException(
+                "EnterpriseWikiDocument [{$documentId}] has document_status '{$document->document_status}', expected 'extracted'."
+            );
+        }
+
+        if (blank($document->extracted_text)) {
+            throw new InvalidArgumentException(
+                "EnterpriseWikiDocument [{$documentId}] has no extracted text."
+            );
+        }
+
+        return $document;
+    }
+
+    /**
+     * Create a new ingest run in the QUEUED state for an EnterpriseWikiDocument.
+     */
+    public function createQueuedRunForDocument(int $customerId, EnterpriseWikiDocument $document): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customerId,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => $this->computeDocumentSourceHash($document->id, (string) $document->file_hash_sha256),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_QUEUED,
+        ]);
+    }
+
+    public function computeDocumentSourceHash(int $documentId, string $fileHash): string
+    {
+        return hash('sha256', "enterprise_wiki_document:{$documentId}:{$fileHash}");
     }
 }
