@@ -18,12 +18,21 @@ use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class ProcessEnterpriseWikiSectionTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Prevent FinalizeEnterpriseWikiIngest from running synchronously after each section.
+        Queue::fake();
+    }
 
     // -------------------------------------------------------------------------
     // Test 1: Stores claim and source reference from fake AI response
@@ -165,6 +174,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
     {
         ['section' => $section] = $this->createScaffold();
 
+        /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
         $mock->shouldReceive('fetchClaims')->andThrow(new \RuntimeException('Tilkobling feilet.'));
 
@@ -193,6 +203,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
 
         $section->update(['status' => EnterpriseWikiIngestSection::STATUS_COMPLETED]);
 
+        /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
         $mock->shouldNotReceive('fetchClaims');
 
@@ -215,6 +226,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         // exception. The mock returning a valid response proves the job only uses the mock.
         ['section' => $section] = $this->createScaffold();
 
+        /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
         $mock->shouldReceive('fetchClaims')
             ->once()
@@ -269,7 +281,7 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         return compact('customer', 'item', 'version', 'run', 'page', 'pageVersion', 'section');
     }
 
-    private function runSection(EnterpriseWikiIngestSection $section, WikiSectionAiClient $aiClient): void
+    private function runSection(EnterpriseWikiIngestSection $section, WikiSectionAiClient&MockInterface $aiClient): void
     {
         (new ProcessEnterpriseWikiSection($section->id))->handle(
             app(EnterpriseWikiIngestService::class),
@@ -278,8 +290,9 @@ class ProcessEnterpriseWikiSectionTest extends TestCase
         );
     }
 
-    private function mockAiClient(array $claims): WikiSectionAiClient
+    private function mockAiClient(array $claims): WikiSectionAiClient&MockInterface
     {
+        /** @var WikiSectionAiClient&MockInterface $mock */
         $mock = $this->mock(WikiSectionAiClient::class);
         $mock->shouldReceive('fetchClaims')->andReturn(['claims' => $claims]);
 

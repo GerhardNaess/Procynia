@@ -2,7 +2,9 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiPageVersion;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemVersion;
 use Illuminate\Support\Str;
@@ -110,6 +112,54 @@ class EnterpriseWikiIngestService
             ->where('status', EnterpriseWikiIngestRun::STATUS_COMPLETED)
             ->latest()
             ->first();
+    }
+
+    /**
+     * Assemble a deterministic Markdown document from all claims stored for a page version.
+     * Claims are listed in insertion order (by id) with their source references.
+     * Returns an empty string when no claims exist; callers should treat that as a failure.
+     */
+    public function assembleContentMarkdown(
+        EnterpriseWikiPageVersion $pageVersion,
+        string $pageTitle,
+        int $runId,
+    ): string {
+        $claims = EnterpriseWikiClaim::query()
+            ->with('sourceReferences')
+            ->where('enterprise_wiki_page_version_id', $pageVersion->id)
+            ->orderBy('id')
+            ->get();
+
+        if ($claims->isEmpty()) {
+            return '';
+        }
+
+        $lines = [];
+        $lines[] = "# {$pageTitle}";
+        $lines[] = '';
+        $lines[] = sprintf('<!-- wiki-ingest-run:%d -->', $runId);
+        $lines[] = '';
+
+        foreach ($claims as $claim) {
+            $lines[] = $claim->claim_text;
+            $lines[] = '';
+
+            foreach ($claim->sourceReferences as $ref) {
+                $excerpt = ($ref->excerpt !== null && $ref->excerpt !== '')
+                    ? sprintf(' — «%s»', $ref->excerpt)
+                    : '';
+                $lines[] = sprintf('> *Kilde: %s%s*', $ref->source_label, $excerpt);
+            }
+
+            $lines[] = '';
+        }
+
+        // Remove trailing blank line(s)
+        while (! empty($lines) && end($lines) === '') {
+            array_pop($lines);
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

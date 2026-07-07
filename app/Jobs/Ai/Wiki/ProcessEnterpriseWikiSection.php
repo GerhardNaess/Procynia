@@ -70,10 +70,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
             $run = EnterpriseWikiIngestRun::query()->find($section->enterprise_wiki_ingest_run_id);
 
             if (! $run instanceof EnterpriseWikiIngestRun || ! $run->enterprise_wiki_page_id) {
-                $section->update([
-                    'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
-                    'error_message' => 'Associated ingest run or draft wiki page not found.',
-                ]);
+                $this->failSection($section, 'Associated ingest run or draft wiki page not found.');
 
                 return;
             }
@@ -84,10 +81,7 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                 ->first();
 
             if (! $pageVersion instanceof EnterpriseWikiPageVersion) {
-                $section->update([
-                    'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
-                    'error_message' => 'Draft wiki page version not found.',
-                ]);
+                $this->failSection($section, 'Draft wiki page version not found.');
 
                 return;
             }
@@ -99,14 +93,11 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
             $sectionData = $allSections[$section->section_index] ?? null;
 
             if ($sectionData === null) {
-                $section->update([
-                    'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
-                    'error_message' => sprintf(
-                        'Section index [%d] not found after re-parsing (total: %d).',
-                        $section->section_index,
-                        count($allSections),
-                    ),
-                ]);
+                $this->failSection($section, sprintf(
+                    'Section index [%d] not found after re-parsing (total: %d).',
+                    $section->section_index,
+                    count($allSections),
+                ));
 
                 return;
             }
@@ -165,16 +156,12 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
                 count($validClaims),
                 $run->id,
             ));
+
+            FinalizeEnterpriseWikiIngest::dispatch($run->id);
         } catch (InvalidArgumentException $e) {
-            $section->update([
-                'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
-                'error_message' => $e->getMessage(),
-            ]);
+            $this->failSection($section, $e->getMessage());
         } catch (Throwable $e) {
-            $section->update([
-                'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
-                'error_message' => mb_substr($e->getMessage(), 0, 1000),
-            ]);
+            $this->failSection($section, mb_substr($e->getMessage(), 0, 1000));
 
             throw $e;
         }
@@ -184,11 +171,30 @@ class ProcessEnterpriseWikiSection implements ShouldQueue
     {
         $section = EnterpriseWikiIngestSection::query()->find($this->sectionId);
 
-        if ($section && ! $section->isTerminal()) {
+        if (! $section instanceof EnterpriseWikiIngestSection) {
+            return;
+        }
+
+        if (! $section->isTerminal()) {
             $section->update([
                 'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
                 'error_message' => mb_substr($exception->getMessage(), 0, 1000),
             ]);
         }
+
+        // Safety net: if the section was already marked failed before the rethrow (Throwable
+        // catch path), a finalize was already dispatched. This covers any edge case where
+        // the handle() method exits abnormally without reaching the catch blocks.
+        FinalizeEnterpriseWikiIngest::dispatch($section->enterprise_wiki_ingest_run_id);
+    }
+
+    private function failSection(EnterpriseWikiIngestSection $section, string $message): void
+    {
+        $section->update([
+            'status' => EnterpriseWikiIngestSection::STATUS_FAILED,
+            'error_message' => $message,
+        ]);
+
+        FinalizeEnterpriseWikiIngest::dispatch($section->enterprise_wiki_ingest_run_id);
     }
 }
