@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class EnterpriseWikiIngestRun extends Model
+{
+    public const STATUS_QUEUED = 'queued';
+
+    public const STATUS_RUNNING = 'running';
+
+    public const STATUS_COMPLETED = 'completed';
+
+    public const STATUS_FAILED = 'failed';
+
+    public const STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_COMPLETED,
+        self::STATUS_FAILED,
+    ];
+
+    public const TRIGGER_TYPE_MANUAL = 'manual';
+
+    public const TRIGGER_TYPE_SCHEDULE = 'schedule';
+
+    public const TRIGGER_TYPE_SOURCE_CHANGE = 'source_change';
+
+    public const TRIGGER_TYPES = [
+        self::TRIGGER_TYPE_MANUAL,
+        self::TRIGGER_TYPE_SCHEDULE,
+        self::TRIGGER_TYPE_SOURCE_CHANGE,
+    ];
+
+    public const SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION = 'knowledge_item_version';
+
+    public const SOURCE_TYPES = [
+        self::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
+    ];
+
+    protected $fillable = [
+        'uuid',
+        'customer_id',
+        'enterprise_wiki_page_id',
+        'trigger_type',
+        'source_type',
+        'source_id',
+        'source_hash',
+        'status',
+        'model_used',
+        'input_tokens',
+        'output_tokens',
+        'cost_estimate_nok',
+        'error_message',
+        'started_at',
+        'finished_at',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'source_id' => 'integer',
+            'input_tokens' => 'integer',
+            'output_tokens' => 'integer',
+            'cost_estimate_nok' => 'decimal:4',
+            'started_at' => 'datetime',
+            'finished_at' => 'datetime',
+        ];
+    }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    public function page(): BelongsTo
+    {
+        return $this->belongsTo(EnterpriseWikiPage::class, 'enterprise_wiki_page_id');
+    }
+
+    public function isTerminal(): bool
+    {
+        return in_array($this->status, [self::STATUS_COMPLETED, self::STATUS_FAILED], true);
+    }
+
+    public function isQueued(): bool
+    {
+        return $this->status === self::STATUS_QUEUED;
+    }
+}
