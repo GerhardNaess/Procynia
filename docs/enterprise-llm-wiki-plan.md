@@ -2,7 +2,7 @@
 
 Versjon: 0.1 (utkast)
 Dato: 2026-07-07
-Status: Fase 0 — plan/ADR
+Status: Fase 0 fullført / Fase 1 fullført (2026-07-07)
 
 ---
 
@@ -146,6 +146,7 @@ Kildebevis på påstandsnivå. Ingen påstand kan eksistere uten minst én kilde
 | `source_type` | enum | `knowledge_item_version`, `saved_notice_document`, `doffin_notice`, `manual` |
 | `source_id` | bigint | Polymorf referanse-ID |
 | `source_label` | varchar | Menneskelesbart navn (filnavn, tittel, kunngjøringsnummer) |
+| `source_hash` | varchar | SHA-256 av kildeinnholdet på ingest-tidspunktet |
 | `excerpt` | text | Relevant tekstutdrag fra kilden |
 | `page_reference` | varchar nullable | Sidenummer eller avsnitt |
 | `created_at` | timestamp | |
@@ -167,7 +168,7 @@ Sporing av alle AI-genereringsjobber. Ingen produksjonsdata uten sporbar run.
 | `trigger_type` | enum | `manual`, `schedule`, `source_change` |
 | `source_type` | enum | `knowledge_item_version`, osv. |
 | `source_id` | bigint | Hvilken kilde som ble brukt |
-| `status` | enum | `queued`, `running`, `completed`, `failed` |
+| `status` | enum | `queued`, `running`, `sections_planned`, `completed`, `failed` |
 | `model_used` | varchar | |
 | `input_tokens` | integer nullable | |
 | `output_tokens` | integer nullable | |
@@ -178,7 +179,25 @@ Sporing av alle AI-genereringsjobber. Ingen produksjonsdata uten sporbar run.
 
 ---
 
-### 4.6 `enterprise_wiki_lint_findings`
+### 4.6 `enterprise_wiki_ingest_sections`
+
+Intern arbeidstabell for per-seksjon arbeidssporing under ingest. Opprettes av orchestratoren og brukes til å styre parallelle seksjonsjobber og aggregere resultat i finalize. Inneholder ikke godkjent wiki-output.
+
+| Felt | Type | Beskrivelse |
+|---|---|---|
+| `id` | bigint PK | |
+| `enterprise_wiki_ingest_run_id` | bigint FK | |
+| `section_index` | integer | Indeks i seksjonslisten (0-basert) |
+| `heading` | varchar nullable | H2-overskrift dersom tilgjengelig |
+| `status` | enum | `pending`, `running`, `completed`, `failed` |
+| `error_message` | text nullable | Feilmelding ved mislykket seksjon |
+| `created_at`, `updated_at` | timestamps | |
+
+*Fase 1-tillegg:* Ikke beskrevet i original plan/ADR. Lagt til under implementering for å støtte parallell seksjonsbehandling og trygg finalize-logikk med `lockForUpdate`.
+
+---
+
+### 4.7 `enterprise_wiki_lint_findings`
 
 Resultater fra helsekontroll. Se §9.
 
@@ -195,7 +214,7 @@ Resultater fra helsekontroll. Se §9.
 
 ---
 
-### 4.7 `enterprise_wiki_page_topics`
+### 4.8 `enterprise_wiki_page_topics`
 
 Temaklassifisering generert av AI. Brukes til filtrering og gruppering.
 
@@ -280,7 +299,10 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 3. Orchestrator-jobb startes (ProcessEnterpriseWikiIngest)
    └─ Leser extracted_text fra KnowledgeItemVersion
    └─ Deler tekst i seksjoner (H1/H2 boundary eller fast tegngrense)
-   └─ Sender én seksjon-jobb per segment
+   └─ Oppretter draft EnterpriseWikiPage og EnterpriseWikiPageVersion (is_current=false)
+   └─ Oppretter enterprise_wiki_ingest_sections-rader (én per seksjon)
+   └─ Setter ingest_run.status = sections_planned
+   └─ Dispatcher én ProcessEnterpriseWikiSection per seksjon
 
 4. Per-seksjon-jobb (ProcessEnterpriseWikiSection)
    └─ AI mottar: seksjonstekst + instruksjon om JSON-output
@@ -302,11 +324,12 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
        (source_type = 'knowledge_item_version', source_id = versjons-ID)
 
 5. Finalisering (FinalizeEnterpriseWikiIngest)
-   └─ Slår sammen resultater fra alle seksjonsjobber
-   └─ Oppretter eller oppdaterer enterprise_wiki_pages (status = draft)
-   └─ Oppretter enterprise_wiki_page_versions (is_current = true)
-   └─ Beregner last_source_hash fra kilde-ID + file_hash_sha256
-   └─ Oppdaterer enterprise_wiki_ingest_runs (status = completed)
+   └─ Venter til alle enterprise_wiki_ingest_sections er i terminal tilstand
+   └─ Avbryter tidlig (no-op) dersom noen seksjoner fortsatt er pending/running
+   └─ Assembler content_markdown fra claims (én claim per avsnitt, kilde inlinert)
+   └─ Oppdaterer EnterpriseWikiPageVersion: content_markdown, is_current=true
+   └─ Oppdaterer EnterpriseWikiPage: status=pending_review
+   └─ Oppdaterer enterprise_wiki_ingest_runs: status=completed, finished_at
 
 6. Ingen wiki-output kobles til eksisterende RAG, kravsvar eller AI workspace
 ```
@@ -367,7 +390,7 @@ Minste implementerbare pilot:
 |---|---|
 | **Ny sidefamilie** | `enterprise_wiki_pages`, `enterprise_wiki_page_versions`, `enterprise_wiki_claims`, `enterprise_wiki_source_references`, `enterprise_wiki_ingest_runs` |
 | **Kilde** | Kun `KnowledgeItemVersion.extracted_text` med `approval_status = approved AND is_current = true` |
-| **Trigger** | Manuell Artisan-kommando: `php artisan wiki:ingest --customer=X --knowledge-item-version=Y` |
+| **Trigger** | Manuell Artisan-kommando: `php artisan wiki:ingest --customer=X --version-id=Y` |
 | **Output** | `enterprise_wiki_pages` med status `draft`, claims og kildehenvisninger |
 | **UI** | Enkel `/app/wiki`-side som lister sider og viser claims med kildelenker |
 | **Godkjenning** | System Owner kan sette `approved` / `rejected` |
@@ -405,19 +428,36 @@ Disse spørsmålene må avgjøres før kode skrives:
 
 ## 12. Faseinndeling
 
-### Fase 0 — Plan/ADR *(denne filen)*
+### Fase 0 — Plan/ADR *(denne filen)* — Fullført
 - Arkitektur- og konsekvenskartlegging
 - Datamodell-design
 - Beslutningslogg (se §11)
 - Ingen kode
 
-### Fase 1 — Datamodell og read-only ingest
-- Migrasjoner for `enterprise_wiki_*`-tabeller
-- Eloquent-modeller: `EnterpriseWikiPage`, `EnterpriseWikiPageVersion`, `EnterpriseWikiClaim`, `EnterpriseWikiSourceReference`, `EnterpriseWikiIngestRun`
-- Artisan-kommando for manuell ingest fra én `KnowledgeItemVersion`
+### Fase 1 — Datamodell og read-only ingest — Fullført (2026-07-07)
+
+**Commits:** `02a18cb` · `aeb41f1` · `778b931` · `e132318` · `15c06b6` · `c7e7593`
+
+Implementert:
+- Migrasjoner for `enterprise_wiki_*`-tabeller (inkl. `enterprise_wiki_ingest_sections`, se §4.6)
+- Eloquent-modeller: `EnterpriseWikiPage`, `EnterpriseWikiPageVersion`, `EnterpriseWikiClaim`, `EnterpriseWikiSourceReference`, `EnterpriseWikiIngestRun`, `EnterpriseWikiIngestSection`
+- Artisan-kommando: `php artisan wiki:ingest --customer=X --version-id=Y`
 - Queue-jobber: `ProcessEnterpriseWikiIngest`, `ProcessEnterpriseWikiSection`, `FinalizeEnterpriseWikiIngest`
 - Kun `enterprise-wiki`-queue — ingen kobling til `ai-requirements`
-- Feature-tests for ingest-flyt
+- 73 feature-tester, alle grønne
+
+Fase 1-garantier (alle verifisert):
+- Ingen ekte AI-kall — `WikiSectionAiClient::fetchClaims()` er stub (kaster RuntimeException)
+- Ingen kobling til produksjons-RAG eller `ai-requirements`-queue
+- `KnowledgeItemVersion` leses kun read-only — ingen endringer i `KnowledgeItem`, `KnowledgeItemVersion` eller `KnowledgeItemChunk`
+- Claims forblir `approval_status = pending` etter finalize
+- Wiki-side settes til `pending_review` av finalize — `approved` krever menneskelig handling
+
+Avvik fra opprinnelig plan:
+- Orchestrator oppretter draft-side og draft-versjon atomisk før seksjonsjobber (ikke finalize som §7 steg 5 opprinnelig beskrev)
+- `sections_planned` lagt til som intern run-status (mellom `running` og `completed`)
+- `enterprise_wiki_ingest_sections` lagt til for per-seksjon arbeidssporing (se §4.6)
+- `source_hash` finnes også på `enterprise_wiki_source_references`-rader
 
 ### Fase 2 — UI for wiki-sider og claims
 - `/app/wiki` — liste over wiki-sider for kunden
