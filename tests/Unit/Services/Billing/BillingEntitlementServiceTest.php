@@ -134,6 +134,76 @@ class BillingEntitlementServiceTest extends TestCase
     }
 
     /**
+     * Purpose: Verify that a zero snapshot (NOT NULL DEFAULT 0) falls through to planConfig.
+     * After a DB reset, customers have included_ai_credits = 0 because syncPlanMeta was never
+     * called. This must not block AI access on paid plans.
+     */
+    public function test_included_ai_credits_zero_snapshot_falls_through_to_plan_config(): void
+    {
+        // PLAN_PRO has included_ai_credits = 3 in procynia_plans.php
+        $customer = $this->createCustomer('Zero Snapshot Pro Kunde AS', Customer::PLAN_PRO);
+
+        $result = app(BillingEntitlementService::class)->includedAiCredits($customer);
+
+        $this->assertSame(3, $result);
+    }
+
+    /**
+     * Purpose: Verify that a zero snapshot on the free plan still returns 0 (free plan has 0 AI credits).
+     */
+    public function test_included_ai_credits_zero_snapshot_on_free_plan_returns_zero(): void
+    {
+        $customer = $this->createCustomer('Zero Snapshot Free Kunde AS', Customer::PLAN_FREE);
+
+        $result = app(BillingEntitlementService::class)->includedAiCredits($customer);
+
+        $this->assertSame(0, $result);
+    }
+
+    /**
+     * Purpose: Verify canUseAiOffer returns true when planConfig provides credits and the DB snapshot is the default 0.
+     */
+    public function test_can_use_ai_offer_returns_true_when_plan_config_provides_credits_and_snapshot_is_default_zero(): void
+    {
+        // PLAN_ULTRA has included_ai_credits = 60 in procynia_plans.php
+        $customer = $this->createCustomer('Ultra Plan Kunde AS', Customer::PLAN_ULTRA);
+
+        $result = app(BillingEntitlementService::class)->canUseAiOffer($customer);
+
+        $this->assertTrue($result);
+    }
+
+    /**
+     * Purpose: Verify canUseAiOffer returns false for free plan even when snapshot is the default 0.
+     * The free plan has 0 AI credits; the zero snapshot must not accidentally unblock access.
+     */
+    public function test_can_use_ai_offer_returns_false_for_free_plan_with_default_zero_snapshot(): void
+    {
+        $customer = $this->createCustomer('Free Plan Kunde AS', Customer::PLAN_FREE);
+
+        $result = app(BillingEntitlementService::class)->canUseAiOffer($customer);
+
+        $this->assertFalse($result);
+    }
+
+    /**
+     * Purpose: Verify that a billing line with included_ai_offers still takes Priority 1
+     * even when the plan config would also grant credits.
+     */
+    public function test_included_ai_credits_billing_line_wins_over_plan_config_when_both_are_present(): void
+    {
+        $customer = $this->createCustomer('Billing Line Beats Config AS', Customer::PLAN_ULTRA);
+        $product = $this->createProduct('test-bp-line-vs-config');
+        // Billing line says 8; plan config says 60
+        $price = $this->createPrice($product, BillingPrice::INTERVAL_MONTHLY, 649000, 'nok', 8);
+        $this->createLine($customer, $product, $price);
+
+        $result = app(BillingEntitlementService::class)->includedAiCredits($customer);
+
+        $this->assertSame(8, $result);
+    }
+
+    /**
      * Purpose: Verify that includedAiCredits() still reads from Tjenestekatalog after activeBasePlanLine() was extracted.
      * Inputs: None.
      * Returns: None.
@@ -170,11 +240,11 @@ class BillingEntitlementServiceTest extends TestCase
 
     /**
      * Purpose: Create a minimal customer fixture for BillingEntitlementService tests.
-     * Inputs: Customer name.
+     * Inputs: Customer name and optional subscription plan (defaults to PLAN_PRO).
      * Returns: The persisted Customer model.
      * Side effects: Writes language, nationality and customer rows.
      */
-    private function createCustomer(string $name): Customer
+    private function createCustomer(string $name, string $plan = Customer::PLAN_PRO): Customer
     {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],
@@ -192,7 +262,7 @@ class BillingEntitlementServiceTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'is_active' => true,
-            'subscription_plan' => Customer::PLAN_PRO,
+            'subscription_plan' => $plan,
             'billing_interval' => Customer::BILLING_MONTHLY,
             'included_ai_credits' => 0,
         ]);

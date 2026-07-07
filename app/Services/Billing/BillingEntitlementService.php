@@ -69,7 +69,9 @@ class BillingEntitlementService
         }
 
         // Priority 2: customer snapshot written by BillingService::syncPlanMeta.
-        if ($customer->included_ai_credits !== null) {
+        // Only used when the snapshot is explicitly positive. The column is NOT NULL DEFAULT 0,
+        // so 0 means "not yet synced" and should fall through to planConfig — not block AI access.
+        if ((int) $customer->included_ai_credits > 0) {
             return (int) $customer->included_ai_credits;
         }
 
