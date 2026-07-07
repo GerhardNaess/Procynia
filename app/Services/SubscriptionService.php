@@ -40,6 +40,16 @@ class SubscriptionService
             throw new RuntimeException("Billing-katalogen mangler en base-planpris for plan '{$plan}' ({$interval}).");
         }
 
+        if (! $this->billingService->hasStripeCustomer($customer)) {
+            $this->billingService->syncLocalAccountBilling($customer, [
+                'plan_key' => $plan,
+                'billing_interval' => $interval,
+                'source' => 'system',
+            ]);
+
+            return;
+        }
+
         $this->billingService->createAccountBilling($customer, [
             'plan_key' => $plan,
             'billing_interval' => $interval,

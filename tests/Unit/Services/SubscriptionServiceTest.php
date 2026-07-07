@@ -94,6 +94,68 @@ class SubscriptionServiceTest extends TestCase
         $this->assertSame(['anbudssok', 'email_varsel'], $freeLines->first()->billingProduct?->metadata['features'] ?? []);
     }
 
+    public function test_subscribe_to_paid_plan_updates_local_billing_without_stripe_connection(): void
+    {
+        $customer = $this->createCustomer();
+        $service = app(SubscriptionService::class);
+
+        $product = BillingProduct::query()->updateOrCreate(
+            ['key' => 'plan_pro'],
+            [
+                'name' => 'Pro',
+                'description' => 'Pro base plan used for local billing changes.',
+                'category' => BillingProduct::CATEGORY_BASE_PLAN,
+                'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+                'is_active' => true,
+                'sort_order' => 3,
+                'metadata' => ['plan_key' => 'pro'],
+            ]
+        );
+
+        $price = BillingPrice::query()->updateOrCreate(
+            ['key' => 'pro_monthly'],
+            [
+                'billing_product_id' => $product->id,
+                'name' => 'Pro — Monthly',
+                'interval' => BillingPrice::INTERVAL_MONTHLY,
+                'currency' => 'nok',
+                'unit_amount' => 199000,
+                'stripe_price_id' => null,
+                'tier_key' => 'pro',
+                'is_recurring' => true,
+                'is_active' => true,
+                'included_quantity' => 1,
+                'metadata' => ['plan_key' => 'pro'],
+            ]
+        );
+
+        $service->changePlan($customer, Customer::PLAN_PRO, Customer::BILLING_MONTHLY);
+        $service->changePlan($customer, Customer::PLAN_PRO, Customer::BILLING_MONTHLY);
+
+        $customer->refresh();
+
+        $this->assertSame(Customer::PLAN_PRO, $customer->subscription_plan);
+        $this->assertSame(Customer::BILLING_MONTHLY, $customer->billing_interval);
+        $this->assertNull($customer->stripe_id);
+        $this->assertSame(1, CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $price->id)
+            ->where('status', 'active')
+            ->count());
+
+        $line = CustomerBillingLine::query()
+            ->where('customer_id', $customer->id)
+            ->where('billing_price_id', $price->id)
+            ->where('status', 'active')
+            ->first();
+
+        $this->assertNotNull($line);
+        $this->assertSame('system', $line->source);
+        $this->assertNull($line->stripe_subscription_item_id);
+        $this->assertSame('pro', data_get($line->metadata, 'plan_key'));
+        $this->assertSame(Customer::BILLING_MONTHLY, data_get($line->metadata, 'billing_interval'));
+    }
+
     private function createCustomer(string $name = 'Procynia AS'): Customer
     {
         $language = Language::query()->firstOrCreate(

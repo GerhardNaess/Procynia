@@ -2193,6 +2193,7 @@ return [
             'confirm' => 'Bekreft abonnementsendring',
             'cancel' => 'Avbryt',
             'success' => 'Abonnementet er oppdatert.',
+            'payment_setup_missing' => 'Abonnementet kunne ikke endres fordi betalingsoppsettet ikke er klart ennå. Kontakt administrator.',
             'error' => 'Abonnementet kunne ikke oppdateres.',
             'validation_plan' => 'Velg et gyldig abonnement.',
             'validation_interval' => 'Velg et gyldig faktureringsintervall.',

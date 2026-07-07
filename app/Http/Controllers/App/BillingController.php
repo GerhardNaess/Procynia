@@ -158,9 +158,9 @@ class BillingController extends Controller
 
         try {
             app(SubscriptionService::class)->changePlan($customer, $validated['plan'], $validated['interval']);
-        } catch (Throwable) {
+        } catch (Throwable $throwable) {
             return back()->withErrors([
-                'plan' => __('procynia.billing.plan_change.error'),
+                'plan' => $this->planChangeErrorMessage($throwable),
             ]);
         }
 
@@ -229,5 +229,22 @@ class BillingController extends Controller
         }
 
         return $plans;
+    }
+
+    private function planChangeErrorMessage(Throwable $throwable): string
+    {
+        $paymentSetupMessage = __('procynia.billing.plan_change.payment_setup_missing');
+        $message = strtolower($throwable->getMessage());
+
+        if (
+            str_contains($message, 'payment setup')
+            || str_contains($message, 'betalingsoppsettet')
+            || str_starts_with($throwable::class, 'Stripe\\')
+            || str_starts_with($throwable::class, 'Laravel\\Cashier\\')
+        ) {
+            return $paymentSetupMessage;
+        }
+
+        return __('procynia.billing.plan_change.error');
     }
 }

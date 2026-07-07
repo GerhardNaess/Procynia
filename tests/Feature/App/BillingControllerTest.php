@@ -495,6 +495,63 @@ class BillingControllerTest extends TestCase
         $response->assertSessionHas('success', __('procynia.billing.plan_change.success'));
     }
 
+    public function test_bid_manager_can_change_plan_locally_without_stripe_connection(): void
+    {
+        $context = $this->bidManagerContext();
+        $customer = $context['customer'];
+
+        $product = BillingProduct::query()->updateOrCreate(
+            ['key' => 'plan_pro'],
+            [
+                'name' => 'Pro',
+                'description' => 'Pro base plan used for local plan changes.',
+                'category' => BillingProduct::CATEGORY_BASE_PLAN,
+                'billing_scope' => BillingProduct::BILLING_SCOPE_CUSTOMER,
+                'is_active' => true,
+                'sort_order' => 3,
+                'metadata' => ['plan_key' => 'pro'],
+            ]
+        );
+
+        $price = BillingPrice::query()->updateOrCreate(
+            ['key' => 'pro_monthly'],
+            [
+                'billing_product_id' => $product->id,
+                'name' => 'Pro — Månedlig',
+                'interval' => BillingPrice::INTERVAL_MONTHLY,
+                'currency' => 'nok',
+                'unit_amount' => 199000,
+                'stripe_price_id' => null,
+                'tier_key' => 'pro',
+                'is_recurring' => true,
+                'is_active' => true,
+                'included_quantity' => 1,
+                'metadata' => ['plan_key' => 'pro'],
+            ]
+        );
+
+        $response = $this->actingAs($context['user'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertRedirect('/app/billing');
+        $response->assertSessionHas('success', __('procynia.billing.plan_change.success'));
+
+        $customer->refresh();
+
+        $this->assertSame(Customer::PLAN_PRO, $customer->subscription_plan);
+        $this->assertSame(Customer::BILLING_MONTHLY, $customer->billing_interval);
+        $this->assertNull($customer->stripe_id);
+        $this->assertDatabaseHas('customer_billing_lines', [
+            'customer_id' => $customer->id,
+            'billing_price_id' => $price->id,
+            'status' => 'active',
+            'source' => 'system',
+            'stripe_subscription_item_id' => null,
+        ]);
+    }
+
     public function test_plan_change_service_errors_are_handled_controlled(): void
     {
         $context = $this->systemOwnerContext();
@@ -511,6 +568,32 @@ class BillingControllerTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors(['plan']);
+        $this->assertSame(
+            __('procynia.billing.plan_change.error'),
+            session('errors')->getBag('default')->first('plan')
+        );
+    }
+
+    public function test_plan_change_shows_clear_message_when_payment_setup_is_missing(): void
+    {
+        $context = $this->systemOwnerContext();
+
+        $this->partialMock(SubscriptionService::class, function ($mock): void {
+            $mock->shouldReceive('changePlan')
+                ->once()
+                ->andThrow(new \RuntimeException(__('procynia.billing.plan_change.payment_setup_missing')));
+        });
+
+        $response = $this->actingAs($context['owner'])->post('/app/billing/change-plan', [
+            'plan' => 'pro',
+            'interval' => 'monthly',
+        ]);
+
+        $response->assertSessionHasErrors(['plan']);
+        $this->assertSame(
+            __('procynia.billing.plan_change.payment_setup_missing'),
+            session('errors')->getBag('default')->first('plan')
+        );
     }
 
     private function systemOwnerContext(string $customerName = 'Procynia AS'): array

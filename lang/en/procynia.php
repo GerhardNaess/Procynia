@@ -2193,6 +2193,7 @@ return [
             'confirm' => 'Confirm subscription change',
             'cancel' => 'Cancel',
             'success' => 'The subscription has been updated.',
+            'payment_setup_missing' => 'The subscription could not be changed because the payment setup is not ready yet. Contact an administrator.',
             'error' => 'The subscription could not be updated.',
             'validation_plan' => 'Choose a valid subscription.',
             'validation_interval' => 'Choose a valid billing interval.',

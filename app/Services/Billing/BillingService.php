@@ -18,6 +18,11 @@ use Throwable;
 
 class BillingService
 {
+    public function hasStripeCustomer(Customer $customer): bool
+    {
+        return filled($customer->stripe_id);
+    }
+
     public function ensureStripeCustomer(Customer $customer): Customer
     {
         if ($customer->stripe_id) {
@@ -39,6 +44,16 @@ class BillingService
     {
         $customer = $this->ensureStripeCustomer($customer);
 
+        return $this->syncAccountBillingState($customer, $payload, true);
+    }
+
+    public function syncLocalAccountBilling(Customer $customer, array $payload = []): array
+    {
+        return $this->syncAccountBillingState($customer->fresh(), $payload, false);
+    }
+
+    private function syncAccountBillingState(Customer $customer, array $payload = [], bool $syncStripe = true): array
+    {
         if (isset($payload['plan_key'], $payload['billing_interval'])) {
             $planKey = (string) $payload['plan_key'];
             $billingInterval = (string) $payload['billing_interval'];
@@ -48,11 +63,15 @@ class BillingService
             $this->syncBasePlanLine($customer, $planKey, $billingInterval, $source);
         }
 
-        $this->recalculateSubscriptionItems($customer);
+        if ($syncStripe) {
+            $this->recalculateSubscriptionItems($customer);
+        }
+
+        $customer = $customer->fresh();
 
         return [
-            'customer' => $customer->fresh(),
-            'subscription' => $customer->subscription('default'),
+            'customer' => $customer,
+            'subscription' => $syncStripe ? $customer->subscription('default') : null,
             'billing_lines' => $this->activeBillingLines($customer),
         ];
     }
