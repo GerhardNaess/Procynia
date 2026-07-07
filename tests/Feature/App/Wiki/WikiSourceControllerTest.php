@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
+use App\Services\DocumentTextExtractor;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -29,6 +30,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_system_owner_can_upload_pdf_as_enterprise_wiki_document(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Tjenestebeskrivelse innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -47,6 +49,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_system_owner_can_upload_docx_as_enterprise_wiki_document(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Kompetansebeskrivelse innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -71,6 +74,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_uploaded_document_is_scoped_to_uploading_customer(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer('Eier AS');
         $other = $this->createCustomer('Fremmed AS');
@@ -84,11 +88,12 @@ class WikiSourceControllerTest extends TestCase
         $this->assertSame(0, EnterpriseWikiDocument::query()->where('customer_id', $other->id)->count());
     }
 
-    // ─── Field assertions ─────────────────────────────────────────────────────
+    // ─── Extraction: success ──────────────────────────────────────────────────
 
-    public function test_document_status_is_pending_after_upload(): void
+    public function test_document_status_is_extracted_when_extraction_succeeds(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Kapittel 1. Kompetanse og erfaring fra norske virksomheter.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -99,13 +104,89 @@ class WikiSourceControllerTest extends TestCase
 
         $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
 
-        $this->assertSame(EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING, $doc->document_status);
+        $this->assertSame(EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED, $doc->document_status);
+    }
+
+    public function test_extracted_text_is_saved_when_extraction_succeeds(): void
+    {
+        Storage::fake('local');
+        $expectedText = 'Kapittel 1. Tjenestebeskrivelse for norske virksomheter.';
+        $this->mockExtractorReturning($expectedText);
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($user)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('tekst.pdf', 64, 'application/pdf'),
+        ]);
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+
+        $this->assertSame($expectedText, $doc->extracted_text);
+    }
+
+    // ─── Extraction: failure ──────────────────────────────────────────────────
+
+    public function test_document_status_is_failed_when_extraction_returns_empty(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('');
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($user)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('tom.pdf', 64, 'application/pdf'),
+        ]);
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+
+        $this->assertSame(EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED, $doc->document_status);
+    }
+
+    public function test_extracted_text_is_null_when_extraction_returns_empty(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('');
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($user)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('tom.pdf', 64, 'application/pdf'),
+        ]);
+
+        $doc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
+
         $this->assertNull($doc->extracted_text);
     }
+
+    public function test_no_document_is_left_as_pending_after_store(): void
+    {
+        Storage::fake('local');
+        $this->mockExtractorReturning('Noe tekst.');
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $this->actingAs($user)->post('/app/wiki/sources', [
+            'file' => UploadedFile::fake()->create('check.pdf', 64, 'application/pdf'),
+        ]);
+
+        $pendingCount = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customer->id)
+            ->where('document_status', EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING)
+            ->count();
+
+        $this->assertSame(0, $pendingCount);
+    }
+
+    // ─── Field assertions ─────────────────────────────────────────────────────
 
     public function test_uploaded_by_user_id_is_set_on_document(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -122,6 +203,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_file_hash_sha256_is_set_on_document(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -140,6 +222,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_original_filename_is_preserved(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -156,6 +239,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_file_is_stored_under_wiki_documents_path(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -179,19 +263,14 @@ class WikiSourceControllerTest extends TestCase
     public function test_same_file_for_same_customer_is_rejected_as_duplicate(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
 
-        // First upload succeeds
         $file = UploadedFile::fake()->create('duplikat.pdf', 64, 'application/pdf');
         $this->actingAs($user)->post('/app/wiki/sources', ['file' => $file])->assertRedirect();
 
-        // Second upload with same content is rejected
-        $duplicate = UploadedFile::fake()->create('duplikat-kopi.pdf', 64, 'application/pdf');
-
-        // Make the duplicate have the same hash by giving it the same real content
-        // We need an identical file — create it via the same fake mechanism and copy content
         $firstDoc = EnterpriseWikiDocument::query()->where('customer_id', $customer->id)->firstOrFail();
 
         $response = $this->actingAs($user)->post('/app/wiki/sources', [
@@ -208,6 +287,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_same_file_for_different_customer_is_allowed(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customerA = $this->createCustomer('Kunde A AS');
         $customerB = $this->createCustomer('Kunde B AS');
@@ -262,6 +342,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_no_knowledge_item_rows_are_created_during_upload(): void
     {
         Storage::fake('local');
+        $this->mockExtractorReturning('Innhold.');
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -274,6 +355,13 @@ class WikiSourceControllerTest extends TestCase
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private function mockExtractorReturning(string $text): void
+    {
+        $this->mock(DocumentTextExtractor::class, function ($mock) use ($text): void {
+            $mock->shouldReceive('extractText')->andReturn($text);
+        });
+    }
 
     private function createCustomer(string $name = 'Wiki Source Test AS'): Customer
     {

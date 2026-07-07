@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiDocument;
+use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,10 @@ use Illuminate\Validation\ValidationException;
 
 class WikiSourceController extends Controller
 {
-    public function __construct(private readonly CustomerContext $customerContext) {}
+    public function __construct(
+        private readonly CustomerContext $customerContext,
+        private readonly DocumentTextExtractor $documentTextExtractor,
+    ) {}
 
     public function store(Request $request): RedirectResponse
     {
@@ -56,14 +60,20 @@ class WikiSourceController extends Controller
 
             abort_unless(is_string($storedPath) && $storedPath !== '', 500, 'Failed to store the wiki document.');
 
-            DB::transaction(function () use ($customerId, $user, $file, $storedPath, $fileHash): void {
+            $absolutePath = Storage::disk('local')->path($storedPath);
+            $extractedText = trim($this->documentTextExtractor->extractText($absolutePath));
+
+            DB::transaction(function () use ($customerId, $user, $file, $storedPath, $fileHash, $extractedText): void {
                 EnterpriseWikiDocument::query()->create([
                     'customer_id' => $customerId,
                     'uploaded_by_user_id' => $user?->id,
                     'original_filename' => $file->getClientOriginalName(),
                     'file_path' => $storedPath,
                     'file_hash_sha256' => $fileHash,
-                    'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING,
+                    'extracted_text' => $extractedText !== '' ? $extractedText : null,
+                    'document_status' => $extractedText !== ''
+                        ? EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED
+                        : EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
                 ]);
             });
         } catch (\Throwable $e) {
