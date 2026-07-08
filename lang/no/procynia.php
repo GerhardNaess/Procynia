@@ -2996,5 +2996,6 @@ return [
         'source_page_reference' => 'Avsnitt',
         'source_no_excerpt' => 'Ingen tekstutdrag tilgjengelig.',
         'claim_no_sources' => 'Ingen kildereferanser for denne påstanden.',
+        'source_open_document' => 'Åpne kildedokument',
     ],
 ];

@@ -305,6 +305,7 @@ Route::prefix('app')
             Route::get('/', [WikiController::class, 'index'])->name('index');
             Route::post('/sources', [WikiSourceController::class, 'store'])->name('sources.store');
             Route::post('/sources/{document}/ingest', [WikiSourceController::class, 'ingest'])->name('sources.ingest');
+            Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');

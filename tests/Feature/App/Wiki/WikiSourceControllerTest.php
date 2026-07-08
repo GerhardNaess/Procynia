@@ -401,6 +401,60 @@ class WikiSourceControllerTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    // ─── Download ────────────────────────────────────────────────────────────
+
+    public function test_system_owner_can_download_own_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, '%PDF-1.4 test content');
+
+        $response = $this->actingAs($user)->get("/app/wiki/sources/{$document->id}/download");
+
+        $response->assertOk();
+    }
+
+    public function test_bid_manager_can_download_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, '%PDF-1.4 test content');
+
+        $response = $this->actingAs($user)->get("/app/wiki/sources/{$document->id}/download");
+
+        $response->assertOk();
+    }
+
+    public function test_download_rejects_other_customer_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignDoc = $this->createDocument($other, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($foreignDoc->file_path, 'Fremmed innhold.');
+
+        $this->actingAs($user)
+            ->get("/app/wiki/sources/{$foreignDoc->id}/download")
+            ->assertNotFound();
+    }
+
+    public function test_download_returns_404_when_file_missing_from_storage(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($user)
+            ->get("/app/wiki/sources/{$document->id}/download")
+            ->assertNotFound();
+    }
+
     // ─── No knowledge_* models touched ───────────────────────────────────────
 
     public function test_no_knowledge_item_rows_are_created_during_upload(): void

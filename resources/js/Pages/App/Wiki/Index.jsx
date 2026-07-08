@@ -290,22 +290,36 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {source.document_status === 'extracted' && (() => {
-                                                        const isInProgress = source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status);
-                                                        const isDisabled = ingestingIds.has(source.id) || isInProgress;
-                                                        return (
-                                                            <button
-                                                                type="button"
-                                                                disabled={isDisabled}
-                                                                onClick={() => startIngest(source.id)}
-                                                                className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                {ingestingIds.has(source.id)
-                                                                    ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                    : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
-                                                            </button>
-                                                        );
-                                                    })()}
+                                                    <div className="flex flex-col items-start gap-2">
+                                                        <a
+                                                            href={`/app/wiki/sources/${source.id}/download`}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"
+                                                        >
+                                                            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                            </svg>
+                                                            {tw.source_open_document ?? 'Åpne dokument'}
+                                                        </a>
+                                                        {source.document_status === 'extracted' && (() => {
+                                                            const isInProgress = source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status);
+                                                            const isDisabled = ingestingIds.has(source.id) || isInProgress;
+                                                            return (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={isDisabled}
+                                                                    onClick={() => startIngest(source.id)}
+                                                                    className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                >
+                                                                    {ingestingIds.has(source.id)
+                                                                        ? (tw.source_ingest_starting ?? 'Starter...')
+                                                                        : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                                </button>
+                                                            );
+                                                        })()}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))}

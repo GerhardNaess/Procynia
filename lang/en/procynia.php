@@ -2996,5 +2996,6 @@ return [
         'source_page_reference' => 'Section',
         'source_no_excerpt' => 'No text excerpt available.',
         'claim_no_sources' => 'No source references for this claim.',
+        'source_open_document' => 'Open source document',
     ],
 ];

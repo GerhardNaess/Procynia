@@ -7,6 +7,7 @@ use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -130,6 +131,9 @@ class WikiController extends Controller
                             'source_label' => $ref->source_label,
                             'excerpt' => $ref->excerpt,
                             'page_reference' => $ref->page_reference,
+                            'download_url' => $ref->source_type === EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT
+                                ? route('app.wiki.sources.download', $ref->source_id)
+                                : null,
                         ])
                         ->all(),
                 ])

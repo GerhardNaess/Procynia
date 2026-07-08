@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 
 class WikiSourceController extends Controller
 {
@@ -95,6 +97,30 @@ class WikiSourceController extends Controller
 
         return redirect()->route('app.wiki.index')
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
+    }
+
+    public function download(EnterpriseWikiDocument $document): BinaryFileResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        $disk = Storage::disk('local');
+        abort_unless($disk->exists($document->file_path), 404);
+
+        $mimeType = match (strtolower(pathinfo($document->original_filename, PATHINFO_EXTENSION))) {
+            'pdf' => 'application/pdf',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            default => 'application/octet-stream',
+        };
+
+        $response = response()->file($disk->path($document->file_path), ['Content-Type' => $mimeType]);
+        $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $document->original_filename);
+
+        return $response;
     }
 
     public function ingest(EnterpriseWikiDocument $document): RedirectResponse
