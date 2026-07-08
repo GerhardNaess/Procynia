@@ -1,0 +1,237 @@
+<?php
+
+namespace App\Services\EnterpriseWiki;
+
+/**
+ * Defines the strict JSON contract for the Karpathy-style maintainer decision step.
+ *
+ * A maintainer decision is produced by an AI pass that reads:
+ *  - the source document text
+ *  - the existing wiki page index (from EnterpriseWikiIndexContextService)
+ *
+ * It decides what pages to create or update, but does NOT generate page content.
+ * Content generation happens in a separate downstream step.
+ *
+ * Rules encoded here (used in both the JSON schema and the PHP validator):
+ *  - source_article and source_summary are 1-to-1 with the source document.
+ *  - concept/entity pages are shared across sources and carry a nullable page_id.
+ *  - update action on a shared page requires a non-null page_id pointing to an existing page.
+ *  - proposed_slug must not contain a file extension.
+ *  - title must not be a raw filename (e.g. "Masterdata.pdf").
+ *  - output is a decision only — no article content, no OpenAI calls in this class.
+ */
+class EnterpriseWikiMaintainerDecisionPrompt
+{
+    public const ACTIONS = ['create', 'update'];
+
+    private const FILE_EXTENSIONS = ['pdf', 'docx', 'xlsx', 'txt', 'doc', 'pptx', 'odt', 'csv'];
+
+    /**
+     * Returns the OpenAI Responses API text.format block for strict JSON output.
+     * Use as: ['text' => self::jsonSchema()] in the API request body.
+     */
+    public static function jsonSchema(): array
+    {
+        $sourcePageSchema = [
+            'type'                 => 'object',
+            'properties'           => [
+                'action'        => ['type' => 'string', 'enum' => self::ACTIONS],
+                'title'         => ['type' => 'string'],
+                'proposed_slug' => ['type' => 'string'],
+                'reason'        => ['type' => 'string'],
+            ],
+            'required'             => ['action', 'title', 'proposed_slug', 'reason'],
+            'additionalProperties' => false,
+        ];
+
+        $sharedPageSchema = [
+            'type'                 => 'object',
+            'properties'           => [
+                'action'        => ['type' => 'string', 'enum' => self::ACTIONS],
+                'page_id'       => ['type' => ['integer', 'null']],
+                'title'         => ['type' => 'string'],
+                'proposed_slug' => ['type' => 'string'],
+                'reason'        => ['type' => 'string'],
+            ],
+            'required'             => ['action', 'page_id', 'title', 'proposed_slug', 'reason'],
+            'additionalProperties' => false,
+        ];
+
+        return [
+            'type' => 'json_schema',
+            'json_schema' => [
+                'name'   => 'maintainer_decision',
+                'strict' => true,
+                'schema' => [
+                    'type'                 => 'object',
+                    'properties'           => [
+                        'source_article'   => $sourcePageSchema,
+                        'source_summary'   => $sourcePageSchema,
+                        'concept_pages'    => ['type' => 'array', 'items' => $sharedPageSchema],
+                        'entity_pages'     => ['type' => 'array', 'items' => $sharedPageSchema],
+                        'no_action_reason' => ['type' => ['string', 'null']],
+                        'warnings'         => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                    'required'             => [
+                        'source_article',
+                        'source_summary',
+                        'concept_pages',
+                        'entity_pages',
+                        'no_action_reason',
+                        'warnings',
+                    ],
+                    'additionalProperties' => false,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Validate a raw decoded decision object.
+     *
+     * @param  array<string, mixed> $raw
+     * @return string[]  Empty when valid; one string per error when invalid.
+     */
+    public static function validate(array $raw): array
+    {
+        $errors = [];
+
+        foreach (['source_article', 'source_summary'] as $key) {
+            if (! isset($raw[$key]) || ! is_array($raw[$key])) {
+                $errors[] = "{$key} is required and must be an object.";
+                continue;
+            }
+            $errors = array_merge($errors, self::validateSourceEntry($raw[$key], $key));
+        }
+
+        foreach (['concept_pages', 'entity_pages'] as $key) {
+            if (! array_key_exists($key, $raw)) {
+                continue;
+            }
+            if (! is_array($raw[$key])) {
+                $errors[] = "{$key} must be an array.";
+                continue;
+            }
+            foreach ($raw[$key] as $i => $entry) {
+                $errors = array_merge($errors, self::validateSharedEntry($entry, "{$key}[{$i}]"));
+            }
+        }
+
+        if (
+            array_key_exists('no_action_reason', $raw)
+            && $raw['no_action_reason'] !== null
+            && ! is_string($raw['no_action_reason'])
+        ) {
+            $errors[] = 'no_action_reason must be a string or null.';
+        }
+
+        if (array_key_exists('warnings', $raw) && ! is_array($raw['warnings'])) {
+            $errors[] = 'warnings must be an array of strings.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Validate and return a normalised decision array.
+     * Optional collection keys default to empty arrays/null.
+     *
+     * @param  array<string, mixed> $raw
+     * @return array<string, mixed>
+     * @throws \InvalidArgumentException when validation fails.
+     */
+    public static function parse(array $raw): array
+    {
+        $errors = self::validate($raw);
+
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(
+                'Invalid maintainer decision: ' . implode(' | ', $errors)
+            );
+        }
+
+        return [
+            'source_article'   => $raw['source_article'],
+            'source_summary'   => $raw['source_summary'],
+            'concept_pages'    => $raw['concept_pages'] ?? [],
+            'entity_pages'     => $raw['entity_pages'] ?? [],
+            'no_action_reason' => $raw['no_action_reason'] ?? null,
+            'warnings'         => $raw['warnings'] ?? [],
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal validators
+    // -------------------------------------------------------------------------
+
+    /** @return string[] */
+    private static function validateSourceEntry(array $entry, string $ctx): array
+    {
+        $errors = [];
+
+        if (! isset($entry['action']) || ! in_array($entry['action'], self::ACTIONS, true)) {
+            $errors[] = "{$ctx}.action must be one of: " . implode(', ', self::ACTIONS) . '.';
+        }
+
+        foreach (['title', 'proposed_slug', 'reason'] as $field) {
+            if (! isset($entry[$field]) || ! is_string($entry[$field]) || trim($entry[$field]) === '') {
+                $errors[] = "{$ctx}.{$field} is required and must be a non-empty string.";
+            }
+        }
+
+        if (isset($entry['title']) && is_string($entry['title'])) {
+            $errors = array_merge($errors, self::validateNoFileExtensionInTitle($entry['title'], "{$ctx}.title"));
+        }
+
+        if (isset($entry['proposed_slug']) && is_string($entry['proposed_slug'])) {
+            $errors = array_merge($errors, self::validateNoFileExtensionInSlug($entry['proposed_slug'], "{$ctx}.proposed_slug"));
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    private static function validateSharedEntry(mixed $entry, string $ctx): array
+    {
+        if (! is_array($entry)) {
+            return ["{$ctx} must be an object."];
+        }
+
+        $errors = self::validateSourceEntry($entry, $ctx);
+
+        if (! array_key_exists('page_id', $entry)) {
+            $errors[] = "{$ctx}.page_id is required (null for create, integer for update).";
+        } elseif ($entry['page_id'] !== null && ! is_int($entry['page_id'])) {
+            $errors[] = "{$ctx}.page_id must be an integer or null.";
+        }
+
+        if (
+            isset($entry['action']) && $entry['action'] === 'update'
+            && (! isset($entry['page_id']) || ! is_int($entry['page_id']))
+        ) {
+            $errors[] = "{$ctx}.page_id must be a non-null integer for update action.";
+        }
+
+        return $errors;
+    }
+
+    /** @return string[] */
+    private static function validateNoFileExtensionInTitle(string $title, string $ctx): array
+    {
+        $ext = mb_strtolower((string) pathinfo($title, PATHINFO_EXTENSION));
+        if ($ext !== '' && in_array($ext, self::FILE_EXTENSIONS, true)) {
+            return ["{$ctx} must not be a raw filename — strip the file extension (found: .{$ext})."];
+        }
+        return [];
+    }
+
+    /** @return string[] */
+    private static function validateNoFileExtensionInSlug(string $slug, string $ctx): array
+    {
+        $extPattern = implode('|', self::FILE_EXTENSIONS);
+        if (preg_match('/[-.](?:' . $extPattern . ')$/i', $slug)) {
+            return ["{$ctx} must not contain a file extension — remove it from the slug."];
+        }
+        return [];
+    }
+}
