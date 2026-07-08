@@ -123,6 +123,11 @@ class EnterpriseWikiPage extends Model
         return $this->hasMany(EnterpriseWikiClaim::class)->orderBy('position_order');
     }
 
+    public function lintFindings(): HasMany
+    {
+        return $this->hasMany(EnterpriseWikiLintFinding::class, 'enterprise_wiki_page_id');
+    }
+
     public function ingestRuns(): HasMany
     {
         return $this->hasMany(EnterpriseWikiIngestRun::class);
