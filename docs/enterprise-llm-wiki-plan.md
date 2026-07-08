@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført / Fase 1 fullført (2026-07-07)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført (2026-07-07)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -518,14 +518,45 @@ Avvik fra opprinnelig plan:
 - Ingen godkjenningshandlinger ennå
 
 ### Fase 3 — Godkjenning og statusflyt
-- System Owner kan godkjenne/avvise sider
-- Statusflyt: draft → pending_review → approved/rejected
-- Eventuelt: godkjenning per enkeltpåstand (avhenger av beslutning i §11)
+
+#### Fase 3B — Minimal approval-UI — Fullført (2026-07-07)
+
+**Commit:** `9c07259`
+
+Implementert:
+- `submit`, `approve`, `reject`-metoder i `WikiController`
+- Statusoverganger: `draft → pending_review`, `pending_review → approved/rejected`, `rejected → draft`
+- System Owner godkjenner og avviser sider; andre roller ser informasjonsmelding for `pending_review`
+- Flash-meldinger for alle handlinger
+- Approval-seksjon i `Show.jsx` styres av `auth.user.is_system_owner` fra delt Inertia-data
+
+Gjenstår i Fase 3:
+- Godkjenning per enkeltpåstand (avhenger av §11, punkt 7)
 - Historikk: vis alle versjoner av en side
 
 ### Fase 4A — Enterprise Wiki egne kilder
 
 > **Korrekt langsiktig arkitektur.** Etter denne fasen er Enterprise Wiki et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG.
+
+#### Implementert — Fase 4A-5–4A-9 — Fullført (2026-07-07)
+
+| Fase | Commit | Innhold |
+|---|---|---|
+| 4A-5 | `d584f43` | Upload-UI for Enterprise Wiki-kildedokumenter (`POST /app/wiki/sources`) |
+| 4A-6 | `00a2c71` | Visning av opplastede kildedokumenter på `/app/wiki` |
+| 4A-7 | `100b17d` | Ingest-action fra UI (`POST /app/wiki/sources/{document}/ingest`) |
+| 4A-8 | `1ce529d` | Ingest-statusvisning per kilde med fargede statuskoder |
+| 4A-9 | `08f0f6c` | Kobling fra kilde til genererte wiki-utkast med navigasjonslenker |
+
+Implementert:
+- `EnterpriseWikiDocument`-modell og `enterprise_wiki_documents`-tabell — ingen FK mot Kunnskapsbase
+- Upload-route (`POST /app/wiki/sources`), `WikiSourceController`, tekstekstraksjon via `EnterpriseWikiIngestService`
+- Ingest-route (`POST /app/wiki/sources/{document}/ingest`), kun for `document_status = 'extracted'`
+- `source_type = 'enterprise_wiki_document'` støttet i `enterprise_wiki_ingest_runs`
+- Kildetabell på `/app/wiki` med filnavn, dokumentstatus, ingest-status og navigasjonslenker til genererte sider
+- Kundeisolasjon håndheves i alle spørringer og kontrollere
+
+Opprinnelig planbeskrivelse:
 
 Ny modell og tabell:
 
