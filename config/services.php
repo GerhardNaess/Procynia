@@ -81,4 +81,8 @@ return [
         'url' => env('UPTIME_KUMA_URL', ''),
     ],
 
+    'enterprise_wiki' => [
+        'ai_enabled' => (bool) env('ENTERPRISE_WIKI_AI_ENABLED', false),
+    ],
+
 ];

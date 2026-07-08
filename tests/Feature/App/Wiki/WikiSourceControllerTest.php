@@ -359,6 +359,23 @@ class WikiSourceControllerTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_ingest_is_not_blocked_by_availability_when_flag_is_true(): void
+    {
+        Queue::fake();
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createExtractedDocument($customer);
+
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+
+        // Passes availability check — redirects after successful run creation, not with 'error'.
+        $response->assertRedirect();
+        $response->assertSessionMissing('error');
+        Queue::assertPushed(\App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest::class);
+    }
+
     public function test_ingest_rejects_other_customer_document(): void
     {
         Queue::fake();

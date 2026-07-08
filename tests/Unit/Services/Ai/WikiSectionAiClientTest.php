@@ -12,9 +12,18 @@ class WikiSectionAiClientTest extends TestCase
 {
     // ─── isAvailable ──────────────────────────────────────────────────────────
 
-    public function test_is_available_returns_false(): void
+    public function test_is_available_returns_false_by_default(): void
     {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+
         $this->assertFalse(WikiSectionAiClient::isAvailable());
+    }
+
+    public function test_is_available_returns_true_when_config_flag_is_enabled(): void
+    {
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+
+        $this->assertTrue(WikiSectionAiClient::isAvailable());
     }
 
     // ─── Happy path ───────────────────────────────────────────────────────────

@@ -26,12 +26,12 @@ class WikiSectionAiClient
     /**
      * Whether wiki generation is available.
      *
-     * Returns false until Phase 1F-C (enabled after manual verification).
-     * Controllers and the frontend use this to block ingest attempts.
+     * Reads ENTERPRISE_WIKI_AI_ENABLED via config('services.enterprise_wiki.ai_enabled').
+     * Default is false. Controllers and the frontend use this to block ingest attempts.
      */
     public static function isAvailable(): bool
     {
-        return false;
+        return (bool) config('services.enterprise_wiki.ai_enabled', false);
     }
 
     /**
