@@ -278,14 +278,16 @@ export default function WikiShow({
 
                 {/* Article — primary content */}
                 <section className="space-y-4">
-                    <div className="flex items-center gap-3">
-                        <h2 className="text-base font-semibold text-slate-700">
-                            {tw.article_heading ?? 'Artikkelutkast'}
-                        </h2>
-                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                            {tw.article_ai_label ?? 'AI-generert'}
-                        </span>
-                    </div>
+                    {!isApproved && (
+                        <div className="flex items-center gap-3">
+                            <h2 className="text-base font-semibold text-slate-700">
+                                {tw.article_heading ?? 'Artikkelutkast'}
+                            </h2>
+                            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                {tw.article_ai_label ?? 'AI-generert'}
+                            </span>
+                        </div>
+                    )}
 
                     {hasArticle ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
@@ -318,6 +320,31 @@ export default function WikiShow({
 
                     {verificationOpen && (
                         <div className="space-y-4">
+                            {lintFindings.length > 0 && (
+                                <div className="space-y-2">
+                                    <p className="text-sm font-semibold text-slate-600">
+                                        {tw.lint_findings_heading ?? 'Helsekontroll'}
+                                    </p>
+                                    <ul className="space-y-2">
+                                        {lintFindings.map((f) => (
+                                            <li
+                                                key={f.id}
+                                                className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
+                                            >
+                                                <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                                    {f.severity === 'error'
+                                                        ? (tw.lint_severity_error ?? 'Feil')
+                                                        : f.severity === 'warning'
+                                                            ? (tw.lint_severity_warning ?? 'Advarsel')
+                                                            : (tw.lint_severity_info ?? 'Info')}
+                                                </span>
+                                                <p className="text-sm text-slate-700">{f.message}</p>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
                             {!current_version ? (
                                 <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
                             ) : claims.length === 0 ? (
@@ -432,36 +459,6 @@ export default function WikiShow({
                                 </>
                             )}
                         </div>
-                    )}
-                </section>
-
-                {/* Helsekontroll */}
-                <section className="space-y-3">
-                    <h2 className="text-base font-semibold text-slate-700">
-                        {tw.lint_findings_heading ?? 'Helsekontroll'}
-                    </h2>
-                    {lintFindings.length === 0 ? (
-                        <p className="text-sm text-slate-400">
-                            {tw.lint_page_no_findings ?? 'Ingen åpne helsefunn for denne siden.'}
-                        </p>
-                    ) : (
-                        <ul className="space-y-2">
-                            {lintFindings.map((f) => (
-                                <li
-                                    key={f.id}
-                                    className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
-                                >
-                                    <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600'}`}>
-                                        {f.severity === 'error'
-                                            ? (tw.lint_severity_error ?? 'Feil')
-                                            : f.severity === 'warning'
-                                                ? (tw.lint_severity_warning ?? 'Advarsel')
-                                                : (tw.lint_severity_info ?? 'Info')}
-                                    </span>
-                                    <p className="text-sm text-slate-700">{f.message}</p>
-                                </li>
-                            ))}
-                        </ul>
                     )}
                 </section>
 
