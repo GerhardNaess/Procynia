@@ -2,7 +2,7 @@
 
 Versjon: 0.3
 Dato: 2026-07-08
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI startet (Fase 8D, commit 94f6541) · **Neste: Fase 8B Artikkelgenerering-spesifikasjon**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI startet (Fase 8D, commit 94f6541) · Artikkelgenerering spesifisert (Fase 8B) · **Neste: Fase 8C Backend artikkelgenerering**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -580,8 +580,8 @@ Disse spørsmålene må avgjøres før kode skrives:
 | Fase 6 | Lokal E2E-verifisering | Fullført |
 | Fase 7 | Produksjonsrunbook | Fullført — aktivering utsatt |
 | Fase 8A | Article Layer Analyse | Fullført |
-| **Fase 8B** | **Artikkelgenerering-spesifikasjon** | **Neste steg** |
-| Fase 8C | Backend artikkelgenerering | Gjenstår |
+| Fase 8B | Artikkelgenerering-spesifikasjon | Fullført |
+| **Fase 8C** | **Backend artikkelgenerering** | **Neste steg** |
 | Fase 8D | Wiki Article UI | Startet (commit 94f6541) |
 | Fase 8E | Review og godkjennings-UX | Gjenstår |
 | Fase 8F | Kontrollert produksjonsaktivering | Gjenstår — sist |
@@ -1087,30 +1087,218 @@ Scope gjennomgått:
 
 Funn: arkitektur og datamodell er riktig. Gap er at `assembleContentMarkdown()` lager en claim-liste, og UI viste ikke `content_markdown` som primærinnhold. Minste trygge vei: (1) fikse UI til å rendre `content_markdown` som artikkel (Fase 8D), (2) erstatte `assembleContentMarkdown()` med AI-generert artikkel (Fase 8C).
 
-### Fase 8B — Artikkelgenerering-spesifikasjon — Neste steg
+### Fase 8B — Artikkelgenerering-spesifikasjon — Fullført
 
-Mål: spesifiser hvordan AI skal generere lesbar wikiartikkel.
+> Spesifikasjonsfase. Ingen kodeendringer i denne fasen.
 
-Krav til output:
-- strict JSON schema
-- `article.title`
-- `article.summary`
-- `article.markdown`
-- `article.sections[]`
-- `claims[]`
-- `source_coverage`
-- språkstyring via customer language
+#### Avgrensninger
 
-Artikkelkrav:
-- skal være lesbar Markdown
-- skal ha overskrifter og avsnitt
-- skal syntetisere, ikke bare liste claims
-- skal ikke innføre fakta uten kildegrunnlag
-- skal kunne reviewes mot claims/source references
+- Ingen ny databaseendring — `content_markdown` finnes allerede på `enterprise_wiki_page_versions`.
+- Ingen kobling til Kunnskapsbase/RAG, `KnowledgeItem`, `KnowledgeItemVersion` eller `KnowledgeItemChunk`.
+- Ingen produksjonsaktivering.
+- Claims er ikke sluttproduktet — de er verifikasjonslaget.
+- `enterprise_wiki_page_versions.content_markdown` er det autoritative feltet for wikiartikkelinnhold.
+
+#### Nåværende gap
+
+`FinalizeEnterpriseWikiIngest::handle()` kaller `EnterpriseWikiIngestService::assembleContentMarkdown()` som produserer:
+
+```
+# {pageTitle}
+<!-- wiki-ingest-run:N -->
+{claim_text}
+> *Kilde: {sourceLabel} — «{excerpt}»*
+...
+```
+
+Dette er ikke en lesbar wikiartikkel. Det er en formatert claim-liste. UI-en (Fase 8D) er klar til å rendre
+`content_markdown` som artikkel — men innholdet som genereres er ikke det rette.
+
+#### Løsning: WikiArticleAiClient i FinalizeEnterpriseWikiIngest
+
+Ny klasse `WikiArticleAiClient` (speiler `WikiSectionAiClient`). Metoden `generateArticle()` kalles av
+`FinalizeEnterpriseWikiIngest` etter at alle seksjonsjobber er fullført — i stedet for `assembleContentMarkdown()`.
+
+Claims og source references i DB røres ikke av dette steget. De forblir som verifikasjonslag.
+
+#### Plassering i pipeline
+
+```
+ProcessEnterpriseWikiIngest      (uendret)
+  → ProcessEnterpriseWikiSection (uendret — ekstraherer claims og source references per seksjon)
+  → FinalizeEnterpriseWikiIngest (ENDRES i Fase 8C: erstatter assembleContentMarkdown()
+                                   med WikiArticleAiClient::generateArticle())
+```
+
+`assembleContentMarkdown()` i `EnterpriseWikiIngestService` beholdes inntil videre for eksisterende tester, men
+kalles ikke lenger fra finalize-jobben etter Fase 8C.
+
+#### Klassestruktur etter Fase 8C
+
+```
+app/Services/Ai/Wiki/
+  WikiSectionAiClient.php          (uendret — claim extraction, gpt-4.1-mini)
+  WikiArticleAiClient.php          (ny — artikkelgenerering, gpt-5)
+  EnterpriseWikiIngestService.php  (beholder assembleContentMarkdown() men kalles ikke fra finalize)
+
+app/Jobs/Ai/Wiki/
+  FinalizeEnterpriseWikiIngest.php (endres — injiserer og bruker WikiArticleAiClient)
+```
+
+#### Input til WikiArticleAiClient::generateArticle()
+
+Alle claims for page version hentes fra DB inne i `FinalizeEnterpriseWikiIngest::handle()`:
+
+```php
+$claimsData = EnterpriseWikiClaim::query()
+    ->with('sourceReferences')
+    ->where('enterprise_wiki_page_version_id', $pageVersion->id)
+    ->orderBy('position_order')
+    ->get()
+    ->map(fn($c) => [
+        'text'       => $c->claim_text,
+        'confidence' => $c->confidence,
+        'excerpt'    => $c->sourceReferences->first()?->excerpt ?? '',
+        'source'     => $c->sourceReferences->first()?->source_label ?? '',
+    ])
+    ->all();
+
+$articleResult = $articleClient->generateArticle(
+    pageTitle: $pageTitle,
+    claims: $claimsData,
+    languageCode: $languageCode,
+);
+```
+
+`languageCode` hentes fra `$run->customer->language->code` inne i jobben (samme mønster som i AI-svarflyt).
+
+#### Modell og temperatur
+
+- **Modell:** `gpt-5` — per CLAUDE.md er dette modellen for synteseoppgaver og answer draft generation.
+- **Temperatur:** 0.3 — litt frihet for syntese; ikke 0 som for ren claim-ekstraksjon.
+- **Maks output tokens:** 4 000 — tilstrekkelig for en wiki-side med 10–20 seksjoner.
+
+#### Output-format — strict JSON schema
+
+Minimalt schema. Kun `article.markdown` er required — dette er det eneste feltet som mappes til `content_markdown`.
+
+```json
+{
+  "article": {
+    "markdown": "## Oversikt\n\nVirksomheten leverer...\n\n## HMS\n\n..."
+  }
+}
+```
+
+PHP schema for Responses API:
+
+```php
+[
+    'type' => 'object',
+    'properties' => [
+        'article' => [
+            'type' => 'object',
+            'properties' => [
+                'markdown' => ['type' => 'string'],
+            ],
+            'required' => ['markdown'],
+            'additionalProperties' => false,
+        ],
+    ],
+    'required' => ['article'],
+    'additionalProperties' => false,
+]
+```
+
+**Begrunnelse for minimalt schema:** Komplekst schema med `title`, `summary`, `sections[]` øker prompt-kompleksitet
+og risiko for schema-brudd. Tittelen er allerede på `enterprise_wiki_pages.title`. `markdown` er det eneste
+feltet som trengs.
+
+#### Prompt-design
+
+System-prompt (developer role):
+
+```
+You are a wiki article writer.
+Write a coherent, readable wiki article in {languageName} based on the provided claims and source excerpts.
+Rules:
+- Use ## headings for sections and write flowing prose paragraphs, not bullet lists.
+- Synthesise overlapping claims into coherent text — do not repeat the same fact twice.
+- Do not introduce facts not supported by the provided claims and excerpts.
+- Do not mention that the article is AI-generated within the article text itself.
+- Return only JSON matching the schema. No text before or after JSON.
+```
+
+User-prompt (en strukturert claim-liste):
+
+```
+Page title: {pageTitle}
+
+Claims and source evidence:
+
+1. {claim_text} [confidence: high]
+   Source: {source_label} — "{excerpt}"
+
+2. {claim_text} [confidence: medium]
+   Source: {source_label} — "{excerpt}"
+
+[uncertain claims inkluderes men merkes med [confidence: uncertain]]
+```
+
+Claims sorteres etter `position_order` (bevarer dokumentrekkefølge).
+
+#### Mapping til content_markdown
+
+`article.markdown` fra AI-responsen skrives direkte til `pageVersion->content_markdown`.
+
+Artikkelen begynner typisk med `## Oversikt` eller tilsvarende første seksjon — AI styrer struktur.
+Sidetittelen vises separat i UI fra `page.title`, så ingen `# {pageTitle}` prepend.
+Wiki-ingest-run-kommentar (`<!-- wiki-ingest-run:N -->`) fra `assembleContentMarkdown()` utelates.
+
+#### Håndtering av tomme/svake grunnlag
+
+| Situasjon | Håndtering |
+|---|---|
+| Ingen claims i DB | Run feiler med `No claims were stored` — eksisterende oppførsel beholdes |
+| Alle claims er `uncertain` | Artikkelen genereres; lint-sjekk `low_confidence_page` plukker opp |
+| `article.markdown` er tom streng | Run feiler med `WikiArticleAiClient: generated article was empty` |
+| AI returnerer ugyldig JSON | `RuntimeException` — run feiler (samme mønster som `WikiSectionAiClient`) |
+| Færre enn 3 claims | Artikkelen genereres — ingen minimumsgrense |
+| OpenAI-timeout | `FinalizeEnterpriseWikiIngest.$timeout = 120` er tilstrekkelig for ett API-kall |
+
+Eksisterende `if ($markdown === '')` i finalize erstattes med tilsvarende sjekk på `$articleResult['article']['markdown']`.
+
+#### Claims-laget er uendret
+
+`ProcessEnterpriseWikiSection` og `WikiSectionAiClient::fetchClaims()` endres **ikke**.
+
+Claims lagres i `enterprise_wiki_claims` som før. Source references lagres i `enterprise_wiki_source_references` som
+før. Lint-regler kjører som før. `WikiController::show()` sender claims som `claims`-prop som før.
+
+Artikkelen er et nytt synteselag skrevet av en ny AI-klient på toppen av eksisterende claims.
+
+#### Teststrategi for Fase 8C
+
+Automatiserte tester bruker mock av `WikiArticleAiClient` — ingen ekte API-kall.
+
+| Test | Hva sjekkes |
+|---|---|
+| Gyldig artikkel-respons | `generateArticle()` returnerer riktig `article.markdown` |
+| `content_markdown` lagres i page version | Finalize skriver `article.markdown` til `enterprise_wiki_page_versions` |
+| Tom `article.markdown` feiler run | Run får `status = failed`, `error_message` settes |
+| Ugyldig JSON fra OpenAI | `RuntimeException` propageres, run feiles |
+| 0 claims feiler run | Eksisterende oppførsel beholdes |
+| Claims og source references røres ikke | DB-data er uendret etter finalize |
+| `assembleContentMarkdown()` kalles ikke | Mock eller assertion verifiserer at gammel metode ikke påkalles |
+| Kunnskapsbase-tabeller røres ikke | Ingen referanse til `knowledge_items`/`knowledge_item_versions` i ny kode |
+
+Eksisterende `FinalizeEnterpriseWikiIngestTest`-tester som mocker `assembleContentMarkdown()` oppdateres i Fase 8C
+til å mocke `WikiArticleAiClient::generateArticle()` i stedet.
 
 ### Fase 8C — Backend artikkelgenerering
 
-Mål: erstatt `assembleContentMarkdown()` med AI-generert artikkel lagret som `content_markdown`.
+Mål: implementer `WikiArticleAiClient::generateArticle()` og koble den inn i `FinalizeEnterpriseWikiIngest`
+i henhold til spesifikasjonen i Fase 8B.
 
 Krav:
 - bruk eksisterende `enterprise_wiki_page_versions.content_markdown`
