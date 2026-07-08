@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08) · Phase 1F-0 spec (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08) · Phase 1F fullført (2026-07-08) · Phase 1H produksjonsrunbook (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -845,6 +845,120 @@ Eksisterende `ProcessEnterpriseWikiSectionTest` bekrefter downstream-integrering
 - §11 punkt 6 (maks tokens per full run): håndteres per-seksjon i pilot — tilstrekkelig for nå
 - §11 punkt 9 (automatisk re-ingest): utsettes til etter pilot
 - §11 punkt 10 (konflikthåndtering): `conflict_flag` settes allerede, UI viser det — ingen ny handling kreves i 1F
+
+### Phase 1H — Produksjonsaktivering av Enterprise Wiki AI
+
+Kjøreklar aktiveringsguide for produksjonsmiljø. Forutsetter at Phase 1F-B lokal verifikasjon er gjennomført og godkjent.
+
+#### Forutsetninger
+
+Før aktivering i produksjon:
+
+- [ ] Phase 1F-B lokal verifikasjon er gjennomført — claims, excerpts og confidence er verifisert mot testdokument
+- [ ] Alle migrasjoner er kjørt i produksjon, inkludert `enterprise_wiki_lint_findings`-migrasjonen (`2026_07_08_000001_create_enterprise_wiki_lint_findings_table`)
+- [ ] Queue worker for `enterprise-wiki`-køen kjører i produksjon
+- [ ] System Owner-bruker er tilgjengelig for første gjennomgang
+
+Sjekk kjørte migrasjoner:
+
+```bash
+php artisan migrate:status | grep enterprise_wiki
+```
+
+#### Aktiveringssekvens
+
+**1. Sett environment-variabelen**
+
+Legg til i `.env` (produksjon):
+
+```
+ENTERPRISE_WIKI_AI_ENABLED=true
+```
+
+Standard er `false`. Variabelen leses av `config('services.enterprise_wiki.ai_enabled')` — definert i `config/services.php`.
+
+**2. Rydd config-cache**
+
+```bash
+php artisan config:clear
+```
+
+Uten dette vil kjørende prosesser lese gammel cachet konfigurasjon.
+
+**3. Restart queue worker**
+
+```bash
+php artisan queue:restart
+```
+
+Lange kjørende queue workers cacher PHP-klassedefinitioner ved oppstart. `queue:restart` sender et graceful stopsignal — eksisterende jobber fullføres, deretter starter supervisor/worker-prosessen på nytt med ny konfigurasjon. Worker vil ikke plukke opp `ENTERPRISE_WIKI_AI_ENABLED=true` uten restart.
+
+Bekreft at ny worker-prosess er startet:
+
+```bash
+ps aux | grep "queue:work"
+```
+
+**4. Verifiser at flagget er aktivt**
+
+```bash
+php artisan config:show services.enterprise_wiki
+```
+
+Forventet output: `ai_enabled: true`
+
+#### Første kontrollerte bruk
+
+Første ingest i produksjon bør gjøres med **ett enkelt, kortere kildedokument** (anbefalt: 5–15 sider). Dette begrenser antall claims og gir et håndterbart grunnlag for første gjennomgang.
+
+Fremgangsmåte:
+
+1. Last opp kildedokumentet via `/app/wiki` → «Last opp kilde»
+2. Vent til dokument-status viser «Ekstrahert»
+3. Trykk «Generer wiki-utkast» for kilden
+4. Overvåk ingest-status på `/app/wiki`
+5. Når ingest er fullført: wiki-siden settes til `pending_review` — **ikke godkjent automatisk**
+
+Wiki-siden er ikke synlig for vanlige brukere som `approved` innhold før en System Owner har godkjent den.
+
+#### Reviewer-sjekkliste for første godkjenning
+
+Gå til `/app/wiki/{slug}` og kontroller:
+
+- [ ] **Claim-tekst** — Er påstandene konkrete og korrekte? Beskriver de faktiske forhold fra kildedokumentet?
+- [ ] **Excerpt** — Stemmer tekstutdraget overens med kilden? Er det hentet verbatimt eller nært fra kildeteksten?
+- [ ] **Kildereferanser** — Har alle påstander minst én kildereferanse? Ingen påstand skal mangle kilde.
+- [ ] **Confidence-nivå** — Er `high`/`medium`/`low`/`uncertain`-merkingen rimelig? `uncertain` betyr svak tekstlig støtte — vurder om påstanden skal avvises.
+- [ ] **Kvalitetsindikatorer** — Kontroller at «Kilde funnet»-indikatoren er grønn for alle påstander. Rødt «Mangler kilde» er alltid en feil.
+- [ ] **Helsekontroll** — Sjekk Helsekontroll-seksjonen på siden. Ingen `error`-funn skal være åpne ved godkjenning.
+- [ ] **Konfliktnoter** — Hvis `conflict_note` er satt på en påstand, les konflikten nøye og vurder om siden likevel er riktig.
+
+Dersom gjennomgangen avdekker vesentlige feil: bruk «Avvis» og logg begrunnelsen. Godkjenn ikke sider med åpne `error`-funn i helsekontroll.
+
+#### Claim-volum for store dokumenter
+
+Et normalt dokument med 20 seksjoner kan generere opptil **15 claims × 20 seksjoner = 300 påstander**. Store policy-dokumenter eller lange tjenestebeskrivelser gir høyt volum.
+
+Dette er forventet atferd. Planlegg gjennomgangskapasitet før ingest av store dokumenter.
+
+#### Reversering
+
+For å deaktivere wiki-generering:
+
+1. Sett `ENTERPRISE_WIKI_AI_ENABLED=false` i `.env`
+2. Kjør `php artisan config:clear`
+3. Kjør `php artisan queue:restart`
+
+Allerede genererte wiki-sider og claims slettes **ikke** ved deaktivering. Ingest-knappen blokkeres igjen og viser «Wiki-generering er ikke aktivert ennå.» Eksisterende `pending_review`-sider kan fortsatt gjennomgås og godkjennes.
+
+#### Logg og overvåking
+
+- Ingest-kjøringer logges i `enterprise_wiki_ingest_runs` med `model_used`, `input_tokens`, `output_tokens` og `cost_estimate_nok`
+- Seksjonsstatus loggføres i `enterprise_wiki_ingest_sections`
+- Queue-logger finnes i `storage/logs/laravel.log`
+- Helsekontroll kjøres daglig kl. 02:30 via `wiki:lint` (Fase 4B-5C)
+
+---
 
 ### Fase 5 — Sammenligning mot dagens RAG
 - Parallell visning: wiki-svar vs. RAG-svar for samme requirement
