@@ -1,33 +1,54 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.2
-Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08) · Phase 1F fullført (2026-07-08) · Phase 1H produksjonsrunbook (2026-07-08)
+Versjon: 0.3
+Dato: 2026-07-08
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI startet (Fase 8D, commit 94f6541) · **Neste: Fase 8B Artikkelgenerering-spesifikasjon**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
-
----
-
+>
+> **Målbildekorrigering (v0.3):** Enterprise Wiki skal ikke være en claim-liste. Den skal være en Karpathy-inspirert, Markdown-first LLM Wiki: raw sources inn, lesbare wikiartikler ut. Claims, excerpts, source references, lint og helsekontroll er verifikasjonsgrunnmur rundt artikkelen — ikke selve sluttproduktet. Phase 4A/4B/1F/1G/1H ga nødvendig infrastruktur, men **Wiki Article Layer mangler** og må bygges før produksjonsaktivering.
 ## 1. Formål
 
-Enterprise LLM Wiki er et parallelt kunnskapssystem for Procynia, inspirert av Karpathy LLM Wiki-metoden, men tilpasset enterprise-krav: kundescoping, rollestyrt godkjenning, sporbar revisjon, og kildebevis på påstandsnivå.
+Enterprise LLM Wiki er et parallelt kunnskapssystem for Procynia, inspirert av Karpathy LLM Wiki-metoden, men tilpasset enterprise-krav: kundescoping, rollestyrt godkjenning, sporbar revisjon, kildebevis og trygg menneskelig review.
 
-Systemet er ikke en erstatning for dagens Kunnskapsbase eller RAG-pipeline. Det er et komplementært lag som:
+Det sentrale produktet er **lesbare wikiartikler**, ikke claim-lister.
 
-- leser fra godkjente, eksisterende kunnskapskilder uten å endre dem
-- bruker AI til å generere strukturerte wiki-sider med én konkret påstand per setning
-- knytter hvert faktum tilbake til kildedokument og tekstutdrag
-- lar menneskelige brukere godkjenne, justere og arkivere innhold
-- gir grunnlag for å sammenligne wiki-baserte svar mot dagens RAG i fremtidige faser
+Systemet skal fungere som et kompilert kunnskapslag:
+
+```text
+raw source documents
+→ extraction
+→ article generation
+→ readable Markdown wiki pages
+→ verification layer: claims, excerpts, source references, lint and health checks
+→ human review and approval
+```
+
+Systemet er ikke en erstatning for dagens Kunnskapsbase eller RAG-pipeline. Det er et separat wiki-lag som:
+
+- tar inn Enterprise Wiki-egne kilder uten å endre Kunnskapsbase/RAG
+- bruker AI til å generere sammenhengende, strukturerte wikiartikler i Markdown
+- lager påstander, excerpts og kildehenvisninger som kontrollgrunnlag for artikkelen
+- lar menneskelige brukere lese, vurdere, redigere, godkjenne eller avvise innhold
+- gjør godkjent kunnskap lett å lese, søke, lenke til og vedlikeholde over tid
+- først i senere faser kan sammenlignes mot dagens RAG — uten automatisk kobling
 
 Kjerneprinsipper:
 
+- **Wikiartikkel først.** Brukeren skal møte en lesbar side med overskrifter, sammendrag og brødtekst.
+- **Verifikasjon som støtte.** Claims, excerpts, kildekoblinger og lint skal støtte review — ikke være hovedopplevelsen.
 - AI foreslår. Mennesker godkjenner.
-- Ingen påstand uten kilde.
-- Ingen skrivetilgang til eksisterende modeller eller tabeller.
+- Ingen sentrale påstander uten kildegrunnlag.
+- Ingen skrivetilgang til eksisterende Kunnskapsbase/RAG-modeller eller tabeller.
 - Kundeisolasjon fra dag én.
 
----
+Konsekvens av v0.3-korrigeringen:
+
+- Eksisterende claim extraction beholdes som grounding/review-lag.
+- Eksisterende lint/helsekontroll beholdes.
+- Eksisterende upload/extract/ingest-grunnmur beholdes.
+- Dagens claim-baserte visning er **ikke** ferdig wiki-opplevelse.
+- Neste hovedspor er å bygge **Wiki Article Layer**.
 
 ## 2. Ikke-rør-grenser
 
@@ -67,28 +88,39 @@ Ingen re-ekstraksjon av dokumenttekst i pilot. `extracted_text` er allerede pros
 
 > **Viktig begrensning:** Denne tilnærmingen bruker Kunnskapsbase som datakilde og skaper dermed en implisitt kobling mellom de to systemene. Det er **ikke** ønsket langsiktig arkitektur. Så snart Fase 4A er implementert, skal `KnowledgeItemVersion`-ingest degraderes til en eksplisitt legacy/import-kommando og ikke eksponeres som primærflyt i UI.
 
-### 3.2 Ønsket primærflyt (Fase 4A — Enterprise Wiki egne kilder)
+### 3.2 Ønsket primærflyt (Fase 4A + v0.3 — Enterprise Wiki egne kilder og artikkellag)
 
 Enterprise Wiki skal ha sin **egen** upload/import-flyt, fullstendig uavhengig av `KnowledgeItem`, `KnowledgeItemVersion` og `KnowledgeItemChunk`.
 
-```
+Korrigert målarkitektur etter v0.3:
+
+```text
 Enterprise Wiki source upload/import
 → Enterprise Wiki extraction (tekstekstraksjon fra docx/pdf)
-→ Enterprise Wiki sections (splitt i seksjoner)
-→ Enterprise Wiki claims (AI genererer strukturerte påstander)
-→ Enterprise Wiki source references (kildebevis per påstand)
-→ Enterprise Wiki page pending_review (klar for menneskelig godkjenning)
+→ Enterprise Wiki section planning
+→ Article generation (lesbar Markdown-artikkel)
+→ Verification extraction (claims, excerpts, source references)
+→ Lint/health checks
+→ Enterprise Wiki page pending_review
+→ Human review and approval
 ```
 
 Primærkilder i Fase 4A:
 
-- `EnterpriseWikiDocument` — ny modell (se Fase 4A), ingen FK mot Kunnskapsbase
+- `EnterpriseWikiDocument` — egen modell, ingen FK mot Kunnskapsbase
 - `source_type = 'enterprise_wiki_document'` på `enterprise_wiki_source_references`
 - `source_type = 'enterprise_wiki_document'` på `enterprise_wiki_ingest_runs`
 
+Viktig skille:
+
+- **Artikkelen** er hovedproduktet og lagres som `content_markdown` på `enterprise_wiki_page_versions`.
+- **Claims** er et verifikasjonslag knyttet til artikkelen.
+- **Source references** dokumenterer hvor claims og sentrale artikkelutsagn kommer fra.
+- **Lint/helsekontroll** hjelper reviewer å finne mangler før godkjenning.
+
 Mulige tilleggskilder i senere faser (egne vurderinger — krever ikke Kunnskapsbase):
 
-- `SavedNoticeAiDocument.extracted_text` (saksdokumenter fra AI-workspace)
+- `SavedNoticeAiDocument.extracted_text` (saksdokumenter fra AI-workspace, kun hvis separat plan åpner for det)
 - `Notice`-data og CPV-mønstre fra Doffin
 - Ekstern URL-import eller manuell tekstinput
 
@@ -131,7 +163,7 @@ Representerer én wiki-side, scoped til én kunde. En side tilsvarer ett faglig 
 
 ### 4.2 `enterprise_wiki_page_versions`
 
-Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner overskrives aldri.
+Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner overskrives aldri. Dette er den autoritative lagringen av selve wikiartikkelen.
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
@@ -139,7 +171,7 @@ Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner o
 | `enterprise_wiki_page_id` | bigint FK | |
 | `version_number` | integer | Monotont stigende per side |
 | `is_current` | boolean | Kun én current per side |
-| `content_markdown` | text | Full markdown-tekst for siden |
+| `content_markdown` | text | Full lesbar Markdown-artikkel for siden — primær wiki-opplevelse |
 | `generated_by_model` | varchar | Modellidentifikator, f.eks. `gpt-5` |
 | `generation_prompt_hash` | varchar | For reproduserbarhet |
 | `created_at` | timestamp | |
@@ -148,7 +180,7 @@ Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner o
 
 ### 4.3 `enterprise_wiki_claims`
 
-Én konkret påstand per rad. En side kan ha mange påstander. Påstander er kjerneenheten i wiki-systemet.
+Én konkret, verifiserbar påstand per rad. En side kan ha mange påstander. Etter v0.3 er påstander **ikke** sluttproduktet; de er verifikasjonsenheter som støtter wikiartikkelen, reviewer og lint.
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
@@ -289,25 +321,31 @@ Alle `enterprise_wiki_*`-tabeller inneholder `customer_id`. Alle spørringer sco
 
 ---
 
-## UX-prinsipper for trygg verifikasjon
+## UX-prinsipper for trygg wiki og verifikasjon
 
-Enterprise Wiki må ikke presentere AI-generert wiki-innhold som ferdig sannhet før det er kvalitetssikret.
+Enterprise Wiki må ikke presentere AI-generert innhold som ferdig sannhet før det er kvalitetssikret.
 
-UI-et skal gjøre verifikasjon enkel, trygg og sporbar:
+UI-et skal ha to tydelige lag:
 
+1. **Wikiartikkel-laget** — primær visning: lesbar Markdown-side med tittel, sammendrag, seksjoner, avsnitt og struktur.
+2. **Verifikasjonslaget** — sekundær visning: claims, excerpts, kildekoblinger, kvalitetssignaler, konflikter og lint.
+
+Bindende UX-prinsipper:
+
+- `/app/wiki/{slug}` skal primært se ut som en wikiartikkel, ikke som en rå claim-tabell.
 - Brukeren skal alltid se status: `draft`, `pending_review`, `approved` eller `rejected`.
 - Pending innhold skal tydelig merkes som utkast.
 - Godkjenning skal ikke være en «blind» knapp.
-- Brukeren skal kunne se hvilke påstander siden bygger på.
+- Brukeren skal kunne åpne verifikasjonsgrunnlaget for artikkelen.
 - Påstander skal kunne spores tilbake til raw kildedokument.
 - Kildegrunnlag skal være synlig nok til at bruker kan kontrollere kvalitet.
 - Svake, manglende eller uklare kilder skal vises tydelig.
 - Det skal være vanskelig å godkjenne innhold ved et uhell.
 - Bid Manager kan lese og vurdere, men System Owner godkjenner i piloten.
 
-Disse prinsippene er bindende for alle UI-valg i Enterprise Wiki. Ny funksjonalitet som presenterer AI-generert innhold uten kildesynlighet og tydelig statusmerking er ikke i tråd med produktets kjerneprinsipper.
+Claims, source references og lint skal altså være **review-støtte**, ikke hovedproduktet.
 
----
+Ny funksjonalitet som gjør claim-listen til primær wiki-opplevelse er ikke i tråd med v0.3-målbildet.
 
 ## 6. Statusmodell
 
@@ -339,9 +377,22 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 
 ## 7. Wiki-ingest-flyt
 
+### 7.0 Status etter v0.3-korrigering
+
+Eksisterende flyt har bygget en god verifikasjonsgrunnmur, men den produserer ikke en fullverdig Karpathy-inspirert wikiopplevelse. Dagens finalize-logikk assembler i praksis `content_markdown` fra claims. Det gir sporbarhet, men ikke en god wikiartikkel.
+
+Korrigert mål:
+
+- `ProcessEnterpriseWikiSection` kan fortsatt ekstrahere claims.
+- Claims skal fortsatt lagres og brukes til review/lint.
+- Det manglende laget er **article generation**: en strukturert, lesbar Markdown-artikkel som bruker kildematerialet og/eller claims som grunnlag.
+- `/app/wiki/{slug}` skal vise artikkelen som hovedinnhold og claims som sekundær verifikasjon.
+
 ### 7.1 Flyt A: Bootstrap/import via Kunnskapsbase (midlertidig — Fase 1)
 
 > **Status:** Implementert og fungerende. Regnes som midlertidig bootstrap — skal ikke promoteres til permanent primærflyt i UI. Se §3.1 for begrensningsbeskrivelse.
+>
+> **v0.3-korrigering:** Flyt A kan beholdes som legacy/import, men skal ikke definere målbildet for wikiopplevelsen.
 
 ```
 1. Bruker velger en godkjent KnowledgeItemVersion
@@ -353,62 +404,64 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 
 3. Orchestrator-jobb startes (ProcessEnterpriseWikiIngest)
    └─ Leser extracted_text fra KnowledgeItemVersion
-   └─ Deler tekst i seksjoner (H1/H2 boundary eller fast tegngrense)
-   └─ Oppretter draft EnterpriseWikiPage og EnterpriseWikiPageVersion (is_current=false)
-   └─ Oppretter enterprise_wiki_ingest_sections-rader (én per seksjon)
-   └─ Setter ingest_run.status = sections_planned
+   └─ Deler tekst i seksjoner
+   └─ Oppretter draft EnterpriseWikiPage og EnterpriseWikiPageVersion
+   └─ Oppretter enterprise_wiki_ingest_sections-rader
    └─ Dispatcher én ProcessEnterpriseWikiSection per seksjon
 
-4. Per-seksjon-jobb (ProcessEnterpriseWikiSection)
-   └─ AI mottar: seksjonstekst + instruksjon om JSON-output
-   └─ AI returnerer strukturert JSON med claim-liste
-   └─ Backend validerer JSON-schema
-   └─ Backend oppretter enterprise_wiki_claims-rader
-   └─ Backend oppretter enterprise_wiki_source_references per claim
-       (source_type = 'knowledge_item_version', source_id = versjons-ID)
+4. Per-seksjon-jobb
+   └─ Ekstraherer claims og source references
+   └─ Lagrer verifikasjonsgrunnlag
 
-5. Finalisering (FinalizeEnterpriseWikiIngest)
-   └─ Venter til alle enterprise_wiki_ingest_sections er i terminal tilstand
-   └─ Avbryter tidlig (no-op) dersom noen seksjoner fortsatt er pending/running
-   └─ Assembler content_markdown fra claims (én claim per avsnitt, kilde inlinert)
-   └─ Oppdaterer EnterpriseWikiPageVersion: content_markdown, is_current=true
-   └─ Oppdaterer EnterpriseWikiPage: status=pending_review
-   └─ Oppdaterer enterprise_wiki_ingest_runs: status=completed, finished_at
+5. Finalisering
+   └─ Dagens implementering: assembler content_markdown fra claims
+   └─ Korrigert mål: content_markdown skal være en lesbar wikiartikkel
+   └─ Claims/source references skal være review-lag rundt artikkelen
 
 6. Ingen wiki-output kobles til eksisterende RAG, kravsvar eller AI workspace
 ```
 
-### 7.2 Ønsket primærflyt: Enterprise Wiki egne kilder (Fase 4A)
+### 7.2 Ønsket primærflyt: Enterprise Wiki egne kilder + Wiki Article Layer
 
 ```
 1. Bruker laster opp dokument direkte i Enterprise Wiki
    └─ Egen upload-route: POST /app/wiki/sources
-   └─ Oppretter EnterpriseWikiDocument (ny modell — ingen FK mot KnowledgeItem)
+   └─ Oppretter EnterpriseWikiDocument
    └─ Lagrer fil, filnavn, SHA-256, customer_id
 
-2. Tekstekstraksjon (Enterprise Wiki extraction)
-   └─ Samme tekstekstraksjons-metoder som Kunnskapsbase (docx/pdf)
-   └─ Men lagret i EnterpriseWikiDocument, ikke KnowledgeItemVersion
-   └─ Ingen chunking — fulltext for seksjonsbasert splitting
+2. Tekstekstraksjon
+   └─ Resultatet lagres på EnterpriseWikiDocument
+   └─ Ingen skriving til Kunnskapsbase
 
-3. Manuell trigger: UI-knapp i Enterprise Wiki
+3. Ingest startes fra UI
    └─ Oppretter enterprise_wiki_ingest_runs
        (source_type = 'enterprise_wiki_document', source_id = EnterpriseWikiDocument.id)
 
-4. Orchestrator → Per-seksjon → Finalize
-   └─ Identisk flyt som Flyt A, men kilde er EnterpriseWikiDocument
-   └─ source_references bruker source_type = 'enterprise_wiki_document'
-   └─ Ingen lesing av KnowledgeItem, KnowledgeItemVersion eller KnowledgeItemChunk
+4. Seksjonsplanlegging
+   └─ Deler kildetekst i håndterbare seksjoner
+   └─ Beholder heading/section metadata for senere artikkelstruktur
 
-5. Wiki-side → pending_review → godkjenning
-   └─ Identisk godkjenningsflyt som Flyt A
+5. AI-verifikasjonslag
+   └─ Ekstraherer claims, excerpts og conflict_note per seksjon
+   └─ Lagrer enterprise_wiki_claims og enterprise_wiki_source_references
+
+6. AI-artikkellag
+   └─ Genererer lesbar Markdown-artikkel fra kildetekst/claims
+   └─ Artikkelen har tittel, sammendrag, seksjoner og sammenhengende brødtekst
+   └─ Artikkelen skal ikke inneholde ubegrunnede påstander
+
+7. Finalize
+   └─ Lagrer Markdown-artikkelen i EnterpriseWikiPageVersion.content_markdown
+   └─ Setter siden til pending_review
+   └─ Knytter claims/source references/lint til siden som review-grunnlag
+
+8. Review
+   └─ Brukeren leser artikkelen
+   └─ Brukeren kontrollerer claims/kilder/lint
+   └─ System Owner godkjenner eller avviser
 ```
 
-**Viktig prinsipp:** AI returnerer JSON med claim-liste. AI returnerer aldri friformulert markdown direkte. Backend assembler wiki-siden fra strukturert output. Dette speiler chunking-filosofien i `docs/chunking-strategy.md`.
-
-Når Flyt B er implementert, skal `enterprise_wiki_ingest_runs.source_type`-enum utvides med `enterprise_wiki_document`. Eksisterende `knowledge_item_version`-verdier beholdes for historikk og legacy-import.
-
----
+**Viktig prinsipp etter v0.3:** AI kan returnere strukturert JSON som inneholder både `article` og `claims`. `article.markdown` er wikiens hovedinnhold. `claims` er verifikasjonsgrunnlag. AI skal ikke levere uvalidert, fri tekst uten schema, men systemet må heller ikke redusere wikiopplevelsen til en claim-liste.
 
 ## 8. Queue-mønster
 
@@ -454,23 +507,38 @@ Lint-resultater lagres i `enterprise_wiki_lint_findings`. UI viser helseindikato
 
 ---
 
-## 10. Første pilotfase (Fase 1)
+## 10. Første pilotfase og rebaselining
 
-Minste implementerbare pilot:
+### 10.1 Opprinnelig pilotfase (gjennomført som teknisk grunnmur)
 
 | Element | Innhold |
 |---|---|
 | **Ny sidefamilie** | `enterprise_wiki_pages`, `enterprise_wiki_page_versions`, `enterprise_wiki_claims`, `enterprise_wiki_source_references`, `enterprise_wiki_ingest_runs` |
-| **Kilde** | Kun `KnowledgeItemVersion.extracted_text` med `approval_status = approved AND is_current = true` |
-| **Trigger** | Manuell Artisan-kommando: `php artisan wiki:ingest --customer=X --version-id=Y` |
-| **Output** | `enterprise_wiki_pages` med status `draft`, claims og kildehenvisninger |
-| **UI** | Enkel `/app/wiki`-side som lister sider og viser claims med kildelenker |
+| **Kilde** | `KnowledgeItemVersion.extracted_text` i bootstrap, senere `EnterpriseWikiDocument` som primærkilde |
+| **Trigger** | Artisan-kommando i bootstrap, senere UI-ingest fra Enterprise Wiki-kilde |
+| **Output** | `enterprise_wiki_pages` med status `pending_review`, claims og kildehenvisninger |
+| **UI** | `/app/wiki` med kilder, sider, claims, kildelenker og helsekontroll |
 | **Godkjenning** | System Owner kan sette `approved` / `rejected` |
 | **RAG-kobling** | Ingen — wiki-output brukes ikke i dagens AI-svarflyt |
 
-Mål med pilot: Verifisere at AI produserer brukbare, sporbare claims fra godkjent kunnskapsinnhold, og at godkjenningsflyten er god nok for System Owners.
+Dette ga en nødvendig teknisk grunnmur.
 
----
+### 10.2 Korrigert pilotmål etter v0.3
+
+Det opprinnelige pilotmålet var for smalt. Å vise claims med kildelenker er ikke nok.
+
+Korrigert pilotmål:
+
+| Element | Korrigert mål |
+|---|---|
+| **Primær output** | Lesbar Markdown-wikiartikkel |
+| **Sekundær output** | Claims, excerpts, kildereferanser og lint |
+| **Primær UI** | Artikkelside som ligner en wiki |
+| **Review UI** | Verifikasjonslag rundt artikkelen |
+| **Godkjenning** | Godkjenning av artikkel, støttet av claim-/kildekontroll |
+| **Produksjonsaktivering** | Først etter at artikkellaget fungerer |
+
+Mål med neste pilot: verifisere at Enterprise Wiki produserer lesbare, nyttige, kildegrunnede wikiartikler som kan reviewes trygt av mennesker.
 
 ## 11. Åpne beslutninger
 
@@ -499,6 +567,26 @@ Disse spørsmålene må avgjøres før kode skrives:
 ---
 
 ## 12. Faseinndeling
+
+| Fase | Innhold | Status |
+|---|---|---|
+| Fase 0 | Plan/ADR | Fullført |
+| Fase 1 | Datamodell og read-only ingest | Fullført |
+| Fase 2 | Claim-/verifikasjons-UI (grunnmur) | Fullført som grunnmur |
+| Fase 3B | Minimal approval-UI | Fullført |
+| Fase 4A | Enterprise Wiki egne kilder | Fullført |
+| Fase 4B | Lint og helsekontroll | Fullført |
+| Fase 5 | WikiSectionAiClient OpenAI-integrasjon | Fullført |
+| Fase 6 | Lokal E2E-verifisering | Fullført |
+| Fase 7 | Produksjonsrunbook | Fullført — aktivering utsatt |
+| Fase 8A | Article Layer Analyse | Fullført |
+| **Fase 8B** | **Artikkelgenerering-spesifikasjon** | **Neste steg** |
+| Fase 8C | Backend artikkelgenerering | Gjenstår |
+| Fase 8D | Wiki Article UI | Startet (commit 94f6541) |
+| Fase 8E | Review og godkjennings-UX | Gjenstår |
+| Fase 8F | Kontrollert produksjonsaktivering | Gjenstår — sist |
+| Fase 9 | Sammenligning mot RAG | Fremtidig |
+| Fase 10 | Wiki som svargrunnlag | Fremtidig |
 
 ### Fase 0 — Plan/ADR *(denne filen)* — Fullført
 - Arkitektur- og konsekvenskartlegging
@@ -531,11 +619,15 @@ Avvik fra opprinnelig plan:
 - `enterprise_wiki_ingest_sections` lagt til for per-seksjon arbeidssporing (se §4.6)
 - `source_hash` finnes også på `enterprise_wiki_source_references`-rader
 
-### Fase 2 — UI for wiki-sider og claims
-- `/app/wiki` — liste over wiki-sider for kunden
-- `/app/wiki/{page}` — detaljvisning med claims og kildelenker
-- Statusindikator per side
-- Ingen godkjenningshandlinger ennå
+### Fase 2 — Historisk claim-/verifikasjons-UI — Fullført som grunnmur, men ikke sluttprodukt
+
+Opprinnelig Fase 2 beskrev `/app/wiki` som liste over sider og `/app/wiki/{page}` som detaljvisning med claims og kildelenker.
+
+v0.3-korrigering:
+
+- Dette er nyttig review-/verifikasjons-UI.
+- Dette er **ikke** en ferdig Enterprise Wiki-opplevelse.
+- Neste hovedspor er ikke mer claim-UI, men **Wiki Article Layer**.
 
 ### Fase 3 — Godkjenning og statusflyt
 
@@ -637,7 +729,7 @@ Implementert:
 
 #### Fase 4B-4 — Forventningsstyring for deaktivert wiki-generering — Fullført (2026-07-08)
 
-- `WikiSectionAiClient::isAvailable()` returnerer `false` frem til Phase 1F er implementert
+- `WikiSectionAiClient::isAvailable()` returnerer `false` frem til Fase 5 er implementert
 - `WikiController::index()` sender `wiki_generation_available: false` som Inertia-prop
 - `WikiSourceController::ingest()` blokkerer kall og returnerer brukervennlig flash-error når ikke tilgjengelig — ingen jobb dispatches
 - Frontend deaktiverer "Generer wiki-utkast"-knappen og viser "Wiki-generering er ikke aktivert ennå." under knappen
@@ -691,9 +783,11 @@ Implementert:
 **Fase 4B fullført.** Alle delmål gjennomført:
 4B-1 Verifikasjonsvisning · 4B-2 Kildenedlasting · 4B-3 Kvalitetsindikatorer · 4B-4 Forventningsstyring · 4B-5A Backend lint · 4B-5B UI helseindikator · 4B-5C Scheduled lint
 
-### Phase 1F — WikiSectionAiClient OpenAI-integrasjon
+### Fase 5 — WikiSectionAiClient OpenAI-integrasjon — Fullført
 
-#### Phase 1F-0 — Implementeringsspesifikasjon (2026-07-08)
+> **v0.3-status:** Fase 5 implementerte claim extraction-klienten og config-gating. Dette er nødvendig verifikasjonsgrunnmur, men ikke nok til å produsere Karpathy-inspirerte wikiartikler.
+
+#### Fase 5.0 — Implementeringsspesifikasjon (2026-07-08)
 
 Spesifiserer det eneste manglende leddet som blokkerer wiki-generering:
 `WikiSectionAiClient::fetchClaims()` og tilhørende aktivering.
@@ -817,7 +911,7 @@ Eksisterende `ProcessEnterpriseWikiSectionTest` bekrefter downstream-integrering
 
 ---
 
-##### Implementeringssteg
+##### Implementeringssteg — Alle fullført
 
 **A — Dark deploy med tester (ingen UI-endring)**
 - Implementer `fetchClaims()` med reell Responses API-kall
@@ -833,28 +927,39 @@ Eksisterende `ProcessEnterpriseWikiSectionTest` bekrefter downstream-integrering
 - Verifiser claims, excerpts og confidence i databasen
 - Verifiser logging og token-telling
 
-**C — Aktiver `isAvailable() = true`**
-- Sett `isAvailable()` til `true`
-- Fjern eventuelt midlertidig config-override
-- Frontend og backend slutter å blokkere ingest
+**C — Config-gatet aktivering**
+- `isAvailable()` leser eksplisitt config/env-flagg
+- Default er fortsatt av
+- Frontend og backend slutter bare å blokkere ingest når flagget eksplisitt er aktivert
+- v0.3: produksjonsaktivering skal ikke skje før Wiki Article Layer er implementert
 
 ---
 
-##### Åpne beslutninger som ikke blokkerer Phase 1F
+##### Åpne beslutninger som ikke blokkerer Fase 5
 
 - §11 punkt 6 (maks tokens per full run): håndteres per-seksjon i pilot — tilstrekkelig for nå
 - §11 punkt 9 (automatisk re-ingest): utsettes til etter pilot
-- §11 punkt 10 (konflikthåndtering): `conflict_flag` settes allerede, UI viser det — ingen ny handling kreves i 1F
+- §11 punkt 10 (konflikthåndtering): `conflict_flag` settes allerede, UI viser det — ingen ny handling kreves i Fase 5
 
-### Phase 1H — Produksjonsaktivering av Enterprise Wiki AI
+### Fase 6 — Lokal E2E-verifisering — Fullført
 
-Kjøreklar aktiveringsguide for produksjonsmiljø. Forutsetter at Phase 1F-B lokal verifikasjon er gjennomført og godkjent.
+Manuell lokal verifisering gjennomført mot Masterdata Prosjekt.docx:
+- 291 claims generert, 0 åpne lint-funn
+- Wiki-side opprettet som `pending_review`
+- Claims, excerpts og confidence verifisert i database
+- `content_markdown` populert av `assembleContentMarkdown()` (claim-dump, ikke artikkel — erstattes i Fase 8C)
+
+### Fase 7 — Produksjonsrunbook — Fullført (aktivering utsatt til Fase 8E er ferdig)
+
+Kjøreklar aktiveringsguide for produksjonsmiljø. Forutsetter at Fase 6 (lokal E2E-verifisering) er gjennomført og godkjent.
+
+> **v0.3-korrigering:** Denne runbooken er beholdt som teknisk aktiveringsgrunnlag, men faktisk produksjonsaktivering skal vente til Wiki Article Layer er ferdig (Fase 8A–8E). Dagens claim-baserte `content_markdown` er ikke riktig sluttprodukt — artikkellaget mangler.
 
 #### Forutsetninger
 
 Før aktivering i produksjon:
 
-- [ ] Phase 1F-B lokal verifikasjon er gjennomført — claims, excerpts og confidence er verifisert mot testdokument
+- [x] Fase 6 lokal E2E-verifisering er gjennomført — claims, excerpts og confidence er verifisert mot testdokument
 - [ ] Alle migrasjoner er kjørt i produksjon, inkludert `enterprise_wiki_lint_findings`-migrasjonen (`2026_07_08_000001_create_enterprise_wiki_lint_findings_table`)
 - [ ] Queue worker for `enterprise-wiki`-køen kjører i produksjon
 - [ ] System Owner-bruker er tilgjengelig for første gjennomgang
@@ -960,12 +1065,101 @@ Allerede genererte wiki-sider og claims slettes **ikke** ved deaktivering. Inges
 
 ---
 
-### Fase 5 — Sammenligning mot dagens RAG
+## Fase 8 — Wiki Article Layer
+
+Målet er å gå fra claim-dump til en ekte Karpathy-inspirert wikiopplevelse:
+
+```
+raw sources → AI-artikkelgenerering → lesbar wikiartikkel
+→ claims/sources/lint som verifikasjonslag rundt artikkelen
+→ human review og godkjenning
+```
+
+### Fase 8A — Article Layer Analyse — Fullført
+
+Mål: kartlegg nøyaktig hvor dagens implementering gjør claims til hovedinnhold.
+
+Scope gjennomgått:
+- `FinalizeEnterpriseWikiIngest::assembleContentMarkdown()` — produserer en claim-dump, ikke en artikkel
+- `EnterpriseWikiPageVersion.content_markdown` — feltet finnes og er riktig sted for artikkelen
+- `WikiController::show()` — passerte `content_markdown` men det ble ikke brukt i UI
+- `resources/js/Pages/App/Wiki/Show.jsx` — ignorerte `content_markdown`, viste bare claims
+
+Funn: arkitektur og datamodell er riktig. Gap er at `assembleContentMarkdown()` lager en claim-liste, og UI viste ikke `content_markdown` som primærinnhold. Minste trygge vei: (1) fikse UI til å rendre `content_markdown` som artikkel (Fase 8D), (2) erstatte `assembleContentMarkdown()` med AI-generert artikkel (Fase 8C).
+
+### Fase 8B — Artikkelgenerering-spesifikasjon — Neste steg
+
+Mål: spesifiser hvordan AI skal generere lesbar wikiartikkel.
+
+Krav til output:
+- strict JSON schema
+- `article.title`
+- `article.summary`
+- `article.markdown`
+- `article.sections[]`
+- `claims[]`
+- `source_coverage`
+- språkstyring via customer language
+
+Artikkelkrav:
+- skal være lesbar Markdown
+- skal ha overskrifter og avsnitt
+- skal syntetisere, ikke bare liste claims
+- skal ikke innføre fakta uten kildegrunnlag
+- skal kunne reviewes mot claims/source references
+
+### Fase 8C — Backend artikkelgenerering
+
+Mål: erstatt `assembleContentMarkdown()` med AI-generert artikkel lagret som `content_markdown`.
+
+Krav:
+- bruk eksisterende `enterprise_wiki_page_versions.content_markdown`
+- behold claims/source references som review-lag
+- ikke endre Kunnskapsbase/RAG
+- ingen produksjonsaktivering
+- tester med mock, ingen ekte API-kall i automatiserte tester
+
+### Fase 8D — Wiki Article UI — Startet (commit 94f6541)
+
+Mål: gjør `/app/wiki/{slug}` til en reell wikiartikkel-side.
+
+**Status:** Article-first UI-omstrukturering fullført i commit `94f6541`:
+- `content_markdown` rendres nå som primær wikiartikkel via `react-markdown` med `.wiki-article`-styling
+- Claims, sources og lint er sekundære — samlet i kollapsbar "Verifikasjonsgrunnlag"-seksjon (lukket som standard)
+- `react-markdown` v10 lagt til som avhengighet
+- Nye lang-nøkler: `article_heading`, `article_ai_label`, `article_empty`, `high_volume_warning`
+- Prop `content_markdown` er nå eksplisitt i controller og bekreftet med test
+
+**Gjenstår:** Backend-generering av faktisk wikiartikkel (Fase 8C). Frem til Fase 8C er ferdig vil `content_markdown` fortsatt inneholde claim-dump fra `assembleContentMarkdown()` — UI er klar til å rendre riktig artikkel så snart backend leverer det.
+
+### Fase 8E — Review og godkjennings-UX for artikkelinnhold
+
+Mål: reviewer godkjenner artikkelen, ikke bare en claim-liste.
+
+Krav:
+- godkjenning knyttes til artikkelversjon
+- verifikasjonslag støtter beslutningen
+- åpne lint `error` skal vurderes før godkjenning
+- ikke auto-publiser
+
+### Fase 8F — Kontrollert produksjonsaktivering — Gjenstår til etter Fase 8E
+
+> **Ikke neste steg.** Produksjonsaktivering skjer først etter at Fase 8B–8E er gjennomført og wikiartikkel-opplevelsen er verifisert.
+
+Mål: bruk eksisterende runbook fra Fase 7 kontrollert i produksjon.
+
+Krav:
+- `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres etter at artikkelgenerering fungerer
+- første produksjonsbruk med kort dokument
+- queue restart/config clear er del av runbook (se Fase 7)
+- reversering via `ENTERPRISE_WIKI_AI_ENABLED=false`
+
+### Fase 9 — Sammenligning mot dagens RAG
 - Parallell visning: wiki-svar vs. RAG-svar for samme requirement
 - Bruker kan velge foretrukket svar og gi tilbakemelding
 - Metrikker: kildedekning, konfidensmerking, brukerpreferanse
 
-### Fase 6 — Vurdering av wiki som svargrunnlag
+### Fase 10 — Vurdering av wiki som svargrunnlag
 - Evaluere om wiki-claims kan brukes som supplement eller erstatning for embedding-søk
 - Vurdere hybrid retrieval: wiki-oppslag + RAG
 - Beslutning basert på data fra fase 5
@@ -1001,35 +1195,93 @@ Disse eksisterende modellene leses kun av `wiki:ingest`-kommandoen (Flyt A). De 
 
 ## Appendix B — AI-promptdesign (retningslinjer)
 
-Wiki-ingest-prompten skal:
+### B.1 v0.3-prinsipp
 
-- Instruere AI til å returnere JSON, ikke markdown
-- Gi AI én seksjon av gangen (ikke hele dokumentet)
-- Instruere AI til å returnere `null` som `conflict_note` dersom ingen konflikt oppdages
-- Instruere AI til å bruke `confidence = uncertain` fremfor å gjette
-- Ikke be AI om å sitere tekst ordrett — eksklarer hentes fra `extracted_text` i backend basert på claim-identifikasjon
-- Inkludere `languageCode` i prompt (fra `CustomerContext::resolveLanguageCode()`)
+Wiki-generering skal ikke lenger stoppe ved claim extraction.
 
-Eksempel på ønsket JSON-output per seksjon:
+AI-output skal være strukturert og validerbar, men må inneholde et faktisk artikkellag:
+
+- `article` — lesbar wikiartikkel
+- `claims` — verifikasjonsgrunnlag
+- `source_coverage` — oversikt over hvilke kilder/seksjoner som er dekket
+- `warnings` — usikkerheter eller hull modellen oppdaget
+
+Claims er ikke sluttproduktet. De støtter review, kildekontroll og lint.
+
+### B.2 Strukturert output
+
+AI skal returnere strict JSON, ikke uvalidert fri tekst.
+
+Eksempel på ønsket overordnet output:
 
 ```json
 {
-  "proposed_topic": "HMS-kompetansekrav",
+  "article": {
+    "title": "HMS-kompetanse",
+    "summary": "Kort sammendrag av hva kildene dokumenterer om HMS-kompetanse.",
+    "markdown": "## Oversikt
+
+Sammenhengende wikiartikkel...",
+    "sections": [
+      {
+        "heading": "Oversikt",
+        "markdown": "Sammenhengende avsnitt med kildegrunnede fakta."
+      }
+    ]
+  },
   "claims": [
     {
       "text": "Virksomheten har ISO 45001-sertifisering for HMS-styringssystem.",
       "confidence": "high",
       "excerpt": "Selskapet ble ISO 45001-sertifisert i 2022 gjennom DNV GL.",
       "conflict_note": null
-    },
-    {
-      "text": "Antall ansatte med godkjent HMS-kurs er ikke dokumentert i kilden.",
-      "confidence": "uncertain",
-      "excerpt": null,
-      "conflict_note": null
     }
-  ]
+  ],
+  "source_coverage": [
+    {
+      "source_label": "hms-policy.docx",
+      "covered": true,
+      "notes": null
+    }
+  ],
+  "warnings": []
 }
 ```
 
-Viktig: AI returnerer aldri ferdig markdown. Backend assembler wiki-siden fra claim-listen.
+### B.3 Artikkelregler
+
+Artikkelen skal:
+
+- skrives på kundens språk
+- være Markdown
+- ha tydelige overskrifter
+- ha sammenhengende brødtekst
+- syntetisere overlappende kildetekst
+- unngå marketing-språk uten kilde
+- ikke inneholde fakta som ikke støttes av kildene
+- ikke nevne at den er AI-generert i selve artikkelteksten
+- kunne leses uten at brukeren åpner claim-listen
+
+### B.4 Claim-/verifikasjonsregler
+
+Claims skal:
+
+- være konkrete og verifiserbare
+- ha `confidence`
+- ha `excerpt`
+- ha `conflict_note` ved konflikt
+- brukes til review, ikke som artikkelens primære layout
+
+### B.5 Teststrategi
+
+Automatiserte tester skal bruke mock/fake OpenAI-klient.
+
+Tester skal dekke:
+
+- gyldig artikkel-JSON
+- `article.markdown` lagres som `content_markdown`
+- claims lagres med source references
+- manglende `article.markdown` gir feil
+- claims uten excerpt håndteres i verifikasjonslaget
+- ingen ekte nettverkskall i tester
+- Kunnskapsbase/RAG-tabeller røres ikke
