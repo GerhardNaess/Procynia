@@ -79,6 +79,7 @@ export default function WikiShow({ page, current_version, claims }) {
 
     const isDraft = page.status === 'draft';
     const isPendingReview = page.status === 'pending_review';
+    const isApproved = page.status === 'approved';
 
     return (
         <CustomerAppLayout title={page.title} showPageTitle={false}>
@@ -238,6 +239,34 @@ export default function WikiShow({ page, current_version, claims }) {
                                                 {tw.conflict_detected ?? 'Mulig konflikt'}
                                             </span>
                                         )}
+                                        {(() => {
+                                            const hasSource = claim.source_references.length > 0;
+                                            const hasExcerpt = claim.source_references.some(r => r.excerpt?.trim());
+                                            if (!hasSource) {
+                                                return (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                        <WarnIcon className="h-3 w-3" />
+                                                        {tw.quality_no_source ?? 'Mangler kilde'}
+                                                    </span>
+                                                );
+                                            }
+                                            if (!hasExcerpt) {
+                                                return (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                        <WarnIcon className="h-3 w-3" />
+                                                        {tw.quality_missing_excerpt ?? 'Mangler utdrag'}
+                                                    </span>
+                                                );
+                                            }
+                                            return (
+                                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${isApproved ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                                                    </svg>
+                                                    {tw.quality_source_found ?? 'Kilde funnet'}
+                                                </span>
+                                            );
+                                        })()}
                                     </div>
 
                                     {/* Source references */}

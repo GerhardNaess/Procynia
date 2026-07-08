@@ -590,6 +590,56 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4B-3: quality indicators — source_found / no_source / missing_excerpt
+    //   The indicator state is computed on the frontend from source_references data.
+    //   These tests verify the controller passes the data shape that drives each state.
+    //   contributor → pending_review access is already covered by
+    //   test_show_returns_404_for_pending_review_page_to_contributor (phase 2A section).
+    // =========================================================================
+
+    public function test_show_claim_with_source_and_excerpt_passes_data_for_source_found_indicator(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kilde funnet side');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Påstand med kilde og utdrag.');
+        $this->createSourceReference($claim, 'kilde.pdf', 'Dette er et tekstutdrag.');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $claims = data_get($inertia, 'props.claims', []);
+            $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+            return $ref !== null
+                && count($claims[0]['source_references']) === 1
+                && !empty($ref['excerpt']);
+        });
+    }
+
+    public function test_show_claim_with_source_but_null_excerpt_passes_data_for_missing_excerpt_indicator(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Mangler utdrag side');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Påstand med kilde men uten utdrag.');
+        $this->createSourceReference($claim, 'kilde.pdf', null);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $claims = data_get($inertia, 'props.claims', []);
+            $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+            return $ref !== null
+                && count($claims[0]['source_references']) === 1
+                && ($ref['excerpt'] === null || $ref['excerpt'] === '');
+        });
+    }
+
+    // =========================================================================
     // Phase 3B: approval UI — flash messages and bid manager visibility
     // =========================================================================
 
@@ -922,7 +972,7 @@ class WikiControllerTest extends TestCase
     private function createSourceReference(
         EnterpriseWikiClaim $claim,
         string $label,
-        string $excerpt,
+        ?string $excerpt = null,
         ?string $pageReference = null,
     ): EnterpriseWikiSourceReference {
         return EnterpriseWikiSourceReference::query()->create([

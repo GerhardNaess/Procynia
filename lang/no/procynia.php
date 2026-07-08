@@ -2997,5 +2997,8 @@ return [
         'source_no_excerpt' => 'Ingen tekstutdrag tilgjengelig.',
         'claim_no_sources' => 'Ingen kildereferanser for denne påstanden.',
         'source_open_document' => 'Åpne kildedokument',
+        'quality_source_found' => 'Kilde funnet',
+        'quality_no_source' => 'Mangler kilde',
+        'quality_missing_excerpt' => 'Mangler utdrag',
     ],
 ];

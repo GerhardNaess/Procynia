@@ -2997,5 +2997,8 @@ return [
         'source_no_excerpt' => 'No text excerpt available.',
         'claim_no_sources' => 'No source references for this claim.',
         'source_open_document' => 'Open source document',
+        'quality_source_found' => 'Source found',
+        'quality_no_source' => 'Missing source',
+        'quality_missing_excerpt' => 'Missing excerpt',
     ],
 ];
