@@ -1031,6 +1031,132 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 1I: claim_summary prop
+    // =========================================================================
+
+    public function test_show_sends_claim_summary_with_correct_total(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Summary side');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $this->createClaim($page, $version, 'Påstand 1.');
+        $this->createClaim($page, $version, 'Påstand 2.');
+        $this->createClaim($page, $version, 'Påstand 3.');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.claim_summary');
+
+            return $summary !== null && $summary['total'] === 3;
+        });
+    }
+
+    public function test_show_claim_summary_quality_breakdown_counts_correctly(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Quality summary side');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+
+        $claim1 = $this->createClaim($page, $version, 'Kilde funnet påstand.');
+        $this->createSourceReference($claim1, 'kilde.pdf', 'Tekstutdrag her.');
+
+        $claim2 = $this->createClaim($page, $version, 'Mangler utdrag påstand.');
+        $this->createSourceReference($claim2, 'kilde.pdf', null);
+
+        $this->createClaim($page, $version, 'Mangler kilde påstand.');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.claim_summary');
+
+            return $summary !== null
+                && $summary['total'] === 3
+                && $summary['source_found'] === 1
+                && $summary['missing_excerpt'] === 1
+                && $summary['missing_source'] === 1;
+        });
+    }
+
+    public function test_show_claim_summary_total_is_zero_with_no_claims(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Tom side');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.claim_summary');
+
+            return $summary !== null && $summary['total'] === 0;
+        });
+    }
+
+    public function test_show_claim_summary_total_reflects_high_volume_for_warning_display(): void
+    {
+        // Frontend shows a high-volume warning when total > 100.
+        // This test verifies the controller correctly counts a volume that crosses the threshold.
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Stor side');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+
+        $rows = [];
+        for ($i = 0; $i < 101; $i++) {
+            $rows[] = [
+                'enterprise_wiki_page_id' => $page->id,
+                'enterprise_wiki_page_version_id' => $version->id,
+                'claim_text' => "Påstand {$i}.",
+                'confidence' => EnterpriseWikiClaim::CONFIDENCE_HIGH,
+                'conflict_flag' => false,
+                'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
+                'position_order' => $i,
+                'created_at' => now(),
+            ];
+        }
+        EnterpriseWikiClaim::query()->insert($rows);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.claim_summary');
+
+            return $summary !== null && $summary['total'] === 101;
+        });
+    }
+
+    // =========================================================================
+    // Article layer UI: content_markdown in current_version prop
+    // =========================================================================
+
+    public function test_show_sends_content_markdown_in_current_version_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkelside');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($version): bool {
+            $currentVersion = data_get($inertia, 'props.current_version');
+
+            return $currentVersion !== null
+                && array_key_exists('content_markdown', $currentVersion)
+                && $currentVersion['content_markdown'] === $version->content_markdown;
+        });
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

@@ -131,13 +131,33 @@ class WikiController extends Controller
 
         $currentVersion = $page->currentVersion()->first();
 
+        $claimSummary = ['total' => 0, 'source_found' => 0, 'missing_excerpt' => 0, 'missing_source' => 0, 'conflict' => 0];
         $claims = [];
+
         if ($currentVersion !== null) {
-            $claims = EnterpriseWikiClaim::query()
+            $claimCollection = EnterpriseWikiClaim::query()
                 ->where('enterprise_wiki_page_version_id', $currentVersion->id)
                 ->with('sourceReferences')
                 ->orderBy('position_order')
-                ->get()
+                ->get();
+
+            $claimSummary['total'] = $claimCollection->count();
+
+            foreach ($claimCollection as $claim) {
+                if ($claim->conflict_flag) {
+                    $claimSummary['conflict']++;
+                }
+
+                if ($claim->sourceReferences->isEmpty()) {
+                    $claimSummary['missing_source']++;
+                } elseif ($claim->sourceReferences->every(fn($r) => empty($r->excerpt))) {
+                    $claimSummary['missing_excerpt']++;
+                } else {
+                    $claimSummary['source_found']++;
+                }
+            }
+
+            $claims = $claimCollection
                 ->map(fn(EnterpriseWikiClaim $claim) => [
                     'id' => $claim->id,
                     'claim_text' => $claim->claim_text,
@@ -191,6 +211,7 @@ class WikiController extends Controller
                 'content_markdown' => $currentVersion->content_markdown,
             ] : null,
             'claims' => $claims,
+            'claim_summary' => $claimSummary,
             'lint_findings' => $lintFindings,
         ]);
     }

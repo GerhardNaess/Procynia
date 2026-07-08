@@ -1,5 +1,6 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 
 const PAGE_STATUS_STYLES = {
@@ -23,11 +24,21 @@ const CLAIM_STATUS_STYLES = {
     rejected: 'bg-rose-100 text-rose-700',
 };
 
+const HIGH_VOLUME_THRESHOLD = 100;
+
 function Badge({ label, cls }) {
     return (
         <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
             {label}
         </span>
+    );
+}
+
+function CheckIcon({ className = 'h-3.5 w-3.5' }) {
+    return (
+        <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+        </svg>
     );
 }
 
@@ -39,18 +50,81 @@ function WarnIcon({ className = 'h-4 w-4' }) {
     );
 }
 
+function ChevronIcon({ open }) {
+    return (
+        <svg
+            className="h-4 w-4 transition-transform"
+            style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+        >
+            <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+        </svg>
+    );
+}
+
+function ClaimSummary({ summary, tw }) {
+    if (!summary || summary.total === 0) return null;
+
+    return (
+        <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+                <span className="font-semibold text-slate-700">
+                    {summary.total} {tw.claims ?? 'påstander'}
+                </span>
+                <span className="flex items-center gap-1 text-emerald-700">
+                    <CheckIcon />
+                    {summary.source_found} {tw.quality_source_found ?? 'kilde funnet'}
+                </span>
+                {summary.missing_excerpt > 0 && (
+                    <span className="flex items-center gap-1 text-amber-700">
+                        <WarnIcon className="h-3.5 w-3.5" />
+                        {summary.missing_excerpt} {tw.quality_missing_excerpt ?? 'mangler utdrag'}
+                    </span>
+                )}
+                {summary.missing_source > 0 && (
+                    <span className="flex items-center gap-1 text-rose-600">
+                        <WarnIcon className="h-3.5 w-3.5" />
+                        {summary.missing_source} {tw.quality_no_source ?? 'mangler kilde'}
+                    </span>
+                )}
+                {summary.conflict > 0 && (
+                    <span className="flex items-center gap-1 text-rose-600">
+                        <WarnIcon className="h-3.5 w-3.5" />
+                        {summary.conflict} {tw.conflict_detected ?? 'mulig konflikt'}
+                    </span>
+                )}
+            </div>
+            {summary.total > HIGH_VOLUME_THRESHOLD && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                    <p>{tw.high_volume_warning ?? 'Denne siden har mange påstander. Gå gjennom seksjon for seksjon før godkjenning.'}</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
 const LINT_SEVERITY_STYLES = {
     error: 'bg-rose-100 text-rose-700',
     warning: 'bg-amber-100 text-amber-700',
     info: 'bg-slate-100 text-slate-600',
 };
 
-export default function WikiShow({ page, current_version, claims, lint_findings: lintFindings = [] }) {
+export default function WikiShow({
+    page,
+    current_version,
+    claims,
+    claim_summary: claimSummary = null,
+    lint_findings: lintFindings = [],
+}) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const isSystemOwner = auth.user?.is_system_owner ?? false;
 
     const [processing, setProcessing] = useState(null);
+    const [verificationOpen, setVerificationOpen] = useState(false);
 
     const sendAction = (action) => {
         if (processing) return;
@@ -87,9 +161,13 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
     const isPendingReview = page.status === 'pending_review';
     const isApproved = page.status === 'approved';
 
+    const articleContent = current_version?.content_markdown ?? null;
+    const hasArticle = Boolean(articleContent?.trim());
+
     return (
         <CustomerAppLayout title={page.title} showPageTitle={false}>
             <div className="space-y-8">
+
                 {/* Back link */}
                 <Link
                     href="/app/wiki"
@@ -100,18 +178,6 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                     </svg>
                     {tw.back ?? 'Tilbake til Wiki'}
                 </Link>
-
-                {/* Draft / pending notice */}
-                {(isDraft || isPendingReview) && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
-                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <p className="text-sm text-amber-800">
-                            {isPendingReview
-                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert og ikke kvalitetssikret.')
-                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast. Innholdet er ikke kvalitetssikret.')}
-                        </p>
-                    </div>
-                )}
 
                 {/* Page header */}
                 <section className="space-y-3">
@@ -133,6 +199,18 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                     )}
                 </section>
 
+                {/* Draft / pending notice */}
+                {(isDraft || isPendingReview) && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <p className="text-sm text-amber-800">
+                            {isPendingReview
+                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert og ikke kvalitetssikret.')
+                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast. Innholdet er ikke kvalitetssikret.')}
+                        </p>
+                    </div>
+                )}
+
                 {/* Approval actions */}
                 {(() => {
                     const actionableForOwner = isSystemOwner && ['draft', 'pending_review', 'rejected'].includes(page.status);
@@ -141,7 +219,6 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
 
                     return (
                         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
-                            {/* pending_review — System Owner sees approve/reject */}
                             {isSystemOwner && page.status === 'pending_review' && (
                                 <div className="flex flex-wrap items-center gap-4">
                                     <p className="text-sm text-slate-600">
@@ -168,7 +245,6 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                                 </div>
                             )}
 
-                            {/* draft — System Owner can submit */}
                             {isSystemOwner && page.status === 'draft' && (
                                 <button
                                     type="button"
@@ -180,7 +256,6 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                                 </button>
                             )}
 
-                            {/* rejected — System Owner can reopen */}
                             {isSystemOwner && page.status === 'rejected' && (
                                 <button
                                     type="button"
@@ -192,7 +267,6 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                                 </button>
                             )}
 
-                            {/* pending_review — non-owner sees notice only */}
                             {noticeForNonOwner && (
                                 <p className="text-sm text-amber-700">
                                     {tw.pending_review_notice ?? 'Denne siden venter på godkjenning av System Owner.'}
@@ -202,131 +276,165 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                     );
                 })()}
 
-                {/* Verification basis — claims and sources */}
+                {/* Article — primary content */}
                 <section className="space-y-4">
-                    <div>
+                    <div className="flex items-center gap-3">
                         <h2 className="text-base font-semibold text-slate-700">
-                            {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
+                            {tw.article_heading ?? 'Artikkelutkast'}
                         </h2>
-                        <p className="mt-0.5 text-sm text-slate-400">
-                            {tw.verification_description ?? 'Påstander og kildebevis som siden bygger på.'}
-                        </p>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                            {tw.article_ai_label ?? 'AI-generert'}
+                        </span>
                     </div>
 
-                    {!current_version ? (
-                        <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
-                    ) : claims.length === 0 ? (
-                        <p className="text-sm text-slate-400">{tw.no_claims ?? 'Ingen påstander for denne siden.'}</p>
+                    {hasArticle ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                            <div className="wiki-article">
+                                <ReactMarkdown>{articleContent}</ReactMarkdown>
+                            </div>
+                        </div>
                     ) : (
+                        <p className="text-sm text-slate-400">
+                            {tw.article_empty ?? 'Ingen artikkelinnhold generert ennå.'}
+                        </p>
+                    )}
+                </section>
+
+                {/* Verification — secondary, collapsible */}
+                <section className="space-y-3">
+                    <button
+                        type="button"
+                        onClick={() => setVerificationOpen((v) => !v)}
+                        className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition-colors hover:text-slate-700"
+                    >
+                        <ChevronIcon open={verificationOpen} />
+                        {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
+                        {claimSummary && claimSummary.total > 0 && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
+                                {claimSummary.total} {tw.claims ?? 'påstander'}
+                            </span>
+                        )}
+                    </button>
+
+                    {verificationOpen && (
                         <div className="space-y-4">
-                            {claims.map((claim) => (
-                                <article
-                                    key={claim.id}
-                                    className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
-                                >
-                                    {/* Claim text */}
-                                    <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
+                            {!current_version ? (
+                                <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
+                            ) : claims.length === 0 ? (
+                                <p className="text-sm text-slate-400">{tw.no_claims ?? 'Ingen påstander for denne siden.'}</p>
+                            ) : (
+                                <>
+                                    <ClaimSummary summary={claimSummary} tw={tw} />
+                                    <div className="space-y-4">
+                                        {claims.map((claim) => (
+                                            <article
+                                                key={claim.id}
+                                                className="rounded-[18px] border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]"
+                                            >
+                                                <p className="text-[15px] leading-7 text-slate-900">{claim.claim_text}</p>
 
-                                    {/* Badges row */}
-                                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                                        <Badge
-                                            label={claimStatusLabel(claim.approval_status)}
-                                            cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
-                                        />
-                                        {claim.confidence && claim.confidence !== 'uncertain' && (
-                                            <Badge
-                                                label={confidenceLabel(claim.confidence)}
-                                                cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
-                                            />
-                                        )}
-                                        {claim.conflict_flag && (
-                                            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
-                                                <WarnIcon className="h-3 w-3" />
-                                                {tw.conflict_detected ?? 'Mulig konflikt'}
-                                            </span>
-                                        )}
-                                        {(() => {
-                                            const hasSource = claim.source_references.length > 0;
-                                            const hasExcerpt = claim.source_references.some(r => r.excerpt?.trim());
-                                            if (!hasSource) {
-                                                return (
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                                        <WarnIcon className="h-3 w-3" />
-                                                        {tw.quality_no_source ?? 'Mangler kilde'}
-                                                    </span>
-                                                );
-                                            }
-                                            if (!hasExcerpt) {
-                                                return (
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                                                        <WarnIcon className="h-3 w-3" />
-                                                        {tw.quality_missing_excerpt ?? 'Mangler utdrag'}
-                                                    </span>
-                                                );
-                                            }
-                                            return (
-                                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${isApproved ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-                                                    </svg>
-                                                    {tw.quality_source_found ?? 'Kilde funnet'}
-                                                </span>
-                                            );
-                                        })()}
-                                    </div>
-
-                                    {/* Source references */}
-                                    <div className="mt-4 border-t border-slate-100 pt-4">
-                                        {claim.source_references.length === 0 ? (
-                                            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
-                                                <WarnIcon className="h-3.5 w-3.5 shrink-0" />
-                                                {tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.'}
-                                            </p>
-                                        ) : (
-                                            <ul className="space-y-3">
-                                                {claim.source_references.map((ref) => (
-                                                    <li key={ref.id}>
-                                                        <p className="text-xs font-semibold text-slate-600">
-                                                            {ref.source_label}
-                                                        </p>
-                                                        {ref.page_reference && (
-                                                            <p className="mt-0.5 text-xs text-slate-400">
-                                                                {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
-                                                            </p>
-                                                        )}
-                                                        {ref.excerpt ? (
-                                                            <p className="mt-1 text-xs leading-5 text-slate-400 line-clamp-3">
-                                                                {ref.excerpt}
-                                                            </p>
-                                                        ) : (
-                                                            <p className="mt-1 text-xs italic text-slate-300">
-                                                                {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
-                                                            </p>
-                                                        )}
-                                                        {ref.download_url && (
-                                                            <a
-                                                                href={ref.download_url}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline"
-                                                            >
+                                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                    <Badge
+                                                        label={claimStatusLabel(claim.approval_status)}
+                                                        cls={CLAIM_STATUS_STYLES[claim.approval_status] ?? 'bg-slate-200 text-slate-500'}
+                                                    />
+                                                    {claim.confidence && claim.confidence !== 'uncertain' && (
+                                                        <Badge
+                                                            label={confidenceLabel(claim.confidence)}
+                                                            cls={CONFIDENCE_STYLES[claim.confidence] ?? 'bg-slate-200 text-slate-500'}
+                                                        />
+                                                    )}
+                                                    {claim.conflict_flag && (
+                                                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
+                                                            <WarnIcon className="h-3 w-3" />
+                                                            {tw.conflict_detected ?? 'Mulig konflikt'}
+                                                        </span>
+                                                    )}
+                                                    {(() => {
+                                                        const hasSource = claim.source_references.length > 0;
+                                                        const hasExcerpt = claim.source_references.some(r => r.excerpt?.trim());
+                                                        if (!hasSource) {
+                                                            return (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                                    <WarnIcon className="h-3 w-3" />
+                                                                    {tw.quality_no_source ?? 'Mangler kilde'}
+                                                                </span>
+                                                            );
+                                                        }
+                                                        if (!hasExcerpt) {
+                                                            return (
+                                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                                                                    <WarnIcon className="h-3 w-3" />
+                                                                    {tw.quality_missing_excerpt ?? 'Mangler utdrag'}
+                                                                </span>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${isApproved ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700'}`}>
                                                                 <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                    <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                                                                    <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
                                                                 </svg>
-                                                                {tw.source_open_document ?? 'Åpne kildedokument'}
-                                                            </a>
-                                                        )}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
+                                                                {tw.quality_source_found ?? 'Kilde funnet'}
+                                                            </span>
+                                                        );
+                                                    })()}
+                                                </div>
+
+                                                <div className="mt-4 border-t border-slate-100 pt-4">
+                                                    {claim.source_references.length === 0 ? (
+                                                        <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                                                            <WarnIcon className="h-3.5 w-3.5 shrink-0" />
+                                                            {tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.'}
+                                                        </p>
+                                                    ) : (
+                                                        <ul className="space-y-3">
+                                                            {claim.source_references.map((ref) => (
+                                                                <li key={ref.id}>
+                                                                    <p className="text-xs font-semibold text-slate-600">
+                                                                        {ref.source_label}
+                                                                    </p>
+                                                                    {ref.page_reference && (
+                                                                        <p className="mt-0.5 text-xs text-slate-400">
+                                                                            {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
+                                                                        </p>
+                                                                    )}
+                                                                    {ref.excerpt ? (
+                                                                        <p className="mt-1 text-xs leading-5 text-slate-400 line-clamp-3">
+                                                                            {ref.excerpt}
+                                                                        </p>
+                                                                    ) : (
+                                                                        <p className="mt-1 text-xs italic text-slate-300">
+                                                                            {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
+                                                                        </p>
+                                                                    )}
+                                                                    {ref.download_url && (
+                                                                        <a
+                                                                            href={ref.download_url}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 hover:text-violet-800 hover:underline"
+                                                                        >
+                                                                            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                                            </svg>
+                                                                            {tw.source_open_document ?? 'Åpne kildedokument'}
+                                                                        </a>
+                                                                    )}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
+                                            </article>
+                                        ))}
                                     </div>
-                                </article>
-                            ))}
+                                </>
+                            )}
                         </div>
                     )}
                 </section>
+
                 {/* Helsekontroll */}
                 <section className="space-y-3">
                     <h2 className="text-base font-semibold text-slate-700">
@@ -356,6 +464,7 @@ export default function WikiShow({ page, current_version, claims, lint_findings:
                         </ul>
                     )}
                 </section>
+
             </div>
         </CustomerAppLayout>
     );
