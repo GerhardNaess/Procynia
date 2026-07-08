@@ -17,6 +17,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
+use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -94,24 +95,23 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Test 4: Assembles content_markdown from claims and source references
+    // Test 4: Writes article markdown (from WikiArticleAiClient) to content_markdown
     // -------------------------------------------------------------------------
 
-    public function test_finalize_assembles_content_markdown_from_claims(): void
+    public function test_finalize_writes_article_markdown_to_content_markdown(): void
     {
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
 
         $this->createClaim($page, $pageVersion, $run, 'Vi er ISO 9001-sertifisert.', 'ISO 9001 siden 2015.');
         $this->createClaim($page, $pageVersion, $run, 'Vi har 50 ansatte.', 'Antall ansatte: 50.', 1);
 
+        $expectedMarkdown = "## Kvalitet\n\nVi er ISO 9001-sertifisert og har 50 ansatte.";
+        $this->mockArticleClient($expectedMarkdown);
+
         $this->runFinalize($run);
 
         $pageVersion->refresh();
-        $this->assertNotNull($pageVersion->content_markdown);
-        $this->assertStringContainsString('Vi er ISO 9001-sertifisert.', $pageVersion->content_markdown);
-        $this->assertStringContainsString('Vi har 50 ansatte.', $pageVersion->content_markdown);
-        $this->assertStringContainsString('kompetanse.docx', $pageVersion->content_markdown);
-        $this->assertStringContainsString('ISO 9001 siden 2015.', $pageVersion->content_markdown);
+        $this->assertSame($expectedMarkdown, $pageVersion->content_markdown);
     }
 
     // -------------------------------------------------------------------------
@@ -122,6 +122,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run);
+        $this->mockArticleClient();
 
         $this->runFinalize($run);
 
@@ -134,6 +135,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run);
+        $this->mockArticleClient();
 
         $this->runFinalize($run);
 
@@ -152,6 +154,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run, 'Første krav.', 'Kildesetning.');
+        $this->mockArticleClient("## Første\n\nInnhold.");
 
         $this->runFinalize($run);
         $run->refresh();
@@ -240,17 +243,18 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Test 9: Finalize makes no real AI calls
+    // Test 9: Finalize calls WikiArticleAiClient, not WikiSectionAiClient
     // -------------------------------------------------------------------------
 
-    public function test_finalize_makes_no_real_ai_calls(): void
+    public function test_finalize_calls_article_client_not_section_client(): void
     {
-        // FinalizeEnterpriseWikiIngest::handle() does not inject WikiSectionAiClient.
-        // WikiSectionAiClient::fetchClaims() throws RuntimeException("not implemented")
-        // if called. This test verifies that finalize completes without that exception,
-        // proving no AI call is made.
+        // FinalizeEnterpriseWikiIngest uses WikiArticleAiClient for article synthesis.
+        // WikiSectionAiClient (per-section extraction) must not be called by finalize.
+        // We mock WikiArticleAiClient and leave WikiSectionAiClient unmocked —
+        // any unexpected call to it would cause the test to fail.
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run);
+        $this->mockArticleClient();
 
         $this->runFinalize($run);
 
@@ -267,6 +271,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion, 'version' => $version]
             = $this->createScaffold(['completed']);
         $this->createClaim($page, $pageVersion, $run);
+        $this->mockArticleClient();
 
         $originalText = $version->extracted_text;
         $originalApproval = $version->approval_status;
@@ -281,6 +286,25 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $this->assertDatabaseCount('knowledge_item_chunks', 0);
     }
 
+    // -------------------------------------------------------------------------
+    // Test 11: Claims and source references survive article generation
+    // -------------------------------------------------------------------------
+
+    public function test_finalize_claims_are_unchanged_after_article_generation(): void
+    {
+        ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
+        $claim = $this->createClaim($page, $pageVersion, $run, 'Vi leverer kvalitet.', 'Kildesetning.');
+        $this->mockArticleClient();
+
+        $this->runFinalize($run);
+
+        $claim->refresh();
+        $this->assertSame('Vi leverer kvalitet.', $claim->claim_text);
+        $this->assertSame(EnterpriseWikiClaim::APPROVAL_STATUS_PENDING, $claim->approval_status);
+        $this->assertDatabaseCount('enterprise_wiki_claims', 1);
+        $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -289,7 +313,17 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
+            app(WikiArticleAiClient::class),
         );
+    }
+
+    private function mockArticleClient(string $markdown = "## Oversikt\n\nGenerert testinnhold."): WikiArticleAiClient
+    {
+        /** @var WikiArticleAiClient&MockInterface $mock */
+        $mock = $this->mock(WikiArticleAiClient::class);
+        $mock->shouldReceive('generateArticle')->andReturn($markdown);
+
+        return $mock;
     }
 
     /**

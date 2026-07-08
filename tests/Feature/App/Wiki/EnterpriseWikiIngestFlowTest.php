@@ -18,6 +18,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\EnterpriseWikiSectionParser;
+use App\Services\Ai\Wiki\WikiArticleAiClient;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -175,8 +176,14 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         Queue::assertPushed(FinalizeEnterpriseWikiIngest::class);
 
         // ─── Stage 4: Run finalize ────────────────────────────────────────────
+        $articleMock = $this->mock(WikiArticleAiClient::class);
+        $articleMock->shouldReceive('generateArticle')
+            ->once()
+            ->andReturn("## Kvalitet\n\nVi er ISO 9001-sertifisert. Kilde: selskapsinfo.docx.");
+
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
+            $articleMock,
         );
 
         // ─── Stage 5: Assert final state ─────────────────────────────────────
@@ -186,7 +193,7 @@ class EnterpriseWikiIngestFlowTest extends TestCase
 
         $pageVersion->refresh();
         $this->assertTrue($pageVersion->is_current, 'Page version must become is_current after finalize.');
-        $this->assertNotNull($pageVersion->content_markdown, 'content_markdown must be assembled.');
+        $this->assertNotNull($pageVersion->content_markdown, 'content_markdown must be set after article generation.');
         $this->assertStringContainsString('Vi er ISO 9001-sertifisert.', $pageVersion->content_markdown);
         $this->assertStringContainsString('selskapsinfo.docx', $pageVersion->content_markdown);
 
@@ -254,8 +261,12 @@ class EnterpriseWikiIngestFlowTest extends TestCase
         }
 
         // Finalize
+        $articleMock = $this->mock(WikiArticleAiClient::class);
+        $articleMock->shouldReceive('generateArticle')->once()->andReturn("## Test\n\nInnhold.");
+
         (new FinalizeEnterpriseWikiIngest($run->id))->handle(
             app(EnterpriseWikiIngestService::class),
+            $articleMock,
         );
 
         // KnowledgeItemVersion unchanged

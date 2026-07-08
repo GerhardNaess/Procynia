@@ -2,11 +2,13 @@
 
 namespace App\Jobs\Ai\Wiki;
 
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
+use App\Services\Ai\Wiki\WikiArticleAiClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -34,12 +36,12 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
         $this->queue = 'enterprise-wiki';
     }
 
-    public function handle(EnterpriseWikiIngestService $service): void
+    public function handle(EnterpriseWikiIngestService $service, WikiArticleAiClient $articleClient): void
     {
-        // All work — including the markdown assembly DB reads — happens inside one transaction
+        // All work — including DB reads and the AI call — happens inside one transaction
         // with the run row locked. This prevents two concurrent finalize instances from both
         // deciding to finalize the same run when the last sections complete at nearly the same time.
-        DB::transaction(function () use ($service): void {
+        DB::transaction(function () use ($articleClient): void {
             $run = EnterpriseWikiIngestRun::query()
                 ->lockForUpdate()
                 ->find($this->runId);
@@ -110,19 +112,38 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
             }
 
             $pageTitle = $pageVersion->page->title;
-            $markdown = $service->assembleContentMarkdown($pageVersion, $pageTitle, $run->id);
 
-            if ($markdown === '') {
+            $claimsData = EnterpriseWikiClaim::query()
+                ->with('sourceReferences')
+                ->where('enterprise_wiki_page_version_id', $pageVersion->id)
+                ->orderBy('position_order')
+                ->get()
+                ->map(fn (EnterpriseWikiClaim $claim) => [
+                    'text'       => $claim->claim_text,
+                    'confidence' => $claim->confidence,
+                    'excerpt'    => $claim->sourceReferences->first()?->excerpt ?? '',
+                    'source'     => $claim->sourceReferences->first()?->source_label ?? '',
+                ])
+                ->all();
+
+            if (empty($claimsData)) {
                 $run->update([
                     'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
-                    'error_message' => 'No claims were stored for this ingest run. Cannot assemble wiki content.',
+                    'error_message' => 'No claims were stored for this ingest run. Cannot generate article.',
                     'finished_at' => now(),
                 ]);
 
                 return;
             }
 
-            // Publish the assembled content to the draft page version.
+            $run->load('customer.language');
+            $languageCode = $run->customer?->language?->code ?? 'no';
+
+            // RuntimeException from generateArticle() propagates out of the transaction,
+            // rolls it back, and is handled by failed() marking the run as failed.
+            $markdown = $articleClient->generateArticle($pageTitle, $claimsData, $languageCode);
+
+            // Publish the generated article to the draft page version.
             // is_current=true makes this the active version (readable via Page::currentVersion()).
             // Page advances to pending_review — ready for human review, not yet approved.
             // Claims remain in approval_status='pending' — human approval is a separate step.
