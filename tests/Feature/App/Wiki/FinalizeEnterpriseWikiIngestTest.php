@@ -335,6 +335,35 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
     }
 
+    // -------------------------------------------------------------------------
+    // Test 13: content_markdown not stored when article client throws (validation failure)
+    // -------------------------------------------------------------------------
+
+    public function test_finalize_does_not_store_content_markdown_when_article_client_throws(): void
+    {
+        ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
+        $this->createClaim($page, $pageVersion, $run);
+
+        $mock = $this->mock(WikiArticleAiClient::class);
+        $mock->shouldReceive('generateArticle')
+            ->andThrow(new \RuntimeException('WikiArticleAiClient: generated article contains HTML comments — rejected.'));
+
+        try {
+            $this->runFinalize($run);
+            $this->fail('Expected RuntimeException was not thrown.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('HTML comments', $e->getMessage());
+        }
+
+        // Transaction was rolled back — content_markdown must not be set.
+        $pageVersion->refresh();
+        $this->assertNull($pageVersion->content_markdown);
+
+        // Claims are intact.
+        $this->assertDatabaseCount('enterprise_wiki_claims', 1);
+        $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

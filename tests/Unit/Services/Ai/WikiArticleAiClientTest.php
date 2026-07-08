@@ -79,6 +79,49 @@ class WikiArticleAiClientTest extends TestCase
         $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
     }
 
+    public function test_generate_article_rejects_output_with_html_comments(): void
+    {
+        $badMarkdown = "# Tittel\n\nInnhold.\n<!-- wiki-ingest-run:42 -->\nMer innhold.";
+        $client = $this->clientWithOutputText(['article' => ['markdown' => $badMarkdown]]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/HTML comments/');
+
+        $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
+    }
+
+    public function test_generate_article_rejects_output_with_multiple_kilde_lines(): void
+    {
+        $badMarkdown = "# Tittel\n\nInnhold.\n\nKilde: kompetanse.docx\n\nKilde: annet.docx\n\nMer innhold.";
+        $client = $this->clientWithOutputText(['article' => ['markdown' => $badMarkdown]]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/source citation lines/');
+
+        $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
+    }
+
+    public function test_generate_article_rejects_output_with_many_blockquote_lines(): void
+    {
+        $badMarkdown = "# Tittel\n\nInnhold.\n\n> Utdrag en\n> Utdrag to\n> Utdrag tre\n\nMer innhold.";
+        $client = $this->clientWithOutputText(['article' => ['markdown' => $badMarkdown]]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/blockquote lines/');
+
+        $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
+    }
+
+    public function test_generate_article_accepts_single_blockquote_line(): void
+    {
+        $goodMarkdown = "# Tittel\n\n> En enkelt sitat er OK.\n\nHovedinnhold her.";
+        $client = $this->clientWithOutputText(['article' => ['markdown' => $goodMarkdown]]);
+
+        $result = $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
+
+        $this->assertSame($goodMarkdown, $result);
+    }
+
     public function test_api_exception_propagates_from_open_ai_client(): void
     {
         /** @var OpenAiClient&MockInterface $mock */

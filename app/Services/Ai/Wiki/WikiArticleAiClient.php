@@ -29,7 +29,8 @@ class WikiArticleAiClient
      *
      * @param  array<int, array{text: string, confidence: string, excerpt: string, source: string}>  $claims
      *
-     * @throws RuntimeException when AI is disabled, the API fails, or the response yields no article text
+     * @throws RuntimeException when AI is disabled, the API fails, the response yields no article text,
+     *                          or the generated article fails format validation
      */
     public function generateArticle(string $pageTitle, array $claims, string $languageCode): string
     {
@@ -57,7 +58,32 @@ class WikiArticleAiClient
             throw new RuntimeException('WikiArticleAiClient: generated article was empty.');
         }
 
+        $this->validateArticle($markdown);
+
         return $markdown;
+    }
+
+    /**
+     * Reject output that looks like an internal claim/source dump rather than a wiki article.
+     *
+     * @throws RuntimeException if the markdown contains forbidden patterns
+     */
+    private function validateArticle(string $markdown): void
+    {
+        // HTML comments are ingest artifacts — never valid in a wiki article
+        if (str_contains($markdown, '<!--')) {
+            throw new RuntimeException('WikiArticleAiClient: generated article contains HTML comments — rejected.');
+        }
+
+        // Two or more citation lines (Kilde:/Source:/Ref: at line start) indicate a source dump
+        if (preg_match_all('/^(Kilde|Source|Ref)\s*:/im', $markdown) >= 2) {
+            throw new RuntimeException('WikiArticleAiClient: generated article contains source citation lines — rejected.');
+        }
+
+        // Three or more blockquote lines indicate an excerpt dump
+        if (preg_match_all('/^>/m', $markdown) >= 3) {
+            throw new RuntimeException('WikiArticleAiClient: generated article contains blockquote lines — rejected.');
+        }
     }
 
     private function buildPayload(string $pageTitle, array $claims, string $languageName): array
@@ -100,14 +126,30 @@ class WikiArticleAiClient
     private function developerPrompt(string $languageName): string
     {
         return implode("\n", [
-            'You are a wiki article writer.',
-            "Write a coherent, readable wiki article in {$languageName} based on the provided claims and source excerpts.",
-            'Rules:',
-            '- Use ## headings for sections and write flowing prose paragraphs, not bullet lists.',
-            '- Synthesise overlapping claims into coherent text — do not repeat the same fact twice.',
-            '- Do not introduce facts not supported by the provided claims and excerpts.',
-            '- Do not mention that the article is AI-generated within the article text itself.',
-            '- Return only JSON matching the schema. No text before or after JSON.',
+            "You are an editorial wiki article writer. Write a professional, readable internal wiki article in {$languageName}.",
+            '',
+            'ARTICLE STRUCTURE (mandatory):',
+            '- First line must be a # heading containing the page title',
+            '- Follow with a short introductory paragraph (2-4 sentences) summarising the topic',
+            '- Organise the body using ## subheadings for logical sections',
+            '- Write flowing prose paragraphs within each section — no bullet lists',
+            '- End the article naturally, without a separate summary or conclusion heading',
+            '',
+            'SYNTHESIS RULES:',
+            '- Synthesise overlapping claims into coherent prose — do not list or copy claims verbatim',
+            '- Do not repeat the same fact across multiple sections',
+            '- Do not invent facts not supported by the provided claims and evidence',
+            '',
+            'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
+            '- No HTML comments (<!-- ... -->)',
+            '- No lines starting with "Kilde:", "Source:", "Ref:" or any citation marker',
+            '- No quoted source excerpts or blockquote lines (lines starting with >)',
+            '- No filenames, document IDs, run IDs, or internal technical identifiers',
+            '- No mention of AI generation, confidence levels, or approval status',
+            '- No claim lists, numbered fact lists, or verification sections',
+            '- No metadata lines (Version:, Status:, Ingest:, etc.)',
+            '',
+            'Return only JSON matching the schema. No text before or after JSON.',
         ]);
     }
 
