@@ -19,13 +19,20 @@ class EnterpriseWikiIngestRun extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    // Used when the run stores only a maintainer decision — no pages are created.
+    public const STATUS_DECISION_ONLY = 'decision_only';
+
     public const STATUSES = [
         self::STATUS_QUEUED,
         self::STATUS_RUNNING,
         self::STATUS_SECTIONS_PLANNED,
         self::STATUS_COMPLETED,
         self::STATUS_FAILED,
+        self::STATUS_DECISION_ONLY,
     ];
+
+    public const MAINTAINER_DECISION_STATUS_PENDING  = 'pending';
+    public const MAINTAINER_DECISION_STATUS_APPLIED  = 'applied';
 
     public const TRIGGER_TYPE_MANUAL = 'manual';
 
@@ -64,6 +71,9 @@ class EnterpriseWikiIngestRun extends Model
         'error_message',
         'started_at',
         'finished_at',
+        'maintainer_decision_json',
+        'maintainer_decision_status',
+        'maintainer_decision_generated_at',
     ];
 
     protected function casts(): array
@@ -75,6 +85,8 @@ class EnterpriseWikiIngestRun extends Model
             'cost_estimate_nok' => 'decimal:4',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
+            'maintainer_decision_json' => 'array',
+            'maintainer_decision_generated_at' => 'datetime',
         ];
     }
 
