@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-2 fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -605,19 +605,35 @@ Etter Fase 4A:
 
 ### Fase 4B — Lint og helsekontroll
 
-#### Fase 4B-1 og 4B-2 — Verifikasjonsvisning og kildenedlasting — Fullført (2026-07-08)
+#### Fase 4B-1 — Verifikasjonsvisning — Fullført (2026-07-08)
 
-| Fase | Commit | Innhold |
-|---|---|---|
-| 4B-1 | `44ea5cb` | Read-only verifikasjonsgrunnlag på wiki detail-side |
-| 4B-2 | `bb20ee9` | Sikker åpning/nedlasting av raw Enterprise Wiki-kildedokument |
+Commit: `44ea5cb`
 
 Implementert:
 - Verifikasjonsgrunnlag på `/app/wiki/{slug}`: hver påstand vises med kildedokument, avsnittref, tekstutdrag og advarsel hvis kildereferanser mangler
 - Utkast/under-gjennomgang-banner for `draft`- og `pending_review`-sider
+
+#### Fase 4B-2 — Kildenedlasting — Fullført (2026-07-08)
+
+Commit: `bb20ee9`
+
+Implementert:
 - `GET /app/wiki/sources/{document}/download` — scoped til innlogget kunde, aldri rå storage path i frontend
 - `download_url` genereres av backend for kildereferanser med `source_type = enterprise_wiki_document`
 - Nedlastingslenke fra kildereferanse på wiki-detaljesiden og fra kildedokument-listen på `/app/wiki`
+
+#### Fase 4B-3 — Kvalitetsindikatorer for påstander — Fullført
+
+Commit: `b92e38a`
+
+Implementert:
+- Read-only kvalitetsindikator per påstand på `/app/wiki/{slug}`
+- "Kilde funnet" når påstanden har kildereferanse med tekstutdrag
+- "Mangler utdrag" når kildereferanse finnes, men excerpt mangler
+- "Mangler kilde" når påstanden ikke har kildereferanser
+- Indikatorene bruker eksisterende claims/source references-data
+- Ingen backend/controller-endringer
+- Ingen migrasjoner, lint-service, AI-kall, graf, ingest-endring eller claim approval
 
 Gjenstår i Fase 4B:
 - Lint-kontroller beskrevet i §9
