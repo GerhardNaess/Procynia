@@ -12,6 +12,11 @@ function formatDate(value, locale) {
     }).format(new Date(value));
 }
 
+function formatTime(value, locale) {
+    if (!value) return null;
+    return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
 const STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     pending_review: 'bg-amber-100 text-amber-700',
@@ -54,7 +59,7 @@ const INGEST_STATUS_STYLES = {
 
 const IN_PROGRESS_STATUSES = ['queued', 'running', 'sections_planned'];
 
-function IngestStatusBadge({ run, label, notStartedLabel }) {
+function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
     if (!run) {
         return (
             <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-500">
@@ -63,14 +68,39 @@ function IngestStatusBadge({ run, label, notStartedLabel }) {
         );
     }
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+    const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
+    const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
+    const startedAt = (run.status === 'running' || run.status === 'sections_planned') ? formatTime(run.started_at, locale) : null;
     return (
-        <div>
+        <div className="space-y-1">
             <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+            {run.status === 'queued' && (
+                <>
+                    {queuedSince && (
+                        <p className="text-[11px] text-slate-400">I kø siden {queuedSince}</p>
+                    )}
+                    <p className="max-w-52 text-[11px] text-slate-400">
+                        Venter på bakgrunnsjobb. Kjører du lokalt — sjekk at worker lytter på <span className="font-mono">enterprise-wiki</span>-køen.
+                    </p>
+                </>
+            )}
+            {startedAt && (
+                <p className="text-[11px] text-slate-400">Startet {startedAt}</p>
+            )}
             {run.status === 'failed' && run.error_message ? (
-                <p className="mt-0.5 max-w-45 truncate text-[11px] text-rose-500" title={run.error_message}>
+                <p className="max-w-45 truncate text-[11px] text-rose-500" title={run.error_message}>
                     {run.error_message}
                 </p>
             ) : null}
+            {isInProgress && (
+                <button
+                    type="button"
+                    onClick={onReload}
+                    className="text-[11px] text-slate-400 underline hover:text-slate-600"
+                >
+                    Oppdater status
+                </button>
+            )}
         </div>
     );
 }
@@ -83,6 +113,8 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
     const fileInputRef = useRef(null);
     const uploadForm = useForm({ file: null });
     const [ingestingIds, setIngestingIds] = useState(new Set());
+
+    const handleSourceReload = () => router.reload({ only: ['sources'] });
 
     const submitUpload = (event) => {
         event.preventDefault();
@@ -273,6 +305,8 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                         run={source.latest_ingest_run}
                                                         label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status) : null}
                                                         notStartedLabel={notStartedLabel}
+                                                        locale={locale}
+                                                        onReload={handleSourceReload}
                                                     />
                                                     {source.generated_pages.length > 0 && (
                                                         <ul className="mt-1.5 space-y-0.5">

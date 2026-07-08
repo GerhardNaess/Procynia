@@ -79,6 +79,9 @@ class WikiController extends Controller
             'latest_ingest_run' => $latestRuns->has($doc->id) ? [
                 'status' => $latestRuns[$doc->id]->status,
                 'error_message' => $latestRuns[$doc->id]->error_message,
+                'created_at' => $latestRuns[$doc->id]->created_at,
+                'started_at' => $latestRuns[$doc->id]->started_at,
+                'finished_at' => $latestRuns[$doc->id]->finished_at,
             ] : null,
             'generated_pages' => ($pagesPerDocument->get($doc->id) ?? collect())
                 ->map(fn($page) => [
