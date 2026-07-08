@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Models\EnterpriseWikiDocument;
+use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -13,12 +15,14 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class WikiSourceController extends Controller
 {
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
+        private readonly EnterpriseWikiIngestService $ingestService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -91,5 +95,41 @@ class WikiSourceController extends Controller
 
         return redirect()->route('app.wiki.index')
             ->with('success', 'Dokumentet er lastet opp og klart for ingest.');
+    }
+
+    public function ingest(EnterpriseWikiDocument $document): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(403);
+        }
+
+        if ($document->document_status !== EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {
+            return redirect()->route('app.wiki.index')
+                ->with('error', 'Dokumentet er ikke klart for ingest. Kun ekstraherte dokumenter kan brukes.');
+        }
+
+        try {
+            $validated = $this->ingestService->resolveDocumentForIngest($customerId, $document->id);
+        } catch (InvalidArgumentException $e) {
+            Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
+
+            return redirect()->route('app.wiki.index')
+                ->with('error', 'Kunne ikke starte ingest. Prøv igjen.');
+        }
+
+        $run = $this->ingestService->createQueuedRunForDocument($customerId, $validated);
+
+        ProcessEnterpriseWikiIngest::dispatch($run->id);
+
+        Log::info('[PROCYNIA][WIKI_SOURCE_INGEST] Queued ingest run.', [
+            'run_id' => $run->id,
+            'customer_id' => $customerId,
+            'document_id' => $document->id,
+        ]);
+
+        return redirect()->route('app.wiki.index')
+            ->with('success', 'Wiki-utkast er satt i kø. Det vil snart være klart til gjennomgang.');
     }
 }

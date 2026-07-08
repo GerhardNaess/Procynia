@@ -2975,5 +2975,7 @@ return [
         'source_status_extracted' => 'Extracted',
         'source_status_pending' => 'Processing',
         'source_status_failed' => 'Failed',
+        'source_ingest_button' => 'Generate wiki draft',
+        'source_ingest_starting' => 'Starting...',
     ],
 ];

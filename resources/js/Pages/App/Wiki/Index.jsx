@@ -1,5 +1,5 @@
-import { Link, useForm, usePage } from '@inertiajs/react';
-import { useRef } from 'react';
+import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { useRef, useState } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 
@@ -51,6 +51,7 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
 
     const fileInputRef = useRef(null);
     const uploadForm = useForm({ file: null });
+    const [ingestingIds, setIngestingIds] = useState(new Set());
 
     const submitUpload = (event) => {
         event.preventDefault();
@@ -71,6 +72,23 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
         rejected: tw.status_rejected ?? 'Avvist',
         archived: tw.status_archived ?? 'Arkivert',
     }[status] ?? status);
+
+    const startIngest = (id) => {
+        if (ingestingIds.has(id)) return;
+        setIngestingIds((prev) => new Set(prev).add(id));
+        router.post(
+            `/app/wiki/sources/${id}/ingest`,
+            {},
+            {
+                onFinish: () =>
+                    setIngestingIds((prev) => {
+                        const next = new Set(prev);
+                        next.delete(id);
+                        return next;
+                    }),
+            },
+        );
+    };
 
     const sourceStatusLabel = (status) => ({
         extracted: tw.source_status_extracted ?? 'Ekstrahert',
@@ -190,6 +208,7 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                             <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                             <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                             <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
+                                            <th className="px-4 py-3"></th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 bg-white">
@@ -206,6 +225,20 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                 </td>
                                                 <td className="px-4 py-3 text-slate-500">
                                                     {formatDate(source.created_at, locale)}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {source.document_status === 'extracted' && (
+                                                        <button
+                                                            type="button"
+                                                            disabled={ingestingIds.has(source.id)}
+                                                            onClick={() => startIngest(source.id)}
+                                                            className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            {ingestingIds.has(source.id)
+                                                                ? (tw.source_ingest_starting ?? 'Starter...')
+                                                                : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}

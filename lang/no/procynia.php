@@ -2975,5 +2975,7 @@ return [
         'source_status_extracted' => 'Ekstrahert',
         'source_status_pending' => 'Behandles',
         'source_status_failed' => 'Feilet',
+        'source_ingest_button' => 'Generer wiki-utkast',
+        'source_ingest_starting' => 'Starter...',
     ],
 ];

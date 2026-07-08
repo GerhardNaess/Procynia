@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\App\Wiki;
 
+use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\Language;
@@ -11,6 +12,7 @@ use App\Services\DocumentTextExtractor;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -337,6 +339,68 @@ class WikiSourceControllerTest extends TestCase
         $response->assertSessionHasErrors('file');
     }
 
+    // ─── Ingest action ────────────────────────────────────────────────────────
+
+    public function test_system_owner_can_start_ingest_for_extracted_document(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createExtractedDocument($customer);
+
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        Queue::assertPushed(ProcessEnterpriseWikiIngest::class);
+    }
+
+    public function test_ingest_rejects_other_customer_document(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignDoc = $this->createExtractedDocument($other);
+
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$foreignDoc->id}/ingest");
+
+        $response->assertForbidden();
+        Queue::assertNothingPushed();
+    }
+
+    public function test_ingest_rejects_pending_document(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING);
+
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        Queue::assertNothingPushed();
+    }
+
+    public function test_ingest_rejects_failed_document(): void
+    {
+        Queue::fake();
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED);
+
+        $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        Queue::assertNothingPushed();
+    }
+
     // ─── No knowledge_* models touched ───────────────────────────────────────
 
     public function test_no_knowledge_item_rows_are_created_during_upload(): void
@@ -355,6 +419,25 @@ class WikiSourceControllerTest extends TestCase
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private function createDocument(Customer $customer, string $status): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'test.pdf',
+            'file_path' => sprintf('customers/%d/wiki-documents/%s.pdf', $customer->id, Str::random(8)),
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => $status,
+            'extracted_text' => $status === EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED
+                ? 'Testtekst for ingest.'
+                : null,
+        ]);
+    }
+
+    private function createExtractedDocument(Customer $customer): EnterpriseWikiDocument
+    {
+        return $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+    }
 
     private function mockExtractorReturning(string $text): void
     {
