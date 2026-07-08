@@ -643,6 +643,17 @@ Implementert:
 - Frontend deaktiverer "Generer wiki-utkast"-knappen og viser "Wiki-generering er ikke aktivert ennå." under knappen
 - Ingen RuntimeException eksponeres mot brukeren lenger
 
+#### Fase 4B — Helsekontroll (2026-07-08)
+
+Teknisk og dokumentasjonsmessig kontroll gjennomført etter Fase 4B-1–4B-4:
+
+- Git-historikk ren, alle Fase 4B-commits på plass
+- Build OK, 85/85 tester grønne
+- Alle Enterprise Wiki-ruter under `app/wiki`, ingen lekkasje mot andre resurser
+- `KnowledgeItem`/`KnowledgeItemVersion`-referanser i ingest-kode er isolert bak `else`-gren eksplisitt merket `legacy/bootstrap — Kunnskapsbase-import` — ingen aktiv kobling fra ny `EnterpriseWikiDocument`-sti
+- `WikiSectionAiClient::isAvailable()` returnerer `false`, ingest blokkeres før queue-dispatch
+- Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
+
 Gjenstår i Fase 4B:
 - Lint-kontroller beskrevet i §9
 - `enterprise_wiki_lint_findings`-tabell
