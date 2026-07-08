@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08) · Phase 1F-0 spec (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -690,6 +690,161 @@ Implementert:
 
 **Fase 4B fullført.** Alle delmål gjennomført:
 4B-1 Verifikasjonsvisning · 4B-2 Kildenedlasting · 4B-3 Kvalitetsindikatorer · 4B-4 Forventningsstyring · 4B-5A Backend lint · 4B-5B UI helseindikator · 4B-5C Scheduled lint
+
+### Phase 1F — WikiSectionAiClient OpenAI-integrasjon
+
+#### Phase 1F-0 — Implementeringsspesifikasjon (2026-07-08)
+
+Spesifiserer det eneste manglende leddet som blokkerer wiki-generering:
+`WikiSectionAiClient::fetchClaims()` og tilhørende aktivering.
+
+---
+
+##### Prompt-regler
+
+Systemrollen (`developer`) instruerer modellen:
+
+- Kun ekstrahere påstander fra den oppgitte seksjonsteksten — aldri finne opp informasjon
+- Aldri bruke ekstern kunnskap eller generell domenekunnskap som kilde
+- Hver claim skal være én konkret, verifiserbar setning på vanlig norsk (eller kundespråk)
+- Hvert `excerpt` skal være et nært tekstutdrag fra seksjonsteksten (ordrett eller minimalt omformulert)
+- `confidence` settes etter støtten i teksten: `high` = eksplisitt og entydig, `medium` = rimelig støtte, `low` = implisitt/usikkert grunnlag, `uncertain` = svak støtte
+- `conflict_note` brukes kun når seksjonsteksten inneholder to utsagn som eksplisitt motsier hverandre
+- Hvis seksjonsteksten ikke inneholder konkrete, verifiserbare påstander: returner tom `claims`-liste
+- Ikke slå sammen informasjon fra ulike seksjoner — én seksjon, én jobb
+
+Brukerrollen (`user`) sender:
+```
+Seksjonstekst (overskrift: {heading}):
+
+{sectionText}
+```
+
+Språk injiseres i system-prompten: `Returner claims på {languageName}.`
+
+---
+
+##### Exakt JSON-format (Responses API, strict JSON schema)
+
+`fetchClaims()` returnerer:
+
+```json
+{
+  "claims": [
+    {
+      "text": "Virksomheten leverer konsulentbistand innen offentlig sektor.",
+      "confidence": "high",
+      "excerpt": "Virksomheten leverer konsulentbistand innen offentlig sektor.",
+      "conflict_note": null
+    }
+  ]
+}
+```
+
+`confidence` enum: `["high", "medium", "low", "uncertain"]`
+`conflict_note`: `string | null`
+
+Responses API-payload:
+
+```php
+[
+    'model' => 'gpt-4.1-mini',
+    'input' => [
+        ['role' => 'developer', 'content' => [['type' => 'input_text', 'text' => $systemPrompt]]],
+        ['role' => 'user',      'content' => [['type' => 'input_text', 'text' => $userPrompt]]],
+    ],
+    'text' => [
+        'format' => [
+            'type' => 'json_schema',
+            'name' => 'wiki_section_claims',
+            'strict' => true,
+            'schema' => self::schema(),
+        ],
+    ],
+    'temperature' => 0,
+    'max_output_tokens' => 2000,
+]
+```
+
+---
+
+##### Grenser
+
+| Grense | Verdi | Kilde |
+|---|---|---|
+| Maks input-tegn per seksjon | 3 000 | `EnterpriseWikiSectionParser::MAX_SECTION_CHARS` — enforces upstream |
+| Maks claims per seksjon | 15 | Prompt-instruksjon + schema `maxItems` |
+| Maks excerpt-lengde | 500 tegn | `EnterpriseWikiSectionParser::MAX_EXCERPT_CHARS` — enforces i parser |
+| Maks output tokens | 2 000 | Rikelig for 15 claims × ~100 tokens |
+| Modell | `gpt-4.1-mini` | Extraction-modell per CLAUDE.md |
+| Temperature | 0 | Deterministisk ekstraksjon |
+
+Seksjonen er allerede splittet og begrenset til 3 000 tegn av `splitIntoSections()` — ingen ekstra truncation i `fetchClaims()`.
+
+---
+
+##### Feilhåndtering
+
+| Feiltype | Håndtering |
+|---|---|
+| OpenAI HTTP-feil | `OpenAiClient` kaster `RuntimeException` → bobler opp til `ProcessEnterpriseWikiSection::handle()` → `failSection()` + seksjonen merkes `failed` |
+| Malformed JSON / strict schema-brudd | `OpenAiClient::send()` kaster `RuntimeException` (eksisterende logikk) |
+| Tom `claims`-liste | Gyldig respons — seksjonen merkes `completed` uten claims |
+| OpenAI timeout | `ProcessEnterpriseWikiSection.$timeout = 600` — queue-job feiler etter 10 min |
+| `sectionText` tom streng | `fetchClaims()` returnerer `['claims' => []]` uten API-kall |
+
+Ingen custom retry-logikk i `fetchClaims()` — existerende `$tries = 1` på job-nivå er tilstrekkelig i pilot.
+
+Logging: ett `Log::info`-kall ved suksess med `section_id`, `claim_count`, `input_tokens`, `output_tokens`.
+Ingen seksjon- eller kundespesifikk tekst i logg-felter.
+
+---
+
+##### Teststrategi (mock — ingen ekte API-kall)
+
+`WikiSectionAiClient` mottar `OpenAiClient` via konstruktør-injeksjon. Tests bruker `$this->mock(OpenAiClient::class)`.
+
+| Test | Hva sjekkes |
+|---|---|
+| Gyldig respons med claims | `fetchClaims()` returnerer riktig array-struktur |
+| Tom claims-liste | Tom array returneres, ingen exception |
+| Tom sectionText | Returnerer `['claims' => []]` uten API-kall |
+| Malformed JSON fra OpenAI | `RuntimeException` kastes |
+| OpenAI HTTP-feil | `RuntimeException` kastes |
+| `isAvailable()` forblir false | Ingen endring av flagg i dette steget |
+
+Eksisterende `ProcessEnterpriseWikiSectionTest` bekrefter downstream-integrering via mock — ingen endringer der nødvendig.
+
+---
+
+##### Implementeringssteg
+
+**A — Dark deploy med tester (ingen UI-endring)**
+- Implementer `fetchClaims()` med reell Responses API-kall
+- Injiser `OpenAiClient` via konstruktør
+- Legg til privat `languageName(string $code): string`-helper
+- Legg til `WikiSectionClaimsPrompt`-klasse for prompt/schema/konstanter (speiler `FullDocumentRequirementExtractionPrompt`-mønsteret)
+- `isAvailable()` forblir `false`
+- Alle tester bruker mock
+
+**B — Manuell lokal verifikasjon**
+- Aktiver midlertidig i `.env` eller med feature-flag (ikke i kode)
+- Kjør manuell ingest mot ett testdokument
+- Verifiser claims, excerpts og confidence i databasen
+- Verifiser logging og token-telling
+
+**C — Aktiver `isAvailable() = true`**
+- Sett `isAvailable()` til `true`
+- Fjern eventuelt midlertidig config-override
+- Frontend og backend slutter å blokkere ingest
+
+---
+
+##### Åpne beslutninger som ikke blokkerer Phase 1F
+
+- §11 punkt 6 (maks tokens per full run): håndteres per-seksjon i pilot — tilstrekkelig for nå
+- §11 punkt 9 (automatisk re-ingest): utsettes til etter pilot
+- §11 punkt 10 (konflikthåndtering): `conflict_flag` settes allerede, UI viser det — ingen ny handling kreves i 1F
 
 ### Fase 5 — Sammenligning mot dagens RAG
 - Parallell visning: wiki-svar vs. RAG-svar for samme requirement
