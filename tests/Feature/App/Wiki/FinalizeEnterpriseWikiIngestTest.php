@@ -33,6 +33,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     {
         parent::setUp();
         Queue::fake();
+        config(['services.enterprise_wiki.ai_enabled' => true]);
     }
 
     // -------------------------------------------------------------------------
@@ -182,7 +183,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $item = $this->createKnowledgeItem($customer);
         $version = $this->createVersion($item, $customer);
         $run = $this->createRun($customer, $version);
-        [$page, $pageVersion] = $this->createDraftPage($customer, $run);
+        $this->createDraftPage($customer, $run);
 
         $section = EnterpriseWikiIngestSection::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
@@ -216,7 +217,7 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
         $item = $this->createKnowledgeItem($customer);
         $version = $this->createVersion($item, $customer);
         $run = $this->createRun($customer, $version);
-        [$page, $pageVersion] = $this->createDraftPage($customer, $run);
+        $this->createDraftPage($customer, $run);
 
         $section = EnterpriseWikiIngestSection::query()->create([
             'enterprise_wiki_ingest_run_id' => $run->id,
@@ -287,7 +288,36 @@ class FinalizeEnterpriseWikiIngestTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
-    // Test 11: Claims and source references survive article generation
+    // Test 11: Disabled AI flag → run fails cleanly, no external call, claims intact
+    // -------------------------------------------------------------------------
+
+    public function test_finalize_marks_run_failed_when_wiki_ai_is_disabled(): void
+    {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+
+        ['run' => $run, 'page' => $page, 'pageVersion' => $pageVersion] = $this->createScaffold(['completed']);
+        $this->createClaim($page, $pageVersion, $run);
+
+        // No mockArticleClient() — the real client is injected and the guard
+        // in finalize must prevent it from making any external call.
+        $this->runFinalize($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::STATUS_FAILED, $run->status);
+        $this->assertStringContainsString('disabled', (string) $run->error_message);
+        $this->assertNotNull($run->finished_at);
+
+        // content_markdown must not be touched — no article was generated.
+        $pageVersion->refresh();
+        $this->assertNull($pageVersion->content_markdown);
+
+        // Claims are intact.
+        $this->assertDatabaseCount('enterprise_wiki_claims', 1);
+        $this->assertDatabaseCount('enterprise_wiki_source_references', 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 12: Claims and source references survive article generation
     // -------------------------------------------------------------------------
 
     public function test_finalize_claims_are_unchanged_after_article_generation(): void

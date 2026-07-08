@@ -42,6 +42,12 @@ class EnterpriseWikiIngestFlowTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+    }
+
     /**
      * Full end-to-end flow: from wiki:ingest command to completed run.
      */

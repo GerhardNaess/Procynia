@@ -136,11 +136,22 @@ class FinalizeEnterpriseWikiIngest implements ShouldQueue
                 return;
             }
 
+            // Guard: if the feature flag was disabled after the ingest was queued,
+            // fail the run cleanly inside the transaction rather than relying on
+            // a RuntimeException + failed() to recover.
+            if (! WikiArticleAiClient::isAvailable()) {
+                $run->update([
+                    'status' => EnterpriseWikiIngestRun::STATUS_FAILED,
+                    'error_message' => 'Enterprise wiki article generation is disabled (ENTERPRISE_WIKI_AI_ENABLED=false).',
+                    'finished_at' => now(),
+                ]);
+
+                return;
+            }
+
             $run->load('customer.language');
             $languageCode = $run->customer?->language?->code ?? 'no';
 
-            // RuntimeException from generateArticle() propagates out of the transaction,
-            // rolls it back, and is handled by failed() marking the run as failed.
             $markdown = $articleClient->generateArticle($pageTitle, $claimsData, $languageCode);
 
             // Publish the generated article to the draft page version.
