@@ -2968,5 +2968,12 @@ return [
         'sources_file_hint' => 'PDF or DOCX · Max 20 MB',
         'sources_upload_button' => 'Upload source',
         'sources_uploading' => 'Uploading...',
+        'sources_list_empty' => 'No source documents uploaded yet.',
+        'source_col_filename' => 'File name',
+        'source_col_status' => 'Status',
+        'source_col_uploaded' => 'Uploaded',
+        'source_status_extracted' => 'Extracted',
+        'source_status_pending' => 'Processing',
+        'source_status_failed' => 'Failed',
     ],
 ];

@@ -29,7 +29,22 @@ function StatusBadge({ status, label }) {
     );
 }
 
-export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = '/app/wiki/sources' }) {
+const SOURCE_STATUS_STYLES = {
+    extracted: 'bg-emerald-100 text-emerald-700',
+    pending: 'bg-amber-100 text-amber-700',
+    failed: 'bg-rose-100 text-rose-700',
+};
+
+function SourceStatusBadge({ status, label }) {
+    const cls = SOURCE_STATUS_STYLES[status] ?? 'bg-slate-200 text-slate-600';
+    return (
+        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+            {label}
+        </span>
+    );
+}
+
+export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources' }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
@@ -55,6 +70,12 @@ export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = 
         draft: tw.status_draft ?? 'Utkast',
         rejected: tw.status_rejected ?? 'Avvist',
         archived: tw.status_archived ?? 'Arkivert',
+    }[status] ?? status);
+
+    const sourceStatusLabel = (status) => ({
+        extracted: tw.source_status_extracted ?? 'Ekstrahert',
+        pending: tw.source_status_pending ?? 'Behandles',
+        failed: tw.source_status_failed ?? 'Feilet',
     }[status] ?? status);
 
     return (
@@ -108,7 +129,7 @@ export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = 
                         </section>
 
                         {/* Desktop table */}
-                        <section className="hidden overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
+                        <section className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
                             <div className="overflow-x-auto">
                                 <table className="min-w-full divide-y divide-slate-200">
                                     <thead className="bg-slate-50">
@@ -147,7 +168,7 @@ export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = 
                 )}
                 {/* Source document upload */}
                 <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                    <div className="space-y-4">
+                    <div className="space-y-5">
                         <div className="space-y-1">
                             <h2 className="text-base font-semibold text-slate-950">
                                 {tw.sources_title ?? 'Kildedokumenter'}
@@ -157,37 +178,75 @@ export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = 
                             </p>
                         </div>
 
-                        <form onSubmit={submitUpload} className="space-y-3">
-                            <div className="space-y-1.5">
-                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                    {tw.sources_file_label ?? 'Velg fil'}
-                                </span>
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".pdf,.docx"
-                                    disabled={uploadForm.processing}
-                                    onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
-                                    className="block w-full max-w-sm cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
-                                />
-                                <p className="text-xs text-slate-400">
-                                    {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
-                                </p>
-                                {uploadForm.errors.file ? (
-                                    <p className="text-sm text-rose-600">{uploadForm.errors.file}</p>
-                                ) : null}
+                        {sources.length === 0 ? (
+                            <p className="text-sm text-slate-400">
+                                {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
+                            </p>
+                        ) : (
+                            <div className="overflow-hidden rounded-2xl border border-slate-100">
+                                <table className="min-w-full divide-y divide-slate-100">
+                                    <thead className="bg-slate-50">
+                                        <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                            <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
+                                            <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
+                                            <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50 bg-white">
+                                        {sources.map((source) => (
+                                            <tr key={source.id} className="text-sm">
+                                                <td className="max-w-xs truncate px-4 py-3 font-medium text-slate-900">
+                                                    {source.original_filename}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <SourceStatusBadge
+                                                        status={source.document_status}
+                                                        label={sourceStatusLabel(source.document_status)}
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3 text-slate-500">
+                                                    {formatDate(source.created_at, locale)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
+                        )}
 
-                            <button
-                                type="submit"
-                                disabled={!uploadForm.data.file || uploadForm.processing}
-                                className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                {uploadForm.processing
-                                    ? (tw.sources_uploading ?? 'Laster opp...')
-                                    : (tw.sources_upload_button ?? 'Last opp kilde')}
-                            </button>
-                        </form>
+                        <div className="border-t border-slate-100 pt-4">
+                            <form onSubmit={submitUpload} className="space-y-3">
+                                <div className="space-y-1.5">
+                                    <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        {tw.sources_file_label ?? 'Velg fil'}
+                                    </span>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept=".pdf,.docx"
+                                        disabled={uploadForm.processing}
+                                        onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                        className="block w-full max-w-sm cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                                    />
+                                    <p className="text-xs text-slate-400">
+                                        {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
+                                    </p>
+                                    {uploadForm.errors.file ? (
+                                        <p className="text-sm text-rose-600">{uploadForm.errors.file}</p>
+                                    ) : null}
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={!uploadForm.data.file || uploadForm.processing}
+                                    className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {uploadForm.processing
+                                        ? (tw.sources_uploading ?? 'Laster opp...')
+                                        : (tw.sources_upload_button ?? 'Last opp kilde')}
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </section>
             </div>

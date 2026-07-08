@@ -2968,5 +2968,12 @@ return [
         'sources_file_hint' => 'PDF eller DOCX · Maks 20 MB',
         'sources_upload_button' => 'Last opp kilde',
         'sources_uploading' => 'Laster opp...',
+        'sources_list_empty' => 'Ingen kildedokumenter lastet opp ennå.',
+        'source_col_filename' => 'Filnavn',
+        'source_col_status' => 'Status',
+        'source_col_uploaded' => 'Lastet opp',
+        'source_status_extracted' => 'Ekstrahert',
+        'source_status_pending' => 'Behandles',
+        'source_status_failed' => 'Feilet',
     ],
 ];

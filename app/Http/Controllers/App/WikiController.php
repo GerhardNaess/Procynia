@@ -4,6 +4,7 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Support\CustomerContext;
@@ -37,8 +38,20 @@ class WikiController extends Controller
                 'updated_at' => $page->updated_at,
             ]);
 
+        $sources = EnterpriseWikiDocument::query()
+            ->where('customer_id', $customerId)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn(EnterpriseWikiDocument $doc) => [
+                'id' => $doc->id,
+                'original_filename' => $doc->original_filename,
+                'document_status' => $doc->document_status,
+                'created_at' => $doc->created_at,
+            ]);
+
         return Inertia::render('App/Wiki/Index', [
             'pages' => $pages,
+            'sources' => $sources,
             'sources_store_url' => route('app.wiki.sources.store'),
         ]);
     }

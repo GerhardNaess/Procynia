@@ -4,6 +4,7 @@ namespace Tests\Feature\App;
 
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
@@ -529,6 +530,42 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4A-6: sources prop isolation
+    // =========================================================================
+
+    public function test_index_returns_wiki_sources_for_current_customer(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            return collect($sources)->contains(fn(array $s) => $s['id'] === $document->id);
+        });
+    }
+
+    public function test_index_does_not_return_other_customer_wiki_sources(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignDoc): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($ownDoc->id) && ! $ids->contains($foreignDoc->id);
+        });
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -602,6 +639,17 @@ class WikiControllerTest extends TestCase
             'conflict_flag' => false,
             'approval_status' => EnterpriseWikiClaim::APPROVAL_STATUS_PENDING,
             'position_order' => 0,
+        ]);
+    }
+
+    private function createDocument(Customer $customer, string $status = EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'test-document.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'document_status' => $status,
         ]);
     }
 
