@@ -868,6 +868,20 @@ class WikiControllerTest extends TestCase
         });
     }
 
+    public function test_index_sends_wiki_generation_available_as_false(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return array_key_exists('wiki_generation_available', $inertia['props'])
+                && $inertia['props']['wiki_generation_available'] === false;
+        });
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

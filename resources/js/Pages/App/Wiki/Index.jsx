@@ -96,7 +96,7 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
     );
 }
 
-export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources' }) {
+export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources', wiki_generation_available: wikiGenerationAvailable = false }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
@@ -352,30 +352,37 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                     </a>
                                                 </td>
                                                 <td className="px-4 py-3 align-top">
-                                                    <div className="flex items-center justify-end gap-3">
-                                                        {source.document_status === 'extracted' && (
-                                                            <button
-                                                                type="button"
-                                                                disabled={ingestingIds.has(source.id) || isInProgress}
-                                                                onClick={() => startIngest(source.id)}
-                                                                className="inline-flex h-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            >
-                                                                {ingestingIds.has(source.id)
-                                                                    ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                    : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
-                                                            </button>
-                                                        )}
-                                                        {canDelete && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleDelete(source)}
-                                                                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
-                                                            >
-                                                                <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
-                                                                </svg>
-                                                                {tw.source_delete_button ?? 'Slett'}
-                                                            </button>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <div className="flex items-center gap-3">
+                                                            {source.document_status === 'extracted' && (
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={ingestingIds.has(source.id) || isInProgress || !wikiGenerationAvailable}
+                                                                    onClick={() => startIngest(source.id)}
+                                                                    className="inline-flex h-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                                >
+                                                                    {ingestingIds.has(source.id)
+                                                                        ? (tw.source_ingest_starting ?? 'Starter...')
+                                                                        : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                                </button>
+                                                            )}
+                                                            {canDelete && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDelete(source)}
+                                                                    className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
+                                                                >
+                                                                    <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                        <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                                                                    </svg>
+                                                                    {tw.source_delete_button ?? 'Slett'}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        {source.document_status === 'extracted' && !wikiGenerationAvailable && (
+                                                            <span className="text-right text-[11px] text-slate-400">
+                                                                {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
+                                                            </span>
                                                         )}
                                                     </div>
                                                 </td>

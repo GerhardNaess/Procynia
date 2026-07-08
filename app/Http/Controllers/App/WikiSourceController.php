@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
+use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -186,6 +187,11 @@ class WikiSourceController extends Controller
 
         if ($document->customer_id !== $customerId) {
             abort(403);
+        }
+
+        if (! WikiSectionAiClient::isAvailable()) {
+            return redirect()->route('app.wiki.index')
+                ->with('error', 'Wiki-generering er ikke aktivert ennå.');
         }
 
         if ($document->document_status !== EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED) {

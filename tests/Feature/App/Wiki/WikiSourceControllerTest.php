@@ -344,7 +344,7 @@ class WikiSourceControllerTest extends TestCase
 
     // ─── Ingest action ────────────────────────────────────────────────────────
 
-    public function test_system_owner_can_start_ingest_for_extracted_document(): void
+    public function test_ingest_is_blocked_when_wiki_generation_not_available(): void
     {
         Queue::fake();
 
@@ -355,8 +355,8 @@ class WikiSourceControllerTest extends TestCase
         $response = $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest");
 
         $response->assertRedirect(route('app.wiki.index'));
-        $response->assertSessionHas('success');
-        Queue::assertPushed(ProcessEnterpriseWikiIngest::class);
+        $response->assertSessionHas('error');
+        Queue::assertNothingPushed();
     }
 
     public function test_ingest_rejects_other_customer_document(): void

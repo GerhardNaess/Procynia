@@ -9,6 +9,7 @@ use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
+use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -97,6 +98,7 @@ class WikiController extends Controller
             'pages' => $pages,
             'sources' => $sources,
             'sources_store_url' => route('app.wiki.sources.store'),
+            'wiki_generation_available' => WikiSectionAiClient::isAvailable(),
         ]);
     }
 

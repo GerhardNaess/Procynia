@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -634,6 +634,14 @@ Implementert:
 - Indikatorene bruker eksisterende claims/source references-data
 - Ingen backend/controller-endringer
 - Ingen migrasjoner, lint-service, AI-kall, graf, ingest-endring eller claim approval
+
+#### Fase 4B-4 — Forventningsstyring for deaktivert wiki-generering — Fullført (2026-07-08)
+
+- `WikiSectionAiClient::isAvailable()` returnerer `false` frem til Phase 1F er implementert
+- `WikiController::index()` sender `wiki_generation_available: false` som Inertia-prop
+- `WikiSourceController::ingest()` blokkerer kall og returnerer brukervennlig flash-error når ikke tilgjengelig — ingen jobb dispatches
+- Frontend deaktiverer "Generer wiki-utkast"-knappen og viser "Wiki-generering er ikke aktivert ennå." under knappen
+- Ingen RuntimeException eksponeres mot brukeren lenger
 
 Gjenstår i Fase 4B:
 - Lint-kontroller beskrevet i §9
