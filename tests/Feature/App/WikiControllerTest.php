@@ -610,6 +610,69 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4A-9: generated pages per source
+    // =========================================================================
+
+    public function test_index_source_includes_generated_pages_from_completed_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Tjenestebeskrivelse');
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $run->update(['enterprise_wiki_page_id' => $page->id]);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document, $page): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            $generatedPages = data_get($source, 'generated_pages', []);
+            return collect($generatedPages)->contains(fn(array $p) => $p['id'] === $page->id);
+        });
+    }
+
+    public function test_index_source_generated_pages_is_empty_when_no_run_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return $source !== null && data_get($source, 'generated_pages', null) === [];
+        });
+    }
+
+    public function test_index_source_does_not_include_other_customer_generated_pages(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+        $foreignPage = $this->createPage($other, EnterpriseWikiPage::STATUS_DRAFT, 'Annen side');
+        $foreignRun = $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $foreignRun->update(['enterprise_wiki_page_id' => $foreignPage->id]);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignPage): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $ownDoc->id);
+            $pageIds = collect(data_get($source, 'generated_pages', []))->pluck('id');
+            return ! $pageIds->contains($foreignPage->id);
+        });
+    }
+
+    // =========================================================================
     // Phase 4A-6: sources prop isolation
     // =========================================================================
 

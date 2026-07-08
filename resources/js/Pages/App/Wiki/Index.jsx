@@ -274,6 +274,20 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                         label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status) : null}
                                                         notStartedLabel={notStartedLabel}
                                                     />
+                                                    {source.generated_pages.length > 0 && (
+                                                        <ul className="mt-1.5 space-y-0.5">
+                                                            {source.generated_pages.map((p) => (
+                                                                <li key={p.id}>
+                                                                    <Link
+                                                                        href={`/app/wiki/${p.slug}`}
+                                                                        className="max-w-50 truncate text-[11px] text-violet-600 hover:text-violet-800 hover:underline"
+                                                                    >
+                                                                        {p.title}
+                                                                    </Link>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     {source.document_status === 'extracted' && (() => {

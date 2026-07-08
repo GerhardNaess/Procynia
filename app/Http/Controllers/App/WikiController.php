@@ -44,16 +44,31 @@ class WikiController extends Controller
             ->orderByDesc('created_at')
             ->get();
 
-        $latestRuns = $documents->isNotEmpty()
+        $allRuns = $documents->isNotEmpty()
             ? EnterpriseWikiIngestRun::query()
                 ->where('customer_id', $customerId)
                 ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
                 ->whereIn('source_id', $documents->pluck('id'))
                 ->orderByDesc('id')
+                ->with('page:id,title,slug,status')
                 ->get()
-                ->groupBy('source_id')
-                ->map(fn($group) => $group->first())
             : collect();
+
+        $visibleStatuses = $this->visibleStatuses($user);
+
+        $latestRuns = $allRuns
+            ->groupBy('source_id')
+            ->map(fn($group) => $group->first());
+
+        $pagesPerDocument = $allRuns
+            ->filter(fn($run) => $run->enterprise_wiki_page_id !== null && $run->page !== null)
+            ->groupBy('source_id')
+            ->map(fn($runs) => $runs
+                ->map(fn($run) => $run->page)
+                ->filter(fn($page) => in_array($page->status, $visibleStatuses, true))
+                ->unique('id')
+                ->values()
+            );
 
         $sources = $documents->map(fn(EnterpriseWikiDocument $doc) => [
             'id' => $doc->id,
@@ -64,6 +79,14 @@ class WikiController extends Controller
                 'status' => $latestRuns[$doc->id]->status,
                 'error_message' => $latestRuns[$doc->id]->error_message,
             ] : null,
+            'generated_pages' => ($pagesPerDocument->get($doc->id) ?? collect())
+                ->map(fn($page) => [
+                    'id' => $page->id,
+                    'title' => $page->title,
+                    'slug' => $page->slug,
+                    'status' => $page->status,
+                ])
+                ->all(),
         ]);
 
         return Inertia::render('App/Wiki/Index', [
