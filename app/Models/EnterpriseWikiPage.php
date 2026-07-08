@@ -46,12 +46,34 @@ class EnterpriseWikiPage extends Model
 
     public const GENERATED_BY_MANUAL = 'manual';
 
+    public const PAGE_TYPE_ARTICLE = 'article';
+
+    public const PAGE_TYPE_SUMMARY = 'summary';
+
+    public const PAGE_TYPE_CONCEPT = 'concept';
+
+    public const PAGE_TYPE_ENTITY = 'entity';
+
+    public const PAGE_TYPE_INDEX = 'index';
+
+    public const PAGE_TYPE_BACKLINKS = 'backlinks';
+
+    public const PAGE_TYPES = [
+        self::PAGE_TYPE_ARTICLE,
+        self::PAGE_TYPE_SUMMARY,
+        self::PAGE_TYPE_CONCEPT,
+        self::PAGE_TYPE_ENTITY,
+        self::PAGE_TYPE_INDEX,
+        self::PAGE_TYPE_BACKLINKS,
+    ];
+
     protected $fillable = [
         'customer_id',
         'department_id',
         'slug',
         'title',
         'scope',
+        'page_type',
         'status',
         'generated_by',
         'owner_user_id',

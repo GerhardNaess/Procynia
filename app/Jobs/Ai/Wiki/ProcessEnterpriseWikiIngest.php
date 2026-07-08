@@ -3,6 +3,7 @@
 namespace App\Jobs\Ai\Wiki;
 
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
@@ -100,9 +101,16 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
                     'customer_id' => $run->customer_id,
                     'slug' => Str::slug($pageTitle) . '-' . Str::lower(Str::random(6)),
                     'title' => $pageTitle,
+                    'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
                     'status' => EnterpriseWikiPage::STATUS_DRAFT,
                     'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
                     'last_source_hash' => $run->source_hash,
+                ]);
+
+                EnterpriseWikiIngestRunPage::query()->create([
+                    'enterprise_wiki_ingest_run_id' => $run->id,
+                    'enterprise_wiki_page_id' => $page->id,
+                    'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
                 ]);
 
                 EnterpriseWikiPageVersion::query()->create([

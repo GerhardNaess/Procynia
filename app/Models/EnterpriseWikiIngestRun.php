@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EnterpriseWikiIngestRun extends Model
@@ -90,6 +91,16 @@ class EnterpriseWikiIngestRun extends Model
     public function sections(): HasMany
     {
         return $this->hasMany(EnterpriseWikiIngestSection::class, 'enterprise_wiki_ingest_run_id');
+    }
+
+    public function pages(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            EnterpriseWikiPage::class,
+            'enterprise_wiki_ingest_run_pages',
+            'enterprise_wiki_ingest_run_id',
+            'enterprise_wiki_page_id',
+        )->withPivot('action')->withTimestamps();
     }
 
     public function isTerminal(): bool

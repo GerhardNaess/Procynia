@@ -7,7 +7,9 @@ use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiSection;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiIngestSection;
+use App\Models\EnterpriseWikiPage;
 use App\Models\KnowledgeItem;
 use App\Models\KnowledgeItemVersion;
 use App\Models\Language;
@@ -123,6 +125,79 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
 
         $this->assertGreaterThan(0, $sectionCount);
         $this->assertLessThanOrEqual(EnterpriseWikiSectionParser::MAX_SECTIONS, $sectionCount);
+    }
+
+    // --- page_type and pivot log ---
+
+    public function test_job_creates_page_with_article_page_type(): void
+    {
+        $customer = $this->createCustomer();
+        $item = $this->createKnowledgeItem($customer);
+        $version = $this->createVersion($item, $customer);
+        $run = $this->createQueuedRun($customer, $version);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $page->page_type);
+    }
+
+    public function test_job_creates_ingest_run_page_pivot_row_with_created_action(): void
+    {
+        $customer = $this->createCustomer();
+        $item = $this->createKnowledgeItem($customer);
+        $version = $this->createVersion($item, $customer);
+        $run = $this->createQueuedRun($customer, $version);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $this->assertDatabaseHas('enterprise_wiki_ingest_run_pages', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id'       => $run->enterprise_wiki_page_id,
+            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+    }
+
+    public function test_document_ingest_also_creates_article_page_type_and_pivot_row(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'selskapsinfo.docx',
+            'extracted_text'    => "## Om oss\nVi er et selskap.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertSame(EnterpriseWikiPage::PAGE_TYPE_ARTICLE, $page->page_type);
+        $this->assertDatabaseHas('enterprise_wiki_ingest_run_pages', [
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id'       => $page->id,
+            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+        ]);
+    }
+
+    public function test_ingest_run_pages_relation_returns_created_page(): void
+    {
+        $customer = $this->createCustomer();
+        $item = $this->createKnowledgeItem($customer);
+        $version = $this->createVersion($item, $customer);
+        $run = $this->createQueuedRun($customer, $version);
+
+        $this->runJob($run);
+
+        $pages = $run->pages()->get();
+
+        $this->assertCount(1, $pages);
+        $this->assertSame(EnterpriseWikiIngestRunPage::ACTION_CREATED, $pages->first()->pivot->action);
     }
 
     // --- Idempotency ---
