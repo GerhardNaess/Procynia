@@ -531,6 +531,57 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 3B: approval UI — flash messages and bid manager visibility
+    // =========================================================================
+
+    public function test_approve_redirects_with_success_flash(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Flash godkjenn');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/approve')
+            ->assertRedirect()
+            ->assertSessionHas('success');
+    }
+
+    public function test_reject_redirects_with_success_flash(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'Flash avvis');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/reject')
+            ->assertRedirect()
+            ->assertSessionHas('success');
+    }
+
+    public function test_submit_redirects_with_success_flash(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Flash submit');
+
+        $this->actingAs($owner)
+            ->patch('/app/wiki/'.$page->slug.'/submit')
+            ->assertRedirect()
+            ->assertSessionHas('success');
+    }
+
+    public function test_bid_manager_can_view_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM lesetilgang');
+
+        $this->actingAs($manager)
+            ->get('/app/wiki/'.$page->slug)
+            ->assertOk();
+    }
+
+    // =========================================================================
     // Phase 4A-8: ingest run status in sources prop
     // =========================================================================
 

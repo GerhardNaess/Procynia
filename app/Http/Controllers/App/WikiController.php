@@ -178,15 +178,17 @@ class WikiController extends Controller
 
         if ($page->status === EnterpriseWikiPage::STATUS_DRAFT) {
             $page->status = EnterpriseWikiPage::STATUS_PENDING_REVIEW;
+            $flash = 'Siden er sendt til gjennomgang.';
         } elseif ($page->status === EnterpriseWikiPage::STATUS_REJECTED) {
             $page->status = EnterpriseWikiPage::STATUS_DRAFT;
+            $flash = 'Siden er gjenåpnet for redigering.';
         } else {
             abort(422);
         }
 
         $page->save();
 
-        return redirect()->route('app.wiki.show', $page->slug);
+        return redirect()->route('app.wiki.show', $page->slug)->with('success', $flash);
     }
 
     /**
@@ -217,7 +219,7 @@ class WikiController extends Controller
         $page->reviewed_by_user_id = $user->id;
         $page->save();
 
-        return redirect()->route('app.wiki.show', $page->slug);
+        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er godkjent.');
     }
 
     /**
@@ -248,7 +250,7 @@ class WikiController extends Controller
         $page->reviewed_by_user_id = $user->id;
         $page->save();
 
-        return redirect()->route('app.wiki.show', $page->slug);
+        return redirect()->route('app.wiki.show', $page->slug)->with('success', 'Wiki-siden er avvist.');
     }
 
     /** @return list<string> */
