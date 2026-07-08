@@ -5,6 +5,7 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\User;
 use App\Support\CustomerContext;
@@ -38,16 +39,32 @@ class WikiController extends Controller
                 'updated_at' => $page->updated_at,
             ]);
 
-        $sources = EnterpriseWikiDocument::query()
+        $documents = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(EnterpriseWikiDocument $doc) => [
-                'id' => $doc->id,
-                'original_filename' => $doc->original_filename,
-                'document_status' => $doc->document_status,
-                'created_at' => $doc->created_at,
-            ]);
+            ->get();
+
+        $latestRuns = $documents->isNotEmpty()
+            ? EnterpriseWikiIngestRun::query()
+                ->where('customer_id', $customerId)
+                ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->whereIn('source_id', $documents->pluck('id'))
+                ->orderByDesc('id')
+                ->get()
+                ->groupBy('source_id')
+                ->map(fn($group) => $group->first())
+            : collect();
+
+        $sources = $documents->map(fn(EnterpriseWikiDocument $doc) => [
+            'id' => $doc->id,
+            'original_filename' => $doc->original_filename,
+            'document_status' => $doc->document_status,
+            'created_at' => $doc->created_at,
+            'latest_ingest_run' => $latestRuns->has($doc->id) ? [
+                'status' => $latestRuns[$doc->id]->status,
+                'error_message' => $latestRuns[$doc->id]->error_message,
+            ] : null,
+        ]);
 
         return Inertia::render('App/Wiki/Index', [
             'pages' => $pages,

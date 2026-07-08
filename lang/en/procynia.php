@@ -2977,5 +2977,11 @@ return [
         'source_status_failed' => 'Failed',
         'source_ingest_button' => 'Generate wiki draft',
         'source_ingest_starting' => 'Starting...',
+        'ingest_col_wiki_status' => 'Wiki status',
+        'ingest_status_not_started' => 'Not started',
+        'ingest_status_queued' => 'Queued',
+        'ingest_status_running' => 'Running',
+        'ingest_status_completed' => 'Completed',
+        'ingest_status_failed' => 'Failed',
     ],
 ];

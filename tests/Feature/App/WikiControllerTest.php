@@ -5,6 +5,7 @@ namespace Tests\Feature\App;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
@@ -530,6 +531,85 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4A-8: ingest run status in sources prop
+    // =========================================================================
+
+    public function test_index_source_includes_latest_ingest_run_status(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return $source !== null
+                && data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_COMPLETED;
+        });
+    }
+
+    public function test_index_source_latest_run_is_null_when_no_ingest_started(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return $source !== null && $source['latest_ingest_run'] === null;
+        });
+    }
+
+    public function test_index_does_not_include_other_customer_ingest_runs(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+
+        // Both documents happen to get the same database ID sequence — the foreign
+        // run must NOT bleed into the own customer's source list.
+        $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $ownDoc->id);
+            // own doc has no run → null; foreign run must not appear
+            return $source !== null && $source['latest_ingest_run'] === null;
+        });
+    }
+
+    public function test_index_source_shows_queued_status_when_run_is_queued(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_QUEUED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_QUEUED;
+        });
+    }
+
+    // =========================================================================
     // Phase 4A-6: sources prop isolation
     // =========================================================================
 
@@ -650,6 +730,19 @@ class WikiControllerTest extends TestCase
             'file_path' => 'customers/'.$customer->id.'/wiki-documents/'.Str::random(8).'.pdf',
             'file_hash_sha256' => hash('sha256', Str::random(32)),
             'document_status' => $status,
+        ]);
+    }
+
+    private function createIngestRun(Customer $customer, EnterpriseWikiDocument $document, string $status): EnterpriseWikiIngestRun
+    {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}"),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => $status,
         ]);
     }
 

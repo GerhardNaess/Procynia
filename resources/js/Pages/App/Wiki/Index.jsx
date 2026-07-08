@@ -44,6 +44,37 @@ function SourceStatusBadge({ status, label }) {
     );
 }
 
+const INGEST_STATUS_STYLES = {
+    queued: 'bg-amber-100 text-amber-700',
+    running: 'bg-blue-100 text-blue-700',
+    sections_planned: 'bg-blue-100 text-blue-700',
+    completed: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-rose-100 text-rose-700',
+};
+
+const IN_PROGRESS_STATUSES = ['queued', 'running', 'sections_planned'];
+
+function IngestStatusBadge({ run, label, notStartedLabel }) {
+    if (!run) {
+        return (
+            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-500">
+                {notStartedLabel}
+            </span>
+        );
+    }
+    const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+    return (
+        <div>
+            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+            {run.status === 'failed' && run.error_message ? (
+                <p className="mt-0.5 max-w-45 truncate text-[11px] text-rose-500" title={run.error_message}>
+                    {run.error_message}
+                </p>
+            ) : null}
+        </div>
+    );
+}
+
 export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources' }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -95,6 +126,16 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
         pending: tw.source_status_pending ?? 'Behandles',
         failed: tw.source_status_failed ?? 'Feilet',
     }[status] ?? status);
+
+    const ingestStatusLabel = (status) => ({
+        queued: tw.ingest_status_queued ?? 'I kø',
+        running: tw.ingest_status_running ?? 'Kjører',
+        sections_planned: tw.ingest_status_running ?? 'Kjører',
+        completed: tw.ingest_status_completed ?? 'Fullført',
+        failed: tw.ingest_status_failed ?? 'Feilet',
+    }[status] ?? status);
+
+    const notStartedLabel = tw.ingest_status_not_started ?? 'Ikke startet';
 
     return (
         <CustomerAppLayout title={tw.index_title ?? 'Wiki'} showPageTitle={false}>
@@ -208,6 +249,7 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                             <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                             <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                             <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
+                                            <th className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
                                             <th className="px-4 py-3"></th>
                                         </tr>
                                     </thead>
@@ -227,18 +269,29 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                     {formatDate(source.created_at, locale)}
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {source.document_status === 'extracted' && (
-                                                        <button
-                                                            type="button"
-                                                            disabled={ingestingIds.has(source.id)}
-                                                            onClick={() => startIngest(source.id)}
-                                                            className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                        >
-                                                            {ingestingIds.has(source.id)
-                                                                ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
-                                                        </button>
-                                                    )}
+                                                    <IngestStatusBadge
+                                                        run={source.latest_ingest_run}
+                                                        label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status) : null}
+                                                        notStartedLabel={notStartedLabel}
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {source.document_status === 'extracted' && (() => {
+                                                        const isInProgress = source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status);
+                                                        const isDisabled = ingestingIds.has(source.id) || isInProgress;
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                disabled={isDisabled}
+                                                                onClick={() => startIngest(source.id)}
+                                                                className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                {ingestingIds.has(source.id)
+                                                                    ? (tw.source_ingest_starting ?? 'Starter...')
+                                                                    : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                            </button>
+                                                        );
+                                                    })()}
                                                 </td>
                                             </tr>
                                         ))}

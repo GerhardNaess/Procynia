@@ -2977,5 +2977,11 @@ return [
         'source_status_failed' => 'Feilet',
         'source_ingest_button' => 'Generer wiki-utkast',
         'source_ingest_starting' => 'Starter...',
+        'ingest_col_wiki_status' => 'Wiki-status',
+        'ingest_status_not_started' => 'Ikke startet',
+        'ingest_status_queued' => 'I kø',
+        'ingest_status_running' => 'Kjører',
+        'ingest_status_completed' => 'Fullført',
+        'ingest_status_failed' => 'Feilet',
     ],
 ];
