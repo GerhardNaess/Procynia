@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08) · Fase 4B-5A fullført (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -654,10 +654,22 @@ Teknisk og dokumentasjonsmessig kontroll gjennomført etter Fase 4B-1–4B-4:
 - `WikiSectionAiClient::isAvailable()` returnerer `false`, ingest blokkeres før queue-dispatch
 - Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
 
+#### Fase 4B-5A — Backend lint-grunnlag — Fullført (2026-07-08)
+
+Implementert:
+- Migration: `enterprise_wiki_lint_findings` med FK til customer, page, claim, document + indekser
+- Model: `EnterpriseWikiLintFinding` med konstanter for `code`, `severity`, `status`
+- Service: `EnterpriseWikiLintService` med 3 lint-regler:
+  - `claim_missing_source` — error (pending_review/approved) eller warning (draft)
+  - `source_reference_missing_excerpt` — warning
+  - `document_ingest_failed` — warning
+- Idempotens: upsert ved unike nøkler (null-aware), close-stale for resolved findings
+- Artisan-kommando: `wiki:lint --customer=ID --page=ID` (ingen opsjoner = alle aktive kunder)
+- 14 nye tester i `tests/Feature/Console/EnterpriseWikiLintCommandTest.php` (14/14 passed)
+- Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
+
 Gjenstår i Fase 4B:
-- Lint-kontroller beskrevet i §9
-- `enterprise_wiki_lint_findings`-tabell
-- Helseindikator per side i UI
+- Helseindikator per side i UI (vise åpne findings)
 - Scheduled lint-job (konfigurerbar frekvens)
 
 ### Fase 5 — Sammenligning mot dagens RAG
