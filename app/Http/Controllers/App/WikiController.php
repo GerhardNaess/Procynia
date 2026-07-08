@@ -39,6 +39,7 @@ class WikiController extends Controller
 
         return Inertia::render('App/Wiki/Index', [
             'pages' => $pages,
+            'sources_store_url' => route('app.wiki.sources.store'),
         ]);
     }
 

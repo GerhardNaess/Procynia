@@ -1,5 +1,5 @@
-import { Link } from '@inertiajs/react';
-import { usePage } from '@inertiajs/react';
+import { Link, useForm, usePage } from '@inertiajs/react';
+import { useRef } from 'react';
 import CustomerAppLayout from '../../../Layouts/CustomerAppLayout';
 import EmptyStateBox from '../../../Components/App/EmptyStateBox';
 
@@ -29,10 +29,25 @@ function StatusBadge({ status, label }) {
     );
 }
 
-export default function WikiIndex({ pages }) {
+export default function WikiIndex({ pages, sources_store_url: sourcesStoreUrl = '/app/wiki/sources' }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
+
+    const fileInputRef = useRef(null);
+    const uploadForm = useForm({ file: null });
+
+    const submitUpload = (event) => {
+        event.preventDefault();
+        if (!uploadForm.data.file || uploadForm.processing) return;
+        uploadForm.post(sourcesStoreUrl, {
+            forceFormData: true,
+            onSuccess: () => {
+                uploadForm.reset();
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            },
+        });
+    };
 
     const statusLabel = (status) => ({
         approved: tw.status_approved ?? 'Godkjent',
@@ -130,6 +145,51 @@ export default function WikiIndex({ pages }) {
                         </section>
                     </>
                 )}
+                {/* Source document upload */}
+                <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="space-y-4">
+                        <div className="space-y-1">
+                            <h2 className="text-base font-semibold text-slate-950">
+                                {tw.sources_title ?? 'Kildedokumenter'}
+                            </h2>
+                            <p className="max-w-2xl text-sm leading-6 text-slate-500">
+                                {tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.'}
+                            </p>
+                        </div>
+
+                        <form onSubmit={submitUpload} className="space-y-3">
+                            <div className="space-y-1.5">
+                                <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                    {tw.sources_file_label ?? 'Velg fil'}
+                                </span>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".pdf,.docx"
+                                    disabled={uploadForm.processing}
+                                    onChange={(e) => uploadForm.setData('file', e.target.files?.[0] ?? null)}
+                                    className="block w-full max-w-sm cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-slate-700 hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                                />
+                                <p className="text-xs text-slate-400">
+                                    {tw.sources_file_hint ?? 'PDF eller DOCX · Maks 20 MB'}
+                                </p>
+                                {uploadForm.errors.file ? (
+                                    <p className="text-sm text-rose-600">{uploadForm.errors.file}</p>
+                                ) : null}
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={!uploadForm.data.file || uploadForm.processing}
+                                className="inline-flex min-h-9 items-center justify-center rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {uploadForm.processing
+                                    ? (tw.sources_uploading ?? 'Laster opp...')
+                                    : (tw.sources_upload_button ?? 'Last opp kilde')}
+                            </button>
+                        </form>
+                    </div>
+                </section>
             </div>
         </CustomerAppLayout>
     );

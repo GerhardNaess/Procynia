@@ -2962,5 +2962,11 @@ return [
         'claim_status_approved' => 'Godkjent',
         'claim_status_rejected' => 'Avvist',
         'source' => 'Kilde',
+        'sources_title' => 'Kildedokumenter',
+        'sources_description' => 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.',
+        'sources_file_label' => 'Velg fil',
+        'sources_file_hint' => 'PDF eller DOCX · Maks 20 MB',
+        'sources_upload_button' => 'Last opp kilde',
+        'sources_uploading' => 'Laster opp...',
     ],
 ];
