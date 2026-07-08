@@ -31,6 +31,14 @@ function Badge({ label, cls }) {
     );
 }
 
+function WarnIcon({ className = 'h-4 w-4' }) {
+    return (
+        <svg className={className} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+        </svg>
+    );
+}
+
 export default function WikiShow({ page, current_version, claims }) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -69,6 +77,9 @@ export default function WikiShow({ page, current_version, claims }) {
         rejected: tw.claim_status_rejected ?? 'Avvist',
     }[s] ?? s);
 
+    const isDraft = page.status === 'draft';
+    const isPendingReview = page.status === 'pending_review';
+
     return (
         <CustomerAppLayout title={page.title} showPageTitle={false}>
             <div className="space-y-8">
@@ -82,6 +93,18 @@ export default function WikiShow({ page, current_version, claims }) {
                     </svg>
                     {tw.back ?? 'Tilbake til Wiki'}
                 </Link>
+
+                {/* Draft / pending notice */}
+                {(isDraft || isPendingReview) && (
+                    <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4">
+                        <WarnIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                        <p className="text-sm text-amber-800">
+                            {isPendingReview
+                                ? (tw.pending_review_draft_notice ?? 'Denne siden er til gjennomgang. Innholdet er AI-generert og ikke kvalitetssikret.')
+                                : (tw.draft_notice ?? 'Dette er et AI-generert utkast. Innholdet er ikke kvalitetssikret.')}
+                        </p>
+                    </div>
+                )}
 
                 {/* Page header */}
                 <section className="space-y-3">
@@ -172,11 +195,16 @@ export default function WikiShow({ page, current_version, claims }) {
                     );
                 })()}
 
-                {/* Claims */}
+                {/* Verification basis — claims and sources */}
                 <section className="space-y-4">
-                    <h2 className="text-base font-semibold text-slate-700">
-                        {tw.claims_heading ?? 'Påstander'}
-                    </h2>
+                    <div>
+                        <h2 className="text-base font-semibold text-slate-700">
+                            {tw.verification_heading ?? 'Verifikasjonsgrunnlag'}
+                        </h2>
+                        <p className="mt-0.5 text-sm text-slate-400">
+                            {tw.verification_description ?? 'Påstander og kildebevis som siden bygger på.'}
+                        </p>
+                    </div>
 
                     {!current_version ? (
                         <p className="text-sm text-slate-400">{tw.no_version ?? 'Ingen aktiv versjon tilgjengelig.'}</p>
@@ -206,31 +234,45 @@ export default function WikiShow({ page, current_version, claims }) {
                                         )}
                                         {claim.conflict_flag && (
                                             <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-600">
-                                                <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                    <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-                                                </svg>
+                                                <WarnIcon className="h-3 w-3" />
                                                 {tw.conflict_detected ?? 'Mulig konflikt'}
                                             </span>
                                         )}
                                     </div>
 
                                     {/* Source references */}
-                                    {claim.source_references.length > 0 && (
-                                        <ul className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-                                            {claim.source_references.map((ref) => (
-                                                <li key={ref.id} className="space-y-0.5">
-                                                    <p className="text-xs font-semibold text-slate-500">
-                                                        {tw.source ?? 'Kilde'}: {ref.source_label}
-                                                    </p>
-                                                    {ref.excerpt && (
-                                                        <p className="text-xs leading-5 text-slate-400 line-clamp-3">
-                                                            {ref.excerpt}
+                                    <div className="mt-4 border-t border-slate-100 pt-4">
+                                        {claim.source_references.length === 0 ? (
+                                            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                                                <WarnIcon className="h-3.5 w-3.5 shrink-0" />
+                                                {tw.claim_no_sources ?? 'Ingen kildereferanser for denne påstanden.'}
+                                            </p>
+                                        ) : (
+                                            <ul className="space-y-3">
+                                                {claim.source_references.map((ref) => (
+                                                    <li key={ref.id}>
+                                                        <p className="text-xs font-semibold text-slate-600">
+                                                            {ref.source_label}
                                                         </p>
-                                                    )}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    )}
+                                                        {ref.page_reference && (
+                                                            <p className="mt-0.5 text-xs text-slate-400">
+                                                                {tw.source_page_reference ?? 'Avsnitt'}: {ref.page_reference}
+                                                            </p>
+                                                        )}
+                                                        {ref.excerpt ? (
+                                                            <p className="mt-1 text-xs leading-5 text-slate-400 line-clamp-3">
+                                                                {ref.excerpt}
+                                                            </p>
+                                                        ) : (
+                                                            <p className="mt-1 text-xs italic text-slate-300">
+                                                                {tw.source_no_excerpt ?? 'Ingen tekstutdrag tilgjengelig.'}
+                                                            </p>
+                                                        )}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
                                 </article>
                             ))}
                         </div>

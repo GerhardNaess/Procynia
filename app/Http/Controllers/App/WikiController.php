@@ -129,6 +129,7 @@ class WikiController extends Controller
                             'source_type' => $ref->source_type,
                             'source_label' => $ref->source_label,
                             'excerpt' => $ref->excerpt,
+                            'page_reference' => $ref->page_reference,
                         ])
                         ->all(),
                 ])

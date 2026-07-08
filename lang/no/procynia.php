@@ -2989,5 +2989,12 @@ return [
         'ingest_status_running' => 'Kjører',
         'ingest_status_completed' => 'Fullført',
         'ingest_status_failed' => 'Feilet',
+        'draft_notice' => 'Dette er et AI-generert utkast. Innholdet er ikke kvalitetssikret.',
+        'pending_review_draft_notice' => 'Denne siden er til gjennomgang. Innholdet er AI-generert og ikke kvalitetssikret.',
+        'verification_heading' => 'Verifikasjonsgrunnlag',
+        'verification_description' => 'Påstander og kildebevis som siden bygger på.',
+        'source_page_reference' => 'Avsnitt',
+        'source_no_excerpt' => 'Ingen tekstutdrag tilgjengelig.',
+        'claim_no_sources' => 'Ingen kildereferanser for denne påstanden.',
     ],
 ];

@@ -531,6 +531,65 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4B-1: verification basis — page_reference and no-source warning
+    // =========================================================================
+
+    public function test_show_source_reference_includes_page_reference(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side med avsnittref');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Testpåstand med kilde.');
+        $this->createSourceReference($claim, 'dokument.docx', 'Relevant tekstutdrag.', 'Avsnitt 3.2');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $claims = data_get($inertia, 'props.claims', []);
+            $ref = ($claims[0]['source_references'] ?? [])[0] ?? null;
+            return $ref !== null && ($ref['page_reference'] ?? null) === 'Avsnitt 3.2';
+        });
+    }
+
+    public function test_show_claim_with_no_sources_returns_empty_source_references(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Side uten kilder');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $this->createClaim($page, $version, 'Påstand uten kildereferanse.');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $claims = data_get($inertia, 'props.claims', []);
+            return count($claims) === 1 && ($claims[0]['source_references'] ?? null) === [];
+        });
+    }
+
+    public function test_bid_manager_sees_claims_and_sources_on_pending_review_page(): void
+    {
+        $customer = $this->createCustomer();
+        $manager = $this->createUser($customer, User::BID_ROLE_BID_MANAGER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_PENDING_REVIEW, 'BM verifikasjon');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Verifikasjonspåstand.');
+        $this->createSourceReference($claim, 'kildedok.pdf', 'Kildeutdrag.');
+
+        $response = $this->actingAs($manager)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $claims = data_get($inertia, 'props.claims', []);
+            return count($claims) === 1
+                && count($claims[0]['source_references'] ?? []) === 1;
+        });
+    }
+
+    // =========================================================================
     // Phase 3B: approval UI — flash messages and bid manager visibility
     // =========================================================================
 
@@ -864,6 +923,7 @@ class WikiControllerTest extends TestCase
         EnterpriseWikiClaim $claim,
         string $label,
         string $excerpt,
+        ?string $pageReference = null,
     ): EnterpriseWikiSourceReference {
         return EnterpriseWikiSourceReference::query()->create([
             'enterprise_wiki_claim_id' => $claim->id,
@@ -872,6 +932,7 @@ class WikiControllerTest extends TestCase
             'source_label' => $label,
             'source_hash' => str_pad('h', 64, '0'),
             'excerpt' => $excerpt,
+            'page_reference' => $pageReference,
         ]);
     }
 }

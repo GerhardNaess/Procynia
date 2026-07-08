@@ -2989,5 +2989,12 @@ return [
         'ingest_status_running' => 'Running',
         'ingest_status_completed' => 'Completed',
         'ingest_status_failed' => 'Failed',
+        'draft_notice' => 'This is an AI-generated draft. The content has not been quality-assured.',
+        'pending_review_draft_notice' => 'This page is under review. The content is AI-generated and has not been quality-assured.',
+        'verification_heading' => 'Verification basis',
+        'verification_description' => 'Claims and source evidence this page is built on.',
+        'source_page_reference' => 'Section',
+        'source_no_excerpt' => 'No text excerpt available.',
+        'claim_no_sources' => 'No source references for this claim.',
     ],
 ];
