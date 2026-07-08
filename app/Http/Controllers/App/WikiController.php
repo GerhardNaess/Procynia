@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
@@ -94,11 +95,26 @@ class WikiController extends Controller
                 ->all(),
         ]);
 
+        $lintBySeverity = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $customerId)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->selectRaw('severity, count(*) as cnt')
+            ->groupBy('severity')
+            ->pluck('cnt', 'severity');
+
+        $lintHealth = [
+            'error' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
+            'warning' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
+            'info' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
+            'total' => (int) $lintBySeverity->sum(),
+        ];
+
         return Inertia::render('App/Wiki/Index', [
             'pages' => $pages,
             'sources' => $sources,
             'sources_store_url' => route('app.wiki.sources.store'),
             'wiki_generation_available' => WikiSectionAiClient::isAvailable(),
+            'lint_health' => $lintHealth,
         ]);
     }
 
@@ -145,6 +161,20 @@ class WikiController extends Controller
                 ->all();
         }
 
+        $lintFindings = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $customerId)
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
+            ->get()
+            ->map(fn($f) => [
+                'id' => $f->id,
+                'code' => $f->code,
+                'severity' => $f->severity,
+                'message' => $f->message,
+            ])
+            ->all();
+
         return Inertia::render('App/Wiki/Show', [
             'page' => [
                 'id' => $page->id,
@@ -161,6 +191,7 @@ class WikiController extends Controller
                 'content_markdown' => $currentVersion->content_markdown,
             ] : null,
             'claims' => $claims,
+            'lint_findings' => $lintFindings,
         ]);
     }
 

@@ -6,6 +6,7 @@ use App\Models\Customer;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
@@ -883,6 +884,153 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 4B-5B: lint_health on index, lint_findings on show
+    // =========================================================================
+
+    public function test_index_sends_lint_health_with_zero_counts_when_no_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $health = data_get($inertia, 'props.lint_health');
+            return $health !== null
+                && $health['error'] === 0
+                && $health['warning'] === 0
+                && $health['info'] === 0
+                && $health['total'] === 0;
+        });
+    }
+
+    public function test_index_lint_health_counts_open_findings_by_severity(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $health = data_get($inertia, 'props.lint_health');
+            return $health !== null
+                && $health['error'] === 1
+                && $health['warning'] === 2
+                && $health['total'] === 3;
+        });
+    }
+
+    public function test_index_lint_health_does_not_count_resolved_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_RESOLVED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $health = data_get($inertia, 'props.lint_health');
+            return $health !== null && $health['total'] === 0;
+        });
+    }
+
+    public function test_index_lint_health_is_scoped_to_current_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Eigen side');
+        $foreignPage = $this->createPage($other, EnterpriseWikiPage::STATUS_DRAFT, 'Annen side');
+
+        $this->createLintFinding($other, $foreignPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $health = data_get($inertia, 'props.lint_health');
+            return $health !== null && $health['total'] === 0;
+        });
+    }
+
+    public function test_show_sends_open_lint_findings_for_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $finding = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
+            $findings = data_get($inertia, 'props.lint_findings', []);
+            return collect($findings)->contains(fn(array $f) => $f['id'] === $finding->id);
+        });
+    }
+
+    public function test_show_does_not_include_resolved_lint_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING, EnterpriseWikiLintFinding::STATUS_RESOLVED);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.lint_findings') === [];
+        });
+    }
+
+    public function test_show_lint_findings_are_scoped_to_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $otherPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Annen testside');
+        $own = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+        $foreign = $this->createLintFinding($customer, $otherPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($own, $foreign): bool {
+            $ids = collect(data_get($inertia, 'props.lint_findings', []))->pluck('id');
+            return $ids->contains($own->id) && ! $ids->contains($foreign->id);
+        });
+    }
+
+    public function test_show_lint_findings_exclude_other_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Eigen side');
+        $foreignPage = $this->createPage($other, EnterpriseWikiPage::STATUS_DRAFT, 'Annen side');
+        $foreignFinding = $this->createLintFinding($other, $foreignPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($foreignFinding): bool {
+            $ids = collect(data_get($inertia, 'props.lint_findings', []))->pluck('id');
+            return ! $ids->contains($foreignFinding->id);
+        });
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -997,6 +1145,26 @@ class WikiControllerTest extends TestCase
             'source_hash' => str_pad('h', 64, '0'),
             'excerpt' => $excerpt,
             'page_reference' => $pageReference,
+        ]);
+    }
+
+    private function createLintFinding(
+        Customer $customer,
+        EnterpriseWikiPage $page,
+        string $severity,
+        string $status = EnterpriseWikiLintFinding::STATUS_OPEN,
+    ): EnterpriseWikiLintFinding {
+        return EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'enterprise_wiki_claim_id' => null,
+            'enterprise_wiki_document_id' => null,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => $severity,
+            'message' => 'Testfunn',
+            'status' => $status,
+            'detected_at' => now(),
+            'resolved_at' => $status === EnterpriseWikiLintFinding::STATUS_RESOLVED ? now() : null,
         ]);
     }
 }

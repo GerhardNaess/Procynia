@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08) · Fase 4B-5A fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08) · Fase 4B-5A fullført (2026-07-08) · Fase 4B-5B fullført (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -668,8 +668,18 @@ Implementert:
 - 14 nye tester i `tests/Feature/Console/EnterpriseWikiLintCommandTest.php` (14/14 passed)
 - Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
 
+#### Fase 4B-5B — UI helseindikator — Fullført (2026-07-08)
+
+Implementert:
+- `WikiController::index()`: ny prop `lint_health` med `{error, warning, info, total}` for aktiv customer (kun `status=open`, customer-scoped)
+- `WikiController::show()`: ny prop `lint_findings` med åpne funn for aktuell side (customer-scoped, sortert error → warning → info)
+- `Index.jsx`: `LintHealthBar`-komponent — viser "Ingen åpne helsefunn" (grønn) eller severity-badges per type
+- `Show.jsx`: Helsekontroll-seksjon med funn-liste eller "Ingen åpne helsefunn for denne siden."
+- 8 nye tester i `WikiControllerTest` (alle passing)
+- Duplikat-nøkkel `source_open_document` fjernet fra begge lang-filer
+- Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
+
 Gjenstår i Fase 4B:
-- Helseindikator per side i UI (vise åpne findings)
 - Scheduled lint-job (konfigurerbar frekvens)
 
 ### Fase 5 — Sammenligning mot dagens RAG

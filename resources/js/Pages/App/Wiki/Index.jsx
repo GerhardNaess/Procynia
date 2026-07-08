@@ -96,7 +96,48 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
     );
 }
 
-export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources', wiki_generation_available: wikiGenerationAvailable = false }) {
+const SEVERITY_STYLES = {
+    error: 'bg-rose-100 text-rose-700',
+    warning: 'bg-amber-100 text-amber-700',
+    info: 'bg-slate-100 text-slate-600',
+};
+
+function LintHealthBar({ health, tw }) {
+    if (health.total === 0) {
+        return (
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                </svg>
+                {tw.lint_health_ok ?? 'Ingen åpne helsefunn'}
+            </div>
+        );
+    }
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">
+                {tw.lint_health_title ?? 'Wiki-helse'}:
+            </span>
+            {health.error > 0 && (
+                <span className={`${BADGE} ${SEVERITY_STYLES.error}`}>
+                    {health.error} {tw.lint_severity_error ?? 'Feil'}
+                </span>
+            )}
+            {health.warning > 0 && (
+                <span className={`${BADGE} ${SEVERITY_STYLES.warning}`}>
+                    {health.warning} {tw.lint_severity_warning ?? 'Advarsel'}
+                </span>
+            )}
+            {health.info > 0 && (
+                <span className={`${BADGE} ${SEVERITY_STYLES.info}`}>
+                    {health.info} {tw.lint_severity_info ?? 'Info'}
+                </span>
+            )}
+        </div>
+    );
+}
+
+export default function WikiIndex({ pages, sources = [], sources_store_url: sourcesStoreUrl = '/app/wiki/sources', wiki_generation_available: wikiGenerationAvailable = false, lint_health: lintHealth = { error: 0, warning: 0, info: 0, total: 0 } }) {
     const { translations = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const locale = document.documentElement.lang || 'no';
@@ -178,6 +219,10 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                         {tw.index_description ?? 'Strukturert kunnskap om virksomheten, generert fra godkjent innhold.'}
                     </p>
                 </section>
+
+                <div>
+                    <LintHealthBar health={lintHealth} tw={tw} />
+                </div>
 
                 {pages.length === 0 ? (
                     <EmptyStateBox

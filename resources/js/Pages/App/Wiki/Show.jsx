@@ -39,7 +39,13 @@ function WarnIcon({ className = 'h-4 w-4' }) {
     );
 }
 
-export default function WikiShow({ page, current_version, claims }) {
+const LINT_SEVERITY_STYLES = {
+    error: 'bg-rose-100 text-rose-700',
+    warning: 'bg-amber-100 text-amber-700',
+    info: 'bg-slate-100 text-slate-600',
+};
+
+export default function WikiShow({ page, current_version, claims, lint_findings: lintFindings = [] }) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
     const isSystemOwner = auth.user?.is_system_owner ?? false;
@@ -319,6 +325,35 @@ export default function WikiShow({ page, current_version, claims }) {
                                 </article>
                             ))}
                         </div>
+                    )}
+                </section>
+                {/* Helsekontroll */}
+                <section className="space-y-3">
+                    <h2 className="text-base font-semibold text-slate-700">
+                        {tw.lint_findings_heading ?? 'Helsekontroll'}
+                    </h2>
+                    {lintFindings.length === 0 ? (
+                        <p className="text-sm text-slate-400">
+                            {tw.lint_page_no_findings ?? 'Ingen åpne helsefunn for denne siden.'}
+                        </p>
+                    ) : (
+                        <ul className="space-y-2">
+                            {lintFindings.map((f) => (
+                                <li
+                                    key={f.id}
+                                    className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3"
+                                >
+                                    <span className={`mt-0.5 inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${LINT_SEVERITY_STYLES[f.severity] ?? 'bg-slate-100 text-slate-600'}`}>
+                                        {f.severity === 'error'
+                                            ? (tw.lint_severity_error ?? 'Feil')
+                                            : f.severity === 'warning'
+                                                ? (tw.lint_severity_warning ?? 'Advarsel')
+                                                : (tw.lint_severity_info ?? 'Info')}
+                                    </span>
+                                    <p className="text-sm text-slate-700">{f.message}</p>
+                                </li>
+                            ))}
+                        </ul>
                     )}
                 </section>
             </div>
