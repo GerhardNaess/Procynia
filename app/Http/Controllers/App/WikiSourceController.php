@@ -5,6 +5,8 @@ namespace App\Http\Controllers\App;
 use App\Http\Controllers\Controller;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestSection;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
@@ -121,6 +123,61 @@ class WikiSourceController extends Controller
         $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_INLINE, $document->original_filename);
 
         return $response;
+    }
+
+    public function destroy(EnterpriseWikiDocument $document): RedirectResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        $runs = EnterpriseWikiIngestRun::query()
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('source_id', $document->id)
+            ->where('customer_id', $customerId)
+            ->get(['id', 'status', 'enterprise_wiki_page_id']);
+
+        $inProgressStatuses = [
+            EnterpriseWikiIngestRun::STATUS_QUEUED,
+            EnterpriseWikiIngestRun::STATUS_RUNNING,
+            EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+        ];
+
+        if ($runs->whereIn('status', $inProgressStatuses)->isNotEmpty()) {
+            return redirect()->route('app.wiki.index')
+                ->with('error', 'Kan ikke slette dokumentet mens ingest-jobben kjører.');
+        }
+
+        if ($runs->whereNotNull('enterprise_wiki_page_id')->isNotEmpty()) {
+            return redirect()->route('app.wiki.index')
+                ->with('error', 'Kan ikke slette dokumentet fordi det har genererte wiki-sider.');
+        }
+
+        DB::transaction(function () use ($document, $runs): void {
+            if ($runs->isNotEmpty()) {
+                EnterpriseWikiIngestSection::query()
+                    ->whereIn('enterprise_wiki_ingest_run_id', $runs->pluck('id'))
+                    ->delete();
+
+                EnterpriseWikiIngestRun::query()
+                    ->whereIn('id', $runs->pluck('id'))
+                    ->delete();
+            }
+
+            Storage::disk('local')->delete($document->file_path);
+
+            $document->delete();
+        });
+
+        Log::info('[PROCYNIA][WIKI_SOURCE] Deleted wiki source document.', [
+            'document_id' => $document->id,
+            'customer_id' => $customerId,
+        ]);
+
+        return redirect()->route('app.wiki.index')
+            ->with('success', 'Kildedokumentet er slettet.');
     }
 
     public function ingest(EnterpriseWikiDocument $document): RedirectResponse

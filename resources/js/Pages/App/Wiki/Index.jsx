@@ -17,6 +17,8 @@ function formatTime(value, locale) {
     return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 }
 
+const BADGE = 'inline-flex h-6 items-center rounded-full px-3 text-xs font-semibold whitespace-nowrap';
+
 const STATUS_STYLES = {
     approved: 'bg-emerald-100 text-emerald-700',
     pending_review: 'bg-amber-100 text-amber-700',
@@ -27,11 +29,7 @@ const STATUS_STYLES = {
 
 function StatusBadge({ status, label }) {
     const cls = STATUS_STYLES[status] ?? 'bg-slate-200 text-slate-600';
-    return (
-        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${cls}`}>
-            {label}
-        </span>
-    );
+    return <span className={`${BADGE} ${cls}`}>{label}</span>;
 }
 
 const SOURCE_STATUS_STYLES = {
@@ -42,11 +40,7 @@ const SOURCE_STATUS_STYLES = {
 
 function SourceStatusBadge({ status, label }) {
     const cls = SOURCE_STATUS_STYLES[status] ?? 'bg-slate-200 text-slate-600';
-    return (
-        <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
-            {label}
-        </span>
-    );
+    return <span className={`${BADGE} ${cls}`}>{label}</span>;
 }
 
 const INGEST_STATUS_STYLES = {
@@ -61,45 +55,42 @@ const IN_PROGRESS_STATUSES = ['queued', 'running', 'sections_planned'];
 
 function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
     if (!run) {
-        return (
-            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-500">
-                {notStartedLabel}
-            </span>
-        );
+        return <span className={`${BADGE} bg-slate-100 text-slate-500`}>{notStartedLabel}</span>;
     }
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
     const startedAt = (run.status === 'running' || run.status === 'sections_planned') ? formatTime(run.started_at, locale) : null;
     return (
-        <div className="space-y-1">
-            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>{label}</span>
+        <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+                <span className={`${BADGE} ${cls}`}>{label}</span>
+                {isInProgress && (
+                    <button
+                        type="button"
+                        onClick={onReload}
+                        className="text-[11px] text-slate-400 underline hover:text-slate-600"
+                    >
+                        Oppdater
+                    </button>
+                )}
+            </div>
             {run.status === 'queued' && (
-                <>
-                    {queuedSince && (
-                        <p className="text-[11px] text-slate-400">I kø siden {queuedSince}</p>
-                    )}
-                    <p className="max-w-52 text-[11px] text-slate-400">
-                        Venter på bakgrunnsjobb. Kjører du lokalt — sjekk at worker lytter på <span className="font-mono">enterprise-wiki</span>-køen.
-                    </p>
-                </>
+                <p className="text-[11px] leading-4 text-slate-400">
+                    {queuedSince ? `I kø siden ${queuedSince} · ` : ''}Sjekk at{' '}
+                    <span className="font-mono">enterprise-wiki</span> worker kjører.
+                </p>
             )}
             {startedAt && (
                 <p className="text-[11px] text-slate-400">Startet {startedAt}</p>
             )}
-            {run.status === 'failed' && run.error_message ? (
-                <p className="max-w-45 truncate text-[11px] text-rose-500" title={run.error_message}>
+            {run.status === 'failed' && run.error_message && (
+                <p
+                    className="line-clamp-2 wrap-break-word text-[11px] leading-4 text-rose-500"
+                    title={run.error_message}
+                >
                     {run.error_message}
                 </p>
-            ) : null}
-            {isInProgress && (
-                <button
-                    type="button"
-                    onClick={onReload}
-                    className="text-[11px] text-slate-400 underline hover:text-slate-600"
-                >
-                    Oppdater status
-                </button>
             )}
         </div>
     );
@@ -115,6 +106,13 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
     const [ingestingIds, setIngestingIds] = useState(new Set());
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
+
+    const handleDelete = (source) => {
+        if (!window.confirm(tw.source_delete_confirm ?? 'Er du sikker på at du vil slette kildedokumentet? Dette kan ikke angres.')) {
+            return;
+        }
+        router.delete(`/app/wiki/sources/${source.id}`, { preserveScroll: true });
+    };
 
     const submitUpload = (event) => {
         event.preventDefault();
@@ -274,33 +272,47 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                 {tw.sources_list_empty ?? 'Ingen kildedokumenter lastet opp ennå.'}
                             </p>
                         ) : (
-                            <div className="overflow-hidden rounded-2xl border border-slate-100">
-                                <table className="min-w-full divide-y divide-slate-100">
+                            <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                                <table className="min-w-full table-fixed divide-y divide-slate-100">
+                                    <colgroup>
+                                        <col />
+                                        <col style={{ width: '130px' }} />
+                                        <col style={{ width: '120px' }} />
+                                        <col style={{ width: '220px' }} />
+                                        <col style={{ width: '56px' }} />
+                                        <col style={{ width: '210px' }} />
+                                    </colgroup>
                                     <thead className="bg-slate-50">
                                         <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
                                             <th className="px-4 py-3">{tw.source_col_filename ?? 'Filnavn'}</th>
                                             <th className="px-4 py-3">{tw.source_col_status ?? 'Status'}</th>
                                             <th className="px-4 py-3">{tw.source_col_uploaded ?? 'Lastet opp'}</th>
                                             <th className="px-4 py-3">{tw.ingest_col_wiki_status ?? 'Wiki-status'}</th>
-                                            <th className="px-4 py-3"></th>
+                                            <th className="px-4 py-3 text-center">{tw.source_col_source ?? 'Kilde'}</th>
+                                            <th className="px-4 py-3 text-right">{tw.source_col_actions ?? 'Handlinger'}</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50 bg-white">
-                                        {sources.map((source) => (
+                                        {sources.map((source) => {
+                                            const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
+                                            const canDelete = !isInProgress && source.generated_pages.length === 0;
+                                            return (
                                             <tr key={source.id} className="text-sm">
-                                                <td className="max-w-xs truncate px-4 py-3 font-medium text-slate-900">
-                                                    {source.original_filename}
+                                                <td className="overflow-hidden px-4 py-3 align-top">
+                                                    <span className="block truncate font-medium text-slate-900" title={source.original_filename}>
+                                                        {source.original_filename}
+                                                    </span>
                                                 </td>
-                                                <td className="px-4 py-3">
+                                                <td className="px-4 py-3 align-top">
                                                     <SourceStatusBadge
                                                         status={source.document_status}
                                                         label={sourceStatusLabel(source.document_status)}
                                                     />
                                                 </td>
-                                                <td className="px-4 py-3 text-slate-500">
+                                                <td className="whitespace-nowrap px-4 py-3 align-top text-sm text-slate-500">
                                                     {formatDate(source.created_at, locale)}
                                                 </td>
-                                                <td className="px-4 py-3">
+                                                <td className="px-4 py-3 align-top">
                                                     <IngestStatusBadge
                                                         run={source.latest_ingest_run}
                                                         label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status) : null}
@@ -309,12 +321,13 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                         onReload={handleSourceReload}
                                                     />
                                                     {source.generated_pages.length > 0 && (
-                                                        <ul className="mt-1.5 space-y-0.5">
+                                                        <ul className="mt-2 space-y-0.5">
                                                             {source.generated_pages.map((p) => (
                                                                 <li key={p.id}>
                                                                     <Link
                                                                         href={`/app/wiki/${p.slug}`}
-                                                                        className="max-w-50 truncate text-[11px] text-violet-600 hover:text-violet-800 hover:underline"
+                                                                        className="block truncate text-[11px] text-violet-600 hover:text-violet-800 hover:underline"
+                                                                        title={p.title}
                                                                     >
                                                                         {p.title}
                                                                     </Link>
@@ -323,40 +336,52 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                         </ul>
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex flex-col items-start gap-2">
-                                                        <a
-                                                            href={`/app/wiki/sources/${source.id}/download`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-800"
-                                                        >
-                                                            <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                                                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
-                                                                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                                                            </svg>
-                                                            {tw.source_open_document ?? 'Åpne dokument'}
-                                                        </a>
-                                                        {source.document_status === 'extracted' && (() => {
-                                                            const isInProgress = source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status);
-                                                            const isDisabled = ingestingIds.has(source.id) || isInProgress;
-                                                            return (
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={isDisabled}
-                                                                    onClick={() => startIngest(source.id)}
-                                                                    className="inline-flex min-h-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                                                >
-                                                                    {ingestingIds.has(source.id)
-                                                                        ? (tw.source_ingest_starting ?? 'Starter...')
-                                                                        : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
-                                                                </button>
-                                                            );
-                                                        })()}
+                                                <td className="px-4 py-3 align-top text-center">
+                                                    <a
+                                                        href={`/app/wiki/sources/${source.id}/download`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        aria-label={tw.source_open_document ?? 'Åpne kildedokument'}
+                                                        title={tw.source_open_document ?? 'Åpne kildedokument'}
+                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                                                    >
+                                                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                            <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                                                            <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+                                                        </svg>
+                                                    </a>
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <div className="flex items-center justify-end gap-3">
+                                                        {source.document_status === 'extracted' && (
+                                                            <button
+                                                                type="button"
+                                                                disabled={ingestingIds.has(source.id) || isInProgress}
+                                                                onClick={() => startIngest(source.id)}
+                                                                className="inline-flex h-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 px-3 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                                {ingestingIds.has(source.id)
+                                                                    ? (tw.source_ingest_starting ?? 'Starter...')
+                                                                    : (tw.source_ingest_button ?? 'Generer wiki-utkast')}
+                                                            </button>
+                                                        )}
+                                                        {canDelete && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDelete(source)}
+                                                                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
+                                                            >
+                                                                <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                                    <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.519.149.022a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 3.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                                                                </svg>
+                                                                {tw.source_delete_button ?? 'Slett'}
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </td>
                                             </tr>
-                                        ))}
+                                            );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>

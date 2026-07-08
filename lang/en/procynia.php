@@ -3000,5 +3000,10 @@ return [
         'quality_source_found' => 'Source found',
         'quality_no_source' => 'Missing source',
         'quality_missing_excerpt' => 'Missing excerpt',
+        'source_col_source' => 'Source',
+        'source_col_actions' => 'Actions',
+        'source_open_document' => 'Open source document',
+        'source_delete_button' => 'Delete',
+        'source_delete_confirm' => 'Are you sure you want to delete this source document? This cannot be undone.',
     ],
 ];

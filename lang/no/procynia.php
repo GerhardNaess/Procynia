@@ -3000,5 +3000,10 @@ return [
         'quality_source_found' => 'Kilde funnet',
         'quality_no_source' => 'Mangler kilde',
         'quality_missing_excerpt' => 'Mangler utdrag',
+        'source_col_source' => 'Kilde',
+        'source_col_actions' => 'Handlinger',
+        'source_open_document' => 'Åpne kildedokument',
+        'source_delete_button' => 'Slett',
+        'source_delete_confirm' => 'Er du sikker på at du vil slette kildedokumentet? Dette kan ikke angres.',
     ],
 ];

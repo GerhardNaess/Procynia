@@ -5,6 +5,9 @@ namespace Tests\Feature\App\Wiki;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestSection;
+use App\Models\EnterpriseWikiPage;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Models\User;
@@ -455,6 +458,141 @@ class WikiSourceControllerTest extends TestCase
             ->assertNotFound();
     }
 
+    // ─── Delete ───────────────────────────────────────────────────────────────
+
+    public function test_system_owner_can_delete_own_document_without_wiki_pages(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        Storage::disk('local')->assertMissing($document->file_path);
+    }
+
+    public function test_failed_document_without_wiki_page_can_be_deleted(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        // Failed run with no wiki page (failed before sections_planned)
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_FAILED, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseCount('enterprise_wiki_ingest_runs', 0);
+    }
+
+    public function test_delete_removes_associated_ingest_runs_and_sections(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED);
+        Storage::disk('local')->put($document->file_path, 'test content');
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_FAILED, null);
+        EnterpriseWikiIngestSection::query()->create([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'section_index' => 0,
+            'heading' => 'Avsnitt 1',
+            'status' => 'failed',
+        ]);
+
+        $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}")->assertRedirect();
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+        $this->assertDatabaseCount('enterprise_wiki_ingest_sections', 0);
+    }
+
+    public function test_delete_rejects_other_customer_document(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $foreignDoc = $this->createDocument($other, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$foreignDoc->id}")
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $foreignDoc->id]);
+    }
+
+    public function test_delete_rejects_document_with_generated_wiki_page(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $page = $this->createWikiPage($customer);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_delete_rejects_document_with_queued_ingest_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_QUEUED, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_delete_rejects_document_with_running_ingest_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_RUNNING, null);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
+    public function test_delete_rejects_document_with_sections_planned_ingest_run(): void
+    {
+        Storage::fake('local');
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $page = $this->createWikiPage($customer);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED, $page->id);
+
+        $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
+
+        $response->assertRedirect(route('app.wiki.index'));
+        $response->assertSessionHas('error');
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+    }
+
     // ─── No knowledge_* models touched ───────────────────────────────────────
 
     public function test_no_knowledge_item_rows_are_created_during_upload(): void
@@ -491,6 +629,36 @@ class WikiSourceControllerTest extends TestCase
     private function createExtractedDocument(Customer $customer): EnterpriseWikiDocument
     {
         return $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+    }
+
+    private function createIngestRun(
+        Customer $customer,
+        EnterpriseWikiDocument $document,
+        string $status,
+        ?int $pageId,
+    ): EnterpriseWikiIngestRun {
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'source_hash' => hash('sha256', "enterprise_wiki_document:{$document->id}"),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => $status,
+            'enterprise_wiki_page_id' => $pageId,
+        ]);
+    }
+
+    private function createWikiPage(Customer $customer): EnterpriseWikiPage
+    {
+        return EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => 'wiki-delete-test-'.Str::random(8),
+            'title' => 'Delete Test Wiki Page',
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => hash('sha256', 'test'),
+        ]);
     }
 
     private function mockExtractorReturning(string $text): void
