@@ -37,3 +37,8 @@ Schedule::command('exchange-rates:sync')
     ->dailyAt('17:00')
     ->timezone('Europe/Oslo')
     ->withoutOverlapping();
+
+// Enterprise Wiki lint: refresh open/resolved health findings for all active customers.
+Schedule::command('wiki:lint')
+    ->dailyAt('02:30')
+    ->withoutOverlapping();

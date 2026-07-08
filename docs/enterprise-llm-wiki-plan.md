@@ -2,7 +2,7 @@
 
 Versjon: 0.2
 Dato: 2026-07-07
-Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B-1–4B-3 fullført · Fase 4B-4 fullført (2026-07-08) · Fase 4B-5A fullført (2026-07-08) · Fase 4B-5B fullført (2026-07-08)
+Status: Fase 0 fullført · Fase 1 fullført · Fase 3B fullført · Fase 4A-5–4A-9 fullført · Fase 4B fullført (2026-07-08)
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 
@@ -679,8 +679,17 @@ Implementert:
 - Duplikat-nøkkel `source_open_document` fjernet fra begge lang-filer
 - Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
 
-Gjenstår i Fase 4B:
-- Scheduled lint-job (konfigurerbar frekvens)
+#### Fase 4B-5C — Scheduled lint-job — Fullført (2026-07-08)
+
+Implementert:
+- `routes/console.php`: `Schedule::command('wiki:lint')->dailyAt('02:30')->withoutOverlapping()`
+- Kjøres daglig kl. 02:30 for alle aktive customers uten --customer/--page (no-args mode)
+- Inaktive customers hoppes over (existing `where('is_active', true)` i command)
+- 3 nye tester: no-args på tom DB, no-args linter alle aktive customers, inaktive customers hoppes over
+- Ingen ekte AI-kall, ingen RAG/Kunnskapsbase/billing/Filament/AI workspace berørt
+
+**Fase 4B fullført.** Alle delmål gjennomført:
+4B-1 Verifikasjonsvisning · 4B-2 Kildenedlasting · 4B-3 Kvalitetsindikatorer · 4B-4 Forventningsstyring · 4B-5A Backend lint · 4B-5B UI helseindikator · 4B-5C Scheduled lint
 
 ### Fase 5 — Sammenligning mot dagens RAG
 - Parallell visning: wiki-svar vs. RAG-svar for samme requirement

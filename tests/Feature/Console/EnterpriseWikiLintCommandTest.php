@@ -203,6 +203,47 @@ class EnterpriseWikiLintCommandTest extends TestCase
             ->count());
     }
 
+    // ─── Scheduled / no-args mode ────────────────────────────────────────────
+
+    public function test_command_without_arguments_succeeds_on_empty_database(): void
+    {
+        // Simulates the scheduled cron run when no customers exist yet.
+        $this->artisan('wiki:lint')
+            ->expectsOutputToContain('Opened: 0')
+            ->assertSuccessful();
+    }
+
+    public function test_command_without_arguments_lints_all_active_customers(): void
+    {
+        $customerA = $this->createCustomer('Kunde A');
+        $customerB = $this->createCustomer('Kunde B');
+        $pageA = $this->createPage($customerA);
+        $pageB = $this->createPage($customerB);
+        $this->createClaim($pageA);
+        $this->createClaim($pageB);
+
+        $this->artisan('wiki:lint')->assertSuccessful();
+
+        // Findings created for both customers without specifying --customer
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', ['customer_id' => $customerA->id]);
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', ['customer_id' => $customerB->id]);
+    }
+
+    public function test_command_without_arguments_skips_inactive_customers(): void
+    {
+        $active = $this->createCustomer('Aktiv kunde');
+        $inactive = $this->createCustomer('Inaktiv kunde', isActive: false);
+        $pageActive = $this->createPage($active);
+        $pageInactive = $this->createPage($inactive);
+        $this->createClaim($pageActive);
+        $this->createClaim($pageInactive);
+
+        $this->artisan('wiki:lint')->assertSuccessful();
+
+        $this->assertDatabaseHas('enterprise_wiki_lint_findings', ['customer_id' => $active->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', ['customer_id' => $inactive->id]);
+    }
+
     // ─── Command options ──────────────────────────────────────────────────────
 
     public function test_command_with_unknown_customer_fails(): void
@@ -247,7 +288,7 @@ class EnterpriseWikiLintCommandTest extends TestCase
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private function createCustomer(string $name = 'Lint Test AS'): Customer
+    private function createCustomer(string $name = 'Lint Test AS', bool $isActive = true): Customer
     {
         $language = Language::query()->firstOrCreate(
             ['code' => 'no'],
@@ -265,7 +306,7 @@ class EnterpriseWikiLintCommandTest extends TestCase
             'language_id' => $language->id,
             'nationality_id' => $nationality->id,
             'billing_interval' => Customer::BILLING_MONTHLY,
-            'is_active' => true,
+            'is_active' => $isActive,
         ]);
     }
 
