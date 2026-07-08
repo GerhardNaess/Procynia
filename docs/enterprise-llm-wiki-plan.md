@@ -289,6 +289,26 @@ Alle `enterprise_wiki_*`-tabeller inneholder `customer_id`. Alle spørringer sco
 
 ---
 
+## UX-prinsipper for trygg verifikasjon
+
+Enterprise Wiki må ikke presentere AI-generert wiki-innhold som ferdig sannhet før det er kvalitetssikret.
+
+UI-et skal gjøre verifikasjon enkel, trygg og sporbar:
+
+- Brukeren skal alltid se status: `draft`, `pending_review`, `approved` eller `rejected`.
+- Pending innhold skal tydelig merkes som utkast.
+- Godkjenning skal ikke være en «blind» knapp.
+- Brukeren skal kunne se hvilke påstander siden bygger på.
+- Påstander skal kunne spores tilbake til raw kildedokument.
+- Kildegrunnlag skal være synlig nok til at bruker kan kontrollere kvalitet.
+- Svake, manglende eller uklare kilder skal vises tydelig.
+- Det skal være vanskelig å godkjenne innhold ved et uhell.
+- Bid Manager kan lese og vurdere, men System Owner godkjenner i piloten.
+
+Disse prinsippene er bindende for alle UI-valg i Enterprise Wiki. Ny funksjonalitet som presenterer AI-generert innhold uten kildesynlighet og tydelig statusmerking er ikke i tråd med produktets kjerneprinsipper.
+
+---
+
 ## 6. Statusmodell
 
 ```
