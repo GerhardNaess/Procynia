@@ -9,8 +9,6 @@ class WikiArticleAiClient
 {
     private const MODEL = 'gpt-5';
 
-    private const TEMPERATURE = 0.3;
-
     private const MAX_OUTPUT_TOKENS = 4000;
 
     private const PROMPT_NAME = 'wiki_article_generation';
@@ -118,7 +116,6 @@ class WikiArticleAiClient
                     'schema' => self::schema(),
                 ],
             ],
-            'temperature' => self::TEMPERATURE,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }

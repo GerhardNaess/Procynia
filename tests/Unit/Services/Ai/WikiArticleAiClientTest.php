@@ -135,6 +135,27 @@ class WikiArticleAiClientTest extends TestCase
         $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
     }
 
+    public function test_build_payload_does_not_include_temperature(): void
+    {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
+                $capturedPayload = $payload;
+
+                return ['output_text' => json_encode(['article' => ['markdown' => '## Test']])];
+            });
+
+        $client = app(WikiArticleAiClient::class);
+        $client->generateArticle('Test', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
+
+        $this->assertIsArray($capturedPayload);
+        $this->assertArrayNotHasKey('temperature', $capturedPayload);
+    }
+
     public function test_is_available_returns_false_by_default(): void
     {
         config(['services.enterprise_wiki.ai_enabled' => false]);

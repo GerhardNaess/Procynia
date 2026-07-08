@@ -16,6 +16,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
 
@@ -66,7 +67,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
                 $document = $service->resolveDocumentForIngest($run->customer_id, $run->source_id);
                 $service->validateExtractedTextSize((string) $document->extracted_text);
                 $sections = $parser->splitIntoSections((string) $document->extracted_text);
-                $pageTitle = $document->original_filename ?? 'Wiki-side';
+                $pageTitle = pathinfo((string) $document->original_filename, PATHINFO_FILENAME) ?: 'Wiki-side';
             } else {
                 // knowledge_item_version path (legacy/bootstrap — Kunnskapsbase-import)
                 $version = $service->resolveApprovedVersion($run->customer_id, $run->source_id);
@@ -97,7 +98,7 @@ class ProcessEnterpriseWikiIngest implements ShouldQueue
             $sectionIds = DB::transaction(function () use ($run, $sections, $pageTitle): array {
                 $page = EnterpriseWikiPage::query()->create([
                     'customer_id' => $run->customer_id,
-                    'slug' => 'wiki-draft-' . $run->id,
+                    'slug' => Str::slug($pageTitle) . '-' . Str::lower(Str::random(6)),
                     'title' => $pageTitle,
                     'status' => EnterpriseWikiPage::STATUS_DRAFT,
                     'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,

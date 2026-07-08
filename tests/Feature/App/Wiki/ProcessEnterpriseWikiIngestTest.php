@@ -326,7 +326,7 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         Queue::assertPushed(ProcessEnterpriseWikiSection::class, 2);
     }
 
-    public function test_job_uses_original_filename_as_page_title_for_document_source(): void
+    public function test_job_strips_file_extension_from_document_title(): void
     {
         $customer = $this->createCustomer();
         $document = $this->createExtractedDocument($customer, [
@@ -341,7 +341,86 @@ class ProcessEnterpriseWikiIngestTest extends TestCase
         $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
 
         $this->assertNotNull($page);
-        $this->assertSame('selskapsinfo.pdf', $page->title);
+        $this->assertSame('selskapsinfo', $page->title);
+    }
+
+    public function test_job_strips_docx_extension_from_document_title(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'Masterdata Prosjekt.docx',
+            'extracted_text'    => "## Innledning\nKortfattet innhold.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertSame('Masterdata Prosjekt', $page->title);
+    }
+
+    public function test_job_slug_is_not_wiki_draft_pattern(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'kompetanse.docx',
+            'extracted_text'    => "## Kompetanse\nVi leverer.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertStringNotContainsString('wiki-draft-', $page->slug);
+    }
+
+    public function test_job_slug_is_based_on_derived_title(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'kompetanse.docx',
+            'extracted_text'    => "## Kompetanse\nVi leverer.",
+        ]);
+        $run = $this->createQueuedRunForDocument($customer, $document);
+
+        $this->runJob($run);
+
+        $run->refresh();
+        $page = \App\Models\EnterpriseWikiPage::query()->find($run->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page);
+        $this->assertStringStartsWith('kompetanse-', $page->slug);
+    }
+
+    public function test_job_two_runs_for_same_document_get_different_slugs(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createExtractedDocument($customer, [
+            'original_filename' => 'kompetanse.docx',
+            'extracted_text'    => "## Kompetanse\nVi leverer.",
+        ]);
+
+        $run1 = $this->createQueuedRunForDocument($customer, $document);
+        $this->runJob($run1);
+
+        $run2 = $this->createQueuedRunForDocument($customer, $document);
+        $this->runJob($run2);
+
+        $run1->refresh();
+        $run2->refresh();
+
+        $page1 = \App\Models\EnterpriseWikiPage::query()->find($run1->enterprise_wiki_page_id);
+        $page2 = \App\Models\EnterpriseWikiPage::query()->find($run2->enterprise_wiki_page_id);
+
+        $this->assertNotNull($page1);
+        $this->assertNotNull($page2);
+        $this->assertNotSame($page1->slug, $page2->slug);
     }
 
     public function test_job_marks_run_failed_when_document_not_found_for_source_type(): void
