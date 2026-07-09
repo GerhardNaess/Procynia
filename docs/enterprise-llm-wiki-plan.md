@@ -1363,6 +1363,22 @@ Implementert:
 - Ingen UI-knapp
 - 15 tester (argument-validering, vellykket apply, already-applied guard, feil status/JSON, side-effects)
 
+#### Fase 8E-11 — Read-only inspection of applied page skeletons — Fullført
+
+**Commit:** `3d95dfc`
+
+Implementert:
+- Artisan-kommando `wiki:inspect-applied-decision --run-id=ID`
+- Leser applied `EnterpriseWikiIngestRun`, tilhørende `enterprise_wiki_ingest_run_pages` og koblede `EnterpriseWikiPage`-rader
+- Viser per side: page id, page type, title/slug, pivot action (`created`/`updated`) og page status
+- Oppsummerer antall article, summary, concept, entity og totalt antall koblede sider
+- Validerer customer-scope read-only: gir feil hvis en koblet side tilhører annen customer enn run
+- Gir tydelig advarsel (exit 0) hvis run ikke er applied ennå
+- Gir feil hvis run ikke finnes eller `--run-id` mangler
+- Skriver ingenting til databasen
+- Test bekrefter at `enterprise_wiki_pages`, `enterprise_wiki_page_versions`, `enterprise_wiki_claims`, `enterprise_wiki_ingest_run_pages` og `enterprise_wiki_ingest_runs` har identisk radtall før og etter kjøring
+- 14 tester
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
