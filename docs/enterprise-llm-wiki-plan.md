@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · Fase 8F-3 trygg sletting fullført (commit c7b3853) · Fase 8F-4 kjøringshistorikk fullført (commit c275bb3) · **Neste: Fase 8F-5 — read-only kvalitetstab**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · **Retning: coverage/eval og continuous maintainer loop — se §8F-retning**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -733,7 +733,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
-| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1, 8F-2, 8F-3 og 8F-4 fullført — 8F-5 til 8F-7 gjenstår** |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1671,71 +1671,50 @@ Implementert:
 
 Tester: 650 passed / 1400 assertions · Build: OK
 
-#### Fase 8F-5 — Read-only Kvalitet-tab
+#### Fase 8F-5 — Read-only Kvalitet-tab — Fullført (commit b32502a)
 
-**Mål:** Kvalitet-tab viser alle lint-funn for innlogget kunde — sortert og filtrerbart, uten handlingsknapper.
+**Status:** Fase 8F-5 fullført
 
-Innhold:
-- Liste over åpne `EnterpriseWikiLintFinding`-rader scoped til kunde
-- Per funn: side (lenke), kjøring, severity, check_type, detail_text, opprettet
-- Aggregert helse per page_type og totalt
+Kvalitet-tabben viser nå åpne `EnterpriseWikiLintFinding`-rader read-only med severity, check_type, melding, side, sidetype, kildefil, run_id og dato. Filter på severity, check_type og page_type er lagt til via URL-parametre. Ugyldige filterverdier ignoreres stille. Customer-scope beholdes.
 
-Filtrering:
-- Filter `severity`: `error` / `warning` / `info`
-- Filter `check_type`: alle 19 koder som multi-select
-- Filter `page_type`: `article` / `summary` / `concept` / `entity`
-- Toggle for å vise/skjule lukkede funn
+Implementert:
+- Backend: `loadQualityTab` tar imot `Request`, filtrerer på `q_severity`, `q_code`, `q_page_type`; eager-loader `page` (med `page_type`) og `run` (med `source_id`); løser opp kildefilnavn via `EnterpriseWikiDocument`; returnerer `quality_filters`-prop
+- Frontend: 8-kolonne-tabell med filterbar (severity, sjekk-kode, sidetype + nullstill); nye kolonner: sidetype, kildefil, kjørings-ID (lenke til kjøringer-tab); `WikiIndex` tar imot og sender `quality_filters` til `QualityTab`
+- 8 tester: severity-filter, kode-filter, sidetype-filter, ugyldig-filter-sikkerhet, `quality_filters`-prop, page_type + run_id eksponering, tom tilstand, gjest redirect
 
-Ingen "Kjør lint nå"-knapp. Ingen handlinger. Rent read-only i piloten. Lint kjøres via daglig scheduled job (Fase 4B-5C) eller manuell Artisan-kommando.
+Tester: 658 passed / 1416 assertions · Build: OK
 
-Akseptansekriterier:
-- Funn vises kun for innlogget kunde
-- Filtre kan kombineres
-- Ingen side-effects i backend fra GET
-- ~12 tester
+---
 
-#### Fase 8F-6 — Redigering som ny EnterpriseWikiPageVersion
+#### Retningsnotat etter 8F-0–8F-5 {#8F-retning}
 
-**Mål:** System Owner kan redigere innholdet på en eksisterende wiki-side. Redigering oppretter alltid ny versjon — eksisterende `content_markdown` overskrives aldri.
+**Fase 8F-1 til 8F-5 utgjør den komplette forvaltnings- og kontrollflaten** for Enterprise Wiki i piloten: tab-navigasjon, wiki-sider med søk og filter, kildedokumenter med opplasting og trygg sletting, kjøringshistorikk med filtre, og read-only kvalitetstab.
 
-Flyt:
-1. System Owner klikker "Rediger" på Show-siden
-2. Modal åpner med nåværende `content_markdown` i enkel `<textarea>`
-3. `POST /app/wiki/{slug}/versions` med `{ content_markdown: "..." }`
-4. Backend `WikiPageVersionController::store()`:
-   - Finn høyeste `version_number` for siden og inkrementer
-   - Sett `is_current = false` på eksisterende current version
-   - Opprett ny `EnterpriseWikiPageVersion` med `is_current = true` og `generated_by_model = 'manual'`
-   - Side-status endres ikke (forblir `draft`, `pending_review` eller `approved`)
-5. For `approved`-sider:
-   - Ny versjon opprettes med `is_current = true`
-   - Gammel approved-versjon settes til `is_current = false` og beholdes i historikk
-   - Side-status flyttes til `draft` — ikke godkjent automatisk
-   - Siden må sendes til ny review og godkjennes på nytt av System Owner
-6. Redirect til Show-siden med flash-melding
+**Viktig prinsipp:** Enterprise Wiki skal normalt vedlikeholdes *automatisk* av Karpathy-pipeline — ikke som et manuelt CMS. Maintainer-jobben er å laste opp kildedokumenter, observere resultatet, og godkjenne/avvise — ikke å redigere wikiinnhold linje for linje. Redigering og regenerering (8F-6 og 8F-7) er unntaksfunksjoner for feilretting, ikke hoveddriften.
 
-Versjonshistorikk vises som kompakt liste på Show-siden: versjonsnummer, dato, `is_current`-markering.
+**Neste hovedretning etter 8F-5:** coverage/eval og continuous maintainer loop:
+- Evalueringsramme: automatisk måling av hvor stor andel av wikisidene som har godkjent innhold, fullstendige claims og lav lint-score
+- Continuous maintainer loop: automatisk kjøring av pipeline på nye og endrede kildedokumenter, med beslutningsforslag klart for System Owner-godkjenning
+- Disse fasene er **ikke startet** — de avklares og spesifiseres separat
 
-Akseptansekriterier:
-- Ny versjon opprettes, gammel versjon har `is_current = false`
-- Versjonsnummer inkrementeres
-- Approved-side: ny versjon er `is_current = true`, gammel approved-versjon beholdes i historikk, side-status er `draft`
-- Rollesjekk: kun System Owner
-- Eksisterende `content_markdown`-rader overskrives aldri
-- ~15 tester
+**Fase 8F-6 og 8F-7 er parkert som unntaksfunksjoner.** De implementeres ikke som en del av normaldriften. Avklares separat ved behov.
 
-#### Fase 8F-7 — Regenerering / ny dokumentversjon
+#### Fase 8F-6 — Redigering som ny EnterpriseWikiPageVersion — Parkert
 
-> **Ikke start uten instruksjon.** Scope avklares separat etter at 8F-1–8F-6 er implementert.
+> **Parkert.** Enterprise Wiki vedlikeholdes automatisk av pipeline, ikke manuelt. Redigering er en unntaksfunksjon for feilretting. Implementeres ikke uten eksplisitt instruksjon.
 
-Foreløpig scope:
-- Laste opp revidert versjon av eksisterende kildedokument
-- Koble ny dokumentversjon til eksisterende `EnterpriseWikiDocument` (eventuelt via nytt felt eller ny modell)
-- Trigge ny Karpathy-pipeline mot oppdatert kilde
-- Håndtere overgang fra gammelt til nytt innhold i avledede sider
-- Oppdatere source references og lint
+Foreløpig scope (for fremtidig referanse):
+- System Owner kan redigere `content_markdown` på en eksisterende wiki-side
+- Redigering oppretter alltid ny `EnterpriseWikiPageVersion` — eksisterende versjon overskrives aldri
+- Approved-sider flyttes til `draft` etter redigering og må godkjennes på nytt
 
-Dette er en selvstendig fase som kan kreve datamodell-audit og ny migrasjon. Avhenger av om `EnterpriseWikiDocument` skal versjoneres eller om ny instans opprettes.
+#### Fase 8F-7 — Regenerering / ny dokumentversjon — Parkert
+
+> **Parkert.** Scope avklares separat. Implementeres ikke uten eksplisitt instruksjon.
+
+Foreløpig scope (for fremtidig referanse):
+- Laste opp revidert versjon av eksisterende kildedokument og trigge ny pipeline-kjøring
+- Krever datamodell-audit og mulig migrasjon
 
 ---
 
