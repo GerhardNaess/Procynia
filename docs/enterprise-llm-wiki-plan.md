@@ -1430,6 +1430,7 @@ Implementert:
 - Artisan-kommando `wiki:verify-page-claims --run-id=ID`
 - Ny `WikiClaimVerificationAiClient` (`app/Services/Ai/Wiki/WikiClaimVerificationAiClient.php`) — gpt-4.1-mini, temperature 0, tar `claimText` + `sourceText`, returnerer `{supported: bool, excerpt: string}`. Excerpt er verbatim sitat fra kildedokumentet — AI oppfinner ikke tekst.
 - Ny `EnterpriseWikiVerifyPageClaimsService` — laster kildedokument via `run->source_id`, itererer pivot-rader → sider → current versions → claims. For hver claim: idempotenssjekk (eksisterende source reference hoppes over), kaller AI, skriver `EnterpriseWikiSourceReference` med `source_type = SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT`, `source_id`, `source_label = original_filename`, `source_hash = file_hash_sha256`, `excerpt`.
+- **Source context er `EnterpriseWikiDocument.extracted_text` — ikke `EnterpriseWikiPageVersion.content_markdown`.** AI-klienten sjekker om påstanden finnes i originalkilden, ikke om den er konsistent med det AI selv har generert. `content_markdown` brukes kun til å slå opp claim-rader; det sendes aldri til verifikasjonsmodellen.
 - Idempotent på claim-nivå: claims som allerede har source reference hoppes over (`skipped`-teller)
 - Claims der AI ikke finner støtte resulterer ikke i source reference (`no_support`-teller)
 - CLI-output: `Pages checked`, `Claims checked`, `References created`, `Skipped`, `No support found`
