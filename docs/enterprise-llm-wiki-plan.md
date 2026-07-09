@@ -1422,6 +1422,22 @@ Implementert:
 - `WikiPageClaimExtractionAiClient` mockes i `setUp()` — ingen ekte OpenAI-kall i tester
 - 23 tester
 
+#### Fase 8E-15 — Verify claims against source document, write source references — Fullført
+
+**Commit:** `cf5c520`
+
+Implementert:
+- Artisan-kommando `wiki:verify-page-claims --run-id=ID`
+- Ny `WikiClaimVerificationAiClient` (`app/Services/Ai/Wiki/WikiClaimVerificationAiClient.php`) — gpt-4.1-mini, temperature 0, tar `claimText` + `sourceText`, returnerer `{supported: bool, excerpt: string}`. Excerpt er verbatim sitat fra kildedokumentet — AI oppfinner ikke tekst.
+- Ny `EnterpriseWikiVerifyPageClaimsService` — laster kildedokument via `run->source_id`, itererer pivot-rader → sider → current versions → claims. For hver claim: idempotenssjekk (eksisterende source reference hoppes over), kaller AI, skriver `EnterpriseWikiSourceReference` med `source_type = SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT`, `source_id`, `source_label = original_filename`, `source_hash = file_hash_sha256`, `excerpt`.
+- Idempotent på claim-nivå: claims som allerede har source reference hoppes over (`skipped`-teller)
+- Claims der AI ikke finner støtte resulterer ikke i source reference (`no_support`-teller)
+- CLI-output: `Pages checked`, `Claims checked`, `References created`, `Skipped`, `No support found`
+- Sider uten current version eller uten claims hoppes over stille
+- Ingen claims, ingen lint, ingen backlinks, ingen UI, ingen endring i `ProcessEnterpriseWikiIngest`
+- `WikiClaimVerificationAiClient` mockes i `setUp()` — ingen ekte OpenAI-kall i tester
+- 23 tester
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
