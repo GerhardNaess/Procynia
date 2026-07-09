@@ -15,6 +15,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -58,7 +59,7 @@ class WikiController extends Controller
 
         $props += match ($tab) {
             'sources' => $this->loadSourcesTab($user, $customerId, $request),
-            'runs' => $this->loadRunsTab($customerId),
+            'runs' => $this->loadRunsTab($customerId, $request),
             'quality' => $this->loadQualityTab($customerId),
             default => $this->loadPagesTab($user, $customerId, $request),
         };
@@ -247,19 +248,58 @@ class WikiController extends Controller
         ];
     }
 
-    private function loadRunsTab(int $customerId): array
+    private function loadRunsTab(int $customerId, Request $request): array
     {
-        $runs = EnterpriseWikiIngestRun::query()
-            ->where('customer_id', $customerId)
-            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-            ->orderByDesc('created_at')
-            ->get();
+        $allowedRunStatuses = EnterpriseWikiIngestRun::STATUSES;
+        $allowedDecisionStatuses = [
+            EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'none',
+        ];
+
+        $runStatus = in_array($request->query('run_status'), $allowedRunStatuses, true)
+            ? $request->query('run_status') : null;
+        $runDecision = in_array($request->query('run_decision'), $allowedDecisionStatuses, true)
+            ? $request->query('run_decision') : null;
+        $runSrc = is_numeric($request->query('run_src'))
+            ? (int) $request->query('run_src') : null;
+
+        $lintCountSub = DB::table('enterprise_wiki_lint_findings')
+            ->selectRaw('count(*)')
+            ->whereColumn('enterprise_wiki_ingest_run_id', 'enterprise_wiki_ingest_runs.id')
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        $query = EnterpriseWikiIngestRun::query()
+            ->select('enterprise_wiki_ingest_runs.*')
+            ->selectSub($lintCountSub, 'lint_count')
+            ->withCount(['sections', 'pages'])
+            ->where('enterprise_wiki_ingest_runs.customer_id', $customerId)
+            ->where('enterprise_wiki_ingest_runs.source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->orderByDesc('enterprise_wiki_ingest_runs.created_at');
+
+        if ($runStatus !== null) {
+            $query->where('enterprise_wiki_ingest_runs.status', $runStatus);
+        }
+
+        if ($runDecision === 'none') {
+            $query->whereNull('enterprise_wiki_ingest_runs.maintainer_decision_status');
+        } elseif ($runDecision !== null) {
+            $query->where('enterprise_wiki_ingest_runs.maintainer_decision_status', $runDecision);
+        }
+
+        if ($runSrc !== null) {
+            $query->where('enterprise_wiki_ingest_runs.source_id', $runSrc);
+        }
+
+        $runs = $query->get();
 
         $documentIds = $runs->pluck('source_id')->unique();
-        $docFilenames = EnterpriseWikiDocument::query()
-            ->whereIn('id', $documentIds)
-            ->where('customer_id', $customerId)
-            ->pluck('original_filename', 'id');
+        $docFilenames = $documentIds->isNotEmpty()
+            ? EnterpriseWikiDocument::query()
+                ->whereIn('id', $documentIds)
+                ->where('customer_id', $customerId)
+                ->pluck('original_filename', 'id')
+            : collect();
 
         return [
             'runs' => $runs->map(fn(EnterpriseWikiIngestRun $run) => [
@@ -272,10 +312,18 @@ class WikiController extends Controller
                 'model_used' => $run->model_used,
                 'input_tokens' => $run->input_tokens,
                 'output_tokens' => $run->output_tokens,
+                'pages_count' => (int) ($run->pages_count ?? 0),
+                'sections_count' => (int) ($run->sections_count ?? 0),
+                'lint_count' => (int) ($run->lint_count ?? 0),
                 'created_at' => $run->created_at,
                 'started_at' => $run->started_at,
                 'finished_at' => $run->finished_at,
             ])->all(),
+            'runs_filters' => [
+                'status' => $runStatus,
+                'decision' => $runDecision,
+                'src_id' => $runSrc,
+            ],
         ];
     }
 

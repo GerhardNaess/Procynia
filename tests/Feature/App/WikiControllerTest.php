@@ -2493,4 +2493,154 @@ class WikiControllerTest extends TestCase
             return $ids->contains($ownDoc->id) && ! $ids->contains($foreignDoc->id);
         });
     }
+
+    // =========================================================================
+    // Phase 8F-4: runs tab — history and filtering
+    // =========================================================================
+
+    public function test_runs_tab_returns_runs_for_customer(): void
+    {
+        $customer = $this->createCustomer();
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+        $ownRun = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $foreignRun = $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownRun, $foreignRun): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($ownRun->id) && ! $ids->contains($foreignRun->id);
+        });
+    }
+
+    public function test_runs_tab_includes_counts_and_filename(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, \App\Models\EnterpriseWikiPage::STATUS_APPROVED, 'Testside');
+        $this->createIngestRunPage($run, $page);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run, $doc): bool {
+            $runs = data_get($inertia, 'props.runs', []);
+            $found = collect($runs)->firstWhere('id', $run->id);
+            return $found !== null
+                && $found['source_document_filename'] === $doc->original_filename
+                && isset($found['pages_count'])
+                && isset($found['sections_count'])
+                && isset($found['lint_count']);
+        });
+    }
+
+    public function test_runs_tab_filter_by_status(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $completed = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $failed = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_FAILED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs&run_status=completed');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($completed, $failed): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($completed->id) && ! $ids->contains($failed->id);
+        });
+    }
+
+    public function test_runs_tab_filter_by_decision_applied(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $applied = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $applied->update(['maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED]);
+        $pending = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $pending->update(['maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs&run_decision=applied');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($applied, $pending): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($applied->id) && ! $ids->contains($pending->id);
+        });
+    }
+
+    public function test_runs_tab_filter_by_decision_none(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $noDecision = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $withDecision = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $withDecision->update(['maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs&run_decision=none');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($noDecision, $withDecision): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($noDecision->id) && ! $ids->contains($withDecision->id);
+        });
+    }
+
+    public function test_runs_tab_filter_by_source_document(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $docA = $this->createDocument($customer);
+        $docB = $this->createDocument($customer);
+        $runA = $this->createIngestRun($customer, $docA, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $runB = $this->createIngestRun($customer, $docB, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get("/app/wiki?tab=runs&run_src={$docA->id}");
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($runA, $runB): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($runA->id) && ! $ids->contains($runB->id);
+        });
+    }
+
+    public function test_runs_tab_invalid_filters_are_ignored(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs&run_status=not_a_status&run_decision=bogus&run_src=abc');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($run->id);
+        });
+    }
+
+    public function test_runs_tab_returns_runs_filters_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs&run_status=completed&run_decision=applied');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $f = data_get($inertia, 'props.runs_filters');
+            return $f !== null
+                && $f['status'] === 'completed'
+                && $f['decision'] === 'applied';
+        });
+    }
 }

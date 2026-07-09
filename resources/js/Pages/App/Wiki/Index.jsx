@@ -882,6 +882,12 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                                             </button>
                                                         )}
                                                     </div>
+                                                    <Link
+                                                        href={`/app/wiki?tab=runs&run_src=${source.id}`}
+                                                        className="text-right text-[11px] text-slate-400 hover:text-violet-600 hover:underline"
+                                                    >
+                                                        {tw.runs_view_runs ?? 'Kjøringer'}
+                                                    </Link>
                                                     {source.document_status === 'extracted' && !wikiGenerationAvailable && (
                                                         <span className="text-right text-[11px] text-slate-400">
                                                             {tw.source_ingest_not_available ?? 'Wiki-generering er ikke aktivert ennå.'}
@@ -1015,7 +1021,21 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
 
 // ─── Runs tab ────────────────────────────────────────────────────────────────
 
-function RunsTab({ runs, tw, locale }) {
+function RunsTab({ runs, runsFilters, tw, locale }) {
+    const filters = runsFilters ?? {};
+
+    const navigate = (overrides) => {
+        router.get('/app/wiki', {
+            tab: 'runs',
+            run_status: filters.status ?? '',
+            run_decision: filters.decision ?? '',
+            run_src: filters.src_id ?? '',
+            ...overrides,
+        }, { preserveState: true, preserveScroll: true });
+    };
+
+    const hasActiveFilter = !!(filters.status || filters.decision || filters.src_id);
+
     const ingestStatusLabel = (status) => ({
         queued: tw.ingest_status_queued ?? 'I kø',
         running: tw.ingest_status_running ?? 'Kjører',
@@ -1025,70 +1045,158 @@ function RunsTab({ runs, tw, locale }) {
         decision_only: tw.ingest_status_decision_only ?? 'Beslutning lagret',
     }[status] ?? status);
 
-    if (runs.length === 0) {
-        return (
-            <EmptyStateBox
-                title={tw.runs_empty ?? 'Ingen kjøringer ennå'}
-                description=""
-            />
-        );
-    }
-
     return (
-        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-            <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                        <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                            <th className="px-6 py-4">{tw.runs_col_document ?? 'Dokument'}</th>
-                            <th className="px-6 py-4">{tw.runs_col_status ?? 'Status'}</th>
-                            <th className="px-6 py-4">{tw.runs_col_decision ?? 'Beslutning'}</th>
-                            <th className="px-6 py-4">{tw.runs_col_created ?? 'Opprettet'}</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {runs.map((run) => {
-                            const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
-                            return (
-                                <tr key={run.id} className="text-sm text-slate-700">
-                                    <td className="px-6 py-4">
-                                        <span className="block max-w-xs truncate font-medium text-slate-900" title={run.source_document_filename ?? ''}>
-                                            {run.source_document_filename ?? '—'}
-                                        </span>
-                                        {run.status === 'failed' && run.error_message && (
-                                            <p className="mt-1 line-clamp-2 text-[11px] text-rose-500" title={run.error_message}>
-                                                {run.error_message}
-                                            </p>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className={`${BADGE} ${statusCls}`}>
-                                            {ingestStatusLabel(run.status)}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        {run.maintainer_decision_status === 'applied' ? (
-                                            <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>
-                                                {tw.run_decision_applied ?? 'Anvendt'}
-                                            </span>
-                                        ) : run.maintainer_decision_status === 'pending' ? (
-                                            <span className={`${BADGE} bg-slate-100 text-slate-500`}>
-                                                {tw.run_decision_pending ?? 'Venter'}
-                                            </span>
-                                        ) : (
-                                            <span className="text-slate-400">—</span>
-                                        )}
-                                    </td>
-                                    <td className="whitespace-nowrap px-6 py-4 text-slate-500">
-                                        {formatDate(run.created_at, locale)}
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+        <div className="space-y-4">
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2">
+                <select
+                    value={filters.status ?? ''}
+                    onChange={(e) => navigate({ run_status: e.target.value })}
+                    className={SELECT_CLS}
+                >
+                    <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
+                    {['queued', 'running', 'sections_planned', 'completed', 'failed', 'decision_only'].map((s) => (
+                        <option key={s} value={s}>{ingestStatusLabel(s)}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={filters.decision ?? ''}
+                    onChange={(e) => navigate({ run_decision: e.target.value })}
+                    className={SELECT_CLS}
+                >
+                    <option value="">{tw.runs_filter_decision_all ?? 'Alle beslutninger'}</option>
+                    <option value="pending">{tw.run_decision_pending ?? 'Venter'}</option>
+                    <option value="applied">{tw.run_decision_applied ?? 'Anvendt'}</option>
+                    <option value="none">{tw.runs_filter_decision_none ?? 'Ingen beslutning'}</option>
+                </select>
+
+                {filters.src_id && (
+                    <span className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm text-violet-700">
+                        {tw.runs_filter_src_active ?? 'Filtrert på dokument'}
+                        <button
+                            type="button"
+                            onClick={() => navigate({ run_src: '' })}
+                            className="ml-0.5 text-violet-400 hover:text-violet-700"
+                            aria-label="Fjern kildefilter"
+                        >
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                            </svg>
+                        </button>
+                    </span>
+                )}
+
+                {hasActiveFilter && (
+                    <button
+                        type="button"
+                        onClick={() => navigate({ run_status: '', run_decision: '', run_src: '' })}
+                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                    >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                        </svg>
+                        {tw.runs_filter_clear ?? 'Nullstill'}
+                    </button>
+                )}
             </div>
-        </section>
+
+            {runs.length === 0 ? (
+                <EmptyStateBox
+                    title={tw.runs_empty ?? 'Ingen kjøringer ennå'}
+                    description=""
+                />
+            ) : (
+                <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-slate-200">
+                            <thead className="bg-slate-50">
+                                <tr className="text-left text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                    <th className="px-4 py-3 text-right tabular-nums">{tw.runs_col_id ?? 'ID'}</th>
+                                    <th className="px-4 py-3">{tw.runs_col_document ?? 'Dokument'}</th>
+                                    <th className="px-4 py-3">{tw.runs_col_status ?? 'Status'}</th>
+                                    <th className="px-4 py-3">{tw.runs_col_decision ?? 'Beslutning'}</th>
+                                    <th className="px-4 py-3 text-right">{tw.runs_col_pages ?? 'Sider'}</th>
+                                    <th className="px-4 py-3 text-right">{tw.runs_col_sections ?? 'Seksjoner'}</th>
+                                    <th className="px-4 py-3 text-right">{tw.runs_col_lint ?? 'Funn'}</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_created ?? 'Opprettet'}</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">{tw.runs_col_finished ?? 'Fullført'}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {runs.map((run) => {
+                                    const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+                                    return (
+                                        <tr key={run.id} className="text-sm text-slate-700">
+                                            <td className="px-4 py-3 text-right font-mono text-xs text-slate-400 tabular-nums">
+                                                {run.id}
+                                            </td>
+                                            <td className="max-w-[200px] px-4 py-3">
+                                                {run.source_id ? (
+                                                    <Link
+                                                        href={`/app/wiki?tab=sources`}
+                                                        className="block truncate text-sm font-medium text-slate-900 hover:text-violet-700 hover:underline"
+                                                        title={run.source_document_filename ?? ''}
+                                                    >
+                                                        {run.source_document_filename ?? '—'}
+                                                    </Link>
+                                                ) : (
+                                                    <span className="text-slate-400">—</span>
+                                                )}
+                                                {run.status === 'failed' && run.error_message && (
+                                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-rose-500" title={run.error_message}>
+                                                        {run.error_message}
+                                                    </p>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className={`${BADGE} ${statusCls}`}>
+                                                    {ingestStatusLabel(run.status)}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                {run.maintainer_decision_status === 'applied' ? (
+                                                    <span className={`${BADGE} bg-emerald-100 text-emerald-700`}>
+                                                        {tw.run_decision_applied ?? 'Anvendt'}
+                                                    </span>
+                                                ) : run.maintainer_decision_status === 'pending' ? (
+                                                    <span className={`${BADGE} bg-slate-100 text-slate-500`}>
+                                                        {tw.run_decision_pending ?? 'Venter'}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400">—</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums">
+                                                {run.pages_count > 0
+                                                    ? <span className="font-semibold text-violet-700">{run.pages_count}</span>
+                                                    : <span className="text-slate-400">0</span>
+                                                }
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums text-slate-500">
+                                                {run.sections_count > 0 ? run.sections_count : <span className="text-slate-400">0</span>}
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums">
+                                                {run.lint_count > 0
+                                                    ? <span className="font-semibold text-rose-600">{run.lint_count}</span>
+                                                    : <span className="text-slate-400">0</span>
+                                                }
+                                            </td>
+                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                                {formatDate(run.created_at, locale)}
+                                            </td>
+                                            <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-500">
+                                                {run.finished_at ? formatDate(run.finished_at, locale) : <span className="text-slate-400">—</span>}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
+        </div>
     );
 }
 
@@ -1164,6 +1272,7 @@ export default function WikiIndex({
     sources = [],
     sources_filters: sourcesFilters = null,
     runs = [],
+    runs_filters: runsFilters = null,
     quality_findings: qualityFindings = [],
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
     wiki_generation_available: wikiGenerationAvailable = false,
@@ -1207,7 +1316,7 @@ export default function WikiIndex({
                     />
                 )}
                 {activeTab === 'runs' && (
-                    <RunsTab runs={runs} tw={tw} locale={locale} />
+                    <RunsTab runs={runs} runsFilters={runsFilters} tw={tw} locale={locale} />
                 )}
                 {activeTab === 'quality' && (
                     <QualityTab findings={qualityFindings} lintHealth={lintHealth} tw={tw} locale={locale} />
