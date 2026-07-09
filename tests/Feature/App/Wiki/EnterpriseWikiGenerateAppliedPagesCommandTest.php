@@ -67,13 +67,13 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
     }
 
     // =========================================================================
-    // Successful generation
+    // Successful generation — article and summary (unchanged from 8E-12)
     // =========================================================================
 
     public function test_command_exits_zero_on_success(): void
     {
         $customer = $this->createCustomer();
-        [$run]    = $this->createAppliedRunWithPages($customer);
+        [$run]    = $this->createAppliedRunWithArticleAndSummary($customer);
 
         $this->artisan('wiki:generate-applied-pages', ['--run-id' => $run->id])
             ->assertExitCode(0);
@@ -81,13 +81,10 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
 
     public function test_command_generates_version_for_article_page(): void
     {
-        $customer             = $this->createCustomer();
-        [$run, $article]      = $this->createAppliedRunWithPages($customer);
-        $versionsBefore       = EnterpriseWikiPageVersion::query()->count();
+        $customer        = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
-
-        $this->assertGreaterThan($versionsBefore, EnterpriseWikiPageVersion::query()->count());
 
         $this->assertTrue(
             EnterpriseWikiPageVersion::query()
@@ -98,8 +95,8 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
 
     public function test_command_generates_version_for_summary_page(): void
     {
-        $customer        = $this->createCustomer();
-        [$run,, $summary] = $this->createAppliedRunWithPages($customer);
+        $customer         = $this->createCustomer();
+        [$run,, $summary] = $this->createAppliedRunWithArticleAndSummary($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
@@ -110,10 +107,10 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         );
     }
 
-    public function test_command_fills_content_markdown_on_version(): void
+    public function test_command_fills_content_markdown_for_article_page(): void
     {
         $customer        = $this->createCustomer();
-        [$run, $article] = $this->createAppliedRunWithPages($customer);
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
@@ -122,14 +119,13 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
             ->first();
 
         $this->assertNotNull($version);
-        $this->assertNotEmpty($version->content_markdown);
         $this->assertSame(self::FAKE_MARKDOWN, $version->content_markdown);
     }
 
     public function test_command_marks_version_as_current(): void
     {
         $customer        = $this->createCustomer();
-        [$run, $article] = $this->createAppliedRunWithPages($customer);
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
@@ -140,74 +136,161 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         $this->assertTrue((bool) $version->is_current);
     }
 
-    public function test_command_outputs_generated_count(): void
+    // =========================================================================
+    // Successful generation — concept and entity (8E-13)
+    // =========================================================================
+
+    public function test_command_generates_version_for_concept_page(): void
     {
-        $customer = $this->createCustomer();
-        [$run]    = $this->createAppliedRunWithPages($customer); // 1 article + 1 summary
+        $customer         = $this->createCustomer();
+        [,,,  $concept]   = $this->createAppliedRunWithAllPageTypes($customer);
+
+        $run = EnterpriseWikiIngestRun::query()
+            ->whereHas('pages', fn ($q) => $q->where('enterprise_wiki_page_id', $concept->id))
+            ->first();
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
-        $this->assertStringContainsString('Generated: 2', Artisan::output());
-    }
-
-    // =========================================================================
-    // Concept and entity pages are skipped
-    // =========================================================================
-
-    public function test_command_skips_concept_pages(): void
-    {
-        $customer = $this->createCustomer();
-        $run      = $this->createDecisionOnlyRunApplied($customer);
-        $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Test Concept');
-
-        EnterpriseWikiIngestRunPage::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $concept->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
-        ]);
-
-        $versionsBefore = EnterpriseWikiPageVersion::query()->count();
-
-        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
-
-        $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
-
-        $this->assertFalse(
+        $this->assertTrue(
             EnterpriseWikiPageVersion::query()
                 ->where('enterprise_wiki_page_id', $concept->id)
                 ->exists()
         );
     }
 
-    public function test_command_skips_entity_pages(): void
+    public function test_command_generates_version_for_entity_page(): void
     {
-        $customer = $this->createCustomer();
-        $run      = $this->createDecisionOnlyRunApplied($customer);
-        $entity   = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Test Entity');
-
-        EnterpriseWikiIngestRunPage::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $entity->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
-        ]);
-
-        $versionsBefore = EnterpriseWikiPageVersion::query()->count();
+        $customer              = $this->createCustomer();
+        [$run,,, , $entity]    = $this->createAppliedRunWithAllPageTypes($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
-        $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
+        $this->assertTrue(
+            EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $entity->id)
+                ->exists()
+        );
+    }
+
+    public function test_command_fills_content_markdown_for_concept_page(): void
+    {
+        $customer              = $this->createCustomer();
+        [$run,,,  $concept]    = $this->createAppliedRunWithAllPageTypes($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $concept->id)
+            ->first();
+
+        $this->assertNotNull($version);
+        $this->assertNotEmpty($version->content_markdown);
+        $this->assertSame(self::FAKE_MARKDOWN, $version->content_markdown);
+    }
+
+    public function test_command_fills_content_markdown_for_entity_page(): void
+    {
+        $customer              = $this->createCustomer();
+        [$run,,,, $entity]     = $this->createAppliedRunWithAllPageTypes($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $version = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $entity->id)
+            ->first();
+
+        $this->assertNotNull($version);
+        $this->assertSame(self::FAKE_MARKDOWN, $version->content_markdown);
+    }
+
+    public function test_command_generates_all_four_page_types(): void
+    {
+        $customer                             = $this->createCustomer();
+        [$run, $article, $summary, $concept, $entity] = $this->createAppliedRunWithAllPageTypes($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        foreach ([$article, $summary, $concept, $entity] as $page) {
+            $this->assertTrue(
+                EnterpriseWikiPageVersion::query()
+                    ->where('enterprise_wiki_page_id', $page->id)
+                    ->exists(),
+                "Expected version for page [{$page->id}] type [{$page->page_type}]"
+            );
+        }
     }
 
     // =========================================================================
-    // Idempotency: page already has a version
+    // CLI output
+    // =========================================================================
+
+    public function test_command_outputs_article_generated_count(): void
+    {
+        $customer = $this->createCustomer();
+        [$run]    = $this->createAppliedRunWithArticleAndSummary($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $this->assertStringContainsString('Article:  1 generated', Artisan::output());
+    }
+
+    public function test_command_outputs_summary_generated_count(): void
+    {
+        $customer = $this->createCustomer();
+        [$run]    = $this->createAppliedRunWithArticleAndSummary($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $this->assertStringContainsString('Summary:  1 generated', Artisan::output());
+    }
+
+    public function test_command_outputs_concept_generated_count(): void
+    {
+        $customer = $this->createCustomer();
+        [$run]    = $this->createAppliedRunWithAllPageTypes($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $this->assertStringContainsString('Concept:  1 generated', Artisan::output());
+    }
+
+    public function test_command_outputs_entity_generated_count(): void
+    {
+        $customer = $this->createCustomer();
+        [$run]    = $this->createAppliedRunWithAllPageTypes($customer);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $this->assertStringContainsString('Entity:   1 generated', Artisan::output());
+    }
+
+    public function test_command_reports_skipped_count(): void
+    {
+        $customer        = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $article->id,
+            'version_number'          => 1,
+            'is_current'              => true,
+            'content_markdown'        => '# Existing',
+            'generated_by_model'      => 'gpt-5',
+        ]);
+
+        Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
+
+        $this->assertStringContainsString('Skipped:  1', Artisan::output());
+    }
+
+    // =========================================================================
+    // Idempotency
     // =========================================================================
 
     public function test_command_skips_page_that_already_has_a_version(): void
     {
         $customer        = $this->createCustomer();
-        [$run, $article] = $this->createAppliedRunWithPages($customer);
+        [$run, $article] = $this->createAppliedRunWithArticleAndSummary($customer);
 
-        // Pre-create a version so the page is already generated
         EnterpriseWikiPageVersion::query()->create([
             'enterprise_wiki_page_id' => $article->id,
             'version_number'          => 1,
@@ -220,7 +303,6 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
-        // Article is skipped; summary may still be generated
         $this->assertSame(
             $versionsBefore,
             EnterpriseWikiPageVersion::query()
@@ -229,25 +311,27 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         );
     }
 
-    public function test_command_reports_skipped_count(): void
+    public function test_command_skips_concept_page_that_already_has_a_version(): void
     {
-        $customer        = $this->createCustomer();
-        [$run, $article] = $this->createAppliedRunWithPages($customer);
+        $customer              = $this->createCustomer();
+        [$run,,,  $concept]    = $this->createAppliedRunWithAllPageTypes($customer);
 
-        // Pre-generate both pages
-        foreach ([$article] as $page) {
-            EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $page->id,
-                'version_number'          => 1,
-                'is_current'              => true,
-                'content_markdown'        => '# Existing',
-                'generated_by_model'      => 'gpt-5',
-            ]);
-        }
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $concept->id,
+            'version_number'          => 1,
+            'is_current'              => true,
+            'content_markdown'        => '# Existing Concept',
+            'generated_by_model'      => 'gpt-5',
+        ]);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
-        $this->assertStringContainsString('Skipped: 1', Artisan::output());
+        $this->assertSame(
+            1,
+            EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $concept->id)
+                ->count()
+        );
     }
 
     // =========================================================================
@@ -256,9 +340,9 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
 
     public function test_command_does_not_create_claims(): void
     {
-        $customer      = $this->createCustomer();
-        [$run]         = $this->createAppliedRunWithPages($customer);
-        $claimsBefore  = EnterpriseWikiClaim::query()->count();
+        $customer     = $this->createCustomer();
+        [$run]        = $this->createAppliedRunWithAllPageTypes($customer);
+        $claimsBefore = EnterpriseWikiClaim::query()->count();
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
@@ -268,7 +352,7 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
     public function test_command_does_not_create_additional_ingest_runs(): void
     {
         $customer   = $this->createCustomer();
-        [$run]      = $this->createAppliedRunWithPages($customer);
+        [$run]      = $this->createAppliedRunWithAllPageTypes($customer);
         $runsBefore = EnterpriseWikiIngestRun::query()->count();
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
@@ -279,7 +363,7 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
     public function test_command_does_not_modify_run_status(): void
     {
         $customer = $this->createCustomer();
-        [$run]    = $this->createAppliedRunWithPages($customer);
+        [$run]    = $this->createAppliedRunWithAllPageTypes($customer);
 
         Artisan::call('wiki:generate-applied-pages', ['--run-id' => $run->id]);
 
@@ -356,7 +440,7 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
         ]);
     }
 
-    private function createDecisionOnlyRunApplied(Customer $customer): EnterpriseWikiIngestRun
+    private function createDecisionOnlyRunApplied(Customer $customer, array $decisionJson = []): EnterpriseWikiIngestRun
     {
         $document = $this->createDocument($customer);
 
@@ -367,6 +451,7 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
             'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id'                        => $document->id,
             'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_json'         => ! empty($decisionJson) ? $decisionJson : null,
             'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
             'maintainer_decision_generated_at' => now(),
         ]);
@@ -377,24 +462,53 @@ class EnterpriseWikiGenerateAppliedPagesCommandTest extends TestCase
      *
      * @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiPage, 2: EnterpriseWikiPage}
      */
-    private function createAppliedRunWithPages(Customer $customer): array
+    private function createAppliedRunWithArticleAndSummary(Customer $customer): array
     {
         $run     = $this->createDecisionOnlyRunApplied($customer);
         $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel');
         $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Test Artikkel');
 
-        EnterpriseWikiIngestRunPage::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $article->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
-        ]);
-
-        EnterpriseWikiIngestRunPage::query()->create([
-            'enterprise_wiki_ingest_run_id' => $run->id,
-            'enterprise_wiki_page_id'       => $summary->id,
-            'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
-        ]);
+        foreach ([$article, $summary] as $page) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id'       => $page->id,
+                'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            ]);
+        }
 
         return [$run, $article, $summary];
+    }
+
+    /**
+     * Applied run with all four page types in the pivot.
+     *
+     * @return array{0: EnterpriseWikiIngestRun, 1: EnterpriseWikiPage, 2: EnterpriseWikiPage, 3: EnterpriseWikiPage, 4: EnterpriseWikiPage}
+     */
+    private function createAppliedRunWithAllPageTypes(Customer $customer): array
+    {
+        $decision = [
+            'source_article' => ['action' => 'create', 'title' => 'Test Artikkel', 'proposed_slug' => 'test-artikkel', 'reason' => 'New article.'],
+            'source_summary' => ['action' => 'create', 'title' => 'Sammendrag', 'proposed_slug' => 'sammendrag', 'reason' => 'Companion summary.'],
+            'concept_pages'  => [['action' => 'create', 'title' => 'Test Konsept', 'proposed_slug' => 'test-konsept', 'reason' => 'Key concept.']],
+            'entity_pages'   => [['action' => 'create', 'title' => 'Test Entitet', 'proposed_slug' => 'test-entitet', 'reason' => 'Key entity.']],
+            'no_action_reason' => null,
+            'warnings'         => [],
+        ];
+
+        $run     = $this->createDecisionOnlyRunApplied($customer, $decision);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Test Artikkel');
+        $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag');
+        $concept = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Test Konsept');
+        $entity  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Test Entitet');
+
+        foreach ([$article, $summary, $concept, $entity] as $page) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id'       => $page->id,
+                'action'                        => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            ]);
+        }
+
+        return [$run, $article, $summary, $concept, $entity];
     }
 }

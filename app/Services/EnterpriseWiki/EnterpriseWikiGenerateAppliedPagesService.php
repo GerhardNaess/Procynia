@@ -11,17 +11,24 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 
 /**
- * Generates content_markdown and EnterpriseWikiPageVersion records for article and summary
- * pages linked to an applied maintainer decision run.
+ * Generates content_markdown and EnterpriseWikiPageVersion records for all four wiki page types
+ * (article, summary, concept, entity) linked to an applied maintainer decision run.
  *
+ * Processing order: article and summary first, then concept and entity — so article/summary
+ * content is available as context when generating concept/entity pages.
  * Idempotent: pages that already have any version record are skipped.
- * Does not touch concept/entity pages, claims, source references, or ProcessEnterpriseWikiIngest.
+ * Does not touch claims, source references, or ProcessEnterpriseWikiIngest.
  */
 class EnterpriseWikiGenerateAppliedPagesService
 {
-    private const ELIGIBLE_TYPES = [
+    private const ARTICLE_SUMMARY_TYPES = [
         EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
         EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+    ];
+
+    private const CONCEPT_ENTITY_TYPES = [
+        EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+        EnterpriseWikiPage::PAGE_TYPE_ENTITY,
     ];
 
     public function __construct(
@@ -29,7 +36,7 @@ class EnterpriseWikiGenerateAppliedPagesService
     ) {}
 
     /**
-     * @return array{generated: int, skipped: int}
+     * @return array{article: int, summary: int, concept: int, entity: int, skipped: int}
      * @throws \InvalidArgumentException if the run is not in a state that permits generation
      * @throws \RuntimeException if AI is unavailable or generation fails
      */
@@ -60,31 +67,33 @@ class EnterpriseWikiGenerateAppliedPagesService
 
         $sourceText   = (string) ($document->extracted_text ?? '');
         $languageCode = $this->resolveLanguageCode($run->customer_id);
+        $decisionJson = (array) ($run->maintainer_decision_json ?? []);
 
         $pivotRows = EnterpriseWikiIngestRunPage::query()
             ->where('enterprise_wiki_ingest_run_id', $run->id)
             ->with('page')
             ->get();
 
-        $generated = 0;
-        $skipped   = 0;
+        $counts = [
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => 0,
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY  => 0,
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT  => 0,
+            EnterpriseWikiPage::PAGE_TYPE_ENTITY   => 0,
+        ];
+        $skipped               = 0;
+        $articleSummaryPageIds = [];
 
+        // --- Pass 1: article and summary ---
         foreach ($pivotRows as $row) {
             $page = $row->page;
 
-            if ($page === null) {
+            if ($page === null || ! in_array($page->page_type, self::ARTICLE_SUMMARY_TYPES, true)) {
                 continue;
             }
 
-            if (! in_array($page->page_type, self::ELIGIBLE_TYPES, true)) {
-                continue;
-            }
+            $articleSummaryPageIds[] = $page->id;
 
-            $hasVersion = EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $page->id)
-                ->exists();
-
-            if ($hasVersion) {
+            if ($this->pageHasVersion($page->id)) {
                 $skipped++;
                 continue;
             }
@@ -96,22 +105,99 @@ class EnterpriseWikiGenerateAppliedPagesService
                 languageCode: $languageCode,
             );
 
-            $nextVersionNumber = ((int) EnterpriseWikiPageVersion::query()
-                ->where('enterprise_wiki_page_id', $page->id)
-                ->max('version_number')) + 1;
-
-            EnterpriseWikiPageVersion::query()->create([
-                'enterprise_wiki_page_id' => $page->id,
-                'version_number'          => $nextVersionNumber,
-                'is_current'              => true,
-                'content_markdown'        => $markdown,
-                'generated_by_model'      => WikiPageContentAiClient::MODEL,
-            ]);
-
-            $generated++;
+            $this->writeVersion($page->id, $markdown);
+            $counts[$page->page_type]++;
         }
 
-        return compact('generated', 'skipped');
+        // Load article/summary content to use as context in concept/entity generation
+        $sharedContext = $this->loadSharedContext($articleSummaryPageIds);
+
+        // --- Pass 2: concept and entity ---
+        foreach ($pivotRows as $row) {
+            $page = $row->page;
+
+            if ($page === null || ! in_array($page->page_type, self::CONCEPT_ENTITY_TYPES, true)) {
+                continue;
+            }
+
+            if ($this->pageHasVersion($page->id)) {
+                $skipped++;
+                continue;
+            }
+
+            $additionalContext = $this->buildConceptEntityContext($page, $decisionJson, $sharedContext);
+
+            $markdown = $this->aiClient->generateFromSource(
+                pageTitle:         $page->title,
+                pageType:          $page->page_type,
+                sourceText:        $sourceText,
+                languageCode:      $languageCode,
+                additionalContext: $additionalContext,
+            );
+
+            $this->writeVersion($page->id, $markdown);
+            $counts[$page->page_type]++;
+        }
+
+        return array_merge($counts, ['skipped' => $skipped]);
+    }
+
+    private function pageHasVersion(int $pageId): bool
+    {
+        return EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $pageId)
+            ->exists();
+    }
+
+    private function writeVersion(int $pageId, string $markdown): void
+    {
+        $next = ((int) EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $pageId)
+            ->max('version_number')) + 1;
+
+        EnterpriseWikiPageVersion::query()->create([
+            'enterprise_wiki_page_id' => $pageId,
+            'version_number'          => $next,
+            'is_current'              => true,
+            'content_markdown'        => $markdown,
+            'generated_by_model'      => WikiPageContentAiClient::MODEL,
+        ]);
+    }
+
+    private function loadSharedContext(array $pageIds): string
+    {
+        if (empty($pageIds)) {
+            return '';
+        }
+
+        return EnterpriseWikiPageVersion::query()
+            ->whereIn('enterprise_wiki_page_id', $pageIds)
+            ->where('is_current', true)
+            ->pluck('content_markdown')
+            ->filter()
+            ->implode("\n\n---\n\n");
+    }
+
+    private function buildConceptEntityContext(EnterpriseWikiPage $page, array $decisionJson, string $sharedContext): string
+    {
+        $parts = [];
+
+        $entries = array_merge(
+            (array) data_get($decisionJson, 'concept_pages', []),
+            (array) data_get($decisionJson, 'entity_pages', []),
+        );
+
+        $match = collect($entries)->firstWhere('title', $page->title);
+
+        if ($match !== null && ! empty($match['reason'])) {
+            $parts[] = "Maintainer note for this page: {$match['reason']}";
+        }
+
+        if ($sharedContext !== '') {
+            $parts[] = "Content from related article and summary pages:\n\n{$sharedContext}";
+        }
+
+        return implode("\n\n", $parts);
     }
 
     private function resolveLanguageCode(int $customerId): string

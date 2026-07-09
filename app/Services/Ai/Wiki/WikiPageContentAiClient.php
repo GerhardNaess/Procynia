@@ -23,7 +23,9 @@ class WikiPageContentAiClient
     }
 
     /**
-     * Generate markdown content for an article or summary page from a source document.
+     * Generate markdown content for any wiki page type from a source document.
+     * Pass $additionalContext for concept/entity pages to include article/summary content
+     * and maintainer notes alongside the source text.
      *
      * @throws RuntimeException when AI is disabled, the API fails, or the response is empty/invalid
      */
@@ -32,12 +34,13 @@ class WikiPageContentAiClient
         string $pageType,
         string $sourceText,
         string $languageCode,
+        string $additionalContext = '',
     ): string {
         if (! self::isAvailable()) {
             throw new RuntimeException('WikiPageContentAiClient: wiki AI generation is not enabled.');
         }
 
-        $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $this->languageName($languageCode));
+        $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $this->languageName($languageCode));
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
         $rawText = $this->extractOutputText($response);
 
@@ -77,7 +80,7 @@ class WikiPageContentAiClient
         }
     }
 
-    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $languageName): array
+    private function buildPayload(string $pageTitle, string $pageType, string $sourceText, string $additionalContext, string $languageName): array
     {
         return [
             'model' => self::MODEL,
@@ -96,7 +99,7 @@ class WikiPageContentAiClient
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $this->userPrompt($pageTitle, $sourceText),
+                            'text' => $this->userPrompt($pageTitle, $sourceText, $additionalContext),
                         ],
                     ],
                 ],
@@ -115,41 +118,7 @@ class WikiPageContentAiClient
 
     private function developerPrompt(string $pageType, string $languageName): string
     {
-        if ($pageType === 'summary') {
-            return implode("\n", [
-                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName} based on the provided source document.",
-                '',
-                'SUMMARY STRUCTURE (mandatory):',
-                '- First line must be a # heading containing the page title',
-                '- Follow with 2-4 paragraphs summarising the key points of the source document',
-                '- Write flowing prose — no bullet lists, no headings beyond the title',
-                '',
-                'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
-                '- No HTML comments (<!-- ... -->)',
-                '- No lines starting with "Kilde:", "Source:", "Ref:" or any citation marker',
-                '- No quoted source excerpts or blockquote lines (lines starting with >)',
-                '- No filenames, document IDs, run IDs, or internal technical identifiers',
-                '- No mention of AI generation, confidence levels, or approval status',
-                '',
-                'Return only JSON matching the schema. No text before or after JSON.',
-            ]);
-        }
-
-        return implode("\n", [
-            "You are an editorial wiki article writer. Write a professional, readable internal wiki article in {$languageName} based on the provided source document.",
-            '',
-            'ARTICLE STRUCTURE (mandatory):',
-            '- First line must be a # heading containing the page title',
-            '- Follow with a short introductory paragraph (2-4 sentences) summarising the topic',
-            '- Organise the body using ## subheadings for logical sections',
-            '- Write flowing prose paragraphs within each section — no bullet lists',
-            '- End the article naturally, without a separate summary or conclusion heading',
-            '',
-            'SYNTHESIS RULES:',
-            '- Synthesise the source material into coherent prose',
-            '- Do not repeat the same fact across multiple sections',
-            '- Do not invent facts not present in the source document',
-            '',
+        $prohibitions = implode("\n", [
             'STRICT PROHIBITIONS — any violation causes the response to be rejected:',
             '- No HTML comments (<!-- ... -->)',
             '- No lines starting with "Kilde:", "Source:", "Ref:" or any citation marker',
@@ -159,17 +128,90 @@ class WikiPageContentAiClient
             '',
             'Return only JSON matching the schema. No text before or after JSON.',
         ]);
+
+        return match ($pageType) {
+            'summary' => implode("\n", [
+                "You are an editorial wiki writer. Write a concise professional summary page in {$languageName} based on the provided source document.",
+                '',
+                'SUMMARY STRUCTURE (mandatory):',
+                '- First line must be a # heading containing the page title',
+                '- Follow with 2-4 paragraphs summarising the key points of the source document',
+                '- Write flowing prose — no bullet lists, no headings beyond the title',
+                '',
+                $prohibitions,
+            ]),
+            'concept' => implode("\n", [
+                "You are an editorial wiki writer. Write a professional concept page in {$languageName} explaining the given concept as it appears in the source material.",
+                '',
+                'CONCEPT PAGE STRUCTURE (mandatory):',
+                '- First line must be a # heading containing the concept name',
+                '- Follow with a definition paragraph (2-4 sentences) explaining what the concept is',
+                '- Add one or two ## sections describing how the concept is used or relevant in context',
+                '- Write flowing prose — no bullet lists',
+                '',
+                'SYNTHESIS RULES:',
+                '- Derive meaning from the provided source text and related page content',
+                '- Do not invent facts not supported by the provided material',
+                '- If related article or summary content is provided, use it to enrich the explanation',
+                '',
+                $prohibitions,
+            ]),
+            'entity' => implode("\n", [
+                "You are an editorial wiki writer. Write a professional entity page in {$languageName} describing the given entity (person, organisation, product, system, or place) as it appears in the source material.",
+                '',
+                'ENTITY PAGE STRUCTURE (mandatory):',
+                '- First line must be a # heading containing the entity name',
+                '- Follow with an identification paragraph (2-4 sentences) stating what the entity is',
+                '- Add one or two ## sections covering relevant roles, relationships, or context',
+                '- Write flowing prose — no bullet lists',
+                '',
+                'SYNTHESIS RULES:',
+                '- Derive all facts from the provided source text and related page content',
+                '- Do not invent roles, relationships, or attributes not present in the material',
+                '- If related article or summary content is provided, use it to enrich the description',
+                '',
+                $prohibitions,
+            ]),
+            default => implode("\n", [
+                "You are an editorial wiki article writer. Write a professional, readable internal wiki article in {$languageName} based on the provided source document.",
+                '',
+                'ARTICLE STRUCTURE (mandatory):',
+                '- First line must be a # heading containing the page title',
+                '- Follow with a short introductory paragraph (2-4 sentences) summarising the topic',
+                '- Organise the body using ## subheadings for logical sections',
+                '- Write flowing prose paragraphs within each section — no bullet lists',
+                '- End the article naturally, without a separate summary or conclusion heading',
+                '',
+                'SYNTHESIS RULES:',
+                '- Synthesise the source material into coherent prose',
+                '- Do not repeat the same fact across multiple sections',
+                '- Do not invent facts not present in the source document',
+                '',
+                $prohibitions,
+            ]),
+        };
     }
 
-    private function userPrompt(string $pageTitle, string $sourceText): string
+    private function userPrompt(string $pageTitle, string $sourceText, string $additionalContext): string
     {
-        return implode("\n", [
+        $parts = [
             "Page title: {$pageTitle}",
             '',
             'Source document:',
             '',
             $sourceText,
-        ]);
+        ];
+
+        if (trim($additionalContext) !== '') {
+            $parts[] = '';
+            $parts[] = '---';
+            $parts[] = '';
+            $parts[] = 'Additional context:';
+            $parts[] = '';
+            $parts[] = $additionalContext;
+        }
+
+        return implode("\n", $parts);
     }
 
     private function extractOutputText(array $response): string
