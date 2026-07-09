@@ -1439,6 +1439,21 @@ Implementert:
 - `WikiClaimVerificationAiClient` mockes i `setUp()` — ingen ekte OpenAI-kall i tester
 - 23 tester
 
+#### Fase 8E-16 — Enterprise Wiki page linking, backlinks og traversal index — Fullført
+
+**Commit:** `9d22159`
+
+Implementert:
+- Migrasjon: `enterprise_wiki_page_links` med unik indeks på `(customer_id, from_page_id, to_page_id, link_type)`
+- Modell `EnterpriseWikiPageLink` — 10 link type-konstanter (`article_to_summary`, `summary_to_article`, `article_to_concept`, `concept_to_article`, `article_to_entity`, `entity_to_article`, `summary_to_concept`, `concept_to_summary`, `summary_to_entity`, `entity_to_summary`). Kilde-konstanter `SOURCE_DETERMINISTIC` / `SOURCE_MAINTAINER_DECISION`. Confidence-konstanter `CONFIDENCE_CERTAIN` / `CONFIDENCE_INFERRED`.
+- `EnterpriseWikiBuildPageLinksService` — deterministisk, ingen OpenAI. Laster pivot-rader for en run, kategoriserer sider etter page type, bygger alle kombinasjoner i begge retninger. Bruker `firstOrCreate` + `wasRecentlyCreated` for idempotens og telling av created vs. skipped.
+- Artisan-kommando `wiki:build-page-links --run-id=ID` — guard på `maintainer_decision_status = applied`, full CLI-output (pages checked, links created, links skipped, missing versions, failed).
+- `EnterpriseWikiPageTraversalService` — read-only. Eksponerer `outgoing()`, `incoming()`, `relatedArticles()`, `relatedConcepts()`, `relatedEntities()`. Alle metoder er rene forward-queries på `from_page_id` eller `to_page_id`, customer-scopet. Ingen reverse joins nødvendig fordi begge retninger lagres som eksplisitte rader.
+- 37 tester (29 kommando + 8 traversal). Ingen endring i claims, source references, lint, `ProcessEnterpriseWikiIngest` eller Kunnskapsbase/RAG.
+
+**Design: `EnterpriseWikiPageLink` er en kanonisk customer-scoped sidegraf — ikke per-run historikk.**  
+Den unikke indeksen sikrer at det kun finnes én kant av hver type mellom to sider per kunde, uavhengig av hvor mange runs som har blitt kjørt. `enterprise_wiki_ingest_run_id` er nullable og viser kun hvilken run som _først_ opprettet linken — det er ikke et eierskap og betyr ikke at linken slettes eller endres ved en ny run. Grafen er kumulativ: kanter akkumuleres over tid, duplikater hoppes over med `wasRecentlyCreated = false`. Dette skiller modellen fra pivot-tabellen `enterprise_wiki_ingest_run_pages`, som er per-run historikk.
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
