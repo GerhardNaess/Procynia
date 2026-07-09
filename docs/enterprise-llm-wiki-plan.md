@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-0 (plan/kartlegging) fullført som samtale — 8G-1 ikke startet. Start ikke uten instruksjon.**
+> **8G-1 fullført (commit 6708a60) — 8G-2 ikke startet. Start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet — et objektivt svar på om wikien er god nok til å stoles på. Ingen manuell redigering, ingen handlingsknapper. System Owner ser tilstand og avvik; systemet peker på hva som mangler.
 
@@ -1778,8 +1778,15 @@ rød    = errors > 0, eller approved uten claims, eller mangler current version
 **8G-0 — Plan/kartlegging** *(denne fasen — fullført som samtale, ikke committet som kode)*
 Teknisk kartlegging av datamodell, score-design og faseinndeling.
 
-**8G-1 — Coverage service + CLI**
-Ny `EnterpriseWikiCoverageService` og Artisan-kommando `wiki:coverage {customer}` som beregner og skriver ut coverage-rapport: kildedekning per dokument, side-kvalitetsfordeling, gjennomsnittlig claim coverage, lint-aggregat. Ingen nye tabeller, ingen UI. Formålet er å verifisere at spørringene er korrekte og ytelsesmessig akseptable mot reelle data.
+**8G-1 — Coverage service + CLI** ✅ *fullført — commit 6708a60 — 677 tester passerer — build OK*
+
+`EnterpriseWikiCoverageService` beregner coverage on-demand fra eksisterende Enterprise Wiki-data. `wiki:coverage --customer=<id>` skriver lesbar CLI-rapport med fire dimensjoner:
+- **Kildedekning:** extracted docs → applied runs → article/summary pages (gaps per dokument)
+- **Sidekvalitet:** totalt, per page_type, per status, med/uten current version og content, med/uten claims
+- **Claim coverage:** claims med/uten source reference, coverage-prosent
+- **Lint og graf:** åpne funn per severity, orphan pages
+
+Ingen nye tabeller, migrasjoner, UI eller AI-kall. Lineage via Document→IngestRun→run_pages→Page.
 
 **8G-2 — Read-only coverage-visning i Kvalitet-tab**
 Utvider eksisterende Kvalitet-tab (`/app/wiki?tab=quality`) med en coverage-seksjon: kildedekning (N av M kilder fullstendig), side-kvalitetsfordeling (grønn/gul/rød), gjennomsnittlig claim coverage, og top-N avvik med lenker til relevante sider/kilder. Ingen nye ruter — data serveres som utvidede props på eksisterende endepunkt. Ingen handlingsknapper utover eksisterende lenker.
