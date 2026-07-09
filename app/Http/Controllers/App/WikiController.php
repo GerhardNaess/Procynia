@@ -14,6 +14,7 @@ use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,11 +25,49 @@ class WikiController extends Controller
         private readonly EnterpriseWikiPageTraversalService $traversal,
     ) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $user = $this->customerContext->currentUser();
         $customerId = $this->customerContext->currentCustomerId();
 
+        $allowedTabs = ['pages', 'sources', 'runs', 'quality'];
+        $tab = in_array($request->query('tab'), $allowedTabs, true)
+            ? $request->query('tab')
+            : 'pages';
+
+        $lintBySeverity = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $customerId)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->selectRaw('severity, count(*) as cnt')
+            ->groupBy('severity')
+            ->pluck('cnt', 'severity');
+
+        $lintHealth = [
+            'error' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
+            'warning' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
+            'info' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
+            'total' => (int) $lintBySeverity->sum(),
+        ];
+
+        $props = [
+            'active_tab' => $tab,
+            'lint_health' => $lintHealth,
+            'wiki_generation_available' => WikiSectionAiClient::isAvailable(),
+            'sources_store_url' => route('app.wiki.sources.store'),
+        ];
+
+        $props += match ($tab) {
+            'sources' => $this->loadSourcesTab($user, $customerId),
+            'runs' => $this->loadRunsTab($customerId),
+            'quality' => $this->loadQualityTab($customerId),
+            default => $this->loadPagesTab($user, $customerId),
+        };
+
+        return Inertia::render('App/Wiki/Index', $props);
+    }
+
+    private function loadPagesTab(?User $user, int $customerId): array
+    {
         $pages = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('status', $this->visibleStatuses($user))
@@ -40,12 +79,18 @@ class WikiController extends Controller
                 'id' => $page->id,
                 'title' => $page->title,
                 'slug' => $page->slug,
+                'page_type' => $page->page_type,
                 'status' => $page->status,
                 'current_version_id' => $page->currentVersion?->id,
                 'claims_count' => $page->claims_count,
                 'updated_at' => $page->updated_at,
             ]);
 
+        return ['pages' => $pages];
+    }
+
+    private function loadSourcesTab(?User $user, int $customerId): array
+    {
         $documents = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
             ->orderByDesc('created_at')
@@ -102,27 +147,62 @@ class WikiController extends Controller
                 ->all(),
         ]);
 
-        $lintBySeverity = EnterpriseWikiLintFinding::query()
+        return ['sources' => $sources];
+    }
+
+    private function loadRunsTab(int $customerId): array
+    {
+        $runs = EnterpriseWikiIngestRun::query()
+            ->where('customer_id', $customerId)
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->orderByDesc('created_at')
+            ->get();
+
+        $documentIds = $runs->pluck('source_id')->unique();
+        $docFilenames = EnterpriseWikiDocument::query()
+            ->whereIn('id', $documentIds)
+            ->where('customer_id', $customerId)
+            ->pluck('original_filename', 'id');
+
+        return [
+            'runs' => $runs->map(fn(EnterpriseWikiIngestRun $run) => [
+                'id' => $run->id,
+                'status' => $run->status,
+                'maintainer_decision_status' => $run->maintainer_decision_status,
+                'source_document_filename' => $docFilenames->get($run->source_id),
+                'source_id' => $run->source_id,
+                'error_message' => $run->error_message,
+                'model_used' => $run->model_used,
+                'input_tokens' => $run->input_tokens,
+                'output_tokens' => $run->output_tokens,
+                'created_at' => $run->created_at,
+                'started_at' => $run->started_at,
+                'finished_at' => $run->finished_at,
+            ])->all(),
+        ];
+    }
+
+    private function loadQualityTab(int $customerId): array
+    {
+        $findings = EnterpriseWikiLintFinding::query()
             ->where('customer_id', $customerId)
             ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->selectRaw('severity, count(*) as cnt')
-            ->groupBy('severity')
-            ->pluck('cnt', 'severity');
+            ->with('page:id,title,slug')
+            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn(EnterpriseWikiLintFinding $f) => [
+                'id' => $f->id,
+                'code' => $f->code,
+                'severity' => $f->severity,
+                'message' => $f->message,
+                'page_title' => $f->page?->title,
+                'page_slug' => $f->page?->slug,
+                'created_at' => $f->created_at,
+            ])
+            ->all();
 
-        $lintHealth = [
-            'error' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_ERROR] ?? 0),
-            'warning' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_WARNING] ?? 0),
-            'info' => (int) ($lintBySeverity[EnterpriseWikiLintFinding::SEVERITY_INFO] ?? 0),
-            'total' => (int) $lintBySeverity->sum(),
-        ];
-
-        return Inertia::render('App/Wiki/Index', [
-            'pages' => $pages,
-            'sources' => $sources,
-            'sources_store_url' => route('app.wiki.sources.store'),
-            'wiki_generation_available' => WikiSectionAiClient::isAvailable(),
-            'lint_health' => $lintHealth,
-        ]);
+        return ['quality_findings' => $findings];
     }
 
     public function show(string $slug): Response

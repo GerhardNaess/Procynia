@@ -703,7 +703,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -720,7 +720,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -743,7 +743,7 @@ class WikiControllerTest extends TestCase
         // run must NOT bleed into the own customer's source list.
         $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
@@ -761,7 +761,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_QUEUED);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -784,7 +784,7 @@ class WikiControllerTest extends TestCase
         $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
         $run->update(['enterprise_wiki_page_id' => $page->id]);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document, $page): bool {
@@ -801,7 +801,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -823,7 +823,7 @@ class WikiControllerTest extends TestCase
         $foreignRun = $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
         $foreignRun->update(['enterprise_wiki_page_id' => $foreignPage->id]);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignPage): bool {
@@ -844,7 +844,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -861,7 +861,7 @@ class WikiControllerTest extends TestCase
         $ownDoc = $this->createDocument($customer);
         $foreignDoc = $this->createDocument($other);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignDoc): bool {
@@ -1586,7 +1586,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createDecisionOnlyRun($customer, $document);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -1603,7 +1603,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createDecisionOnlyRun($customer, $document);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -1621,7 +1621,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createDecisionOnlyRun($customer, $document);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -1638,7 +1638,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createDecisionOnlyRun($customer, $document);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -1657,7 +1657,7 @@ class WikiControllerTest extends TestCase
         $foreignDoc = $this->createDocument($other);
         $this->createDecisionOnlyRun($other, $foreignDoc);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
@@ -1675,7 +1675,7 @@ class WikiControllerTest extends TestCase
         $document = $this->createDocument($customer);
         $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
 
-        $response = $this->actingAs($user)->get('/app/wiki');
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
 
         $response->assertOk();
         $response->assertViewHas('page', function (array $inertia) use ($document): bool {
@@ -1703,5 +1703,119 @@ class WikiControllerTest extends TestCase
         $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
         $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
         $this->assertSame($runsBefore, EnterpriseWikiIngestRun::query()->count());
+    }
+
+    // =========================================================================
+    // Phase 8F-1: tab navigation
+    // =========================================================================
+
+    public function test_index_default_tab_is_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.active_tab') === 'pages';
+        });
+    }
+
+    public function test_index_tab_param_sources_sets_active_tab(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.active_tab') === 'sources';
+        });
+    }
+
+    public function test_index_invalid_tab_falls_back_to_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=invalid');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.active_tab') === 'pages';
+        });
+    }
+
+    public function test_index_tab_runs_returns_runs_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($run): bool {
+            $runs = data_get($inertia, 'props.runs', []);
+            return data_get($inertia, 'props.active_tab') === 'runs'
+                && collect($runs)->contains(fn(array $r) => $r['id'] === $run->id);
+        });
+    }
+
+    public function test_index_tab_runs_is_scoped_to_current_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+        $ownRun = $this->createIngestRun($customer, $ownDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $foreignRun = $this->createIngestRun($other, $foreignDoc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=runs');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownRun, $foreignRun): bool {
+            $ids = collect(data_get($inertia, 'props.runs', []))->pluck('id');
+            return $ids->contains($ownRun->id) && ! $ids->contains($foreignRun->id);
+        });
+    }
+
+    public function test_index_tab_quality_returns_quality_findings_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kvalitetsside');
+        $finding = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
+            $findings = data_get($inertia, 'props.quality_findings', []);
+            return data_get($inertia, 'props.active_tab') === 'quality'
+                && collect($findings)->contains(fn(array $f) => $f['id'] === $finding->id);
+        });
+    }
+
+    public function test_index_tab_quality_is_scoped_to_current_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Eigen side');
+        $foreignPage = $this->createPage($other, EnterpriseWikiPage::STATUS_DRAFT, 'Annen side');
+        $foreignFinding = $this->createLintFinding($other, $foreignPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($foreignFinding): bool {
+            $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+            return ! $ids->contains($foreignFinding->id);
+        });
     }
 }
