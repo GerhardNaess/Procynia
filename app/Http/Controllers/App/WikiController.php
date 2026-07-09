@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -24,6 +25,7 @@ class WikiController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
+        private readonly EnterpriseWikiCoverageService $coverageService,
     ) {}
 
     public function index(Request $request): Response
@@ -394,6 +396,8 @@ class WikiController extends Controller
             'created_at' => $f->created_at,
         ])->all();
 
+        $coverage = $this->coverageService->computeForCustomer($customerId);
+
         return [
             'quality_findings' => $mapped,
             'quality_filters' => [
@@ -401,6 +405,7 @@ class WikiController extends Controller
                 'code' => $code,
                 'page_type' => $pageType,
             ],
+            'coverage' => $coverage,
         ];
     }
 

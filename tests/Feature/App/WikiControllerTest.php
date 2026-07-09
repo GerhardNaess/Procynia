@@ -2273,6 +2273,154 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 8G-2: coverage panel in quality tab
+    // =========================================================================
+
+    public function test_quality_tab_includes_coverage_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $coverage = data_get($inertia, 'props.coverage');
+            return is_array($coverage)
+                && array_key_exists('source_coverage', $coverage)
+                && array_key_exists('page_quality', $coverage)
+                && array_key_exists('claim_coverage', $coverage)
+                && array_key_exists('lint', $coverage);
+        });
+    }
+
+    public function test_quality_tab_coverage_source_coverage_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $doc->id,
+            'source_hash' => hash('sha256', "doc:{$doc->id}"),
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_COMPLETED,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+        ]);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Coverage test side');
+        $this->createIngestRunPage($run, $page);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $sc = data_get($inertia, 'props.coverage.source_coverage');
+            return is_array($sc)
+                && $sc['extracted_documents'] === 1
+                && $sc['documents_with_applied_run'] === 1;
+        });
+    }
+
+    public function test_quality_tab_coverage_page_quality_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+        $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pq = data_get($inertia, 'props.coverage.page_quality');
+            return is_array($pq) && $pq['total'] === 2;
+        });
+    }
+
+    public function test_quality_tab_coverage_claim_coverage_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Claim test side');
+        $version = $this->createVersion($page, true);
+        $this->createClaim($page, $version, 'Test-påstand');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $cc = data_get($inertia, 'props.coverage.claim_coverage');
+            return is_array($cc)
+                && $cc['claims_total'] === 1
+                && $cc['claims_without_source_reference'] === 1;
+        });
+    }
+
+    public function test_quality_tab_coverage_lint_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Lint test side');
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $lint = data_get($inertia, 'props.coverage.lint');
+            return is_array($lint)
+                && $lint['open_errors'] === 1
+                && $lint['open_warnings'] === 1;
+        });
+    }
+
+    public function test_quality_tab_coverage_gaps_are_customer_scoped(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $this->createDocument($customer); // no applied run → gap
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $gaps = data_get($inertia, 'props.coverage.source_coverage.gaps', []);
+            return count($gaps) === 1;
+        });
+    }
+
+    public function test_quality_tab_coverage_other_customer_data_not_counted(): void
+    {
+        $customerA = $this->createCustomer('Kunde A');
+        $customerB = $this->createCustomer('Kunde B');
+        $userA = $this->createUser($customerA, User::BID_ROLE_SYSTEM_OWNER);
+        $this->createPage($customerB, EnterpriseWikiPage::STATUS_APPROVED, 'Annen kundes side');
+        $this->createDocument($customerB);
+
+        $response = $this->actingAs($userA)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $pq = data_get($inertia, 'props.coverage.page_quality');
+            $sc = data_get($inertia, 'props.coverage.source_coverage');
+            return $pq['total'] === 0 && $sc['extracted_documents'] === 0;
+        });
+    }
+
+    public function test_quality_tab_is_read_only(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        // Quality tab renders via GET — verify no POST route exists for coverage
+        $this->actingAs($user)->get('/app/wiki?tab=quality')->assertOk();
+        $this->actingAs($user)->post('/app/wiki?tab=quality')->assertStatus(405);
+    }
+
+    // =========================================================================
     // Phase 8F-2: search and filtering — pages tab
     // =========================================================================
 

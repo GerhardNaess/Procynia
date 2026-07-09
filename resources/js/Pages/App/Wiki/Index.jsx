@@ -281,6 +281,121 @@ function DecisionModal({ run, tw, onClose }) {
     );
 }
 
+// ─── Coverage panel ──────────────────────────────────────────────────────────
+
+function CoverageStat({ label, value, warn = false }) {
+    const numCls = warn && value > 0
+        ? 'text-amber-600'
+        : 'text-slate-900';
+    return (
+        <div className="flex flex-col gap-0.5">
+            <span className={`text-xl font-semibold tabular-nums ${numCls}`}>{value ?? '—'}</span>
+            <span className="text-[11px] text-slate-500">{label}</span>
+        </div>
+    );
+}
+
+function CoverageSection({ title, children }) {
+    return (
+        <div className="space-y-3">
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{title}</h3>
+            <div className="flex flex-wrap gap-x-8 gap-y-3">{children}</div>
+        </div>
+    );
+}
+
+function CoveragePanel({ coverage, tw }) {
+    if (!coverage) return null;
+
+    const sc = coverage.source_coverage ?? {};
+    const pq = coverage.page_quality ?? {};
+    const cc = coverage.claim_coverage ?? {};
+    const lint = coverage.lint ?? {};
+    const gaps = sc.gaps ?? [];
+
+    const gapLabelMap = {
+        applied_run: tw.coverage_docs_with_run ?? 'applied kjøring',
+        article: tw.coverage_docs_with_article ?? 'artikkel-side',
+        summary: tw.coverage_docs_with_summary ?? 'sammendrag-side',
+    };
+
+    return (
+        <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+            <div className="border-b border-slate-100 px-5 py-4">
+                <h2 className="text-sm font-semibold text-slate-800">
+                    {tw.coverage_title ?? 'Dekning'}
+                </h2>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+                {/* Source coverage */}
+                <div className="px-5 py-4">
+                    <CoverageSection title={tw.coverage_section_sources ?? 'Kildedekning'}>
+                        <CoverageStat label={tw.coverage_extracted_docs ?? 'Extracted dokumenter'} value={sc.extracted_documents ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_with_run ?? 'Med applied kjøring'} value={sc.documents_with_applied_run ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_with_article ?? 'Med artikkel-side'} value={sc.documents_with_article ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_with_summary ?? 'Med sammendrag-side'} value={sc.documents_with_summary ?? 0} />
+                    </CoverageSection>
+                </div>
+
+                {/* Page quality */}
+                <div className="px-5 py-4">
+                    <CoverageSection title={tw.coverage_section_pages ?? 'Sidekvalitet'}>
+                        <CoverageStat label={tw.coverage_pages_total ?? 'Totalt sider'} value={pq.total ?? 0} />
+                        <CoverageStat label={tw.coverage_pages_no_version ?? 'Uten gjeldende versjon'} value={pq.without_current_version ?? 0} warn />
+                        <CoverageStat label={tw.coverage_pages_no_content ?? 'Uten innhold'} value={pq.without_content ?? 0} warn />
+                        <CoverageStat label={tw.coverage_pages_no_claims ?? 'Uten claims'} value={pq.without_claims ?? 0} warn />
+                    </CoverageSection>
+                </div>
+
+                {/* Claim coverage + graph */}
+                <div className="flex flex-wrap divide-x divide-slate-100">
+                    <div className="px-5 py-4">
+                        <CoverageSection title={tw.coverage_section_claims ?? 'Claim-dekning'}>
+                            <CoverageStat
+                                label={tw.coverage_claim_pct ?? 'Dekningsgrad'}
+                                value={cc.claim_coverage_pct != null ? `${cc.claim_coverage_pct}%` : '—'}
+                            />
+                            <CoverageStat label="Med kildereferanse" value={cc.claims_with_source_reference ?? 0} />
+                            <CoverageStat label="Uten kildereferanse" value={cc.claims_without_source_reference ?? 0} warn />
+                        </CoverageSection>
+                    </div>
+                    <div className="px-5 py-4">
+                        <CoverageSection title={tw.coverage_section_graph ?? 'Graf og struktur'}>
+                            <CoverageStat label={tw.coverage_orphan_pages ?? 'Foreldreløse sider'} value={lint.orphan_pages ?? 0} warn />
+                        </CoverageSection>
+                    </div>
+                </div>
+
+                {/* Gaps */}
+                <div className="px-5 py-4">
+                    <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                        {tw.coverage_gaps_title ?? 'Dekning-gap'}
+                    </h3>
+                    {gaps.length === 0 ? (
+                        <p className="text-sm text-slate-500">{tw.coverage_no_gaps ?? 'Ingen dekning-gap'}</p>
+                    ) : (
+                        <ul className="space-y-1">
+                            {gaps.map((gap) => (
+                                <li key={gap.document_id} className="flex items-baseline gap-2 text-sm">
+                                    <span className="max-w-[240px] truncate font-medium text-slate-700" title={gap.filename}>
+                                        {gap.filename}
+                                    </span>
+                                    <span className="text-slate-400">—</span>
+                                    <span className="text-amber-600">
+                                        {tw.coverage_gap_missing ?? 'Mangler'}:{' '}
+                                        {gap.missing.map((m) => gapLabelMap[m] ?? m).join(', ')}
+                                    </span>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            </div>
+        </section>
+    );
+}
+
 function LintHealthBar({ health, tw }) {
     if (health.total === 0) {
         return (
@@ -1211,7 +1326,7 @@ const PAGE_TYPE_LABELS = {
     backlinks: 'Backlinks',
 };
 
-function QualityTab({ findings, qualityFilters, lintHealth, tw, locale }) {
+function QualityTab({ findings, qualityFilters, lintHealth, coverage, tw, locale }) {
     const filters = qualityFilters ?? {};
 
     const navigate = (overrides) => {
@@ -1230,6 +1345,7 @@ function QualityTab({ findings, qualityFilters, lintHealth, tw, locale }) {
 
     return (
         <div className="space-y-5">
+            <CoveragePanel coverage={coverage} tw={tw} />
             <LintHealthBar health={lintHealth} tw={tw} />
 
             {/* Filter bar */}
@@ -1383,6 +1499,7 @@ export default function WikiIndex({
     runs_filters: runsFilters = null,
     quality_findings: qualityFindings = [],
     quality_filters: qualityFilters = null,
+    coverage = null,
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
     wiki_generation_available: wikiGenerationAvailable = false,
     lint_health: lintHealth = { error: 0, warning: 0, info: 0, total: 0 },
@@ -1428,7 +1545,7 @@ export default function WikiIndex({
                     <RunsTab runs={runs} runsFilters={runsFilters} tw={tw} locale={locale} />
                 )}
                 {activeTab === 'quality' && (
-                    <QualityTab findings={qualityFindings} qualityFilters={qualityFilters} lintHealth={lintHealth} tw={tw} locale={locale} />
+                    <QualityTab findings={qualityFindings} qualityFilters={qualityFilters} lintHealth={lintHealth} coverage={coverage} tw={tw} locale={locale} />
                 )}
             </div>
         </CustomerAppLayout>
