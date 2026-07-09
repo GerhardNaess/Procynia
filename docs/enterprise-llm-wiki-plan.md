@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-19 fullført (commit 1486007) · **Neste: Fase 8F Review og godkjennings-UX**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · **Neste: Fase 8F Review og godkjennings-UX**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -1546,6 +1546,44 @@ Implementert:
 - Ingen frontend-biblioteker ble lagt til (ikke sigma, graphology, d3, cytoscape, react-force-graph)
 - Ingen layout-algoritme i backend
 - Graph-UI er et bevisst utsatt neste steg
+
+#### Fase 8E-20 — Read-only Enterprise Wiki Graph View UI — Fullført
+
+**Implementeringscommit:** `dd071f6` — Add Enterprise Wiki graph view UI (Phase 8E-20)
+
+Implementert:
+- `WikiGraphController` (`app/Http/Controllers/App/`) — Inertia-endepunkt, sender `initialRunId` og `initialPageId` som props fra query params
+- Rute `GET /app/wiki/graph` lagt inn i wiki-routegruppen (etter `/graph-data`, før `/{slug}`)
+- `Graph.jsx` (`resources/js/Pages/App/Wiki/`) — read-only Sigma.js + Graphology graph view:
+  - Henter data fra `GET /app/wiki/graph-data` (8E-19 endpoint) via `fetch()` i browser
+  - Bygger Graphology-graf fra JSON-payload
+  - Kjører ForceAtlas2 layout i browser (150 iterasjoner, `inferSettings`)
+  - Rendrer med Sigma v3 — ingen backend layout-algoritme
+  - Nodes = `EnterpriseWikiPage`, Edges = `EnterpriseWikiPageLink`
+- Fargekoding av noder per `page_type`: article (violet), summary (sky), concept (teal), entity (orange)
+- Nodestørrelse basert på `page_type` + grad (antall koblinger)
+- Lint-status-ring i tegnforklaring (error/warning/ok)
+- FilterPanel: page type-avkryssing, status-avkryssing, vis/skjul orphans
+- SummaryPanel: viser `summary`-feltet fra graph-data-payload
+- NodePanel (sidepanel ved klikk): title, page_type, status, claim_count, source_reference_count, lint_error_count, lint_warning_count, "Åpne side"-lenke
+- Zoom og pan via Sigma innebygd; "Tilpass visning" knapp kaller `animatedReset()`
+- Scopes: customer-wide (default), `?run_id=` (applied run), `?page_id=` (neighborhood) — `page_id` vinner over `run_id` i tråd med 8E-19
+- Tom wiki / alle filtrert bort / 422 fra ugyldig scope — viser brukerforståelig feilmelding
+- "Grafvisning"-knapp lagt til på Wiki index-siden
+- 32 nye i18n-nøkler (wiki.graph_*) i `lang/no/procynia.php` og `lang/en/procynia.php`
+- 13 tester i `tests/Feature/App/Wiki/WikiGraphControllerTest.php`
+
+**Frontend-pakker (ny):**
+- `sigma@3.0.3`
+- `graphology@0.26.0`
+- `graphology-layout-forceatlas2@0.10.1`
+
+**Avgrensninger (8E-20):**
+- Read-only — ingen editor, ingen AI-kall, ingen godkjenningsflyt, ingen ny linkbygging, ingen ny lint-kjøring
+- Ingen produksjonsaktivering, ingen admin/Filament-endringer, ingen billing
+- Ingen 3D-graf — 2D ForceAtlas2 i browser
+- Ingen backend layout-algoritme
+- `GET /app/wiki/graph-data` er fortsatt den eneste datakilden for grafen
 
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
