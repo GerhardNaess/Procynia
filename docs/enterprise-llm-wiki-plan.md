@@ -734,7 +734,9 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
+| Fase 8G | Enterprise Wiki coverage/eval | Gjenstår — neste etter 8F |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår |
+| Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
 
@@ -1099,7 +1101,7 @@ Manuell lokal verifisering gjennomført mot Masterdata Prosjekt.docx:
 - Claims, excerpts og confidence verifisert i database
 - `content_markdown` populert av `assembleContentMarkdown()` (claim-dump, ikke artikkel — erstattes i Fase 8C)
 
-### Fase 7 — Produksjonsrunbook — Fullført (aktivering utsatt til Fase 8G)
+### Fase 7 — Produksjonsrunbook — Fullført (aktivering utsatt — ikke del av 8G)
 
 Kjøreklar aktiveringsguide for produksjonsmiljø. Forutsetter at Fase 6 (lokal E2E-verifisering) er gjennomført og godkjent.
 
@@ -1721,16 +1723,31 @@ Foreløpig scope (for fremtidig referanse):
 **Teststrategi for 8F:**
 Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall. `KnowledgeItem`/`KnowledgeItemVersion`/`KnowledgeItemChunk` verifiseres urørt etter sletteoperasjoner.
 
-### Fase 8G — Kontrollert produksjonsaktivering — Gjenstår til etter Fase 8F
+### Fase 8G — Enterprise Wiki coverage/eval — Gjenstår
 
-> **Ikke neste steg.** Produksjonsaktivering skjer først etter at Fase 8E–8F er gjennomført og wiki-maintainer-opplevelsen er verifisert.
+> **Ikke start uten instruksjon.** Scope avklares separat. Dette er neste planlagte aktive fase etter 8F.
 
-Mål: bruk eksisterende runbook fra Fase 7 kontrollert i produksjon.
+Mål: automatisk måling av wiki-helse og innholdskvalitet over tid — et objektivt svar på om wikien er god nok til å stoles på.
 
-Krav:
-- `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres etter at maintainer-flyten fungerer
+Foreløpig scope (avklares separat):
+- Andel sider med godkjent innhold, komplette claims og lavt lint-score
+- Koblingsdekning og page_type-fordeling
+- Historisk trendvisning: forbedres wikien over tid?
+- Grunnlaget for å vurdere produksjonsaktivering
+
+### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
+
+> **Ikke start uten instruksjon.** Avhenger av at 8G er på plass.
+
+Mål: automatisk pipeline-kjøring ved nye eller endrede kildedokumenter, med ferdig beslutningsforslag klart for System Owner-godkjenning — fra manuell pilot til operasjonelt system.
+
+### Produksjonsaktivering — Etter 8G og 8H
+
+> **Ikke aktiv fase.** Produksjonsaktivering skjer etter at coverage/eval (8G) og continuous maintainer loop (8H) er implementert og verifisert. Eksisterende runbook fra Fase 7 brukes som teknisk grunnlag.
+
+Krav (uendret fra Fase 7-runbook):
+- `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres kontrollert
 - første produksjonsbruk med kort dokument
-- queue restart/config clear er del av runbook (se Fase 7)
 - reversering via `ENTERPRISE_WIKI_AI_ENABLED=false`
 
 ### Fase 9 — Sammenligning mot dagens RAG
