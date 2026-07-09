@@ -2102,6 +2102,177 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 8F-5: quality tab — filtering
+    // =========================================================================
+
+    public function test_quality_tab_filter_by_severity(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $error = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+        $warning = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality&q_severity=error');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($error, $warning): bool {
+            $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+            return $ids->contains($error->id) && ! $ids->contains($warning->id);
+        });
+    }
+
+    public function test_quality_tab_filter_by_code(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+
+        $missingSource = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Mangler kilde',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+        $missingExcerpt = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'code' => EnterpriseWikiLintFinding::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Mangler utdrag',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality&q_code=claim_missing_source');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($missingSource, $missingExcerpt): bool {
+            $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+            return $ids->contains($missingSource->id) && ! $ids->contains($missingExcerpt->id);
+        });
+    }
+
+    public function test_quality_tab_filter_by_page_type(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $articlePage = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Article side',
+            'slug' => 'article-side-' . uniqid(),
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+        ]);
+        $conceptPage = EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'title' => 'Concept side',
+            'slug' => 'concept-side-' . uniqid(),
+            'page_type' => EnterpriseWikiPage::PAGE_TYPE_CONCEPT,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+        ]);
+
+        $articleFinding = $this->createLintFinding($customer, $articlePage, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+        $conceptFinding = $this->createLintFinding($customer, $conceptPage, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality&q_page_type=article');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($articleFinding, $conceptFinding): bool {
+            $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+            return $ids->contains($articleFinding->id) && ! $ids->contains($conceptFinding->id);
+        });
+    }
+
+    public function test_quality_tab_invalid_filters_are_ignored(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+        $finding = $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality&q_severity=bogus&q_code=not_a_code&q_page_type=not_a_type');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($finding): bool {
+            $ids = collect(data_get($inertia, 'props.quality_findings', []))->pluck('id');
+            return $ids->contains($finding->id);
+        });
+    }
+
+    public function test_quality_tab_returns_quality_filters_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality&q_severity=error&q_page_type=article');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $f = data_get($inertia, 'props.quality_filters');
+            return $f !== null
+                && $f['severity'] === 'error'
+                && $f['page_type'] === 'article';
+        });
+    }
+
+    public function test_quality_tab_finding_exposes_page_type_and_run_id(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Testside');
+
+        $finding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'code' => EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            'message' => 'Testfunn',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($finding, $run): bool {
+            $found = collect(data_get($inertia, 'props.quality_findings', []))
+                ->firstWhere('id', $finding->id);
+            return $found !== null
+                && $found['run_id'] === $run->id
+                && isset($found['page_type'])
+                && isset($found['source_filename']);
+        });
+    }
+
+    public function test_quality_tab_empty_state_handled_gracefully(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=quality');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $findings = data_get($inertia, 'props.quality_findings', []);
+            return is_array($findings) && count($findings) === 0;
+        });
+    }
+
+    public function test_quality_tab_guest_is_redirected(): void
+    {
+        $response = $this->get('/app/wiki?tab=quality');
+        $response->assertRedirect('/login');
+    }
+
+    // =========================================================================
     // Phase 8F-2: search and filtering — pages tab
     // =========================================================================
 

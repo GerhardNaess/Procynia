@@ -60,7 +60,7 @@ class WikiController extends Controller
         $props += match ($tab) {
             'sources' => $this->loadSourcesTab($user, $customerId, $request),
             'runs' => $this->loadRunsTab($customerId, $request),
-            'quality' => $this->loadQualityTab($customerId),
+            'quality' => $this->loadQualityTab($customerId, $request),
             default => $this->loadPagesTab($user, $customerId, $request),
         };
 
@@ -327,27 +327,81 @@ class WikiController extends Controller
         ];
     }
 
-    private function loadQualityTab(int $customerId): array
+    private function loadQualityTab(int $customerId, Request $request): array
     {
-        $findings = EnterpriseWikiLintFinding::query()
-            ->where('customer_id', $customerId)
-            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
-            ->with('page:id,title,slug')
-            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
-            ->orderByDesc('created_at')
-            ->get()
-            ->map(fn(EnterpriseWikiLintFinding $f) => [
-                'id' => $f->id,
-                'code' => $f->code,
-                'severity' => $f->severity,
-                'message' => $f->message,
-                'page_title' => $f->page?->title,
-                'page_slug' => $f->page?->slug,
-                'created_at' => $f->created_at,
-            ])
-            ->all();
+        $allowedSeverities = [
+            EnterpriseWikiLintFinding::SEVERITY_ERROR,
+            EnterpriseWikiLintFinding::SEVERITY_WARNING,
+            EnterpriseWikiLintFinding::SEVERITY_INFO,
+        ];
+        $allowedPageTypes = EnterpriseWikiPage::PAGE_TYPES;
+        $allowedCodes = EnterpriseWikiLintFinding::CODES;
 
-        return ['quality_findings' => $findings];
+        $severity = in_array($request->query('q_severity'), $allowedSeverities, true)
+            ? $request->query('q_severity') : null;
+        $code = in_array($request->query('q_code'), $allowedCodes, true)
+            ? $request->query('q_code') : null;
+        $pageType = in_array($request->query('q_page_type'), $allowedPageTypes, true)
+            ? $request->query('q_page_type') : null;
+
+        $query = EnterpriseWikiLintFinding::query()
+            ->where('enterprise_wiki_lint_findings.customer_id', $customerId)
+            ->where('enterprise_wiki_lint_findings.status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            ->with([
+                'page:id,title,slug,page_type',
+                'run:id,source_id',
+            ])
+            ->orderByRaw("CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END")
+            ->orderByDesc('enterprise_wiki_lint_findings.created_at');
+
+        if ($severity !== null) {
+            $query->where('enterprise_wiki_lint_findings.severity', $severity);
+        }
+
+        if ($code !== null) {
+            $query->where('enterprise_wiki_lint_findings.code', $code);
+        }
+
+        if ($pageType !== null) {
+            $query->whereHas('page', fn ($q) => $q->where('page_type', $pageType));
+        }
+
+        $findings = $query->get();
+
+        $docIds = $findings
+            ->map(fn ($f) => $f->run?->source_id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $docFilenames = $docIds->isNotEmpty()
+            ? EnterpriseWikiDocument::query()
+                ->where('customer_id', $customerId)
+                ->whereIn('id', $docIds)
+                ->pluck('original_filename', 'id')
+            : collect();
+
+        $mapped = $findings->map(fn (EnterpriseWikiLintFinding $f) => [
+            'id' => $f->id,
+            'code' => $f->code,
+            'severity' => $f->severity,
+            'message' => $f->message,
+            'page_title' => $f->page?->title,
+            'page_slug' => $f->page?->slug,
+            'page_type' => $f->page?->page_type,
+            'run_id' => $f->enterprise_wiki_ingest_run_id,
+            'source_filename' => $f->run?->source_id ? $docFilenames->get($f->run->source_id) : null,
+            'created_at' => $f->created_at,
+        ])->all();
+
+        return [
+            'quality_findings' => $mapped,
+            'quality_filters' => [
+                'severity' => $severity,
+                'code' => $code,
+                'page_type' => $pageType,
+            ],
+        ];
     }
 
     public function show(string $slug): Response
