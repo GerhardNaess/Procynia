@@ -1523,7 +1523,7 @@ Implementert:
 
 #### Fase 8E-19 — Enterprise Wiki graph data foundation — Fullført
 
-**Commit:** `1486007`
+**Implementeringscommit:** `1486007` — Add Enterprise Wiki graph data foundation (Phase 8E-19)
 
 Implementert:
 - `EnterpriseWikiGraphDataService` (`app/Services/EnterpriseWiki/`) — bygger stabilt grafpayload (nodes, edges, summary, scope) fra det kanoniske `EnterpriseWikiPageLink`-grafen. Tre scope-varianter:
