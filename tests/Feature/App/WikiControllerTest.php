@@ -1818,4 +1818,397 @@ class WikiControllerTest extends TestCase
             return ! $ids->contains($foreignFinding->id);
         });
     }
+
+    // =========================================================================
+    // Phase 8F-2: search and filtering — pages tab
+    // =========================================================================
+
+    public function test_pages_tab_search_filters_by_title(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $match = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO 9001 sertifisering');
+        $noMatch = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Miljøpolicy');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=ISO');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($match, $noMatch): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($match->id) && ! $ids->contains($noMatch->id);
+        });
+    }
+
+    public function test_pages_tab_search_is_case_insensitive(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $match = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kompetansekrav');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=kompetanse');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($match): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($match->id);
+        });
+    }
+
+    public function test_pages_tab_page_type_filter_works(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kvalitetsbegrep', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&page_type=concept');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($concept, $article): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($concept->id) && ! $ids->contains($article->id);
+        });
+    }
+
+    public function test_pages_tab_status_filter_works(): void
+    {
+        $customer = $this->createCustomer();
+        $owner = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $draft = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Utkast side');
+        $approved = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent side');
+
+        $response = $this->actingAs($owner)->get('/app/wiki?tab=pages&status=draft');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($draft, $approved): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($draft->id) && ! $ids->contains($approved->id);
+        });
+    }
+
+    public function test_pages_tab_lint_filter_errors_returns_pages_with_error_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $errorPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Side med feil');
+        $cleanPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Ren side');
+        $this->createLintFinding($customer, $errorPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&lint=errors');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($errorPage, $cleanPage): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($errorPage->id) && ! $ids->contains($cleanPage->id);
+        });
+    }
+
+    public function test_pages_tab_lint_filter_warnings_returns_pages_with_warning_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $warnPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Side med advarsel');
+        $cleanPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Ren side');
+        $this->createLintFinding($customer, $warnPage, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&lint=warnings');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($warnPage, $cleanPage): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($warnPage->id) && ! $ids->contains($cleanPage->id);
+        });
+    }
+
+    public function test_pages_tab_lint_filter_ok_returns_pages_without_open_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $cleanPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Ren side');
+        $errorPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Side med feil');
+        $this->createLintFinding($customer, $errorPage, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&lint=ok');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($cleanPage, $errorPage): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($cleanPage->id) && ! $ids->contains($errorPage->id);
+        });
+    }
+
+    public function test_pages_tab_combined_search_and_page_type_filter(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $match = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $wrongType = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $wrongTitle = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Annet konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=ISO&page_type=concept');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($match, $wrongType, $wrongTitle): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($match->id)
+                && ! $ids->contains($wrongType->id)
+                && ! $ids->contains($wrongTitle->id);
+        });
+    }
+
+    public function test_pages_tab_invalid_page_type_is_ignored_safely(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Normal side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&page_type=invalid_type');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($page->id);
+        });
+    }
+
+    public function test_pages_tab_invalid_lint_value_is_ignored_safely(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Normal side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&lint=blahblah');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($page->id);
+        });
+    }
+
+    public function test_pages_tab_invalid_status_not_in_visible_statuses_is_ignored(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $approved = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Godkjent');
+
+        // contributor cannot see draft, so ?status=draft should be ignored
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&status=draft');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($approved): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($approved->id);
+        });
+    }
+
+    public function test_pages_tab_sort_title_asc_orders_alphabetically(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $b = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Beta side');
+        $a = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Alfa side');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&sort=title_asc');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($a, $b): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id')->values();
+            $posA = $ids->search($a->id);
+            $posB = $ids->search($b->id);
+            return $posA !== false && $posB !== false && $posA < $posB;
+        });
+    }
+
+    public function test_pages_tab_invalid_sort_falls_back_to_default(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&sort=not_a_valid_sort');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $filters = data_get($inertia, 'props.pages_filters');
+            return $filters !== null && $filters['sort'] === 'updated_at_desc';
+        });
+    }
+
+    public function test_pages_tab_returns_pages_filters_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=foo&page_type=concept&lint=errors&sort=title_asc');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $f = data_get($inertia, 'props.pages_filters');
+            return $f !== null
+                && $f['search'] === 'foo'
+                && $f['page_type'] === 'concept'
+                && $f['lint'] === 'errors'
+                && $f['sort'] === 'title_asc';
+        });
+    }
+
+    public function test_pages_tab_returns_pages_meta_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $meta = data_get($inertia, 'props.pages_meta');
+            return $meta !== null
+                && array_key_exists('current_page', $meta)
+                && array_key_exists('per_page', $meta)
+                && array_key_exists('total', $meta)
+                && array_key_exists('last_page', $meta);
+        });
+    }
+
+    public function test_pages_tab_filter_is_scoped_to_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownPage = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'ISO sertifikat');
+        $foreignPage = $this->createPage($other, EnterpriseWikiPage::STATUS_APPROVED, 'ISO rutine');
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=pages&search=ISO');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownPage, $foreignPage): bool {
+            $ids = collect(data_get($inertia, 'props.pages', []))->pluck('id');
+            return $ids->contains($ownPage->id) && ! $ids->contains($foreignPage->id);
+        });
+    }
+
+    // =========================================================================
+    // Phase 8F-2: search and filtering — sources tab
+    // =========================================================================
+
+    public function test_sources_tab_search_filters_by_filename(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $matchDoc = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'iso9001-kvalitetsmanual.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/match.pdf',
+            'file_hash_sha256' => hash('sha256', 'match'),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+        $noMatchDoc = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'miljopolicy.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/nomatch.pdf',
+            'file_hash_sha256' => hash('sha256', 'nomatch'),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_q=iso');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($matchDoc, $noMatchDoc): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($matchDoc->id) && ! $ids->contains($noMatchDoc->id);
+        });
+    }
+
+    public function test_sources_tab_status_filter_works(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $extracted = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
+        $failed = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_status=extracted');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($extracted, $failed): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($extracted->id) && ! $ids->contains($failed->id);
+        });
+    }
+
+    public function test_sources_tab_combined_search_and_status_filter(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $match = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'iso-extracted.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/iso-e.pdf',
+            'file_hash_sha256' => hash('sha256', 'iso-e'),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+        $wrongStatus = EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'iso-failed.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki-documents/iso-f.pdf',
+            'file_hash_sha256' => hash('sha256', 'iso-f'),
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
+        ]);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_q=iso&src_status=extracted');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($match, $wrongStatus): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($match->id) && ! $ids->contains($wrongStatus->id);
+        });
+    }
+
+    public function test_sources_tab_invalid_status_is_ignored_safely(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_status=not_a_status');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($doc): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($doc->id);
+        });
+    }
+
+    public function test_sources_tab_returns_sources_filters_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_q=test&src_status=extracted');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $f = data_get($inertia, 'props.sources_filters');
+            return $f !== null
+                && $f['search'] === 'test'
+                && $f['status'] === 'extracted';
+        });
+    }
+
+    public function test_sources_tab_filter_is_scoped_to_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+
+        $response = $this->actingAs($user)->get('/app/wiki?tab=sources&src_status=extracted');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDoc, $foreignDoc): bool {
+            $ids = collect(data_get($inertia, 'props.sources', []))->pluck('id');
+            return $ids->contains($ownDoc->id) && ! $ids->contains($foreignDoc->id);
+        });
+    }
 }

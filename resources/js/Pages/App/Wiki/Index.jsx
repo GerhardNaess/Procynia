@@ -365,7 +365,31 @@ function TabBar({ activeTab, lintHealth, tw }) {
 
 // ─── Pages tab ───────────────────────────────────────────────────────────────
 
-function PagesTab({ pages, tw, locale }) {
+const SELECT_CLS = 'h-9 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 shadow-sm transition focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100';
+
+function PagesTab({ pages, pagesMeta, pagesFilters, tw, locale }) {
+    const filters = pagesFilters ?? {};
+    const meta = pagesMeta ?? { current_page: 1, last_page: 1, total: 0, per_page: 25 };
+
+    const [searchInput, setSearchInput] = useState(filters.search ?? '');
+
+    const navigate = (overrides) => {
+        router.get('/app/wiki', {
+            tab: 'pages',
+            search: filters.search ?? '',
+            page_type: filters.page_type ?? '',
+            status: filters.status ?? '',
+            lint: filters.lint ?? '',
+            sort: filters.sort ?? 'updated_at_desc',
+            ...overrides,
+        }, { preserveState: true, preserveScroll: true });
+    };
+
+    const handleSearchSubmit = (e) => {
+        e.preventDefault();
+        navigate({ search: searchInput, page: 1 });
+    };
+
     const statusLabel = (status) => ({
         approved: tw.status_approved ?? 'Godkjent',
         pending_review: tw.status_pending_review ?? 'Til gjennomgang',
@@ -381,100 +405,229 @@ function PagesTab({ pages, tw, locale }) {
         entity: tw.page_type_entity ?? 'Entitet',
     }[type] ?? type);
 
-    if (pages.length === 0) {
-        return (
-            <EmptyStateBox
-                title={tw.empty_title ?? 'Ingen wiki-sider ennå'}
-                description={tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.'}
-            />
-        );
-    }
+    const hasActiveFilters = !!(filters.search || filters.page_type || filters.status || filters.lint);
 
     return (
-        <>
-            {/* Mobile cards */}
-            <section className="grid gap-3 md:hidden">
-                {pages.map((page) => (
-                    <article
-                        key={page.id}
-                        className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]"
+        <div className="space-y-4">
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-end gap-2">
+                <form onSubmit={handleSearchSubmit} className="flex items-center gap-1.5">
+                    <input
+                        type="search"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        placeholder={tw.filter_search_placeholder ?? 'Søk...'}
+                        className={SELECT_CLS + ' w-52'}
+                    />
+                    <button
+                        type="submit"
+                        className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                     >
-                        <div className="space-y-3">
-                            <div>
-                                <div className="text-base font-semibold text-slate-950">{page.title}</div>
-                                <div className="mt-1 text-sm text-slate-400">
-                                    {tw.updated ?? 'Oppdatert'} {formatDate(page.updated_at, locale)}
-                                </div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <StatusBadge status={page.status} label={statusLabel(page.status)} />
-                                {page.page_type && (
-                                    <PageTypeBadge type={page.page_type} label={pageTypeLabel(page.page_type)} />
-                                )}
-                                <span className="text-xs text-slate-400">
-                                    {page.claims_count} {tw.claims ?? 'påstander'}
-                                </span>
-                            </div>
-                            <Link
-                                href={`/app/wiki/${page.slug}`}
-                                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                            >
-                                {tw.open ?? 'Åpne'}
-                            </Link>
-                        </div>
-                    </article>
-                ))}
-            </section>
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                </form>
 
-            {/* Desktop table */}
-            <section className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200">
-                        <thead className="bg-slate-50">
-                            <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                                <th className="px-6 py-4">Tittel</th>
-                                <th className="px-6 py-4">Type</th>
-                                <th className="px-6 py-4">Status</th>
-                                <th className="px-6 py-4">{tw.claims ?? 'Påstander'}</th>
-                                <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
-                                <th className="px-6 py-4"></th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {pages.map((page) => (
-                                <tr key={page.id} className="text-sm text-slate-700">
-                                    <td className="px-6 py-4 font-medium text-slate-950">{page.title}</td>
-                                    <td className="px-6 py-4">
+                <select
+                    value={filters.page_type ?? ''}
+                    onChange={(e) => navigate({ page_type: e.target.value, page: 1 })}
+                    className={SELECT_CLS}
+                >
+                    <option value="">{tw.filter_page_type_all ?? 'Alle typer'}</option>
+                    <option value="article">{tw.page_type_article ?? 'Kildeartikkel'}</option>
+                    <option value="summary">{tw.page_type_summary ?? 'Sammendrag'}</option>
+                    <option value="concept">{tw.page_type_concept ?? 'Konsept'}</option>
+                    <option value="entity">{tw.page_type_entity ?? 'Entitet'}</option>
+                </select>
+
+                <select
+                    value={filters.status ?? ''}
+                    onChange={(e) => navigate({ status: e.target.value, page: 1 })}
+                    className={SELECT_CLS}
+                >
+                    <option value="">{tw.filter_status_all ?? 'Alle statuser'}</option>
+                    <option value="approved">{tw.status_approved ?? 'Godkjent'}</option>
+                    <option value="pending_review">{tw.status_pending_review ?? 'Til gjennomgang'}</option>
+                    <option value="draft">{tw.status_draft ?? 'Utkast'}</option>
+                    <option value="rejected">{tw.status_rejected ?? 'Avvist'}</option>
+                </select>
+
+                <select
+                    value={filters.lint ?? ''}
+                    onChange={(e) => navigate({ lint: e.target.value, page: 1 })}
+                    className={SELECT_CLS}
+                >
+                    <option value="">{tw.filter_lint_all ?? 'Alle'}</option>
+                    <option value="errors">{tw.filter_lint_errors ?? 'Har feil'}</option>
+                    <option value="warnings">{tw.filter_lint_warnings ?? 'Har advarsler'}</option>
+                    <option value="ok">{tw.filter_lint_ok ?? 'Ingen funn'}</option>
+                </select>
+
+                <select
+                    value={filters.sort ?? 'updated_at_desc'}
+                    onChange={(e) => navigate({ sort: e.target.value, page: 1 })}
+                    className={SELECT_CLS}
+                >
+                    <option value="updated_at_desc">{tw.filter_sort_updated_at_desc ?? 'Nyeste oppdatering'}</option>
+                    <option value="title_asc">{tw.filter_sort_title_asc ?? 'Tittel A–Å'}</option>
+                    <option value="created_at_desc">{tw.filter_sort_created_at_desc ?? 'Nyeste opprettet'}</option>
+                </select>
+
+                {hasActiveFilters && (
+                    <button
+                        type="button"
+                        onClick={() => { setSearchInput(''); navigate({ search: '', page_type: '', status: '', lint: '', sort: 'updated_at_desc', page: 1 }); }}
+                        className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                    >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                        </svg>
+                        {tw.filter_clear ?? 'Nullstill'}
+                    </button>
+                )}
+
+                {meta.total > 0 && (
+                    <span className="ml-auto text-sm text-slate-400">
+                        {meta.total} {tw.pages_total_label ?? 'sider totalt'}
+                    </span>
+                )}
+            </div>
+
+            {pages.length === 0 ? (
+                <EmptyStateBox
+                    title={tw.empty_title ?? 'Ingen wiki-sider ennå'}
+                    description={tw.empty_description ?? 'Wiki-sider opprettes automatisk fra godkjente kunnskapsdokumenter.'}
+                />
+            ) : (
+                <>
+                    {/* Mobile cards */}
+                    <section className="grid gap-3 md:hidden">
+                        {pages.map((page) => (
+                            <article
+                                key={page.id}
+                                className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_8px_22px_rgba(15,23,42,0.04)]"
+                            >
+                                <div className="space-y-3">
+                                    <div>
+                                        <div className="text-base font-semibold text-slate-950">{page.title}</div>
+                                        <div className="mt-1 text-sm text-slate-400">
+                                            {tw.updated ?? 'Oppdatert'} {formatDate(page.updated_at, locale)}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <StatusBadge status={page.status} label={statusLabel(page.status)} />
                                         {page.page_type && (
                                             <PageTypeBadge type={page.page_type} label={pageTypeLabel(page.page_type)} />
                                         )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <StatusBadge status={page.status} label={statusLabel(page.status)} />
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-500">{page.claims_count}</td>
-                                    <td className="px-6 py-4 text-slate-500">{formatDate(page.updated_at, locale)}</td>
-                                    <td className="px-6 py-4">
-                                        <Link
-                                            href={`/app/wiki/${page.slug}`}
-                                            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
-                                        >
-                                            {tw.open ?? 'Åpne'}
-                                        </Link>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                        <span className="text-xs text-slate-400">
+                                            {page.claims_count} {tw.claims ?? 'påstander'}
+                                        </span>
+                                    </div>
+                                    <Link
+                                        href={`/app/wiki/${page.slug}`}
+                                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                    >
+                                        {tw.open ?? 'Åpne'}
+                                    </Link>
+                                </div>
+                            </article>
+                        ))}
+                    </section>
+
+                    {/* Desktop table */}
+                    <section className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.04)] md:block">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-200">
+                                <thead className="bg-slate-50">
+                                    <tr className="text-left text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                                        <th className="px-6 py-4">Tittel</th>
+                                        <th className="px-6 py-4">Type</th>
+                                        <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4">{tw.claims ?? 'Påstander'}</th>
+                                        <th className="px-6 py-4">{tw.updated ?? 'Oppdatert'}</th>
+                                        <th className="px-6 py-4"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {pages.map((page) => (
+                                        <tr key={page.id} className="text-sm text-slate-700">
+                                            <td className="px-6 py-4 font-medium text-slate-950">{page.title}</td>
+                                            <td className="px-6 py-4">
+                                                {page.page_type && (
+                                                    <PageTypeBadge type={page.page_type} label={pageTypeLabel(page.page_type)} />
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <StatusBadge status={page.status} label={statusLabel(page.status)} />
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-500">{page.claims_count}</td>
+                                            <td className="px-6 py-4 text-slate-500">{formatDate(page.updated_at, locale)}</td>
+                                            <td className="px-6 py-4">
+                                                <Link
+                                                    href={`/app/wiki/${page.slug}`}
+                                                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                                                >
+                                                    {tw.open ?? 'Åpne'}
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </>
+            )}
+
+            {/* Pagination */}
+            {meta.last_page > 1 && (
+                <div className="flex items-center justify-between">
+                    <button
+                        type="button"
+                        disabled={meta.current_page <= 1}
+                        onClick={() => navigate({ page: meta.current_page - 1 })}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        {tw.pagination_prev ?? 'Forrige'}
+                    </button>
+                    <span className="text-sm text-slate-500">
+                        {meta.current_page} {tw.pagination_of ?? 'av'} {meta.last_page}
+                    </span>
+                    <button
+                        type="button"
+                        disabled={meta.current_page >= meta.last_page}
+                        onClick={() => navigate({ page: meta.current_page + 1 })}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        {tw.pagination_next ?? 'Neste'}
+                    </button>
                 </div>
-            </section>
-        </>
+            )}
+        </div>
     );
 }
 
 // ─── Sources tab ─────────────────────────────────────────────────────────────
 
-function SourcesTab({ sources, sourcesStoreUrl, wikiGenerationAvailable, tw, locale }) {
+function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAvailable, tw, locale }) {
+    const srcFilters = sourcesFilters ?? {};
+    const [srcSearchInput, setSrcSearchInput] = useState(srcFilters.search ?? '');
+
+    const navigateSources = (overrides) => {
+        router.get('/app/wiki', {
+            tab: 'sources',
+            src_q: srcFilters.search ?? '',
+            src_status: srcFilters.status ?? '',
+            ...overrides,
+        }, { preserveState: true, preserveScroll: true });
+    };
+
+    const handleSrcSearchSubmit = (e) => {
+        e.preventDefault();
+        navigateSources({ src_q: srcSearchInput });
+    };
+
     const fileInputRef = useRef(null);
     const uploadForm = useForm({ file: null });
     const [ingestingIds, setIngestingIds] = useState(new Set());
@@ -529,6 +682,51 @@ function SourcesTab({ sources, sourcesStoreUrl, wikiGenerationAvailable, tw, loc
                         <p className="max-w-2xl text-sm leading-6 text-slate-500">
                             {tw.sources_description ?? 'Last opp kildedokumenter direkte til Enterprise Wiki. Dokumentet lagres og tekst ekstraheres før det kan brukes til å generere wiki-innhold.'}
                         </p>
+                    </div>
+
+                    {/* Filter bar */}
+                    <div className="flex flex-wrap items-end gap-2">
+                        <form onSubmit={handleSrcSearchSubmit} className="flex items-center gap-1.5">
+                            <input
+                                type="search"
+                                value={srcSearchInput}
+                                onChange={(e) => setSrcSearchInput(e.target.value)}
+                                placeholder={tw.sources_search_placeholder ?? 'Søk i filnavn...'}
+                                className={SELECT_CLS + ' w-52'}
+                            />
+                            <button
+                                type="submit"
+                                className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                            >
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                                </svg>
+                            </button>
+                        </form>
+
+                        <select
+                            value={srcFilters.status ?? ''}
+                            onChange={(e) => navigateSources({ src_status: e.target.value })}
+                            className={SELECT_CLS}
+                        >
+                            <option value="">{tw.sources_status_all ?? 'Alle statuser'}</option>
+                            <option value="extracted">{tw.source_status_extracted ?? 'Ekstrahert'}</option>
+                            <option value="pending">{tw.source_status_pending ?? 'Behandles'}</option>
+                            <option value="failed">{tw.source_status_failed ?? 'Feilet'}</option>
+                        </select>
+
+                        {(srcFilters.search || srcFilters.status) && (
+                            <button
+                                type="button"
+                                onClick={() => { setSrcSearchInput(''); navigateSources({ src_q: '', src_status: '' }); }}
+                                className="inline-flex h-9 items-center gap-1 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800"
+                            >
+                                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                    <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                                </svg>
+                                {tw.filter_clear ?? 'Nullstill'}
+                            </button>
+                        )}
                     </div>
 
                     {sources.length === 0 ? (
@@ -867,7 +1065,10 @@ function QualityTab({ findings, lintHealth, tw, locale }) {
 export default function WikiIndex({
     active_tab: activeTab = 'pages',
     pages = [],
+    pages_meta: pagesMeta = null,
+    pages_filters: pagesFilters = null,
     sources = [],
+    sources_filters: sourcesFilters = null,
     runs = [],
     quality_findings: qualityFindings = [],
     sources_store_url: sourcesStoreUrl = '/app/wiki/sources',
@@ -893,11 +1094,18 @@ export default function WikiIndex({
                 <TabBar activeTab={activeTab} lintHealth={lintHealth} tw={tw} />
 
                 {activeTab === 'pages' && (
-                    <PagesTab pages={pages} tw={tw} locale={locale} />
+                    <PagesTab
+                        pages={pages}
+                        pagesMeta={pagesMeta}
+                        pagesFilters={pagesFilters}
+                        tw={tw}
+                        locale={locale}
+                    />
                 )}
                 {activeTab === 'sources' && (
                     <SourcesTab
                         sources={sources}
+                        sourcesFilters={sourcesFilters}
                         sourcesStoreUrl={sourcesStoreUrl}
                         wikiGenerationAvailable={wikiGenerationAvailable}
                         tw={tw}

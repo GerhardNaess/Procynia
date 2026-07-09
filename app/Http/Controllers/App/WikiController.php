@@ -57,44 +57,135 @@ class WikiController extends Controller
         ];
 
         $props += match ($tab) {
-            'sources' => $this->loadSourcesTab($user, $customerId),
+            'sources' => $this->loadSourcesTab($user, $customerId, $request),
             'runs' => $this->loadRunsTab($customerId),
             'quality' => $this->loadQualityTab($customerId),
-            default => $this->loadPagesTab($user, $customerId),
+            default => $this->loadPagesTab($user, $customerId, $request),
         };
 
         return Inertia::render('App/Wiki/Index', $props);
     }
 
-    private function loadPagesTab(?User $user, int $customerId): array
+    private function loadPagesTab(?User $user, int $customerId, Request $request): array
     {
-        $pages = EnterpriseWikiPage::query()
+        $allowedPageTypes = ['article', 'summary', 'concept', 'entity', 'index', 'backlinks'];
+        $allowedSorts = ['updated_at_desc', 'title_asc', 'created_at_desc'];
+        $allowedLint = ['errors', 'warnings', 'ok'];
+
+        $search = trim((string) $request->query('search', ''));
+        $pageType = in_array($request->query('page_type'), $allowedPageTypes, true)
+            ? $request->query('page_type') : null;
+        $filterStatus = null;
+        $requestedStatus = $request->query('status');
+        if ($requestedStatus !== null && in_array($requestedStatus, $this->visibleStatuses($user), true)) {
+            $filterStatus = $requestedStatus;
+        }
+        $lint = in_array($request->query('lint'), $allowedLint, true)
+            ? $request->query('lint') : null;
+        $sort = in_array($request->query('sort'), $allowedSorts, true)
+            ? $request->query('sort') : 'updated_at_desc';
+
+        $query = EnterpriseWikiPage::query()
             ->where('customer_id', $customerId)
             ->whereIn('status', $this->visibleStatuses($user))
-            ->with('currentVersion')
-            ->withCount('claims')
-            ->orderBy('title')
-            ->get()
-            ->map(fn(EnterpriseWikiPage $page) => [
-                'id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'page_type' => $page->page_type,
-                'status' => $page->status,
-                'current_version_id' => $page->currentVersion?->id,
-                'claims_count' => $page->claims_count,
-                'updated_at' => $page->updated_at,
-            ]);
+            ->withCount('claims');
 
-        return ['pages' => $pages];
+        if ($search !== '') {
+            $searchLower = strtolower($search);
+            $query->where(fn ($sub) => $sub
+                ->whereRaw('LOWER(title) LIKE ?', ["%{$searchLower}%"])
+                ->orWhereRaw('LOWER(slug) LIKE ?', ["%{$searchLower}%"])
+            );
+        }
+
+        if ($pageType !== null) {
+            $query->where('page_type', $pageType);
+        }
+
+        if ($filterStatus !== null) {
+            $query->where('status', $filterStatus);
+        }
+
+        if ($lint === 'errors') {
+            $query->whereHas('lintFindings', fn ($q) => $q
+                ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+                ->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)
+            );
+        } elseif ($lint === 'warnings') {
+            $query->whereHas('lintFindings', fn ($q) => $q
+                ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+                ->where('severity', EnterpriseWikiLintFinding::SEVERITY_WARNING)
+            );
+        } elseif ($lint === 'ok') {
+            $query->whereDoesntHave('lintFindings', fn ($q) => $q
+                ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN)
+            );
+        }
+
+        if ($sort === 'title_asc') {
+            $query->orderBy('title');
+        } elseif ($sort === 'created_at_desc') {
+            $query->orderByDesc('created_at');
+        } else {
+            $query->orderByDesc('updated_at');
+        }
+
+        $paginator = $query->paginate(25);
+
+        $pages = collect($paginator->items())->map(fn (EnterpriseWikiPage $page) => [
+            'id' => $page->id,
+            'title' => $page->title,
+            'slug' => $page->slug,
+            'page_type' => $page->page_type,
+            'status' => $page->status,
+            'claims_count' => $page->claims_count,
+            'updated_at' => $page->updated_at,
+        ]);
+
+        return [
+            'pages' => $pages,
+            'pages_meta' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+            ],
+            'pages_filters' => [
+                'search' => $search,
+                'page_type' => $pageType,
+                'status' => $filterStatus,
+                'lint' => $lint,
+                'sort' => $sort,
+            ],
+        ];
     }
 
-    private function loadSourcesTab(?User $user, int $customerId): array
+    private function loadSourcesTab(?User $user, int $customerId, Request $request): array
     {
-        $documents = EnterpriseWikiDocument::query()
+        $allowedDocStatuses = [
+            EnterpriseWikiDocument::DOCUMENT_STATUS_PENDING,
+            EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+            EnterpriseWikiDocument::DOCUMENT_STATUS_FAILED,
+        ];
+
+        $srcSearch = trim((string) $request->query('src_q', ''));
+        $srcStatus = in_array($request->query('src_status'), $allowedDocStatuses, true)
+            ? $request->query('src_status') : null;
+
+        $docQuery = EnterpriseWikiDocument::query()
             ->where('customer_id', $customerId)
-            ->orderByDesc('created_at')
-            ->get();
+            ->orderByDesc('created_at');
+
+        if ($srcSearch !== '') {
+            $searchLower = strtolower($srcSearch);
+            $docQuery->whereRaw('LOWER(original_filename) LIKE ?', ["%{$searchLower}%"]);
+        }
+
+        if ($srcStatus !== null) {
+            $docQuery->where('document_status', $srcStatus);
+        }
+
+        $documents = $docQuery->get();
 
         $allRuns = $documents->isNotEmpty()
             ? EnterpriseWikiIngestRun::query()
@@ -147,7 +238,13 @@ class WikiController extends Controller
                 ->all(),
         ]);
 
-        return ['sources' => $sources];
+        return [
+            'sources' => $sources,
+            'sources_filters' => [
+                'search' => $srcSearch,
+                'status' => $srcStatus,
+            ],
+        ];
     }
 
     private function loadRunsTab(int $customerId): array
