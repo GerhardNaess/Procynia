@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · Fase 8F-3 trygg sletting fullført (commit c7b3853) · **Neste: Fase 8F-4 — kjøringshistorikk**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · Fase 8F-3 trygg sletting fullført (commit c7b3853) · Fase 8F-4 kjøringshistorikk fullført (commit c275bb3) · **Neste: Fase 8F-5 — read-only kvalitetstab**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -733,7 +733,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
-| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1, 8F-2 og 8F-3 fullført — 8F-4 til 8F-7 gjenstår** |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1, 8F-2, 8F-3 og 8F-4 fullført — 8F-5 til 8F-7 gjenstår** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1657,27 +1657,19 @@ Kjøringer-tab og Kvalitet-tab fikk ikke filter i 8F-2 — utsatt til eventuell 
 **Tester:** 642 passed / 1384 assertions
 **Build:** OK
 
-#### Fase 8F-4 — Kjøringshistorikk
+#### Fase 8F-4 — Kjøringshistorikk — Fullført (commit c275bb3)
 
-**Mål:** Kjøringer-tab viser kjøringshistorikk for innlogget kunde — informasjon, ikke pipeline-handlingsknapper.
+**Status:** Fase 8F-4 fullført
 
-Informasjon per kjøring:
-- Kjørings-ID, dato, kildedokument (filnavn, lenke til Kildedokumenter-tab)
-- Status (`queued` / `running` / `sections_planned` / `completed` / `failed` / `decision_only`)
-- Decision status (`pending` / `applied`)
-- Antall koblede sider via `enterprise_wiki_ingest_run_pages` (total + per page_type)
-- `model_used`, `input_tokens`, `output_tokens`, `cost_estimate_nok` der tilgjengelig
-- `error_message` ved `failed`
+Kjøringer-tabben viser nå `EnterpriseWikiIngestRun`-historikk med kildefil, status, maintainer decision-status, side-/section-/lint-counts og tidspunkt. Filter på `run_status`, `run_decision` og `run_src` er lagt til. Kildedokumenter-tabben lenker til filtrert kjøringshistorikk per dokument via `?tab=runs&run_src={id}`.
 
-Filtrerbar på `status` og `decision_status` (URL-parametre). Sortert `created_at desc`. Paginering 25 per side.
+Implementert:
+- Backend: `loadRunsTab` returnerer `pages_count`, `sections_count`, `lint_count` (correlated subquery), `source_document_filename`, `finished_at` og aktive filter-verdier (`runs_filters`)
+- URL-baserte filtere: `run_status`, `run_decision` (pending/applied/none), `run_src` (document-ID) — ugyldige verdier ignoreres stille
+- Frontend: 9-kolonne-tabell med filterbar (status-dropdown, beslutning-dropdown, aktiv-kilde-chip med slett-knapp, nullstill-knapp)
+- 7 tester: customer-scoping, counts, alle filtertyper, ugyldig-filter-sikkerhet, `runs_filters`-prop
 
-Ingen pipeline-handlingsknapper i Fase 8F-4. Pipeline-kommandoer (apply, generate, extract, verify, build-links, lint) forblir Artisan-kommandoer og eksponeres ikke via UI i piloten.
-
-Akseptansekriterier:
-- Kjøringer vises kun for innlogget kunde
-- Filter på status og decision_status virker
-- Lenker til tilhørende sider og kildedokumenter
-- ~12 tester
+Tester: 650 passed / 1400 assertions · Build: OK
 
 #### Fase 8F-5 — Read-only Kvalitet-tab
 
