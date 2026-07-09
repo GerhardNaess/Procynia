@@ -1345,6 +1345,24 @@ Akseptansekriterier:
 - Neste kodeendring er basert på faktisk audit av eksisterende `EnterpriseWikiPage`-opprettelse og kildelenker.
 - Kunnskapsbase/RAG, billing, admin/Filament og AI workspace er urørt.
 
+#### Fase 8E-10 — Manual apply command for maintainer decision — Fullført
+
+**Commit:** `520ef49`
+
+Implementert:
+- Artisan-kommando `wiki:apply-maintainer-decision --run-id=ID`
+- Kommandoen er utelukkende en tynn wrapper rundt `EnterpriseWikiMaintainerDecisionApplyService::apply()`
+- Henter `EnterpriseWikiIngestRun` via ID og videresender til servicen
+- Skriver tydelig CLI-output: hvilke sider som ble created, hvilke som ble updated, bekreftelse på at run er marked applied
+- Alle guards (feil status, null JSON, allerede applied, manglende run) håndteres av servicen og oversettes til CLI-feil
+- Ingen OpenAI-kall
+- Ingen innholdsgenerering / ingen `content_markdown`
+- Ingen `EnterpriseWikiPageVersion` opprettes
+- Ingen claims eller source references skrives
+- `ProcessEnterpriseWikiIngest` er uendret
+- Ingen UI-knapp
+- 15 tester (argument-validering, vellykket apply, already-applied guard, feil status/JSON, side-effects)
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
