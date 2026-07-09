@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · **Neste: Fase 8F-2 — søk og filtrering**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · **Neste: Fase 8F-3 — trygg sletting av EnterpriseWikiDocument**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -733,7 +733,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
-| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0 og 8F-1 fullført — 8F-2 til 8F-7 gjenstår** |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1 og 8F-2 fullført — 8F-3 til 8F-7 gjenstår** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1623,35 +1623,11 @@ Teknisk plan dokumentert og committet til `docs/enterprise-llm-wiki-plan.md`.
 
 Ikke-scope: Ingen pipeline-handlingsknapper i Kjøringer-tab — det er Fase 8F-4.
 
-#### Fase 8F-2 — Søk og filtrering
+#### Fase 8F-2 — Søk og filtrering — Fullført (commit 101885a)
 
-**Mål:** Fritekst og filtre på Wiki-sider-, Kildedokumenter- og Kjøringer-tabber.
+**Resultat:** Wiki-sider-tab har fritekstsøk (title/slug, case-insensitive), `page_type`-filter, `status`-filter (begrenset til rollebaserte synlige statuser), lint-filter (errors/warnings/ok via `whereHas`/`whereDoesntHave`), sortering og paginering (25 per side). Kildedokumenter-tab har søk i `original_filename` og `document_status`-filter. Alle filtre i URL-parametre; ugyldige verdier ignoreres trygt. 629 tester bestått / 1332 assertions. Build OK.
 
-**Wiki-sider tab:**
-- Fritekst: `ILIKE '%...%'` på `enterprise_wiki_pages.title` og `slug`
-- Filter `page_type`: `article` / `summary` / `concept` / `entity` (multi-select, URL-param)
-- Filter `status`: `draft` / `pending_review` / `approved` / `rejected` / `archived`
-- Filter `lint`: `has_errors` / `has_warnings` / `ok` (via JOIN mot lint_findings)
-- Sortering: `updated_at desc` (default), `title asc`, `created_at desc`
-- Paginering: 25 per side
-
-**Kildedokumenter tab:**
-- Fritekst: `ILIKE` på `original_filename`
-- Filter `document_status`: `uploaded` / `extracting` / `extracted` / `failed`
-- Sortering: `created_at desc`
-
-**Kjøringer tab:**
-- Filter `status`: `queued` / `running` / `completed` / `failed` / `decision_only`
-- Filter `decision_status`: ikke besluttet / `applied`
-- Sortering: `created_at desc`
-
-Alle filtre som URL-parametre. Backend validerer parametre mot tillatte verdier — ukjente ignoreres.
-
-Akseptansekriterier:
-- Fritekst returnerer treff scoped til innlogget kunde
-- Filtre kan kombineres
-- Tomt resultat viser forståelig melding, ikke tom side
-- ~15 tester
+Kjøringer-tab og Kvalitet-tab fikk ikke filter i 8F-2 — utsatt til eventuell separat fase.
 
 #### Fase 8F-3 — Trygg sletting av EnterpriseWikiDocument
 
