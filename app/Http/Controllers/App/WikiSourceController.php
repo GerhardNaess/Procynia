@@ -4,15 +4,21 @@ namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
+use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiIngestSection;
+use App\Models\EnterpriseWikiLintFinding;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiSourceReference;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\DocumentTextExtractor;
 use App\Support\CustomerContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -126,6 +132,44 @@ class WikiSourceController extends Controller
         return $response;
     }
 
+    public function deletePreview(EnterpriseWikiDocument $document): JsonResponse
+    {
+        $customerId = $this->customerContext->currentCustomerId();
+
+        if ($document->customer_id !== $customerId) {
+            abort(404);
+        }
+
+        $inProgressStatuses = [
+            EnterpriseWikiIngestRun::STATUS_QUEUED,
+            EnterpriseWikiIngestRun::STATUS_RUNNING,
+            EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
+        ];
+
+        $runs = EnterpriseWikiIngestRun::query()
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('source_id', $document->id)
+            ->where('customer_id', $customerId)
+            ->get(['id', 'status']);
+
+        if ($runs->whereIn('status', $inProgressStatuses)->isNotEmpty()) {
+            return response()->json([
+                'blocked' => true,
+                'reason' => 'in_progress_run',
+            ]);
+        }
+
+        [$soleSourcePageIds, $sharedPageIds] = $this->classifyPages($runs->pluck('id'));
+
+        return response()->json([
+            'blocked' => false,
+            'document_name' => $document->original_filename,
+            'run_count' => $runs->count(),
+            'sole_source_page_count' => $soleSourcePageIds->count(),
+            'shared_page_count' => $sharedPageIds->count(),
+        ]);
+    }
+
     public function destroy(EnterpriseWikiDocument $document): RedirectResponse
     {
         $customerId = $this->customerContext->currentCustomerId();
@@ -134,39 +178,71 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        $runs = EnterpriseWikiIngestRun::query()
-            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
-            ->where('source_id', $document->id)
-            ->where('customer_id', $customerId)
-            ->get(['id', 'status', 'enterprise_wiki_page_id']);
-
         $inProgressStatuses = [
             EnterpriseWikiIngestRun::STATUS_QUEUED,
             EnterpriseWikiIngestRun::STATUS_RUNNING,
             EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
         ];
 
+        $runs = EnterpriseWikiIngestRun::query()
+            ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+            ->where('source_id', $document->id)
+            ->where('customer_id', $customerId)
+            ->get(['id', 'status']);
+
         if ($runs->whereIn('status', $inProgressStatuses)->isNotEmpty()) {
             return redirect()->route('app.wiki.index')
                 ->with('error', 'Kan ikke slette dokumentet mens ingest-jobben kjører.');
         }
 
-        if ($runs->whereNotNull('enterprise_wiki_page_id')->isNotEmpty()) {
-            return redirect()->route('app.wiki.index')
-                ->with('error', 'Kan ikke slette dokumentet fordi det har genererte wiki-sider.');
-        }
+        $runIds = $runs->pluck('id');
+        [$soleSourcePageIds] = $this->classifyPages($runIds);
 
-        DB::transaction(function () use ($document, $runs): void {
-            if ($runs->isNotEmpty()) {
-                EnterpriseWikiIngestSection::query()
-                    ->whereIn('enterprise_wiki_ingest_run_id', $runs->pluck('id'))
-                    ->delete();
-
-                EnterpriseWikiIngestRun::query()
-                    ->whereIn('id', $runs->pluck('id'))
+        DB::transaction(function () use ($document, $runIds, $soleSourcePageIds): void {
+            // Delete lint findings for sole-source pages
+            if ($soleSourcePageIds->isNotEmpty()) {
+                EnterpriseWikiLintFinding::query()
+                    ->whereIn('enterprise_wiki_page_id', $soleSourcePageIds)
                     ->delete();
             }
 
+            // Delete lint findings tied to this document's runs
+            if ($runIds->isNotEmpty()) {
+                EnterpriseWikiLintFinding::query()
+                    ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
+                    ->delete();
+            }
+
+            // Delete lint findings tied directly to this document
+            EnterpriseWikiLintFinding::query()
+                ->where('enterprise_wiki_document_id', $document->id)
+                ->delete();
+
+            // Delete source references on any page's claims that point to this document
+            EnterpriseWikiSourceReference::query()
+                ->where('source_type', EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
+                ->where('source_id', $document->id)
+                ->delete();
+
+            // Delete sole-source pages (cascades: claims, source refs, versions, page links, run_pages)
+            if ($soleSourcePageIds->isNotEmpty()) {
+                EnterpriseWikiPage::query()
+                    ->whereIn('id', $soleSourcePageIds)
+                    ->delete();
+            }
+
+            // Delete ingest sections and runs
+            if ($runIds->isNotEmpty()) {
+                EnterpriseWikiIngestSection::query()
+                    ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
+                    ->delete();
+
+                EnterpriseWikiIngestRun::query()
+                    ->whereIn('id', $runIds)
+                    ->delete();
+            }
+
+            // Delete the uploaded file
             Storage::disk('local')->delete($document->file_path);
 
             $document->delete();
@@ -175,6 +251,7 @@ class WikiSourceController extends Controller
         Log::info('[PROCYNIA][WIKI_SOURCE] Deleted wiki source document.', [
             'document_id' => $document->id,
             'customer_id' => $customerId,
+            'sole_source_pages_deleted' => $soleSourcePageIds->count(),
         ]);
 
         return redirect()->route('app.wiki.index')
@@ -220,5 +297,42 @@ class WikiSourceController extends Controller
 
         return redirect()->route('app.wiki.index')
             ->with('success', 'Wiki-utkast er satt i kø. Det vil snart være klart til gjennomgang.');
+    }
+
+    /**
+     * Classify pages linked to the given run IDs as sole-source or shared.
+     *
+     * Sole-source: page only appears in run_pages rows for these runs.
+     * Shared: page also appears in run_pages rows from other runs (other documents).
+     *
+     * @param  Collection<int, int>  $runIds
+     * @return array{Collection<int, int>, Collection<int, int>}  [soleSourcePageIds, sharedPageIds]
+     */
+    private function classifyPages(Collection $runIds): array
+    {
+        if ($runIds->isEmpty()) {
+            return [collect(), collect()];
+        }
+
+        $allPageIds = DB::table('enterprise_wiki_ingest_run_pages')
+            ->whereIn('enterprise_wiki_ingest_run_id', $runIds)
+            ->pluck('enterprise_wiki_page_id')
+            ->unique()
+            ->values();
+
+        if ($allPageIds->isEmpty()) {
+            return [collect(), collect()];
+        }
+
+        $sharedPageIds = DB::table('enterprise_wiki_ingest_run_pages')
+            ->whereIn('enterprise_wiki_page_id', $allPageIds)
+            ->whereNotIn('enterprise_wiki_ingest_run_id', $runIds)
+            ->pluck('enterprise_wiki_page_id')
+            ->unique()
+            ->values();
+
+        $soleSourcePageIds = $allPageIds->diff($sharedPageIds)->values();
+
+        return [$soleSourcePageIds, $sharedPageIds];
     }
 }

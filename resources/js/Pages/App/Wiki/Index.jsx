@@ -635,12 +635,36 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
 
-    const handleDelete = (source) => {
-        if (!window.confirm(tw.source_delete_confirm ?? 'Er du sikker på at du vil slette kildedokumentet? Dette kan ikke angres.')) {
-            return;
-        }
-        router.delete(`/app/wiki/sources/${source.id}`, { preserveScroll: true });
+    const [deletePreview, setDeletePreview] = useState(null);
+
+    const handleDeleteClick = (source) => {
+        setDeletePreview({ source, loading: true, blocked: false, data: null, error: null });
+        fetch(`/app/wiki/sources/${source.id}/delete-preview`, {
+            headers: { 'Accept': 'application/json' },
+        })
+            .then((res) => res.json())
+            .then((json) => {
+                setDeletePreview((prev) => prev
+                    ? { ...prev, loading: false, blocked: json.blocked, data: json }
+                    : prev
+                );
+            })
+            .catch(() => {
+                setDeletePreview((prev) => prev
+                    ? { ...prev, loading: false, error: true }
+                    : prev
+                );
+            });
     };
+
+    const handleDeleteConfirm = () => {
+        if (!deletePreview?.source) return;
+        const sourceId = deletePreview.source.id;
+        setDeletePreview(null);
+        router.delete(`/app/wiki/sources/${sourceId}`, { preserveScroll: true });
+    };
+
+    const handleDeleteCancel = () => setDeletePreview(null);
 
     const submitUpload = (event) => {
         event.preventDefault();
@@ -757,7 +781,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                 <tbody className="divide-y divide-slate-50 bg-white">
                                     {sources.map((source) => {
                                         const isInProgress = !!(source.latest_ingest_run && IN_PROGRESS_STATUSES.includes(source.latest_ingest_run.status));
-                                        const canDelete = !isInProgress && source.generated_pages.length === 0;
+                                        const canDelete = !isInProgress;
                                         return (
                                         <tr key={source.id} className="text-sm">
                                             <td className="overflow-hidden px-4 py-3 align-top">
@@ -848,7 +872,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                                         {canDelete && (
                                                             <button
                                                                 type="button"
-                                                                onClick={() => handleDelete(source)}
+                                                                onClick={() => handleDeleteClick(source)}
                                                                 className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-rose-500 transition hover:bg-rose-50 hover:text-rose-700"
                                                             >
                                                                 <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -914,6 +938,76 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                     tw={tw}
                     onClose={() => setDecisionView(null)}
                 />
+            )}
+            {deletePreview && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog" aria-modal="true">
+                    <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+                        <h2 className="mb-4 text-base font-semibold text-slate-900">
+                            {tw.delete_preview_title ?? 'Bekreft sletting av kildedokument'}
+                        </h2>
+
+                        {deletePreview.loading && (
+                            <p className="text-sm text-slate-500">{tw.delete_preview_loading ?? 'Laster forhåndsvisning...'}</p>
+                        )}
+
+                        {!deletePreview.loading && deletePreview.error && (
+                            <p className="text-sm text-rose-600">Kunne ikke laste forhåndsvisning. Prøv igjen.</p>
+                        )}
+
+                        {!deletePreview.loading && !deletePreview.error && deletePreview.blocked && (
+                            <p className="text-sm text-rose-600">
+                                {tw.delete_preview_blocked_in_progress ?? 'Dokumentet kan ikke slettes fordi det pågår en aktiv ingest-jobb. Vent til jobben er fullført og prøv igjen.'}
+                            </p>
+                        )}
+
+                        {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && deletePreview.data && (
+                            <div className="space-y-3">
+                                <p className="text-sm font-medium text-slate-800 break-all">
+                                    {deletePreview.data.document_name}
+                                </p>
+                                <dl className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm space-y-1.5">
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_runs ?? 'Ingest-kjøringer som slettes'}</dt>
+                                        <dd className="font-semibold text-slate-800">{deletePreview.data.run_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_sole_source_pages ?? 'Wiki-sider som slettes'}</dt>
+                                        <dd className="font-semibold text-rose-600">{deletePreview.data.sole_source_page_count}</dd>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <dt className="text-slate-500">{tw.delete_preview_shared_pages ?? 'Delte wiki-sider som beholdes'}</dt>
+                                        <dd className="font-semibold text-emerald-600">{deletePreview.data.shared_page_count}</dd>
+                                    </div>
+                                </dl>
+                                {deletePreview.data.sole_source_page_count === 0 && (
+                                    <p className="text-xs text-slate-400">{tw.delete_preview_no_pages ?? 'Ingen wiki-sider vil bli slettet.'}</p>
+                                )}
+                                <p className="text-xs font-semibold text-rose-600">
+                                    {tw.delete_preview_irreversible ?? 'Denne handlingen kan ikke angres.'}
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="mt-5 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={handleDeleteCancel}
+                                className="inline-flex h-9 items-center rounded-full border border-slate-200 px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                            >
+                                {tw.delete_cancel_button ?? 'Avbryt'}
+                            </button>
+                            {!deletePreview.loading && !deletePreview.error && !deletePreview.blocked && (
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteConfirm}
+                                    className="inline-flex h-9 items-center rounded-full bg-rose-600 px-4 text-sm font-semibold text-white transition hover:bg-rose-700"
+                                >
+                                    {tw.delete_confirm_button ?? 'Slett permanent'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
         </>
     );

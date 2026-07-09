@@ -548,20 +548,29 @@ class WikiSourceControllerTest extends TestCase
         $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $foreignDoc->id]);
     }
 
-    public function test_delete_rejects_document_with_generated_wiki_page(): void
+    public function test_delete_cascades_sole_source_wiki_page(): void
     {
         Storage::fake('local');
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $document = $this->createDocument($customer, EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED);
         $page = $this->createWikiPage($customer);
-        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+        $run = $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED, $page->id);
+
+        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insert([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => 'created',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
 
         $response = $this->actingAs($user)->delete("/app/wiki/sources/{$document->id}");
 
         $response->assertRedirect(route('app.wiki.index'));
-        $response->assertSessionHas('error');
-        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $document->id]);
+        $response->assertSessionHas('success');
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $document->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
     }
 
     public function test_delete_rejects_document_with_queued_ingest_run(): void

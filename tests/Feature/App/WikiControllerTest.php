@@ -1391,6 +1391,277 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 8F-3: safe deletion of EnterpriseWikiDocument — delete-preview
+    // =========================================================================
+
+    public function test_delete_preview_returns_404_for_wrong_customer(): void
+    {
+        $owner = $this->createCustomer('Eier');
+        $other = $this->createCustomer('Annen');
+        $user = $this->createUser($owner, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($other);
+
+        $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
+            ->assertNotFound();
+    }
+
+    public function test_delete_preview_returns_blocked_for_queued_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_QUEUED);
+
+        $response = $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
+            ->assertOk();
+
+        $this->assertTrue($response->json('blocked'));
+        $this->assertSame('in_progress_run', $response->json('reason'));
+    }
+
+    public function test_delete_preview_not_blocked_for_completed_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
+            ->assertOk();
+
+        $this->assertFalse($response->json('blocked'));
+        $this->assertSame($doc->original_filename, $response->json('document_name'));
+        $this->assertSame(1, $response->json('run_count'));
+        $this->assertSame(0, $response->json('sole_source_page_count'));
+        $this->assertSame(0, $response->json('shared_page_count'));
+    }
+
+    public function test_delete_preview_counts_sole_source_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kun én kilde');
+        $this->createIngestRunPage($run, $page);
+
+        $response = $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
+            ->assertOk();
+
+        $this->assertFalse($response->json('blocked'));
+        $this->assertSame(1, $response->json('sole_source_page_count'));
+        $this->assertSame(0, $response->json('shared_page_count'));
+    }
+
+    public function test_delete_preview_counts_shared_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $docA = $this->createDocument($customer);
+        $docB = $this->createDocument($customer);
+        $runA = $this->createIngestRun($customer, $docA, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $runB = $this->createIngestRun($customer, $docB, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $shared = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Delt side');
+        $this->createIngestRunPage($runA, $shared);
+        $this->createIngestRunPage($runB, $shared);
+
+        $response = $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$docA->id}/delete-preview")
+            ->assertOk();
+
+        $this->assertFalse($response->json('blocked'));
+        $this->assertSame(0, $response->json('sole_source_page_count'));
+        $this->assertSame(1, $response->json('shared_page_count'));
+    }
+
+    public function test_delete_preview_does_not_delete_anything(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Skal overleve preview');
+        $this->createIngestRunPage($run, $page);
+
+        $docsBefore  = EnterpriseWikiDocument::query()->count();
+        $runsBefore  = EnterpriseWikiIngestRun::query()->count();
+        $pagesBefore = EnterpriseWikiPage::query()->count();
+
+        $this->actingAs($user)
+            ->getJson("/app/wiki/sources/{$doc->id}/delete-preview")
+            ->assertOk();
+
+        $this->assertSame($docsBefore,  EnterpriseWikiDocument::query()->count());
+        $this->assertSame($runsBefore,  EnterpriseWikiIngestRun::query()->count());
+        $this->assertSame($pagesBefore, EnterpriseWikiPage::query()->count());
+    }
+
+    // =========================================================================
+    // Phase 8F-3: safe deletion — destroy
+    // =========================================================================
+
+    public function test_destroy_returns_404_for_wrong_customer(): void
+    {
+        $owner = $this->createCustomer('Eier');
+        $other = $this->createCustomer('Annen');
+        $user = $this->createUser($owner, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($other);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$doc->id}")
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $doc->id]);
+    }
+
+    public function test_destroy_blocks_when_in_progress_run_exists(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_RUNNING);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$doc->id}")
+            ->assertRedirect()
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseHas('enterprise_wiki_documents', ['id' => $doc->id]);
+        $this->assertDatabaseHas('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+    }
+
+    public function test_destroy_deletes_document_and_runs_without_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_FAILED);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$doc->id}")
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $doc->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_ingest_runs', ['id' => $run->id]);
+    }
+
+    public function test_destroy_deletes_sole_source_page_and_its_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+        $run = $this->createIngestRun($customer, $doc, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Enkelt kildeside');
+        $version = $this->createVersion($page, isCurrentTrue: true);
+        $claim = $this->createClaim($page, $version, 'Påstand');
+        $this->createSourceReference($claim, 'kilde.pdf');
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+        $this->createIngestRunPage($run, $page);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$doc->id}")
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $doc->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_pages', ['id' => $page->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_page_versions', ['enterprise_wiki_page_id' => $page->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_claims', ['enterprise_wiki_page_id' => $page->id]);
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', ['enterprise_wiki_page_id' => $page->id]);
+    }
+
+    public function test_destroy_keeps_shared_page_intact(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $docA = $this->createDocument($customer);
+        $docB = $this->createDocument($customer);
+        $runA = $this->createIngestRun($customer, $docA, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $runB = $this->createIngestRun($customer, $docB, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $shared = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Delt konsept');
+        $this->createIngestRunPage($runA, $shared);
+        $this->createIngestRunPage($runB, $shared);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$docA->id}")
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('enterprise_wiki_documents', ['id' => $docA->id]);
+        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $shared->id]);
+    }
+
+    public function test_destroy_removes_document_source_references_on_shared_pages(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+
+        $docA = $this->createDocument($customer);
+        $docB = $this->createDocument($customer);
+        $runA = $this->createIngestRun($customer, $docA, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+        $runB = $this->createIngestRun($customer, $docB, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $shared = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Delt side med kilde');
+        $version = $this->createVersion($shared, isCurrentTrue: true);
+        $claim = $this->createClaim($shared, $version, 'Delt påstand');
+        $this->createIngestRunPage($runA, $shared);
+        $this->createIngestRunPage($runB, $shared);
+
+        // Source reference pointing to the document being deleted
+        $docRef = EnterpriseWikiSourceReference::query()->create([
+            'enterprise_wiki_claim_id' => $claim->id,
+            'source_type' => EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $docA->id,
+            'source_label' => $docA->original_filename,
+            'source_hash' => str_pad('d', 64, '0'),
+            'excerpt' => 'Utdrag fra docA',
+        ]);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$docA->id}")
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        // Shared page survives
+        $this->assertDatabaseHas('enterprise_wiki_pages', ['id' => $shared->id]);
+        $this->assertDatabaseHas('enterprise_wiki_claims', ['id' => $claim->id]);
+        // Source reference pointing to the deleted document is removed
+        $this->assertDatabaseMissing('enterprise_wiki_source_references', ['id' => $docRef->id]);
+    }
+
+    public function test_destroy_deletes_lint_findings_for_document(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $doc = $this->createDocument($customer);
+
+        $finding = EnterpriseWikiLintFinding::query()->create([
+            'customer_id' => $customer->id,
+            'enterprise_wiki_document_id' => $doc->id,
+            'code' => EnterpriseWikiLintFinding::CODE_DOCUMENT_INGEST_FAILED,
+            'severity' => EnterpriseWikiLintFinding::SEVERITY_ERROR,
+            'message' => 'Ingest feilet',
+            'status' => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->delete("/app/wiki/sources/{$doc->id}")
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseMissing('enterprise_wiki_lint_findings', ['id' => $finding->id]);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -1572,6 +1843,17 @@ class WikiControllerTest extends TestCase
             'maintainer_decision_json' => $decision,
             'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
             'maintainer_decision_generated_at' => now(),
+        ]);
+    }
+
+    private function createIngestRunPage(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $action = 'created'): void
+    {
+        \Illuminate\Support\Facades\DB::table('enterprise_wiki_ingest_run_pages')->insertOrIgnore([
+            'enterprise_wiki_ingest_run_id' => $run->id,
+            'enterprise_wiki_page_id' => $page->id,
+            'action' => $action,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 

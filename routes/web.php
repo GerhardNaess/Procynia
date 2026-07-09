@@ -308,6 +308,7 @@ Route::prefix('app')
             Route::post('/sources', [WikiSourceController::class, 'store'])->name('sources.store');
             Route::post('/sources/{document}/ingest', [WikiSourceController::class, 'ingest'])->name('sources.ingest');
             Route::delete('/sources/{document}', [WikiSourceController::class, 'destroy'])->name('sources.destroy');
+            Route::get('/sources/{document}/delete-preview', [WikiSourceController::class, 'deletePreview'])->name('sources.delete-preview');
             Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
             Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
