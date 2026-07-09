@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · **Neste: Fase 8F-1 — tab-navigasjon**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · **Neste: Fase 8F-2 — søk og filtrering**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -733,7 +733,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
-| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0 fullført — 8F-1 til 8F-7 gjenstår** |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0 og 8F-1 fullført — 8F-2 til 8F-7 gjenstår** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1607,29 +1607,19 @@ Fase 8F gir System Owner verktøy til å forvalte hele Enterprise Wiki-livssyklu
 
 Teknisk plan dokumentert og committet til `docs/enterprise-llm-wiki-plan.md`.
 
-#### Fase 8F-1 — Tab-navigasjon og splitting av /app/wiki
+#### Fase 8F-1 — Tab-navigasjon og splitting av /app/wiki — Fullført (commit e9360fa)
 
-**Mål:** `/app/wiki` splittes i fem tydelig adskilte flater via URL-param `?tab=X`.
-
-Tab-state styres via URL-parameteret `?tab=pages|sources|runs|quality|graph`. Ingen React-state som primær mekanisme — tabs er bookmarkbare og fungerer med Inertia `preserveState`. Backend laster kun data for aktiv tab.
+**Resultat:** `/app/wiki` er delt i fire tabs via URL-param `?tab=X`. Grafvisning lenker videre til `/app/wiki/graph`. Backend er tab-bevisst og ugyldig tab faller trygt tilbake til `pages`. 607 tester bestått / 1288 assertions. Build OK.
 
 | Tab | URL | Primærdata |
 |---|---|---|
-| Wiki-sider | `?tab=pages` (default) | `EnterpriseWikiPage` med filtrering |
+| Wiki-sider | `?tab=pages` (default) | `EnterpriseWikiPage` |
 | Kildedokumenter | `?tab=sources` | `EnterpriseWikiDocument` med handlinger |
-| Kjøringer | `?tab=runs` | `EnterpriseWikiIngestRun` med status |
+| Kjøringer | `?tab=runs` | `EnterpriseWikiIngestRun` — read-only |
 | Kvalitet | `?tab=quality` | `EnterpriseWikiLintFinding` — read-only |
-| Graf | redirect til `/app/wiki/graph` | (ingen egne data på tab) |
+| Grafvisning | `/app/wiki/graph` | Lenke i tab-linja |
 
-`WikiController::index()` deler opp query-logikken per tab — ingen tab laster andres data. Lint-helseindikatoren flyttes inn som innhold i Kvalitet-tabben. Index-siden beholder kun en liten helseindikator som lenker til tabben.
-
-Akseptansekriterier:
-- `?tab=pages` er default ved direkte besøk
-- `?tab=quality` viser kun helseoversikt — ingen handlingsknapper
-- Graf-tab sender bruker til `/app/wiki/graph` (8E-20)
-- Bytte mellom tabs oppdaterer URL uten full reload
-- Kundeisolasjon håndhevet per tab i backend
-- ~10 tester
+`WikiController::index()` laster kun data for aktiv tab. `lint_health` alltid beregnet (tab-badge). 15 eksisterende sources-tester oppdatert til `?tab=sources`. 7 nye tab-navigasjonstester lagt til.
 
 Ikke-scope: Ingen pipeline-handlingsknapper i Kjøringer-tab — det er Fase 8F-4.
 
