@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\Ai\Wiki\WikiSectionAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -18,7 +19,10 @@ use Inertia\Response;
 
 class WikiController extends Controller
 {
-    public function __construct(private readonly CustomerContext $customerContext) {}
+    public function __construct(
+        private readonly CustomerContext $customerContext,
+        private readonly EnterpriseWikiPageTraversalService $traversal,
+    ) {}
 
     public function index(): Response
     {
@@ -198,24 +202,46 @@ class WikiController extends Controller
             ])
             ->all();
 
+        $lintSummary = [
+            'error'   => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_ERROR)->count(),
+            'warning' => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_WARNING)->count(),
+            'info'    => collect($lintFindings)->where('severity', EnterpriseWikiLintFinding::SEVERITY_INFO)->count(),
+            'total'   => count($lintFindings),
+        ];
+
+        $mapPage = fn(EnterpriseWikiPage $p) => [
+            'id'        => $p->id,
+            'title'     => $p->title,
+            'slug'      => $p->slug,
+            'page_type' => $p->page_type,
+            'status'    => $p->status,
+        ];
+
         return Inertia::render('App/Wiki/Show', [
             'page' => [
-                'id' => $page->id,
-                'title' => $page->title,
-                'slug' => $page->slug,
-                'status' => $page->status,
+                'id'           => $page->id,
+                'title'        => $page->title,
+                'slug'         => $page->slug,
+                'page_type'    => $page->page_type,
+                'status'       => $page->status,
                 'generated_by' => $page->generated_by,
-                'reviewed_at' => $page->reviewed_at,
-                'updated_at' => $page->updated_at,
+                'reviewed_at'  => $page->reviewed_at,
+                'updated_at'   => $page->updated_at,
             ],
             'current_version' => $currentVersion !== null ? [
-                'id' => $currentVersion->id,
-                'version_number' => $currentVersion->version_number,
+                'id'               => $currentVersion->id,
+                'version_number'   => $currentVersion->version_number,
                 'content_markdown' => $currentVersion->content_markdown,
             ] : null,
-            'claims' => $claims,
-            'claim_summary' => $claimSummary,
-            'lint_findings' => $lintFindings,
+            'claims'          => $claims,
+            'claim_summary'   => $claimSummary,
+            'lint_findings'   => $lintFindings,
+            'lint_summary'    => $lintSummary,
+            'outgoing_links'  => $this->traversal->outgoing($page)->map($mapPage)->values()->all(),
+            'incoming_links'  => $this->traversal->incoming($page)->map($mapPage)->values()->all(),
+            'related_articles' => $this->traversal->relatedArticles($page)->map($mapPage)->values()->all(),
+            'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
+            'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
         ]);
     }
 

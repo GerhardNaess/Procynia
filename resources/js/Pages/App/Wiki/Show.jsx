@@ -11,6 +11,13 @@ const PAGE_STATUS_STYLES = {
     archived: 'bg-slate-200 text-slate-500',
 };
 
+const PAGE_TYPE_STYLES = {
+    article: 'bg-violet-100 text-violet-700',
+    summary: 'bg-sky-100 text-sky-700',
+    concept: 'bg-teal-100 text-teal-700',
+    entity: 'bg-orange-100 text-orange-700',
+};
+
 const CONFIDENCE_STYLES = {
     high: 'bg-emerald-100 text-emerald-700',
     medium: 'bg-amber-100 text-amber-700',
@@ -112,12 +119,47 @@ const LINT_SEVERITY_STYLES = {
     info: 'bg-slate-100 text-slate-600',
 };
 
+function LinkedPageList({ pages, label }) {
+    if (!pages || pages.length === 0) return null;
+
+    return (
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+            <span className="shrink-0 text-xs font-semibold text-slate-500 mt-0.5">{label}:</span>
+            <div className="flex flex-wrap gap-2">
+                {pages.map((p) => (
+                    <Link
+                        key={p.id}
+                        href={`/app/wiki/${p.slug}`}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-medium text-slate-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                    >
+                        {p.page_type && (
+                            <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                                p.page_type === 'article' ? 'bg-violet-500' :
+                                p.page_type === 'summary' ? 'bg-sky-500' :
+                                p.page_type === 'concept' ? 'bg-teal-500' :
+                                'bg-orange-500'
+                            }`} />
+                        )}
+                        {p.title}
+                    </Link>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 export default function WikiShow({
     page,
     current_version,
     claims,
     claim_summary: claimSummary = null,
     lint_findings: lintFindings = [],
+    lint_summary: lintSummary = null,
+    outgoing_links: outgoingLinks = [],
+    incoming_links: incomingLinks = [],
+    related_articles: relatedArticles = [],
+    related_concepts: relatedConcepts = [],
+    related_entities: relatedEntities = [],
 }) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -144,6 +186,13 @@ export default function WikiShow({
         archived: tw.status_archived ?? 'Arkivert',
     }[status] ?? status);
 
+    const pageTypeLabel = (type) => ({
+        article: tw.page_type_article ?? 'Kildeartikkel',
+        summary: tw.page_type_summary ?? 'Sammendrag',
+        concept: tw.page_type_concept ?? 'Konsept',
+        entity: tw.page_type_entity ?? 'Entitet',
+    }[type] ?? type);
+
     const confidenceLabel = (c) => ({
         high: tw.confidence_high ?? 'Høy',
         medium: tw.confidence_medium ?? 'Medium',
@@ -163,6 +212,18 @@ export default function WikiShow({
 
     const articleContent = current_version?.content_markdown ?? null;
     const hasArticle = Boolean(articleContent?.trim());
+
+    // Derive semantic traversal groups from outgoing links
+    const summaryLinks = outgoingLinks.filter((p) => p.page_type === 'summary');
+    const articleLinks = outgoingLinks.filter((p) => p.page_type === 'article');
+
+    const hasAnyTraversal =
+        summaryLinks.length > 0 ||
+        articleLinks.length > 0 ||
+        relatedConcepts.length > 0 ||
+        relatedEntities.length > 0 ||
+        relatedArticles.length > 0 ||
+        incomingLinks.length > 0;
 
     return (
         <CustomerAppLayout title={page.title} showPageTitle={false}>
@@ -185,7 +246,13 @@ export default function WikiShow({
                         <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
                             {page.title}
                         </h1>
-                        <div className="mt-1">
+                        <div className="mt-1 flex flex-wrap gap-2">
+                            {page.page_type && (
+                                <Badge
+                                    label={pageTypeLabel(page.page_type)}
+                                    cls={PAGE_TYPE_STYLES[page.page_type] ?? 'bg-slate-200 text-slate-600'}
+                                />
+                            )}
                             <Badge
                                 label={pageStatusLabel(page.status)}
                                 cls={PAGE_STATUS_STYLES[page.status] ?? 'bg-slate-200 text-slate-600'}
@@ -302,6 +369,48 @@ export default function WikiShow({
                     )}
                 </section>
 
+                {/* Traversal / navigation */}
+                <section className="space-y-3">
+                    <h2 className="text-base font-semibold text-slate-700">
+                        {tw.traversal_heading ?? 'Navigasjon'}
+                    </h2>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                        {hasAnyTraversal ? (
+                            <div className="space-y-3">
+                                <LinkedPageList
+                                    pages={summaryLinks}
+                                    label={tw.traversal_summary_link ?? 'Sammendrag'}
+                                />
+                                <LinkedPageList
+                                    pages={articleLinks}
+                                    label={tw.traversal_article_link ?? 'Kildeartikkel'}
+                                />
+                                <LinkedPageList
+                                    pages={relatedConcepts}
+                                    label={tw.traversal_related_concepts ?? 'Konsepter'}
+                                />
+                                <LinkedPageList
+                                    pages={relatedEntities}
+                                    label={tw.traversal_related_entities ?? 'Entiteter'}
+                                />
+                                <LinkedPageList
+                                    pages={relatedArticles}
+                                    label={tw.traversal_related_articles ?? 'Relaterte artikler'}
+                                />
+                                <LinkedPageList
+                                    pages={incomingLinks}
+                                    label={tw.traversal_incoming_links ?? 'Baklenker'}
+                                />
+                            </div>
+                        ) : (
+                            <p className="text-sm text-slate-400">
+                                {tw.traversal_no_links ?? 'Ingen lenker registrert ennå.'}
+                            </p>
+                        )}
+                    </div>
+                </section>
+
                 {/* Verification — secondary, collapsible */}
                 <section className="space-y-3">
                     <button
@@ -314,6 +423,24 @@ export default function WikiShow({
                         {claimSummary && claimSummary.total > 0 && (
                             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-normal text-slate-500">
                                 {claimSummary.total} {tw.claims ?? 'påstander'}
+                            </span>
+                        )}
+                        {lintSummary && lintSummary.total === 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                                <CheckIcon className="h-3 w-3" />
+                                {tw.lint_summary_ok ?? 'OK'}
+                            </span>
+                        )}
+                        {lintSummary && lintSummary.error > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                                <WarnIcon className="h-3 w-3" />
+                                {lintSummary.error}
+                            </span>
+                        )}
+                        {lintSummary && lintSummary.warning > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                <WarnIcon className="h-3 w-3" />
+                                {lintSummary.warning}
                             </span>
                         )}
                     </button>

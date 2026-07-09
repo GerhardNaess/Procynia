@@ -8,6 +8,7 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\Language;
@@ -1157,6 +1158,239 @@ class WikiControllerTest extends TestCase
     }
 
     // =========================================================================
+    // Phase 8E-18: traversal data in show()
+    // =========================================================================
+
+    public function test_show_includes_page_type_in_page_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page): bool {
+            return data_get($inertia, 'props.page.page_type') === EnterpriseWikiPage::PAGE_TYPE_ARTICLE;
+        });
+    }
+
+    public function test_show_includes_empty_outgoing_links_when_no_links(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Isolert side');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.outgoing_links') === [];
+        });
+    }
+
+    public function test_show_includes_empty_incoming_links_when_no_backlinks(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Isolert side');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.incoming_links') === [];
+        });
+    }
+
+    public function test_show_outgoing_links_contains_linked_page_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($summary): bool {
+            $links = data_get($inertia, 'props.outgoing_links', []);
+            $found = collect($links)->firstWhere('id', $summary->id);
+            return $found !== null
+                && $found['title'] === $summary->title
+                && $found['slug'] === $summary->slug
+                && $found['page_type'] === EnterpriseWikiPage::PAGE_TYPE_SUMMARY;
+        });
+    }
+
+    public function test_show_incoming_links_contains_backlink_page_data(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $this->createPageLink($customer, $summary, $article, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($summary): bool {
+            $links = data_get($inertia, 'props.incoming_links', []);
+            return collect($links)->contains(fn(array $p) => $p['id'] === $summary->id);
+        });
+    }
+
+    public function test_show_related_concepts_for_article_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $this->createPageLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($concept): bool {
+            $concepts = data_get($inertia, 'props.related_concepts', []);
+            return collect($concepts)->contains(fn(array $p) => $p['id'] === $concept->id);
+        });
+    }
+
+    public function test_show_related_entities_for_article_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $entity = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Entitet', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $this->createPageLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($entity): bool {
+            $entities = data_get($inertia, 'props.related_entities', []);
+            return collect($entities)->contains(fn(array $p) => $p['id'] === $entity->id);
+        });
+    }
+
+    public function test_show_related_articles_for_concept_page(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $concept = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createPageLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$concept->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($article): bool {
+            $articles = data_get($inertia, 'props.related_articles', []);
+            return collect($articles)->contains(fn(array $p) => $p['id'] === $article->id);
+        });
+    }
+
+    public function test_show_includes_lint_summary_with_zero_counts_when_no_findings(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Ren side');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.lint_summary');
+            return $summary !== null
+                && $summary['error'] === 0
+                && $summary['warning'] === 0
+                && $summary['info'] === 0
+                && $summary['total'] === 0;
+        });
+    }
+
+    public function test_show_lint_summary_counts_open_findings_by_severity(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Side med funn');
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_ERROR);
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+        $this->createLintFinding($customer, $page, EnterpriseWikiLintFinding::SEVERITY_WARNING);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            $summary = data_get($inertia, 'props.lint_summary');
+            return $summary !== null
+                && $summary['error'] === 1
+                && $summary['warning'] === 2
+                && $summary['total'] === 3;
+        });
+    }
+
+    public function test_show_traversal_data_is_customer_scoped(): void
+    {
+        $customer1 = $this->createCustomer('Eigen kunde');
+        $customer2 = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer1, User::BID_ROLE_CONTRIBUTOR);
+
+        $page1 = $this->createPage($customer1, EnterpriseWikiPage::STATUS_APPROVED, 'Side 1', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $page2 = $this->createPage($customer2, EnterpriseWikiPage::STATUS_APPROVED, 'Fremmed side', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+
+        // Create a link that belongs to customer2 — must not appear in customer1's page props
+        $this->createPageLink($customer2, $page2, $page1, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE);
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page1->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($page2): bool {
+            $incoming = data_get($inertia, 'props.incoming_links', []);
+            return ! collect($incoming)->contains(fn(array $p) => $p['id'] === $page2->id);
+        });
+    }
+
+    public function test_show_page_without_version_still_returns_empty_traversal_arrays(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $page = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Tom side');
+
+        $response = $this->actingAs($user)->get('/app/wiki/'.$page->slug);
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia): bool {
+            return data_get($inertia, 'props.outgoing_links') === []
+                && data_get($inertia, 'props.incoming_links') === []
+                && data_get($inertia, 'props.related_articles') === []
+                && data_get($inertia, 'props.related_concepts') === []
+                && data_get($inertia, 'props.related_entities') === [];
+        });
+    }
+
+    public function test_show_does_not_create_links_claims_or_lint_rows_on_get(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+
+        $linksBefore    = EnterpriseWikiPageLink::query()->count();
+        $claimsBefore   = EnterpriseWikiClaim::query()->count();
+        $findingsBefore = EnterpriseWikiLintFinding::query()->count();
+
+        $this->actingAs($user)->get('/app/wiki/'.$article->slug)->assertOk();
+
+        $this->assertSame($linksBefore, EnterpriseWikiPageLink::query()->count());
+        $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
+        $this->assertSame($findingsBefore, EnterpriseWikiLintFinding::query()->count());
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -1195,15 +1429,36 @@ class WikiControllerTest extends TestCase
         ]);
     }
 
-    private function createPage(Customer $customer, string $status, string $title): EnterpriseWikiPage
-    {
+    private function createPage(
+        Customer $customer,
+        string $status,
+        string $title,
+        string $pageType = EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+    ): EnterpriseWikiPage {
         return EnterpriseWikiPage::query()->create([
             'customer_id' => $customer->id,
             'slug' => Str::slug($title).'-'.Str::lower(Str::random(4)),
             'title' => $title,
+            'page_type' => $pageType,
             'status' => $status,
             'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
             'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    private function createPageLink(
+        Customer $customer,
+        EnterpriseWikiPage $from,
+        EnterpriseWikiPage $to,
+        string $linkType,
+    ): EnterpriseWikiPageLink {
+        return EnterpriseWikiPageLink::query()->create([
+            'customer_id'  => $customer->id,
+            'from_page_id' => $from->id,
+            'to_page_id'   => $to->id,
+            'link_type'    => $linkType,
+            'source'       => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence'   => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
         ]);
     }
 
