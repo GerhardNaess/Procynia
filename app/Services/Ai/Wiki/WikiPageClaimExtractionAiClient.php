@@ -10,6 +10,12 @@ use RuntimeException;
  *
  * Distinct from WikiSectionAiClient (which extracts from raw source sections).
  * This client operates on already-compiled wiki articles/summaries/concept/entity pages.
+ *
+ * CONFIDENCE CONTRACT: confidence is a string enum — 'high', 'medium', 'low', 'uncertain' —
+ * matching EnterpriseWikiClaim::CONFIDENCE_* constants and the enterprise_wiki_claims.confidence
+ * string column. The 8E-14 spec showed confidence as 0.0 (illustrative); the canonical type is
+ * the same string enum used by WikiSectionAiClient and enforced by the JSON schema here.
+ * Changing to float would require a DB migration and is intentionally deferred.
  */
 class WikiPageClaimExtractionAiClient
 {
