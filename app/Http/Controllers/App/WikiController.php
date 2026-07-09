@@ -84,6 +84,9 @@ class WikiController extends Controller
                 'created_at' => $latestRuns[$doc->id]->created_at,
                 'started_at' => $latestRuns[$doc->id]->started_at,
                 'finished_at' => $latestRuns[$doc->id]->finished_at,
+                'maintainer_decision_json' => $latestRuns[$doc->id]->maintainer_decision_json,
+                'maintainer_decision_status' => $latestRuns[$doc->id]->maintainer_decision_status,
+                'maintainer_decision_generated_at' => $latestRuns[$doc->id]->maintainer_decision_generated_at,
             ] : null,
             'generated_pages' => ($pagesPerDocument->get($doc->id) ?? collect())
                 ->map(fn($page) => [

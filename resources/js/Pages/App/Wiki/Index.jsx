@@ -49,14 +49,41 @@ const INGEST_STATUS_STYLES = {
     sections_planned: 'bg-blue-100 text-blue-700',
     completed: 'bg-emerald-100 text-emerald-700',
     failed: 'bg-rose-100 text-rose-700',
+    decision_only: 'bg-violet-100 text-violet-700',
 };
 
 const IN_PROGRESS_STATUSES = ['queued', 'running', 'sections_planned'];
 
-function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
+function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision }) {
     if (!run) {
         return <span className={`${BADGE} bg-slate-100 text-slate-500`}>{notStartedLabel}</span>;
     }
+
+    if (run.status === 'decision_only') {
+        const generatedAt = run.maintainer_decision_generated_at
+            ? formatDate(run.maintainer_decision_generated_at, locale)
+            : null;
+        return (
+            <div className="space-y-1.5">
+                <span className={`${BADGE} bg-violet-100 text-violet-700`}>{label}</span>
+                {generatedAt && (
+                    <p className="text-[11px] text-slate-400">
+                        {(tw ?? {}).decision_panel_generated ?? 'Generert'} {generatedAt}
+                    </p>
+                )}
+                {run.maintainer_decision_json && onViewDecision && (
+                    <button
+                        type="button"
+                        onClick={() => onViewDecision(run)}
+                        className="inline-flex h-6 items-center rounded-full border border-violet-200 bg-violet-50 px-3 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-100"
+                    >
+                        {(tw ?? {}).decision_panel_view_button ?? 'Vis beslutning'}
+                    </button>
+                )}
+            </div>
+        );
+    }
+
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
@@ -92,6 +119,146 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload }) {
                     {run.error_message}
                 </p>
             )}
+        </div>
+    );
+}
+
+function DecisionPageEntry({ entry, tw }) {
+    if (!entry) return <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>;
+    return (
+        <dl className="space-y-0.5 text-[11px]">
+            <div className="flex gap-1.5">
+                <dt className="text-slate-400">{tw.decision_action_label ?? 'Handling'}:</dt>
+                <dd className="font-mono font-semibold text-violet-700">{entry.action}</dd>
+            </div>
+            {entry.title && (
+                <div className="flex gap-1.5">
+                    <dt className="text-slate-400">{tw.decision_title_label ?? 'Tittel'}:</dt>
+                    <dd className="text-slate-800">{entry.title}</dd>
+                </div>
+            )}
+            {entry.proposed_slug && (
+                <div className="flex gap-1.5">
+                    <dt className="text-slate-400">{tw.decision_slug_label ?? 'Slug'}:</dt>
+                    <dd className="font-mono text-slate-600">{entry.proposed_slug}</dd>
+                </div>
+            )}
+            {entry.reason && (
+                <div className="flex gap-1.5">
+                    <dt className="shrink-0 text-slate-400">{tw.decision_reason_label ?? 'Begrunnelse'}:</dt>
+                    <dd className="text-slate-700">{entry.reason}</dd>
+                </div>
+            )}
+        </dl>
+    );
+}
+
+function DecisionModal({ run, tw, onClose }) {
+    const d = run.maintainer_decision_json ?? {};
+    return (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+            <div className="relative w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+                <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+                    <h2 className="text-base font-semibold text-slate-950">
+                        {tw.decision_panel_heading ?? 'Vedlikeholdersbeslutning'}
+                    </h2>
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                        aria-label={tw.decision_modal_close ?? 'Lukk'}
+                    >
+                        <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div className="max-h-[70vh] overflow-y-auto px-6 py-5 space-y-5">
+                    <section className="space-y-2">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                            {tw.decision_source_article ?? 'Kildeartikkel'}
+                        </h3>
+                        <DecisionPageEntry entry={d.source_article} tw={tw} />
+                    </section>
+
+                    <section className="space-y-2">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                            {tw.decision_source_summary ?? 'Sammendrag'}
+                        </h3>
+                        <DecisionPageEntry entry={d.source_summary} tw={tw} />
+                    </section>
+
+                    <section className="space-y-2">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                            {tw.decision_concept_pages ?? 'Konseptsider'}
+                        </h3>
+                        {(d.concept_pages ?? []).length === 0 ? (
+                            <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>
+                        ) : (
+                            <ul className="space-y-3">
+                                {d.concept_pages.map((p, i) => (
+                                    <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                                        <DecisionPageEntry entry={p} tw={tw} />
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </section>
+
+                    <section className="space-y-2">
+                        <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                            {tw.decision_entity_pages ?? 'Entitetssider'}
+                        </h3>
+                        {(d.entity_pages ?? []).length === 0 ? (
+                            <span className="text-[11px] text-slate-400">{tw.decision_no_items ?? 'Ingen'}</span>
+                        ) : (
+                            <ul className="space-y-3">
+                                {d.entity_pages.map((p, i) => (
+                                    <li key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                                        <DecisionPageEntry entry={p} tw={tw} />
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </section>
+
+                    {(d.warnings ?? []).length > 0 && (
+                        <section className="space-y-2">
+                            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-amber-500">
+                                {tw.decision_warnings ?? 'Advarsler'}
+                            </h3>
+                            <ul className="space-y-1">
+                                {d.warnings.map((w, i) => (
+                                    <li key={i} className="text-[11px] text-amber-700">{w}</li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+
+                    {d.no_action_reason && (
+                        <section className="space-y-1">
+                            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                                {tw.decision_no_action_reason ?? 'Ingen handling – begrunnelse'}
+                            </h3>
+                            <p className="text-[11px] text-slate-700">{d.no_action_reason}</p>
+                        </section>
+                    )}
+                </div>
+
+                <div className="border-t border-slate-100 px-6 py-4 text-right">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex min-h-9 items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        {tw.decision_modal_close ?? 'Lukk'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -145,6 +312,7 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
     const fileInputRef = useRef(null);
     const uploadForm = useForm({ file: null });
     const [ingestingIds, setIngestingIds] = useState(new Set());
+    const [decisionView, setDecisionView] = useState(null);
 
     const handleSourceReload = () => router.reload({ only: ['sources'] });
 
@@ -204,6 +372,7 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
         sections_planned: tw.ingest_status_running ?? 'Kjører',
         completed: tw.ingest_status_completed ?? 'Fullført',
         failed: tw.ingest_status_failed ?? 'Feilet',
+        decision_only: tw.ingest_status_decision_only ?? 'Beslutning lagret',
     }[status] ?? status);
 
     const notStartedLabel = tw.ingest_status_not_started ?? 'Ikke startet';
@@ -364,6 +533,8 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                                                         notStartedLabel={notStartedLabel}
                                                         locale={locale}
                                                         onReload={handleSourceReload}
+                                                        tw={tw}
+                                                        onViewDecision={setDecisionView}
                                                     />
                                                     {source.generated_pages.length > 0 && (
                                                         <ul className="mt-2 space-y-0.5">
@@ -475,6 +646,13 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                     </div>
                 </section>
             </div>
+            {decisionView && (
+                <DecisionModal
+                    run={decisionView}
+                    tw={tw}
+                    onClose={() => setDecisionView(null)}
+                />
+            )}
         </CustomerAppLayout>
     );
 }

@@ -1293,4 +1293,160 @@ class WikiControllerTest extends TestCase
             'resolved_at' => $status === EnterpriseWikiLintFinding::STATUS_RESOLVED ? now() : null,
         ]);
     }
+
+    private function createDecisionOnlyRun(Customer $customer, EnterpriseWikiDocument $document, array $decision = []): EnterpriseWikiIngestRun
+    {
+        if ($decision === []) {
+            $decision = [
+                'source_article' => ['action' => 'create', 'title' => 'Test', 'proposed_slug' => 'test-ab1c', 'reason' => 'New.'],
+                'source_summary' => ['action' => 'create', 'title' => 'Sammendrag', 'proposed_slug' => 'sammendrag-ab1c', 'reason' => 'Companion.'],
+                'concept_pages' => [],
+                'entity_pages' => [],
+                'no_action_reason' => null,
+                'warnings' => [],
+            ];
+        }
+
+        return EnterpriseWikiIngestRun::query()->create([
+            'uuid' => (string) \Illuminate\Support\Str::uuid(),
+            'customer_id' => $customer->id,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'status' => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'maintainer_decision_json' => $decision,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
+            'maintainer_decision_generated_at' => now(),
+        ]);
+    }
+
+    // =========================================================================
+    // Phase 8E-8: maintainer decision prop in sources
+    // =========================================================================
+
+    public function test_index_decision_only_run_is_included_in_source_latest_ingest_run(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createDecisionOnlyRun($customer, $document);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return data_get($source, 'latest_ingest_run.status') === EnterpriseWikiIngestRun::STATUS_DECISION_ONLY;
+        });
+    }
+
+    public function test_index_decision_only_run_includes_maintainer_decision_json_in_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createDecisionOnlyRun($customer, $document);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            $json = data_get($source, 'latest_ingest_run.maintainer_decision_json');
+            return is_array($json) && array_key_exists('source_article', $json);
+        });
+    }
+
+    public function test_index_decision_only_run_includes_maintainer_decision_status_in_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createDecisionOnlyRun($customer, $document);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return data_get($source, 'latest_ingest_run.maintainer_decision_status') === EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING;
+        });
+    }
+
+    public function test_index_decision_only_run_includes_maintainer_decision_generated_at_in_prop(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createDecisionOnlyRun($customer, $document);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return data_get($source, 'latest_ingest_run.maintainer_decision_generated_at') !== null;
+        });
+    }
+
+    public function test_index_decision_only_run_not_leaked_to_other_customer(): void
+    {
+        $customer = $this->createCustomer('Eigen kunde');
+        $other = $this->createCustomer('Annen kunde');
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $ownDoc = $this->createDocument($customer);
+        $foreignDoc = $this->createDocument($other);
+        $this->createDecisionOnlyRun($other, $foreignDoc);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($ownDoc): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $ownDoc->id);
+            // Own doc has no run; foreign decision must not appear
+            return $source !== null && $source['latest_ingest_run'] === null;
+        });
+    }
+
+    public function test_index_source_without_decision_run_has_null_maintainer_decision_json(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createIngestRun($customer, $document, EnterpriseWikiIngestRun::STATUS_COMPLETED);
+
+        $response = $this->actingAs($user)->get('/app/wiki');
+
+        $response->assertOk();
+        $response->assertViewHas('page', function (array $inertia) use ($document): bool {
+            $sources = data_get($inertia, 'props.sources', []);
+            $source = collect($sources)->firstWhere('id', $document->id);
+            return data_get($source, 'latest_ingest_run.maintainer_decision_json') === null;
+        });
+    }
+
+    public function test_index_get_request_does_not_create_any_wiki_rows(): void
+    {
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createDocument($customer);
+        $this->createDecisionOnlyRun($customer, $document);
+
+        $pagesBefore = EnterpriseWikiPage::query()->count();
+        $versionsBefore = EnterpriseWikiPageVersion::query()->count();
+        $claimsBefore = EnterpriseWikiClaim::query()->count();
+        $runsBefore = EnterpriseWikiIngestRun::query()->count();
+
+        $this->actingAs($user)->get('/app/wiki')->assertOk();
+
+        $this->assertSame($pagesBefore, EnterpriseWikiPage::query()->count());
+        $this->assertSame($versionsBefore, EnterpriseWikiPageVersion::query()->count());
+        $this->assertSame($claimsBefore, EnterpriseWikiClaim::query()->count());
+        $this->assertSame($runsBefore, EnterpriseWikiIngestRun::query()->count());
+    }
 }
