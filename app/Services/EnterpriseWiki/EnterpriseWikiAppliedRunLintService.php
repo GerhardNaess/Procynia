@@ -1,0 +1,605 @@
+<?php
+
+namespace App\Services\EnterpriseWiki;
+
+use App\Models\EnterpriseWikiClaim;
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiLintFinding;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\EnterpriseWikiSourceReference;
+
+/**
+ * Structural lint for an applied maintainer decision run.
+ *
+ * Reads existing Enterprise Wiki data (pages, versions, claims, source references,
+ * links) and writes EnterpriseWikiLintFinding rows describing any gaps or
+ * inconsistencies found.
+ *
+ * Strategy:
+ * - Idempotent: findings are upserted by a stable composite key that includes
+ *   enterprise_wiki_ingest_run_id. Re-running opens resolved findings that
+ *   still apply, skips findings that are already open, and resolves findings
+ *   whose condition no longer holds.
+ * - Stale resolution scope: only findings with enterprise_wiki_ingest_run_id
+ *   equal to the current run are considered for resolution. Findings from
+ *   wiki:lint (run_id = null) are never touched here.
+ * - No OpenAI calls, no content generation, no link or claim creation.
+ */
+class EnterpriseWikiAppliedRunLintService
+{
+    /** Expected reverse link type for each forward link type. */
+    private const REVERSE_LINK_TYPES = [
+        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY  => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE,
+        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE  => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
+        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT  => EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE,
+        EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE  => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT,
+        EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY   => EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE,
+        EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE   => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY,
+        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT  => EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY,
+        EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY  => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT,
+        EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ENTITY   => EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY,
+        EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY   => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ENTITY,
+    ];
+
+    /**
+     * @return array{pages_checked: int, claims_checked: int, source_refs_checked: int,
+     *               links_checked: int, findings_created: int, findings_skipped: int,
+     *               findings_resolved: int, errors: int, warnings: int, info: int}
+     * @throws \InvalidArgumentException if the run is not applied
+     */
+    public function lint(EnterpriseWikiIngestRun $run): array
+    {
+        if ($run->maintainer_decision_status !== EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED) {
+            throw new \InvalidArgumentException(
+                "Run [{$run->id}] has maintainer_decision_status [{$run->maintainer_decision_status}] — only 'applied' runs can be linted."
+            );
+        }
+
+        $touchedIds = [];
+        $counts     = [
+            'pages_checked'       => 0,
+            'claims_checked'      => 0,
+            'source_refs_checked' => 0,
+            'links_checked'       => 0,
+            'findings_created'    => 0,
+            'findings_skipped'    => 0,
+            'findings_resolved'   => 0,
+            'errors'              => 0,
+            'warnings'            => 0,
+            'info'                => 0,
+        ];
+
+        // ----------------------------------------------------------------
+        // Load pages from run
+        // ----------------------------------------------------------------
+        $pivotRows = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->with('page')
+            ->get();
+
+        $allPages  = [];
+        $articles  = [];
+        $summaries = [];
+
+        foreach ($pivotRows as $row) {
+            $page = $row->page;
+
+            if ($page === null) {
+                continue;
+            }
+
+            $version = EnterpriseWikiPageVersion::query()
+                ->where('enterprise_wiki_page_id', $page->id)
+                ->where('is_current', true)
+                ->first();
+
+            $entry = ['page' => $page, 'version' => $version];
+            $allPages[] = $entry;
+
+            match ($page->page_type) {
+                EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $articles[] = $entry,
+                EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $summaries[] = $entry,
+                default                               => null,
+            };
+        }
+
+        // ----------------------------------------------------------------
+        // Run completeness checks
+        // ----------------------------------------------------------------
+        $this->checkRunCompleteness($run, $allPages, $articles, $summaries, $touchedIds, $counts);
+
+        // ----------------------------------------------------------------
+        // Per-page checks
+        // ----------------------------------------------------------------
+        foreach ($allPages as $entry) {
+            $counts['pages_checked']++;
+            $page    = $entry['page'];
+            $version = $entry['version'];
+
+            $this->checkPageVersion($run, $page, $version, $touchedIds, $counts);
+
+            if ($version !== null && trim((string) ($version->content_markdown ?? '')) !== '') {
+                $this->checkPageClaims($run, $page, $version, $touchedIds, $counts);
+                $this->checkPageLinks($run, $page, $touchedIds, $counts);
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // Close stale open findings for this run that were not touched
+        // ----------------------------------------------------------------
+        $counts['findings_resolved'] = $this->closeStaleFindings($run->id, $run->customer_id, $touchedIds);
+
+        return $counts;
+    }
+
+    // =========================================================================
+    // Check groups
+    // =========================================================================
+
+    private function checkRunCompleteness(
+        EnterpriseWikiIngestRun $run,
+        array $allPages,
+        array $articles,
+        array $summaries,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        if (empty($allPages)) {
+            $this->upsertFinding(
+                $this->runKey($run, EnterpriseWikiLintFinding::CODE_APPLIED_RUN_WITHOUT_PAGES),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Applied run contains no pages.',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        if (empty($articles)) {
+            $this->upsertFinding(
+                $this->runKey($run, EnterpriseWikiLintFinding::CODE_APPLIED_RUN_WITHOUT_ARTICLE),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Applied run has no article page.',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        if (empty($summaries)) {
+            $this->upsertFinding(
+                $this->runKey($run, EnterpriseWikiLintFinding::CODE_APPLIED_RUN_WITHOUT_SUMMARY),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Applied run has no summary page.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkPageVersion(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $version,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        if ($version === null) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_MISSING_CURRENT_VERSION),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Page has no current version.',
+                $touchedIds,
+                $counts,
+            );
+
+            return;
+        }
+
+        if (trim((string) ($version->content_markdown ?? '')) === '') {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_EMPTY_PAGE_CONTENT),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Current version has empty content_markdown.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkPageClaims(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $claims = EnterpriseWikiClaim::query()
+            ->where('enterprise_wiki_page_version_id', $version->id)
+            ->with('sourceReferences')
+            ->get();
+
+        if ($claims->isEmpty()) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_CLAIMS),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Page has no claims extracted from its current version.',
+                $touchedIds,
+                $counts,
+            );
+
+            return;
+        }
+
+        foreach ($claims as $claim) {
+            $counts['claims_checked']++;
+
+            // claim_missing_source (reuse existing code)
+            if ($claim->sourceReferences->isEmpty()) {
+                $this->upsertFinding(
+                    $this->claimKey($run, $page, $version, $claim, EnterpriseWikiLintFinding::CODE_CLAIM_MISSING_SOURCE),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    'Claim has no source reference.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
+
+            foreach ($claim->sourceReferences as $ref) {
+                $counts['source_refs_checked']++;
+
+                // source_reference_missing_excerpt (reuse existing code)
+                if (($ref->excerpt ?? '') === '') {
+                    $this->upsertFinding(
+                        $this->claimKey($run, $page, $version, $claim, EnterpriseWikiLintFinding::CODE_SOURCE_REFERENCE_MISSING_EXCERPT),
+                        EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                        'Source reference has no excerpt.',
+                        $touchedIds,
+                        $counts,
+                    );
+                }
+
+                // source_reference_without_document / source_reference_customer_mismatch
+                if ($ref->source_type === EnterpriseWikiSourceReference::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT) {
+                    $doc = EnterpriseWikiDocument::find($ref->source_id);
+
+                    if ($doc === null) {
+                        $this->upsertFinding(
+                            $this->claimKey($run, $page, $version, $claim, EnterpriseWikiLintFinding::CODE_SOURCE_REFERENCE_WITHOUT_DOCUMENT),
+                            EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                            "Source reference points to document [{$ref->source_id}] which does not exist.",
+                            $touchedIds,
+                            $counts,
+                        );
+                    } elseif ($doc->customer_id !== $run->customer_id) {
+                        $this->upsertFinding(
+                            $this->claimKey($run, $page, $version, $claim, EnterpriseWikiLintFinding::CODE_SOURCE_REFERENCE_CUSTOMER_MISMATCH),
+                            EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                            "Source reference document [{$ref->source_id}] belongs to a different customer.",
+                            $touchedIds,
+                            $counts,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    private function checkPageLinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $outgoing = EnterpriseWikiPageLink::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('from_page_id', $page->id)
+            ->get();
+
+        $counts['links_checked'] += $outgoing->count();
+
+        // page_without_outgoing_links
+        if ($outgoing->isEmpty()) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_OUTGOING_LINKS),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Page has no outgoing links.',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        // page_without_incoming_links
+        $hasIncoming = EnterpriseWikiPageLink::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('to_page_id', $page->id)
+            ->exists();
+
+        if (! $hasIncoming) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_PAGE_WITHOUT_INCOMING_LINKS),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Page has no incoming links (backlinks).',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        // Type-specific link checks
+        $outgoingTypes = $outgoing->pluck('link_type')->all();
+
+        match ($page->page_type) {
+            EnterpriseWikiPage::PAGE_TYPE_ARTICLE => $this->checkArticleLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
+            EnterpriseWikiPage::PAGE_TYPE_SUMMARY => $this->checkSummaryLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
+            EnterpriseWikiPage::PAGE_TYPE_CONCEPT => $this->checkConceptLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
+            EnterpriseWikiPage::PAGE_TYPE_ENTITY  => $this->checkEntityLinks($run, $page, $outgoingTypes, $touchedIds, $counts),
+            default                               => null,
+        };
+
+        // missing_reverse_link: for each outgoing link, check if reverse exists
+        $missingReverses = [];
+
+        foreach ($outgoing as $link) {
+            $reverseType = self::REVERSE_LINK_TYPES[$link->link_type] ?? null;
+
+            if ($reverseType === null) {
+                continue;
+            }
+
+            $reverseExists = EnterpriseWikiPageLink::query()
+                ->where('customer_id', $run->customer_id)
+                ->where('from_page_id', $link->to_page_id)
+                ->where('to_page_id', $page->id)
+                ->where('link_type', $reverseType)
+                ->exists();
+
+            if (! $reverseExists) {
+                $missingReverses[] = $reverseType;
+            }
+        }
+
+        if (! empty($missingReverses)) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_MISSING_REVERSE_LINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Expected reverse link(s) are missing: ' . implode(', ', $missingReverses) . '.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkArticleLinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $outgoingTypes,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        if (! in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY, $outgoingTypes, true)) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_SUMMARY_LINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Article page has no link to a summary page.',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        $hasConceptOrEntity = in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT, $outgoingTypes, true)
+            || in_array(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY, $outgoingTypes, true);
+
+        if (! $hasConceptOrEntity) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ARTICLE_WITHOUT_CONCEPT_OR_ENTITY_LINKS),
+                EnterpriseWikiLintFinding::SEVERITY_INFO,
+                'Article page has no links to concept or entity pages.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkSummaryLinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $outgoingTypes,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        if (! in_array(EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE, $outgoingTypes, true)) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_SUMMARY_WITHOUT_ARTICLE_LINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Summary page has no link back to its article page.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkConceptLinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $outgoingTypes,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $hasBacklink = in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE, $outgoingTypes, true)
+            || in_array(EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY, $outgoingTypes, true);
+
+        if (! $hasBacklink) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ORPHAN_CONCEPT_PAGE),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Concept page has no links to article or summary pages.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    private function checkEntityLinks(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        array $outgoingTypes,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $hasBacklink = in_array(EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE, $outgoingTypes, true)
+            || in_array(EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_SUMMARY, $outgoingTypes, true);
+
+        if (! $hasBacklink) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, null, EnterpriseWikiLintFinding::CODE_ORPHAN_ENTITY_PAGE),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Entity page has no links to article or summary pages.',
+                $touchedIds,
+                $counts,
+            );
+        }
+    }
+
+    // =========================================================================
+    // Upsert + resolve helpers
+    // =========================================================================
+
+    /**
+     * Upsert a lint finding by its composite key.
+     *
+     * - Not found:                 creates it (findings_created++)
+     * - Found, was resolved:       re-opens it (findings_created++)
+     * - Found, already open:       updates severity/message, no state change (findings_skipped++)
+     */
+    private function upsertFinding(
+        array $key,
+        string $severity,
+        string $message,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $query = EnterpriseWikiLintFinding::query();
+
+        foreach ($key as $col => $val) {
+            $val === null ? $query->whereNull($col) : $query->where($col, $val);
+        }
+
+        $existing = $query->first();
+
+        if ($existing !== null) {
+            $alreadyOpen = $existing->status === EnterpriseWikiLintFinding::STATUS_OPEN;
+
+            $existing->update([
+                'severity'    => $severity,
+                'message'     => $message,
+                'status'      => EnterpriseWikiLintFinding::STATUS_OPEN,
+                'detected_at' => now(),
+                'resolved_at' => null,
+            ]);
+
+            $touchedIds[] = $existing->id;
+
+            if ($alreadyOpen) {
+                $counts['findings_skipped']++;
+            } else {
+                // Was resolved → re-opened counts as created
+                $counts['findings_created']++;
+                $this->incrementSeverity($severity, $counts);
+            }
+
+            return;
+        }
+
+        $created = EnterpriseWikiLintFinding::query()->create(array_merge($key, [
+            'severity'    => $severity,
+            'message'     => $message,
+            'status'      => EnterpriseWikiLintFinding::STATUS_OPEN,
+            'detected_at' => now(),
+        ]));
+
+        $touchedIds[] = $created->id;
+        $counts['findings_created']++;
+        $this->incrementSeverity($severity, $counts);
+    }
+
+    /**
+     * Mark all open findings for this run that were not touched in this pass as resolved.
+     */
+    private function closeStaleFindings(int $runId, int $customerId, array $touchedIds): int
+    {
+        $query = EnterpriseWikiLintFinding::query()
+            ->where('customer_id', $customerId)
+            ->where('enterprise_wiki_ingest_run_id', $runId)
+            ->where('status', EnterpriseWikiLintFinding::STATUS_OPEN);
+
+        if (! empty($touchedIds)) {
+            $query->whereNotIn('id', $touchedIds);
+        }
+
+        return $query->update([
+            'status'      => EnterpriseWikiLintFinding::STATUS_RESOLVED,
+            'resolved_at' => now(),
+        ]);
+    }
+
+    private function incrementSeverity(string $severity, array &$counts): void
+    {
+        match ($severity) {
+            EnterpriseWikiLintFinding::SEVERITY_ERROR   => $counts['errors']++,
+            EnterpriseWikiLintFinding::SEVERITY_WARNING => $counts['warnings']++,
+            EnterpriseWikiLintFinding::SEVERITY_INFO    => $counts['info']++,
+            default                                     => null,
+        };
+    }
+
+    // =========================================================================
+    // Key builders
+    // =========================================================================
+
+    private function runKey(EnterpriseWikiIngestRun $run, string $code): array
+    {
+        return [
+            'customer_id'                     => $run->customer_id,
+            'enterprise_wiki_ingest_run_id'   => $run->id,
+            'enterprise_wiki_page_id'         => null,
+            'enterprise_wiki_page_version_id' => null,
+            'enterprise_wiki_claim_id'        => null,
+            'code'                            => $code,
+        ];
+    }
+
+    private function pageKey(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        ?EnterpriseWikiPageVersion $version,
+        string $code,
+    ): array {
+        return [
+            'customer_id'                     => $run->customer_id,
+            'enterprise_wiki_ingest_run_id'   => $run->id,
+            'enterprise_wiki_page_id'         => $page->id,
+            'enterprise_wiki_page_version_id' => $version?->id,
+            'enterprise_wiki_claim_id'        => null,
+            'code'                            => $code,
+        ];
+    }
+
+    private function claimKey(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        EnterpriseWikiClaim $claim,
+        string $code,
+    ): array {
+        return [
+            'customer_id'                     => $run->customer_id,
+            'enterprise_wiki_ingest_run_id'   => $run->id,
+            'enterprise_wiki_page_id'         => $page->id,
+            'enterprise_wiki_page_version_id' => $version->id,
+            'enterprise_wiki_claim_id'        => $claim->id,
+            'code'                            => $code,
+        ];
+    }
+}

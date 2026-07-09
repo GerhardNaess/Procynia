@@ -1454,6 +1454,51 @@ Implementert:
 **Design: `EnterpriseWikiPageLink` er en kanonisk customer-scoped sidegraf — ikke per-run historikk.**  
 Den unikke indeksen sikrer at det kun finnes én kant av hver type mellom to sider per kunde, uavhengig av hvor mange runs som har blitt kjørt. `enterprise_wiki_ingest_run_id` er nullable og viser kun hvilken run som _først_ opprettet linken — det er ikke et eierskap og betyr ikke at linken slettes eller endres ved en ny run. Grafen er kumulativ: kanter akkumuleres over tid, duplikater hoppes over med `wasRecentlyCreated = false`. Dette skiller modellen fra pivot-tabellen `enterprise_wiki_ingest_run_pages`, som er per-run historikk.
 
+#### Fase 8E-17 — Enterprise Wiki lint / quality checks for applied runs — Fullført
+
+**Commit:** (se nedenfor)
+
+Implementert:
+- Migrasjon: `2026_07_09_000002_add_run_version_metadata_to_enterprise_wiki_lint_findings_table.php` — legger til `enterprise_wiki_ingest_run_id` (nullable FK, nullOnDelete), `enterprise_wiki_page_version_id` (nullable FK, nullOnDelete), `metadata` (json nullable), og indeks `ewlf_ingest_run_idx` på eksisterende tabell `enterprise_wiki_lint_findings`.
+- Modell `EnterpriseWikiLintFinding` — 16 nye kode-konstanter for 8E-17-sjekker (se liste nedenfor). `CODES`-array utvidet til 19 totalt. Nye fillable-felter og casts. Nye relasjoner `run()` og `version()`.
+- `EnterpriseWikiAppliedRunLintService` (`app/Services/EnterpriseWiki/`) — ny service, skiller seg fra eksisterende `EnterpriseWikiLintService` (som ligger i `app/Services/Ai/Wiki/`). Ingen OpenAI-kall. Ingen innholdsgenerering. Leser eksisterende data og skriver `EnterpriseWikiLintFinding`-rader.
+- Artisan-kommando `wiki:lint-applied-run --run-id=ID` — guard på `maintainer_decision_status = applied`. Full CLI-output med prefix `[WIKI_LINT]`.
+- 33 tester. Ingen endring i claims, source references, page links, `ProcessEnterpriseWikiIngest` eller Kunnskapsbase/RAG.
+
+**18 lint-sjekker fordelt på 5 kategorier:**
+
+*Run-nivå (3):*
+- `applied_run_without_pages` — run uten noen sider (error)
+- `applied_run_without_article` — run uten article page (warning)
+- `applied_run_without_summary` — run uten summary page (warning)
+
+*Side/versjon (2):*
+- `missing_current_version` — side uten current version (error)
+- `empty_page_content` — current version med tom `content_markdown` (error)
+
+*Claims (3, inkl. 2 gjenbrukte koder fra eksisterende lint):*
+- `page_without_claims` — side med innhold men ingen claims (warning)
+- `claim_missing_source` *(gjenbrukt)* — claim uten source reference (warning)
+- `source_reference_missing_excerpt` *(gjenbrukt)* — source reference uten excerpt (warning)
+
+*Source reference-integritet (2):*
+- `source_reference_without_document` — source_id peker på ikke-eksisterende dokument (error)
+- `source_reference_customer_mismatch` — dokument tilhører feil kunde (error)
+
+*Lenker (8):*
+- `page_without_outgoing_links` — side uten utgående lenker (warning)
+- `page_without_incoming_links` — side uten innkommende lenker (warning)
+- `article_without_summary_link` — article uten `article_to_summary`-lenke (warning)
+- `summary_without_article_link` — summary uten `summary_to_article`-lenke (warning)
+- `article_without_concept_or_entity_links` — article uten concept/entity-lenker (info)
+- `orphan_concept_page` — concept uten lenker tilbake til article/summary (warning)
+- `orphan_entity_page` — entity uten lenker tilbake til article/summary (warning)
+- `missing_reverse_link` — utgående lenke mangler forventet reverslenke (warning)
+
+**Design: idempotens og stale resolution.**
+- Upsert-nøkkel: `{customer_id, enterprise_wiki_ingest_run_id, enterprise_wiki_page_id, enterprise_wiki_page_version_id, enterprise_wiki_claim_id, code}` — manuell query (ingen DB unique constraint, håndterer NULL-felt). Allerede åpen finding teller som skipped; resolved finding gjenåpnes og teller som created.
+- Stale resolution: etter lint-passet lukkes alle åpne findings for denne run-id som ikke ble rørt i denne kjøringen. Findings fra `wiki:lint` (run_id = NULL) røres aldri.
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
