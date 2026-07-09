@@ -1530,16 +1530,22 @@ Implementert:
   - **customer-wide** — alle sider og kanter for kunden (ingen parametre)
   - **run-scoped** — sider fra `enterprise_wiki_ingest_run_pages`-pivot for én applied run; kanter kun der begge endepunkter er i scope (`?run_id=`)
   - **neighborhood** — valgt side + direkte naboer (inn og ut); kanter mellom alle i dette settet (`?page_id=`, vinner over `run_id` ved konflikt)
-- `WikiGraphDataController` (`app/Http/Controllers/App/`) — JSON-endepunkt, kaster `InvalidArgumentException` → 422 ved ugyldig scope
+- `WikiGraphDataController` (`app/Http/Controllers/App/`) — JSON-endepunkt; ugyldig `run_id` (ikke-applied run, ukjent, feil kunde) eller ugyldig `page_id` (ukjent, feil kunde) gir `422 Unprocessable Entity`
 - Rute `GET /app/wiki/graph-data` lagt inn **foran** `/{slug}` i wiki-routegruppen
 - Stabilt JSON-kontrakt:
-  - Node-ID: `"page-{id}"`, feltene: `page_id, slug, title, page_type, url, current_version_id, claim_count, source_reference_count, lint_error_count, lint_warning_count, status` (error/warning/ok)
-  - Edge-ID: `"link-{id}"`, feltene: `link_id, source, target, from_page_id, to_page_id, link_type, confidence`
+  - **Nodes** = `EnterpriseWikiPage`-rader. Node-ID: `"page-{id}"`. Feltene: `page_id, slug, title, page_type, url, current_version_id, claim_count, source_reference_count, lint_error_count, lint_warning_count, status` (error/warning/ok)
+  - **Edges** = `EnterpriseWikiPageLink`-rader. Edge-ID: `"link-{id}"`. Feltene: `link_id, source, target, from_page_id, to_page_id, link_type, confidence`
   - Summary: `node_count, edge_count, article_count, summary_count, concept_count, entity_count, lint_error_count, lint_warning_count, orphan_count`
   - Scope: `type, run_id, page_id`
 - Alle telleoperasjoner er bulk-aggregert (ingen N+1)
 - Helt read-only — ingen skriving, ingen OpenAI
 - 39 tester i `tests/Feature/App/Wiki/WikiGraphDataControllerTest.php` — dekker: authentication, customer-wide shape, node-payload, edge-payload, summary, run-scoped (inklusive scope-validering), neighborhood (inklusive en-hopp-grense), scope-prioritet (page_id vinner), customer-scoping og no-side-effects
+
+**Avgrensninger (8E-19):**
+- Ingen graph-UI ble bygget — endepunktet returnerer ren JSON, ingen React-komponent, ingen canvas/SVG/WebGL
+- Ingen frontend-biblioteker ble lagt til (ikke sigma, graphology, d3, cytoscape, react-force-graph)
+- Ingen layout-algoritme i backend
+- Graph-UI er et bevisst utsatt neste steg
 
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
