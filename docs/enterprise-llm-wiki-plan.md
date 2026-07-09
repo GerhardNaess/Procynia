@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · **Neste: Fase 8F Review og godkjennings-UX**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · **Neste: Fase 8F-1 — tab-navigasjon**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -732,8 +732,8 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8B | Artikkelgenerering-spesifikasjon | Fullført som article-writer-byggestein, men mangler summary/concepts/index/log/backlinks |
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
-| **Fase 8E** | **Karpathy-alignment: page types/schema/index/log/backlinks/compile decision** | **Neste steg** |
-| Fase 8F | Review og godkjennings-UX | Gjenstår — etter Fase 8E |
+| Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0 fullført — 8F-1 til 8F-7 gjenstår** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1585,16 +1585,231 @@ Implementert:
 - Ingen backend layout-algoritme
 - `GET /app/wiki/graph-data` er fortsatt den eneste datakilden for grafen
 
-### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
+### Fase 8F — Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold
 
-Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
+Fase 8F gir System Owner verktøy til å forvalte hele Enterprise Wiki-livssyklusen: navigere mellom flater via tabs, søke og filtrere wiki-sider, slette kildedokumenter trygt, følge kjøringshistorikk, lese kvalitetsfunn og redigere innhold som ny versjon. Godkjenningsflyten (submit/approve/reject) er allerede implementert i Fase 3B og berøres ikke.
 
-Krav:
-- godkjenning knyttes til riktig sideversjon
-- verifikasjonslag støtter beslutningen
-- åpne lint `error` skal vurderes før godkjenning
-- reviewer skal kunne se hvilke kilder som endret hvilke sider
-- ikke auto-publiser
+**Masterdata-prinsipp:**
+- `EnterpriseWikiDocument` er master for opplastede råkilder.
+- `EnterpriseWikiPage` er avledet innhold generert fra ett eller flere kildedokumenter.
+- Sletting skjer primært fra kildedokumenter — ikke fra enkelt-genererte sider.
+- Sletting av et kildedokument kaskader til sole-source sider og rydder opp i all avledet data.
+
+**Grenser — røres ikke i 8F:**
+- `KnowledgeItem`, `KnowledgeItemVersion`, `KnowledgeItemChunk`
+- Dagens Kunnskapsbase/RAG-pipeline
+- Billing
+- Admin/Filament
+- AI workspace
+- `ProcessEnterpriseWikiIngest`
+
+#### Fase 8F-0 — Docs/plan — Fullført
+
+Teknisk plan dokumentert og committet til `docs/enterprise-llm-wiki-plan.md`.
+
+#### Fase 8F-1 — Tab-navigasjon og splitting av /app/wiki
+
+**Mål:** `/app/wiki` splittes i fem tydelig adskilte flater via URL-param `?tab=X`.
+
+Tab-state styres via URL-parameteret `?tab=pages|sources|runs|quality|graph`. Ingen React-state som primær mekanisme — tabs er bookmarkbare og fungerer med Inertia `preserveState`. Backend laster kun data for aktiv tab.
+
+| Tab | URL | Primærdata |
+|---|---|---|
+| Wiki-sider | `?tab=pages` (default) | `EnterpriseWikiPage` med filtrering |
+| Kildedokumenter | `?tab=sources` | `EnterpriseWikiDocument` med handlinger |
+| Kjøringer | `?tab=runs` | `EnterpriseWikiIngestRun` med status |
+| Kvalitet | `?tab=quality` | `EnterpriseWikiLintFinding` — read-only |
+| Graf | redirect til `/app/wiki/graph` | (ingen egne data på tab) |
+
+`WikiController::index()` deler opp query-logikken per tab — ingen tab laster andres data. Lint-helseindikatoren flyttes inn som innhold i Kvalitet-tabben. Index-siden beholder kun en liten helseindikator som lenker til tabben.
+
+Akseptansekriterier:
+- `?tab=pages` er default ved direkte besøk
+- `?tab=quality` viser kun helseoversikt — ingen handlingsknapper
+- Graf-tab sender bruker til `/app/wiki/graph` (8E-20)
+- Bytte mellom tabs oppdaterer URL uten full reload
+- Kundeisolasjon håndhevet per tab i backend
+- ~10 tester
+
+Ikke-scope: Ingen pipeline-handlingsknapper i Kjøringer-tab — det er Fase 8F-4.
+
+#### Fase 8F-2 — Søk og filtrering
+
+**Mål:** Fritekst og filtre på Wiki-sider-, Kildedokumenter- og Kjøringer-tabber.
+
+**Wiki-sider tab:**
+- Fritekst: `ILIKE '%...%'` på `enterprise_wiki_pages.title` og `slug`
+- Filter `page_type`: `article` / `summary` / `concept` / `entity` (multi-select, URL-param)
+- Filter `status`: `draft` / `pending_review` / `approved` / `rejected` / `archived`
+- Filter `lint`: `has_errors` / `has_warnings` / `ok` (via JOIN mot lint_findings)
+- Sortering: `updated_at desc` (default), `title asc`, `created_at desc`
+- Paginering: 25 per side
+
+**Kildedokumenter tab:**
+- Fritekst: `ILIKE` på `original_filename`
+- Filter `document_status`: `uploaded` / `extracting` / `extracted` / `failed`
+- Sortering: `created_at desc`
+
+**Kjøringer tab:**
+- Filter `status`: `queued` / `running` / `completed` / `failed` / `decision_only`
+- Filter `decision_status`: ikke besluttet / `applied`
+- Sortering: `created_at desc`
+
+Alle filtre som URL-parametre. Backend validerer parametre mot tillatte verdier — ukjente ignoreres.
+
+Akseptansekriterier:
+- Fritekst returnerer treff scoped til innlogget kunde
+- Filtre kan kombineres
+- Tomt resultat viser forståelig melding, ikke tom side
+- ~15 tester
+
+#### Fase 8F-3 — Trygg sletting av EnterpriseWikiDocument
+
+**Mål:** Slett et kildedokument med alle avledede sole-source-data, uten å ødelegge delte concept/entity-sider.
+
+**Bakgrunn — hull i dagens `destroy()`:**
+- Sjekker `enterprise_wiki_page_id` (gammel enkelt-side-link) — ikke `enterprise_wiki_ingest_run_pages`
+- Sletter ikke `EnterpriseWikiPage`, versjoner, claims, source references eller lint findings
+- Beskytter ikke delte concept/entity-sider mot feil sletting
+
+**Ny `WikiSourceDeleteService` med sole-source/delt-klassifisering:**
+
+```
+1. Guard: ingen run med status queued/running/sections_planned
+2. Finn alle pages koblet via enterprise_wiki_ingest_run_pages for dette dokumentets runs
+3. Klassifiser:
+   - SOLE-SOURCE: alle run_pages-rader for siden tilhører KUN dette dokumentets runs
+   - DELT: siden har run_pages fra andre dokumenters runs i tillegg
+4. Returner preview:
+   { sole_source_pages: [...], shared_pages_affected: [...], run_count: N }
+```
+
+**To-stegs HTTP-flyt:**
+- `GET /app/wiki/sources/{doc}/delete-preview` — returnerer JSON med `{ sole_source_pages, shared_pages_affected, run_count }`. Ingen sletting.
+- `DELETE /app/wiki/sources/{doc}` med bekreftelse i modal — utfører slettingen.
+
+Modal viser preview-data og krever eksplisitt bekreftelse. Disable-knapp ved pågående sletting.
+
+**Cascade i transaksjon (korrekt rekkefølge):**
+1. Slett `enterprise_wiki_lint_findings` for sole-source pages
+2. Slett `enterprise_wiki_source_references` for claims på sole-source pages
+3. Slett `enterprise_wiki_claims` for sole-source pages
+4. Slett `enterprise_wiki_page_versions` for sole-source pages
+5. Slett `enterprise_wiki_page_links` der `from_page_id` eller `to_page_id` er sole-source
+6. Slett `enterprise_wiki_ingest_run_pages` for alle runs tilhørende dette dokumentet
+7. Slett `enterprise_wiki_ingest_sections` og `enterprise_wiki_ingest_runs`
+8. Slett sole-source pages fra `enterprise_wiki_pages`
+9. Slett source references som peker på dette dokumentet (`source_type = 'enterprise_wiki_document'`, `source_id = doc.id`) — disse kan tilhøre claims på delte sider
+10. Slett filen fra Storage
+11. Slett dokumentet
+
+**Delte concept/entity-sider:**
+- Beholdes med alt innhold og alle versjoner intakt
+- Kun `enterprise_wiki_ingest_run_pages`-rader tilhørende dette dokumentets runs fjernes
+- Source references som peker på det slettede dokumentet fjernes (jf. punkt 9)
+- Siden fremstår deretter med færre kildekoblinger — lint plukker opp stale source references
+
+Akseptansekriterier:
+- Slett dokument uten runs: OK
+- Slett dokument med sole-source pages: alle avledede data slettes; `KnowledgeItem`/`KnowledgeItemVersion`/`KnowledgeItemChunk` urørt etter kjøring
+- Slett dokument med delte pages: sole-source data slettes, delte sider beholdes, source references til slettet dokument fjernes
+- In-progress run blokkerer sletting med tydelig feilmelding
+- Filen slettes fra Storage
+- Preview-endepunkt returnerer riktig klassifisering uten å slette noe
+- ~20 tester
+
+#### Fase 8F-4 — Kjøringshistorikk
+
+**Mål:** Kjøringer-tab viser kjøringshistorikk for innlogget kunde — informasjon, ikke pipeline-handlingsknapper.
+
+Informasjon per kjøring:
+- Kjørings-ID, dato, kildedokument (filnavn, lenke til Kildedokumenter-tab)
+- Status (`queued` / `running` / `sections_planned` / `completed` / `failed` / `decision_only`)
+- Decision status (`pending` / `applied`)
+- Antall koblede sider via `enterprise_wiki_ingest_run_pages` (total + per page_type)
+- `model_used`, `input_tokens`, `output_tokens`, `cost_estimate_nok` der tilgjengelig
+- `error_message` ved `failed`
+
+Filtrerbar på `status` og `decision_status` (URL-parametre). Sortert `created_at desc`. Paginering 25 per side.
+
+Ingen pipeline-handlingsknapper i Fase 8F-4. Pipeline-kommandoer (apply, generate, extract, verify, build-links, lint) forblir Artisan-kommandoer og eksponeres ikke via UI i piloten.
+
+Akseptansekriterier:
+- Kjøringer vises kun for innlogget kunde
+- Filter på status og decision_status virker
+- Lenker til tilhørende sider og kildedokumenter
+- ~12 tester
+
+#### Fase 8F-5 — Read-only Kvalitet-tab
+
+**Mål:** Kvalitet-tab viser alle lint-funn for innlogget kunde — sortert og filtrerbart, uten handlingsknapper.
+
+Innhold:
+- Liste over åpne `EnterpriseWikiLintFinding`-rader scoped til kunde
+- Per funn: side (lenke), kjøring, severity, check_type, detail_text, opprettet
+- Aggregert helse per page_type og totalt
+
+Filtrering:
+- Filter `severity`: `error` / `warning` / `info`
+- Filter `check_type`: alle 19 koder som multi-select
+- Filter `page_type`: `article` / `summary` / `concept` / `entity`
+- Toggle for å vise/skjule lukkede funn
+
+Ingen "Kjør lint nå"-knapp. Ingen handlinger. Rent read-only i piloten. Lint kjøres via daglig scheduled job (Fase 4B-5C) eller manuell Artisan-kommando.
+
+Akseptansekriterier:
+- Funn vises kun for innlogget kunde
+- Filtre kan kombineres
+- Ingen side-effects i backend fra GET
+- ~12 tester
+
+#### Fase 8F-6 — Redigering som ny EnterpriseWikiPageVersion
+
+**Mål:** System Owner kan redigere innholdet på en eksisterende wiki-side. Redigering oppretter alltid ny versjon — eksisterende `content_markdown` overskrives aldri.
+
+Flyt:
+1. System Owner klikker "Rediger" på Show-siden
+2. Modal åpner med nåværende `content_markdown` i enkel `<textarea>`
+3. `POST /app/wiki/{slug}/versions` med `{ content_markdown: "..." }`
+4. Backend `WikiPageVersionController::store()`:
+   - Finn høyeste `version_number` for siden og inkrementer
+   - Sett `is_current = false` på eksisterende current version
+   - Opprett ny `EnterpriseWikiPageVersion` med `is_current = true` og `generated_by_model = 'manual'`
+   - Side-status endres ikke (forblir `draft`, `pending_review` eller `approved`)
+5. For `approved`-sider:
+   - Ny versjon opprettes med `is_current = true`
+   - Gammel approved-versjon settes til `is_current = false` og beholdes i historikk
+   - Side-status flyttes til `draft` — ikke godkjent automatisk
+   - Siden må sendes til ny review og godkjennes på nytt av System Owner
+6. Redirect til Show-siden med flash-melding
+
+Versjonshistorikk vises som kompakt liste på Show-siden: versjonsnummer, dato, `is_current`-markering.
+
+Akseptansekriterier:
+- Ny versjon opprettes, gammel versjon har `is_current = false`
+- Versjonsnummer inkrementeres
+- Approved-side: ny versjon er `is_current = true`, gammel approved-versjon beholdes i historikk, side-status er `draft`
+- Rollesjekk: kun System Owner
+- Eksisterende `content_markdown`-rader overskrives aldri
+- ~15 tester
+
+#### Fase 8F-7 — Regenerering / ny dokumentversjon
+
+> **Ikke start uten instruksjon.** Scope avklares separat etter at 8F-1–8F-6 er implementert.
+
+Foreløpig scope:
+- Laste opp revidert versjon av eksisterende kildedokument
+- Koble ny dokumentversjon til eksisterende `EnterpriseWikiDocument` (eventuelt via nytt felt eller ny modell)
+- Trigge ny Karpathy-pipeline mot oppdatert kilde
+- Håndtere overgang fra gammelt til nytt innhold i avledede sider
+- Oppdatere source references og lint
+
+Dette er en selvstendig fase som kan kreve datamodell-audit og ny migrasjon. Avhenger av om `EnterpriseWikiDocument` skal versjoneres eller om ny instans opprettes.
+
+---
+
+**Teststrategi for 8F:**
+Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall. `KnowledgeItem`/`KnowledgeItemVersion`/`KnowledgeItemChunk` verifiseres urørt etter sletteoperasjoner.
 
 ### Fase 8G — Kontrollert produksjonsaktivering — Gjenstår til etter Fase 8F
 
