@@ -1,138 +1,72 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.4
+Versjon: 0.5
 Dato: 2026-07-08
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI startet (Fase 8D) · Artikkelgenerering implementert (Fase 8C, commits 956206d–4ea8fb6) · **v0.4 korrigering: «claims → én artikkel» er for smalt. Neste steg: schema/index/log-audit og minste grunnlag for maintainer workflow.**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · **Neste: Fase 8E Karpathy-alignment — page types/schema/index/log/backlinks/compile decision**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
-> **Målbildekorrigering (v0.3):** Enterprise Wiki skal ikke være en claim-liste. Den skal være en Karpathy-inspirert, Markdown-first LLM Wiki: raw sources inn, lesbare wikiartikler ut. Claims, excerpts, source references, lint og helsekontroll er verifikasjonsgrunnmur rundt artikkelen — ikke selve sluttproduktet. Phase 4A/4B/1F/1G/1H ga nødvendig infrastruktur, men **Wiki Article Layer mangler** og må bygges før produksjonsaktivering.
+> **Målbildekorrigering (v0.3):** Enterprise Wiki skal ikke være en claim-liste. Den skal være en Markdown-first LLM Wiki: raw sources inn, lesbare wikiartikler ut. Claims, excerpts, source references, lint og helsekontroll er verifikasjonsgrunnmur rundt artikkelen — ikke selve sluttproduktet.
 >
-> **Arkitekturkorrigering (v0.4):** Fase 8C implementerte «claims fra én kilde → én AI-generert artikkel per kilde». Det er en gyldig teknisk byggestein, men modellen er konseptuelt for smal. Riktig Karpathy-modell er et *wiki maintainer*-system: raw sources er immutable, wiki pages er tematiske entiteter (ikke en-til-en med kildedokumenter), én kilde kan oppdatere N relevante sider, og et schema/instruction-lag styrer page types, navngiving og lenkestruktur. Index og log er sentrale komponenter som mangler. Se §v0.4 for full kartlegging og anbefalt neste steg.
+> **Karpathy-korrigering (v0.5):** Enterprise Wiki skal ligge tettest mulig på Karpathy Wiki-modellen: `raw source → compile/maintainer → article per source + summary per source + dedupliserte concept/entity pages → index/log/backlinks/lint`. Tidligere v0.4-formuleringer som antydet at `article per source` i seg selv er feil, er korrigert. Feilen er ikke at en kilde får en artikkel; feilen er å stoppe der. Én kilde skal normalt få source article og source summary, og samtidig kunne oppdatere flere felles concept/entity-sider. Filnavn er fortsatt kildemetadata, ikke automatisk wiki-identitet.
 
 ## 1. Formål
 
-Enterprise LLM Wiki er et parallelt kunnskapssystem for Procynia, inspirert av Karpathy LLM Wiki-metoden, men tilpasset enterprise-krav: kundescoping, rollestyrt godkjenning, sporbar revisjon, kildebevis og trygg menneskelig review.
+Enterprise LLM Wiki er et parallelt kunnskapssystem for Procynia, inspirert av Karpathy Wiki-mønsteret og tilpasset enterprise-krav: kundescoping, rollestyrt godkjenning, sporbar revisjon, kildebevis og trygg menneskelig review.
 
-Det sentrale produktet er **lesbare wikiartikler**, ikke claim-lister.
+Det sentrale produktet er **en kompilert, vedlikeholdt Markdown-wiki**, ikke dokumentoppsummeringer alene og ikke claim-lister.
 
-Systemet skal fungere som et kompilert kunnskapslag:
+Systemet skal fungere som et kompilert og vedlikeholdt kunnskapslag:
 
 ```text
 raw source documents
-→ extraction
-→ article generation
-→ readable Markdown wiki pages
-→ verification layer: claims, excerpts, source references, lint and health checks
+→ immutable source store
+→ schema-guided compile/maintainer workflow
+→ source article page per source
+→ source summary page per source
+→ shared concept/entity pages deduped across sources
+→ maintained index, log, backlinks and lint
+→ claims/source references as verification layer
 → human review and approval
+→ approved wiki pages become future AI context
 ```
 
 Systemet er ikke en erstatning for dagens Kunnskapsbase eller RAG-pipeline. Det er et separat wiki-lag som:
 
 - tar inn Enterprise Wiki-egne kilder uten å endre Kunnskapsbase/RAG
-- bruker AI til å generere sammenhengende, strukturerte wikiartikler i Markdown
-- lager påstander, excerpts og kildehenvisninger som kontrollgrunnlag for artikkelen
-- lar menneskelige brukere lese, vurdere, redigere, godkjenne eller avvise innhold
-- gjør godkjent kunnskap lett å lese, søke, lenke til og vedlikeholde over tid
+- beholder råkilder som originalt kildegrunnlag
+- bruker AI som wiki-compiler/forvalter, ikke bare som enkel artikkelgenerator
+- lager én source article og én kort source summary per kilde
+- oppretter og oppdaterer concept/entity-sider på tvers av kilder
+- finner relevante eksisterende wiki-sider før nye concept/entity-sider opprettes
+- lagrer lesbart Markdown-innhold i `enterprise_wiki_page_versions.content_markdown`
+- bruker claims, excerpts, source references og lint som verifikasjonslag rundt wikiinnholdet
+- lar mennesker lese, vurdere, redigere, godkjenne eller avvise wikiinnhold
 - først i senere faser kan sammenlignes mot dagens RAG — uten automatisk kobling
 
 Kjerneprinsipper:
 
-- **Wikiartikkel først.** Brukeren skal møte en lesbar side med overskrifter, sammendrag og brødtekst.
+- **Karpathy-layout først.** `article`, `summary`, `concept`, `index`, `log` og `backlinks` er egne logiske wiki-lag.
+- **Article per source er riktig.** En råkilde skal normalt få en full source writeup.
+- **Summary per source er riktig.** En råkilde skal normalt få et kort TL;DR-sammendrag.
+- **Concept/entity-sider er compounding-laget.** Disse dedupliserer og kobler kunnskap på tvers av kilder.
+- **Index før ny concept/entity-side.** Systemet skal undersøke eksisterende wiki-sider før det foreslår nye felles sider.
+- **Én kilde kan påvirke mange sider.** En opplasting kan opprette/oppdatere source article, source summary og flere concept/entity-sider.
+- **Råkilder er immutable.** Kilder leses og spores, men endres ikke av AI.
 - **Verifikasjon som støtte.** Claims, excerpts, kildekoblinger og lint skal støtte review — ikke være hovedopplevelsen.
 - AI foreslår. Mennesker godkjenner.
 - Ingen sentrale påstander uten kildegrunnlag.
 - Ingen skrivetilgang til eksisterende Kunnskapsbase/RAG-modeller eller tabeller.
 - Kundeisolasjon fra dag én.
 
-Konsekvens av v0.3-korrigeringen:
+Konsekvens av v0.5-korrigeringen:
 
 - Eksisterende claim extraction beholdes som grounding/review-lag.
 - Eksisterende lint/helsekontroll beholdes.
 - Eksisterende upload/extract/ingest-grunnmur beholdes.
-- Dagens claim-baserte visning er **ikke** ferdig wiki-opplevelse.
-- Neste hovedspor er å bygge **Wiki Article Layer**.
-
-## v0.4 Korrigering: Wiki Maintainer-modell
-
-**Dato:** 2026-07-08
-
-Fase 8C implementerte `WikiArticleAiClient` og `content_markdown`-generering. Det er teknisk velfungerende kode. Men den underliggende modellen — *én kilde produserer én wikiartikkel* — er konseptuelt for smal og stemmer ikke med Karpathy/LLM Wiki-modellen.
-
-> **Viktig bugnotat (verifisert under E2E-test 2026-07-08):** `gpt-5` støtter ikke `temperature`-parameteren i Responses API. Kjøring med `temperature: 0.3` gir HTTP 400. `WikiArticleAiClient::buildPayload()` må fjerne `temperature`-feltet. Dette er en linje kode — men er ikke del av dette docs-steget.
-
-### Hva Karpathy-modellen faktisk er
-
-```text
-raw sources (immutable input)
-  → wiki maintainer AI
-      leser: source content + existing page index
-      beslutter: hvilke sider oppdateres? hvilke nye sider opprettes?
-  → for hver berørt side:
-      henter: eksisterende content_markdown + relevante kildeseksjoner
-      genererer: oppdatert Markdown-artikkel
-  → logger: hvilke sider ble endret av hvilken kilde (ingest run log)
-  → lint: contradictions mellom sider, orphan pages, stale content, manglende kryssreferanser
-  → query: leser index + relevante sider — ikke rådokumenter
-```
-
-Sentrale egenskaper som skiller dette fra dagens modell:
-
-- **Raw sources er immutable.** `EnterpriseWikiDocument.extracted_text` endres aldri etter ekstraksjon.
-- **Wiki pages er tematiske entiteter — ikke kopier av kildedokumenter.** En side heter «ISO-sertifiseringer», «Nøkkelpersoner», «Referanseprosjekter» — ikke «selskapsinfo.docx». Sidetittelen er begrep, ikke filnavn.
-- **Schema/instruction-lag definerer reglene.** Hva slags sider finnes? Hvilke felt er påkrevd? Hvordan lenkes sider til hverandre? Dette er config/instruksjon som AI-maintainer følger — ikke kode.
-- **Index gjør AI-maintainer orientert.** Før AI beslutter om en kilde skal opprette ny side eller oppdatere eksisterende, leser den en oversikt over eksisterende sider med titler, slug, temaer og korte summarier.
-- **Én kilde kan påvirke N sider.** Et selskapsdokument kan oppdatere «Kompetanseprofil», «ISO-sertifiseringer» og «Referanseprosjekter» i samme ingest-run.
-- **Log dokumenterer kilde→side-endringer.** Hvilke sider ble opprettet eller oppdatert av hvilken kilde og ingest-run.
-- **Lint finner systemnivåfeil — ikke bare per-side.** Contradictions mellom sider, orphan pages uten lenker, stale content og manglende kryssreferanser.
-- **Query leser index og wiki-sider, ikke rådokumenter.** Brukere og AI-svar-generering starter fra wiki, ikke fra uploaded sources.
-
-### Hva eksisterende kode kan gjenbrukes
-
-| Komponent | Status | Gjenbruk |
-|---|---|---|
-| `EnterpriseWikiDocument` | Implementert | Immutable raw source — riktig konsept, beholdes som-er |
-| `EnterpriseWikiPage` + `EnterpriseWikiPageVersion` | Implementert | Tematisk side + versjonering — riktig datamodell |
-| `content_markdown` på `EnterpriseWikiPageVersion` | Implementert | Riktig felt for Markdown-artikkelinnhold |
-| `WikiArticleAiClient` | Implementert (Fase 8C) | Kan gjenbrukes for per-side generering — ingest-løkken bygges rundt den |
-| `EnterpriseWikiClaim` + `enterprise_wiki_source_references` | Implementert | Verifikasjonslag — beholdes |
-| `enterprise_wiki_ingest_runs` | Implementert | Log-grunnlag per ingest-run — kan utvides til å dekke hvilke sider som ble berørt |
-| `enterprise_wiki_lint_findings` | Implementert | Per-side helsekontroll — kan utvides til cross-page lint |
-| `enterprise_wiki_page_topics` | Implementert | Kan inngå i page index |
-| `ProcessEnterpriseWikiIngest` / `ProcessEnterpriseWikiSection` / `FinalizeEnterpriseWikiIngest` | Implementert | Orchestrator/seksjonsmønster kan gjenbrukes; finalize må bygges ut for multi-page routing |
-
-### Hva som mangler
-
-| Manglende komponent | Beskrivelse | Blokkerer |
-|---|---|---|
-| **Schema/instruction-lag** | Definisjon av page types (entity, concept, source summary), navngiving, felt og lenkekonvensjoner. Config/instruksjon som maintainer-AI følger. | Riktig tematisk routing |
-| **Page index** | Søkbar oversikt over eksisterende sider (tittel, slug, topics, summary) som maintainer-AI leser før ingest-beslutning. Kan baseres på `enterprise_wiki_pages` + `enterprise_wiki_page_topics`. | Index-awareness |
-| **Ingest decision logic** | «Hvilke eksisterende sider er relevante for denne kilden?» + «Trenger noen nye sider opprettes?» Returnerer (update/create, side-id) per berørt side. | Multi-page routing |
-| **Multi-page ingest** | Én ingest run → N sider. Dagens pipeline: én run → én side. Krever endring i orchestrator og finalize. | Karpathy-modell |
-| **Log per (run, page)** | Dokumenterer hvilke sider som ble opprettet/oppdatert av hvilken kilde. Kan implementeres som pivot-tabell eller utvidelse av `enterprise_wiki_ingest_runs`. | Sporbarhet |
-| **Query-flyt** | Brukerflyt og AI-flyt som starter fra wiki-index og relevante sider — ikke fra rådokumenter. | Wiki som svargrunnlag |
-| **Cross-page lint** | Finner contradictions mellom sider, orphan pages og manglende kryssreferanser (utover dagens per-side-lint). | Wiki-konsistens |
-
-### Anbefalt neste steg
-
-**Ikke neste steg:**
-- Review/approval UX
-- Produksjonsaktivering
-- Mer prompt-polering av `WikiArticleAiClient`
-
-**Anbefalt neste steg (i rekkefølge):**
-
-1. **Schema/instruction-audit** (docs) — definer hvilke page types som skal finnes for en typisk Procynia-kunde. Eksempel: `company_overview`, `certifications`, `key_personnel`, `reference_projects`, `service_portfolio`, `domain_expertise`. Hva er navngivingsregelen? Hva lenkes til hva? Ingen kode i dette steget.
-
-2. **Index-vurdering** (docs/kode) — vurder om `enterprise_wiki_pages` (tittel, slug) + `enterprise_wiki_page_topics` (emner) er tilstrekkelig som page index for maintainer-AI, eller om et `summary`-felt eller eget indeks-format trengs. Minimal kodeendring.
-
-3. **Minste kodeendring for multi-page routing** — kan orchestratoren returnere N side-targets fra én source, og finalize skrive til N sider? Vurder om det krever ny pivot-tabell `enterprise_wiki_ingest_run_pages` eller kun en utvidelse av `enterprise_wiki_ingest_runs.enterprise_wiki_page_id` til en-til-mange-relasjon.
-
-4. **Log-design** — er én ny pivottabell `enterprise_wiki_ingest_run_pages` (run_id, page_id, action: created|updated) tilstrekkelig som log? Eller skal `enterprise_wiki_ingest_runs` beholdes som primær log-entitet med N side-referanser?
-
-Trinn 1 og 2 er ren docs/design. Trinn 3 og 4 er smal arkitekturvurdering — ingen kode og ingen migrasjoner i dette steget.
-
----
+- `WikiArticleAiClient` beholdes som teknisk writer/valideringspunkt for `article`-sider.
+- Dagens `source → one page → article`-flyt er for smal, men `article per source` er fortsatt riktig som ett av flere output-lag.
+- Neste hovedspor er **Karpathy-alignment: page types, schema, index, log, backlinks og compile decision**.
 
 ## 2. Ikke-rør-grenser
 
@@ -172,21 +106,24 @@ Ingen re-ekstraksjon av dokumenttekst i pilot. `extracted_text` er allerede pros
 
 > **Viktig begrensning:** Denne tilnærmingen bruker Kunnskapsbase som datakilde og skaper dermed en implisitt kobling mellom de to systemene. Det er **ikke** ønsket langsiktig arkitektur. Så snart Fase 4A er implementert, skal `KnowledgeItemVersion`-ingest degraderes til en eksplisitt legacy/import-kommando og ikke eksponeres som primærflyt i UI.
 
-### 3.2 Ønsket primærflyt (Fase 4A + v0.3 — Enterprise Wiki egne kilder og artikkellag)
+### 3.2 Ønsket primærflyt (Fase 4A + v0.5 — Enterprise Wiki egne kilder og Karpathy compile)
 
 Enterprise Wiki skal ha sin **egen** upload/import-flyt, fullstendig uavhengig av `KnowledgeItem`, `KnowledgeItemVersion` og `KnowledgeItemChunk`.
 
-Korrigert målarkitektur etter v0.3:
+Korrigert målarkitektur etter v0.5:
 
 ```text
 Enterprise Wiki source upload/import
-→ Enterprise Wiki extraction (tekstekstraksjon fra docx/pdf)
-→ Enterprise Wiki section planning
-→ Article generation (lesbar Markdown-artikkel)
-→ Verification extraction (claims, excerpts, source references)
-→ Lint/health checks
-→ Enterprise Wiki page pending_review
-→ Human review and approval
+→ Enterprise Wiki extraction
+→ immutable raw source
+→ schema-guided compile decision
+→ create/update source article page
+→ create/update source summary page
+→ create/update relevant shared concept/entity pages
+→ write new page versions with content_markdown
+→ preserve claims/source references/lint as verification layer
+→ update index/log/backlinks/health state
+→ human review and approval
 ```
 
 Primærkilder i Fase 4A:
@@ -197,10 +134,25 @@ Primærkilder i Fase 4A:
 
 Viktig skille:
 
-- **Artikkelen** er hovedproduktet og lagres som `content_markdown` på `enterprise_wiki_page_versions`.
-- **Claims** er et verifikasjonslag knyttet til artikkelen.
+- **Råkilden** er originaldokumentet og beholdes som kildegrunnlag.
+- **Source article** er full writeup for én råkilde.
+- **Source summary** er kort TL;DR for én råkilde.
+- **Concept/entity-side** er delt tematisk kunnskap på tvers av kilder.
+- **Index** er systemvedlikeholdt katalog over article/summary/concept/entity-sider.
+- **Log** er append-only operasjonslogg.
+- **Backlinks** er systemgenerert lenkegraf.
+- **Artikkelinnhold** lagres som `content_markdown` på `enterprise_wiki_page_versions`.
+- **Claims** er verifikasjonsenheter som støtter artikkel, reviewer og lint.
 - **Source references** dokumenterer hvor claims og sentrale artikkelutsagn kommer fra.
 - **Lint/helsekontroll** hjelper reviewer å finne mangler før godkjenning.
+
+Forbud i målmodellen:
+
+- Filnavn skal ikke automatisk bli wiki-tittel eller slug.
+- Én kilde skal ikke bare bli én isolert wiki-side.
+- Source article skal ikke erstatte concept/entity-laget.
+- Claims/excerpts skal ikke dumpes inn som artikkeltekst.
+- Review/approval og produksjonsaktivering skal ikke bygges videre før Karpathy compile-modellen er avklart.
 
 Mulige tilleggskilder i senere faser (egne vurderinger — krever ikke Kunnskapsbase):
 
@@ -224,15 +176,29 @@ Alle tabeller er nye og bruker prefikset `enterprise_wiki_`. De har ingen fremme
 
 ### 4.1 `enterprise_wiki_pages`
 
-Representerer én wiki-side, scoped til én kunde. En side tilsvarer ett faglig tema (f.eks. «HMS-kompetansekrav», «Referanseprosjekter innen bygg», «Sikkerhetsgodkjenning»).
+Representerer én wiki-side, scoped til én kunde. Etter v0.5 må siden ha en eksplisitt eller logisk `page_type` som speiler Karpathy-layouten.
+
+Første ønskede page types:
+
+| `page_type` | Karpathy-lag | Beskrivelse |
+|---|---|---|
+| `article` | `wiki/articles/<slug>.md` | Full source writeup for én `EnterpriseWikiDocument` |
+| `summary` | `wiki/summaries/<slug>.md` | Kort TL;DR for én `EnterpriseWikiDocument`, maks ca. 200 ord |
+| `concept` | `wiki/concepts/<concept>.md` | Deduplisert tematisk side på tvers av kilder |
+| `entity` | konseptvariant | Kunde, leverandør, person, produkt, system eller annen navngitt entitet |
+| `index` | `wiki/index.md` | Systemvedlikeholdt innholdskatalog |
+| `backlinks` | `wiki/backlinks.md` | Systemgenerert lenkeoversikt, eventuelt ikke synlig som normal side |
+
+Felt:
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
 | `id` | bigint PK | |
 | `customer_id` | bigint FK → customers | Kundeisolasjon |
 | `department_id` | bigint FK nullable | Avdelingsscoping (valgfritt i pilot) |
-| `slug` | varchar | URL-vennlig identifikator, unik per kunde |
-| `title` | varchar | Sidetittel |
+| `page_type` | enum nullable i overgang | `article`, `summary`, `concept`, `entity`, `index`, `backlinks` |
+| `slug` | varchar | URL-vennlig identifikator, unik per kunde og helst per page type |
+| `title` | varchar | Sidetittel. Må ikke blindt kopieres fra filnavn |
 | `scope` | enum | `company`, `domain`, `project` |
 | `status` | enum | Se §6 |
 | `owner_user_id` | bigint FK nullable | Ansvarlig redaktør |
@@ -243,11 +209,13 @@ Representerer én wiki-side, scoped til én kunde. En side tilsvarer ett faglig 
 | `archived_at` | timestamp nullable | |
 | `created_at`, `updated_at` | timestamps | |
 
+Midlertidig før migrasjon: `page_type` kan defineres i schema/kontrakt og utledes fra slug/status/koblinger. Første kodefase bør audite om eksisterende tabell kan bære dette uten DB-endring.
+
 ---
 
 ### 4.2 `enterprise_wiki_page_versions`
 
-Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner overskrives aldri. Dette er den autoritative lagringen av selve wikiartikkelen.
+Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner overskrives aldri. Dette er den autoritative lagringen av selve wikiinnholdet for alle page types.
 
 | Felt | Type | Beskrivelse |
 |---|---|---|
@@ -255,7 +223,7 @@ Immutable versjonering. Ny versjon opprettes alltid — eksisterende versjoner o
 | `enterprise_wiki_page_id` | bigint FK | |
 | `version_number` | integer | Monotont stigende per side |
 | `is_current` | boolean | Kun én current per side |
-| `content_markdown` | text | Full lesbar Markdown-artikkel for siden — primær wiki-opplevelse |
+| `content_markdown` | text | Full Markdown for siden. For `article`: full writeup. For `summary`: kort TL;DR. For `concept/entity`: deduplisert tematisk kunnskap |
 | `generated_by_model` | varchar | Modellidentifikator, f.eks. `gpt-5` |
 | `generation_prompt_hash` | varchar | For reproduserbarhet |
 | `created_at` | timestamp | |
@@ -290,7 +258,7 @@ Kildebevis på påstandsnivå. Ingen påstand kan eksistere uten minst én kilde
 |---|---|---|
 | `id` | bigint PK | |
 | `enterprise_wiki_claim_id` | bigint FK | |
-| `source_type` | enum | `knowledge_item_version`, `saved_notice_document`, `doffin_notice`, `manual` |
+| `source_type` | enum | `enterprise_wiki_document`, `knowledge_item_version`, `saved_notice_document`, `doffin_notice`, `manual` |
 | `source_id` | bigint | Polymorf referanse-ID |
 | `source_label` | varchar | Menneskelesbart navn (filnavn, tittel, kunngjøringsnummer) |
 | `source_hash` | varchar | SHA-256 av kildeinnholdet på ingest-tidspunktet |
@@ -311,9 +279,9 @@ Sporing av alle AI-genereringsjobber. Ingen produksjonsdata uten sporbar run.
 | `id` | bigint PK | |
 | `uuid` | uuid | Ekstern identifikator for jobber |
 | `customer_id` | bigint FK | |
-| `enterprise_wiki_page_id` | bigint FK nullable | Kobling til side (null hvis ny side ikke ble opprettet) |
+| `enterprise_wiki_page_id` | bigint FK nullable | Legacy/enkel kobling til én side. For Karpathy-modellen er dette for smalt og må suppleres av run→pages mapping |
 | `trigger_type` | enum | `manual`, `schedule`, `source_change` |
-| `source_type` | enum | `knowledge_item_version`, osv. |
+| `source_type` | enum | `enterprise_wiki_document`, `knowledge_item_version`, osv. |
 | `source_id` | bigint | Hvilken kilde som ble brukt |
 | `status` | enum | `queued`, `running`, `sections_planned`, `completed`, `failed` |
 | `model_used` | varchar | |
@@ -323,6 +291,8 @@ Sporing av alle AI-genereringsjobber. Ingen produksjonsdata uten sporbar run.
 | `error_message` | text nullable | |
 | `started_at`, `finished_at` | timestamps nullable | |
 | `created_at` | timestamp | |
+
+v0.5-merknad: Karpathy-modellen krever at én run kan berøre flere sider (`article`, `summary`, `concept`, `entity`). Eksisterende `enterprise_wiki_page_id` kan beholdes for historikk, men må ikke være eneste sporingsmekanisme i endelig compile-flyt.
 
 ---
 
@@ -373,6 +343,29 @@ Temaklassifisering generert av AI. Brukes til filtrering og gruppering.
 | `confidence` | float | AI-konfidens for koblingen |
 | `created_at` | timestamp | |
 
+
+### 4.9 Karpathy-lag over eksisterende datamodell (ingen DB-endring før audit)
+
+v0.5 innfører en logisk modell som ligger tettest mulig på Karpathy Wiki. Første steg er å spesifisere og audite dette mot eksisterende tabeller før nye migrasjoner vurderes.
+
+| Karpathy-lag | Procynia-komponent nå | Status |
+|---|---|---|
+| `raw/` | `EnterpriseWikiDocument` | Finnes |
+| `wiki/articles/*.md` | `EnterpriseWikiPage` + `EnterpriseWikiPageVersion.content_markdown` med `page_type=article` | Mangler eksplisitt page type / source mapping |
+| `wiki/summaries/*.md` | `EnterpriseWikiPage` + `EnterpriseWikiPageVersion.content_markdown` med `page_type=summary` | Mangler |
+| `wiki/concepts/*.md` | `EnterpriseWikiPage` + `EnterpriseWikiPageVersion.content_markdown` med `page_type=concept` | Mangler |
+| `wiki/entities/*.md` | `EnterpriseWikiPage` + `EnterpriseWikiPageVersion.content_markdown` med `page_type=entity` | Ikke i Karpathy-repoets konkrete SCHEMA, men vanlig Obsidian/LLM Wiki-tilpasning |
+| `wiki/index.md` | `EnterpriseWikiPage(page_type=index)` eller dynamisk index service | Mangler eksplisitt kontrakt |
+| `wiki/log.md` | `EnterpriseWikiIngestRun` + eventuelt ny append-only operation log | Finnes delvis |
+| `wiki/backlinks.md` | Systemgenerert lenkegraf/lint-output | Mangler |
+| Verification | `EnterpriseWikiClaim` + `EnterpriseWikiSourceReference` | Finnes |
+| Lint/health | `EnterpriseWikiLintFinding` + `wiki:lint` | Finnes, men må utvides med broken links/orphans/stubs/backlinks |
+| Schema/instructions | Ingen egen klasse/kontrakt ennå | Mangler |
+| Compile decision | Hvilke article/summary/concept/entity-sider skal opprettes/oppdateres | Mangler |
+| Multi-page source impact | Én kilde kan endre flere sider | Mangler i flyt |
+
+Fase 8E skal først forsøke å utnytte eksisterende tabeller. Ny databaseendring skal bare foreslås hvis audit viser at eksisterende `enterprise_wiki_*`-modeller ikke kan bære Karpathy-modellen.
+
 ---
 
 ## 5. Enterprise-krav
@@ -411,7 +404,7 @@ Enterprise Wiki må ikke presentere AI-generert innhold som ferdig sannhet før 
 
 UI-et skal ha to tydelige lag:
 
-1. **Wikiartikkel-laget** — primær visning: lesbar Markdown-side med tittel, sammendrag, seksjoner, avsnitt og struktur.
+1. **Wikiinnhold-laget** — primær visning: lesbar Markdown-side med riktig page type (`article`, `summary`, `concept`, `entity` eller `index`).
 2. **Verifikasjonslaget** — sekundær visning: claims, excerpts, kildekoblinger, kvalitetssignaler, konflikter og lint.
 
 Bindende UX-prinsipper:
@@ -461,22 +454,51 @@ Ny AI-generering mot en eksisterende `approved`-side oppretter alltid en ny `ent
 
 ## 7. Wiki-ingest-flyt
 
-### 7.0 Status etter v0.3-korrigering
+### 7.0 Status etter v0.5-korrigering
 
-Eksisterende flyt har bygget en god verifikasjonsgrunnmur, men den produserer ikke en fullverdig Karpathy-inspirert wikiopplevelse. Dagens finalize-logikk assembler i praksis `content_markdown` fra claims. Det gir sporbarhet, men ikke en god wikiartikkel.
+Eksisterende flyt har bygget en god teknisk grunnmur:
+
+- egne Enterprise Wiki-kilder
+- tekstekstraksjon
+- seksjonsjobber
+- claim extraction
+- source references
+- lint/helsekontroll
+- `content_markdown`
+- article-first UI
+- OpenAI-klienter bak config-flagg
+
+Men dagens hovedmodell er fortsatt for smal. Den kan ende i:
+
+```text
+source document → one wiki page → one generated article
+```
+
+Det er ikke nok i Karpathy-modellen.
 
 Korrigert mål:
 
+```text
+source document
+→ compile decision
+→ source article + source summary
+→ update/create shared concept/entity pages
+→ update index/log/backlinks/lint
+```
+
+Konsekvenser:
+
 - `ProcessEnterpriseWikiSection` kan fortsatt ekstrahere claims.
 - Claims skal fortsatt lagres og brukes til review/lint.
-- Det manglende laget er **article generation**: en strukturert, lesbar Markdown-artikkel som bruker kildematerialet og/eller claims som grunnlag.
-- `/app/wiki/{slug}` skal vise artikkelen som hovedinnhold og claims som sekundær verifikasjon.
+- `WikiArticleAiClient` kan brukes som writer for `article`-sider.
+- Det manglende laget er **Karpathy compile workflow**: schema, page types, index, log, backlinks og beslutning om hvilke sider som skal oppdateres/opprettes.
+- `/app/wiki/{slug}` skal vise wikiinnhold som hovedinnhold og claims som sekundær verifikasjon.
 
 ### 7.1 Flyt A: Bootstrap/import via Kunnskapsbase (midlertidig — Fase 1)
 
 > **Status:** Implementert og fungerende. Regnes som midlertidig bootstrap — skal ikke promoteres til permanent primærflyt i UI. Se §3.1 for begrensningsbeskrivelse.
 >
-> **v0.3-korrigering:** Flyt A kan beholdes som legacy/import, men skal ikke definere målbildet for wikiopplevelsen.
+> **v0.5-korrigering:** Flyt A kan beholdes som legacy/import, men skal ikke definere målbildet for wikiopplevelsen.
 
 ```
 1. Bruker velger en godkjent KnowledgeItemVersion
@@ -489,23 +511,21 @@ Korrigert mål:
 3. Orchestrator-jobb startes (ProcessEnterpriseWikiIngest)
    └─ Leser extracted_text fra KnowledgeItemVersion
    └─ Deler tekst i seksjoner
-   └─ Oppretter draft EnterpriseWikiPage og EnterpriseWikiPageVersion
-   └─ Oppretter enterprise_wiki_ingest_sections-rader
-   └─ Dispatcher én ProcessEnterpriseWikiSection per seksjon
+   └─ Dagens implementering kan opprette draft-side tidlig
+   └─ Dette er akseptabelt for legacy/import, men ikke målmodell
 
 4. Per-seksjon-jobb
    └─ Ekstraherer claims og source references
    └─ Lagrer verifikasjonsgrunnlag
 
 5. Finalisering
-   └─ Dagens implementering: assembler content_markdown fra claims
-   └─ Korrigert mål: content_markdown skal være en lesbar wikiartikkel
-   └─ Claims/source references skal være review-lag rundt artikkelen
+   └─ Teknisk article generation finnes etter Fase 8C
+   └─ Men endelig mål krever maintainer decision før sideidentitet bestemmes
 
 6. Ingen wiki-output kobles til eksisterende RAG, kravsvar eller AI workspace
 ```
 
-### 7.2 Ønsket primærflyt: Enterprise Wiki egne kilder + Wiki Article Layer
+### 7.2 Ønsket primærflyt: Enterprise Wiki egne kilder + Karpathy compile
 
 ```
 1. Bruker laster opp dokument direkte i Enterprise Wiki
@@ -517,35 +537,52 @@ Korrigert mål:
    └─ Resultatet lagres på EnterpriseWikiDocument
    └─ Ingen skriving til Kunnskapsbase
 
-3. Ingest startes fra UI
+3. Ingest/compile startes fra UI
    └─ Oppretter enterprise_wiki_ingest_runs
        (source_type = 'enterprise_wiki_document', source_id = EnterpriseWikiDocument.id)
 
-4. Seksjonsplanlegging
-   └─ Deler kildetekst i håndterbare seksjoner
-   └─ Beholder heading/section metadata for senere artikkelstruktur
+4. Maintainer schema lastes
+   └─ Regler for page types, front matter/logiske metadata, navngiving, lenking, index, log, compile og lint
+   └─ Filnavn kan brukes som kildeetikett, men ikke blindt som tittel/slug
 
-5. AI-verifikasjonslag
-   └─ Ekstraherer claims, excerpts og conflict_note per seksjon
+5. Index lookup
+   └─ Systemet henter eksisterende pages, titles, slugs, page_type, topics, status og korte sammendrag
+   └─ AI vurderer hvilke concept/entity-sider kilden berører
+
+6. Compile decision
+   └─ Returnerer strukturert beslutning:
+       - source_article: create/update
+       - source_summary: create/update
+       - update_existing_pages[]
+       - create_new_pages[]
+       - no_action_reason hvis kilden ikke gir nyttig wikiinnhold
+       - warnings/conflicts
+
+7. Verification extraction
+   └─ Ekstraherer claims, excerpts og conflict_note
    └─ Lagrer enterprise_wiki_claims og enterprise_wiki_source_references
 
-6. AI-artikkellag
-   └─ Genererer lesbar Markdown-artikkel fra kildetekst/claims
-   └─ Artikkelen har tittel, sammendrag, seksjoner og sammenhengende brødtekst
-   └─ Artikkelen skal ikke inneholde ubegrunnede påstander
+8. Page writing/update
+   └─ Oppretter/oppdaterer article-side for kilden
+   └─ Oppretter/oppdaterer summary-side for kilden
+   └─ Oppretter/oppdaterer relevante concept/entity-sider
+   └─ For hver berørt side opprettes ny EnterpriseWikiPageVersion
+   └─ content_markdown skrives som lesbar Markdown
+   └─ Claims/source references knyttes til riktig sideversjon der de brukes som verifikasjon
 
-7. Finalize
-   └─ Lagrer Markdown-artikkelen i EnterpriseWikiPageVersion.content_markdown
-   └─ Setter siden til pending_review
-   └─ Knytter claims/source references/lint til siden som review-grunnlag
+9. Log/index/backlinks/lint
+   └─ Run-logg dokumenterer hvilke sider kilden endret eller foreslo
+   └─ Index/sideoversikt oppdateres
+   └─ Backlinks/lenkegraf bygges eller oppdateres
+   └─ Lint sjekker manglende kilder, konflikter, stale claims, orphan pages, broken links, stub pages og missing cross-references
 
-8. Review
-   └─ Brukeren leser artikkelen
+10. Review
+   └─ Brukeren leser article/summary/concept/entity-sider
    └─ Brukeren kontrollerer claims/kilder/lint
    └─ System Owner godkjenner eller avviser
 ```
 
-**Viktig prinsipp etter v0.3:** AI kan returnere strukturert JSON som inneholder både `article` og `claims`. `article.markdown` er wikiens hovedinnhold. `claims` er verifikasjonsgrunnlag. AI skal ikke levere uvalidert, fri tekst uten schema, men systemet må heller ikke redusere wikiopplevelsen til en claim-liste.
+**Viktig prinsipp etter v0.5:** AI kan returnere strukturert JSON som inneholder compile-beslutning, Markdown-innhold og verifikasjonsgrunnlag. `content_markdown` er fortsatt hovedinnholdet på en wiki-side, men output må deles i Karpathy-lag: `article`, `summary`, `concept/entity`, `index`, `log` og `backlinks`.
 
 ## 8. Queue-mønster
 
@@ -564,7 +601,7 @@ ProcessEnterpriseWikiIngest          (orchestrator)
 |---|---|---|
 | `ProcessEnterpriseWikiIngest` | `enterprise-wiki` | Orchestrator: leser kilde, splitter, dispatcherer seksjonsjobber |
 | `ProcessEnterpriseWikiSection` | `enterprise-wiki` | Sender én seksjon til AI, lagrer claims og kilder |
-| `FinalizeEnterpriseWikiIngest` | `enterprise-wiki` | Slår sammen resultater, oppdaterer side og ingest-run |
+| `FinalizeEnterpriseWikiIngest` | `enterprise-wiki` | Slår sammen resultater. Midlertidig én side; skal senere koordinere article/summary/concept/entity-output og ingest-run |
 
 Ny queue: `enterprise-wiki`. Holdes separat fra `ai-requirements` for å unngå ressurskonflikter med produksjonsflyt.
 
@@ -572,24 +609,28 @@ Ny queue: `enterprise-wiki`. Holdes separat fra `ai-requirements` for å unngå 
 
 ## 9. Lint og helsekontroll
 
+Lint skal etter v0.5 speile Karpathy-linteren bedre: først deterministisk strukturscan, deretter eventuelt LLM-basert semantisk vurdering.
+
 Planlagte lint-kontroller som kan kjøres on-demand eller som scheduled job:
 
 | Check-type | Alvorlighet | Beskrivelse |
 |---|---|---|
 | `claim_without_source` | error | Claim-rad mangler minst én source_reference |
-| `page_without_approved_source` | error | Wiki-side er bygget fra en kilde som ikke lenger er `approved` |
-| `conflicting_claims` | warning | To claims på samme side motsier hverandre (AI-flagget) |
+| `source_reference_missing_excerpt` | warning | Kildereferanse finnes, men mangler excerpt |
+| `document_ingest_failed` | warning | Kildedokument feilet ingest/extract |
+| `broken_wiki_link` | error | `[[wikilink]]` peker til side som ikke finnes |
+| `orphan_page` | info | Wiki-side uten inbound links |
+| `stub_page` | info | Side er for kort/tynn til å være nyttig |
+| `missing_backlinks` | info | Backlinks/lenkegraf er ikke oppdatert |
+| `conflicting_claims` | warning | To claims eller sider motsier hverandre |
 | `source_version_superseded` | warning | Kildeversjon har `approval_status = superseded` |
 | `stale_approved_page` | warning | Godkjent side, men kildens `file_hash_sha256` er endret siden `last_source_hash` ble beregnet |
-| `orphan_page` | info | Wiki-side uten noen claims |
 | `low_confidence_page` | info | Mer enn halvparten av claims har `confidence = low` eller `uncertain` |
 | `missing_owner` | info | `owner_user_id` er null |
 | `overdue_review` | warning | Godkjent side uten review de siste N dager (konfigurerbart) |
 | `missing_topics` | info | Siden har ingen `enterprise_wiki_page_topics`-rader |
 
 Lint-resultater lagres i `enterprise_wiki_lint_findings`. UI viser helseindikator per side.
-
----
 
 ## 10. Første pilotfase og rebaselining
 
@@ -607,46 +648,70 @@ Lint-resultater lagres i `enterprise_wiki_lint_findings`. UI viser helseindikato
 
 Dette ga en nødvendig teknisk grunnmur.
 
-### 10.2 Korrigert pilotmål etter v0.3
+### 10.2 Korrigert pilotmål etter v0.5
 
-Det opprinnelige pilotmålet var for smalt. Å vise claims med kildelenker er ikke nok.
+Det opprinnelige pilotmålet var for smalt. Å vise claims med kildelenker er ikke nok. Å generere én artikkel fra én kilde er nyttig, men bare ett lag i Karpathy-modellen.
 
 Korrigert pilotmål:
 
 | Element | Korrigert mål |
 |---|---|
-| **Primær output** | Lesbar Markdown-wikiartikkel |
+| **Primær output** | Karpathy-kompatibel wiki med article, summary og concept/entity-sider |
+| **Source behavior** | Én kilde får source article + source summary og kan oppdatere/opprette flere concept/entity-sider |
+| **Index** | Eksisterende wiki-sider vurderes før nye concept/entity-sider opprettes |
+| **Schema** | Eget maintainer-regelverk styrer page types, navngiving, lenking, ingest/compile, query og lint |
+| **Backlinks** | Lenkegraf bygges/vedlikeholdes systematisk |
 | **Sekundær output** | Claims, excerpts, kildereferanser og lint |
-| **Primær UI** | Artikkelside som ligner en wiki |
-| **Review UI** | Verifikasjonslag rundt artikkelen |
-| **Godkjenning** | Godkjenning av artikkel, støttet av claim-/kildekontroll |
-| **Produksjonsaktivering** | Først etter at artikkellaget fungerer |
+| **Primær UI** | Wiki-side som ligner en lesbar wiki, med riktig page type |
+| **Review UI** | Verifikasjonslag rundt artikkel/concept/summary |
+| **Godkjenning** | Godkjenning av wikiinnhold, støttet av claim-/kildekontroll |
+| **Produksjonsaktivering** | Først etter at Karpathy compile-flyten fungerer |
 
-Mål med neste pilot: verifisere at Enterprise Wiki produserer lesbare, nyttige, kildegrunnede wikiartikler som kan reviewes trygt av mennesker.
+Mål med neste pilot: verifisere at Enterprise Wiki kan bruke en opplastet kilde til å produsere source article, source summary, relevante concept/entity-oppdateringer, index/log/backlinks og sporbar verifikasjon.
 
 ## 11. Åpne beslutninger
 
-Disse spørsmålene må avgjøres før kode skrives:
+Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 
-1. **Navn i UI** — «Enterprise Wiki», «Kunnskapswiki» eller annet? Norsk eller engelsk i UI-strenger?
+1. **Schema/instruction contract** — Skal schemaet implementeres som PHP prompt-/kontraktklasse, markdown-fil i repo, config, databasekonfigurasjon eller en kombinasjon?
 
-2. **Godkjenning: Hvem?** — Kun System Owner i pilot, eller også Bid Manager? Skal godkjenning per side være nok, eller kreves det godkjenning per enkeltpåstand?
+2. **Page types** — Skal `page_type` legges fysisk på `enterprise_wiki_pages` nå, eller først defineres i schema og simuleres i kode? Minimum ønsket modell: `article`, `summary`, `concept`, `entity`, `index`, `backlinks`.
 
-3. **Avdelingsscoping fra start?** — Skal `department_id` brukes i pilot, eller kun selskapsbred wiki?
+3. **Source article mapping** — Hvordan kobles én `EnterpriseWikiDocument` stabilt til sin `article`-side uten at filnavn blir wiki-identitet?
 
-4. **Superadmin-tilgang** — Skal interne superadmins se kundewiki via Filament, eller holder det med produksjonsdata i Filament-logger?
+4. **Source summary mapping** — Skal `summary` være egen page type, egen tabell eller metadatafelt på source article? Karpathy peker mot egen summary-side.
 
-5. **RAG-sammenligning** — Når og hvordan skal wiki-svar sammenlignes mot dagens RAG? Feature-flag, separat side, eller parallell visning i AI workspace?
+5. **Concept/entity-sider** — Skal `entity` være egen page type eller behandles som `concept` med tag/topic?
 
-6. **Kostnadsstyring** — Maksimalt antall tokens per ingest-run? Maksimalt antall sider per dag per kunde? Skal cost_estimate_nok vises i UI?
+6. **Index-format** — Skal første index være dynamisk bygget fra `enterprise_wiki_pages`, `enterprise_wiki_page_topics`, status og korte sammendrag, eller skal det finnes en eksplisitt index-side?
 
-7. **Enkeltpåstand-godkjenning** — Skal brukere kunne godkjenne/avvise individuelle claims, eller kun hele siden?
+7. **Logg over operasjoner** — Holder `enterprise_wiki_ingest_runs` alene, eller trengs en append-only operation log som speiler `wiki/log.md`?
 
-8. **Kildeutdrag-lengde** — Hvor langt bør `excerpt` maksimalt være? (Forslag: 500 tegn)
+8. **Backlinks** — Skal backlinks lagres som egen tabell, genereres fra `[[wikilinks]]` ved lint, eller vises som lint-/index-output?
 
-9. **Automatisk re-ingest** — Skal wiki-sider automatisk trigge ny generering når kildeversjon oppdateres, eller kun manuelt i pilot?
+9. **Compile decision JSON** — Hvilket strict JSON-format skal styre `source_article`, `source_summary`, `update_existing_pages[]`, `create_new_pages[]`, warnings og no-op?
 
-10. **Konflikthåndtering** — Når `conflict_flag = true`: skal brukeren løse konflikten manuelt, eller skal AI foreslå sammenslåing?
+10. **Multi-page ingest** — Hvordan skal én `EnterpriseWikiDocument` kunne påvirke flere `EnterpriseWikiPage`-rader uten stor refaktor?
+
+11. **Update existing vs create new** — Hvilke regler skal hindre duplikatsider og kildefilnavn som artikkeltittel?
+
+12. **Review boundary** — Skal reviewer godkjenne hele siden, per sideversjon, per kildeendring eller per claim?
+
+13. **Navn i UI** — «Enterprise Wiki», «Kunnskapswiki» eller annet? Norsk eller engelsk i UI-strenger?
+
+14. **Godkjenning: Hvem?** — Kun System Owner i pilot, eller også Bid Manager?
+
+15. **Avdelingsscoping fra start?** — Skal `department_id` brukes i pilot, eller kun selskapsbred wiki?
+
+16. **RAG-sammenligning** — Når og hvordan skal wiki-svar sammenlignes mot dagens RAG? Feature-flag, separat side, eller parallell visning i AI workspace?
+
+17. **Kostnadsstyring** — Maksimalt antall tokens per ingest-run? Maksimalt antall sider per dag per kunde? Skal cost_estimate_nok vises i UI?
+
+18. **Kildeutdrag-lengde** — Hvor langt bør `excerpt` maksimalt være? (Forslag: 500 tegn)
+
+19. **Automatisk re-ingest** — Skal wiki-sider automatisk trigge ny generering når kildeversjon oppdateres, eller kun manuelt i pilot?
+
+20. **Konflikthåndtering** — Når `conflict_flag = true`: skal brukeren løse konflikten manuelt, eller skal AI foreslå sammenslåing?
 
 ---
 
@@ -661,15 +726,15 @@ Disse spørsmålene må avgjøres før kode skrives:
 | Fase 4A | Enterprise Wiki egne kilder | Fullført |
 | Fase 4B | Lint og helsekontroll | Fullført |
 | Fase 5 | WikiSectionAiClient OpenAI-integrasjon | Fullført |
-| Fase 6 | Lokal E2E-verifisering | Fullført |
+| Fase 6 | Lokal E2E-verifisering | Fullført — viste claim-grunnmur, ikke endelig wiki-modell |
 | Fase 7 | Produksjonsrunbook | Fullført — aktivering utsatt |
 | Fase 8A | Article Layer Analyse | Fullført |
-| Fase 8B | Artikkelgenerering-spesifikasjon | Fullført |
-| Fase 8C | Backend artikkelgenerering | Fullført (commits 956206d–4ea8fb6) — se §v0.4 for korrigering |
-| Fase 8D | Wiki Article UI | Startet (commit 94f5721) |
-| Fase 8E | Review og godkjennings-UX | Utsatt — ikke neste steg, se §v0.4 |
-| Fase 8F | Kontrollert produksjonsaktivering | Utsatt — sist, etter maintainer-modell er ferdig |
-| **Fase 8M** | **Schema/index/log-audit og minste grunnlag for maintainer workflow** | **Neste steg (v0.4 korrigering)** |
+| Fase 8B | Artikkelgenerering-spesifikasjon | Fullført som article-writer-byggestein, men mangler summary/concepts/index/log/backlinks |
+| Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
+| Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
+| **Fase 8E** | **Karpathy-alignment: page types/schema/index/log/backlinks/compile decision** | **Neste steg** |
+| Fase 8F | Review og godkjennings-UX | Gjenstår — etter Fase 8E |
+| Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
 
@@ -1034,11 +1099,11 @@ Manuell lokal verifisering gjennomført mot Masterdata Prosjekt.docx:
 - Claims, excerpts og confidence verifisert i database
 - `content_markdown` populert av `assembleContentMarkdown()` (claim-dump, ikke artikkel — erstattes i Fase 8C)
 
-### Fase 7 — Produksjonsrunbook — Fullført (aktivering utsatt til Fase 8E er ferdig)
+### Fase 7 — Produksjonsrunbook — Fullført (aktivering utsatt til Fase 8G)
 
 Kjøreklar aktiveringsguide for produksjonsmiljø. Forutsetter at Fase 6 (lokal E2E-verifisering) er gjennomført og godkjent.
 
-> **v0.3-korrigering:** Denne runbooken er beholdt som teknisk aktiveringsgrunnlag, men faktisk produksjonsaktivering skal vente til Wiki Article Layer er ferdig (Fase 8A–8E). Dagens claim-baserte `content_markdown` er ikke riktig sluttprodukt — artikkellaget mangler.
+> **v0.5-korrigering:** Denne runbooken er beholdt som teknisk aktiveringsgrunnlag, men faktisk produksjonsaktivering skal vente til Karpathy compile-modellen er implementert og verifisert. Dagens tekniske article generation er bare article-laget og er ikke riktig sluttprodukt alene.
 
 #### Forutsetninger
 
@@ -1150,280 +1215,155 @@ Allerede genererte wiki-sider og claims slettes **ikke** ved deaktivering. Inges
 
 ---
 
-## Fase 8 — Wiki Article Layer
+## Fase 8 — Karpathy-alignment og Wiki Maintainer Layer
 
-Målet er å gå fra claim-dump til en ekte Karpathy-inspirert wikiopplevelse:
+Målet er å gå fra dokumentbasert article generation til en Karpathy-kompatibel wiki-compiler:
 
+```text
+raw sources → schema → compile decision
+→ source article + source summary
+→ shared concept/entity pages
+→ index/log/backlinks/lint
+→ content_markdown as readable wiki
+→ claims/sources as verification layer
+→ review/approval
 ```
-raw sources → AI-artikkelgenerering → lesbar wikiartikkel
-→ claims/sources/lint som verifikasjonslag rundt artikkelen
-→ human review og godkjenning
-```
+
+Fase 8A–8D ga viktige byggesteiner, men v0.5 korrigerer retningen: `article per source` er riktig, men ikke tilstrekkelig. Neste arbeid er ikke review/approval UX og ikke produksjonsaktivering. Neste arbeid er å få Karpathy page types, schema, index, log, backlinks og compile decision på plass.
 
 ### Fase 8A — Article Layer Analyse — Fullført
 
 Mål: kartlegg nøyaktig hvor dagens implementering gjør claims til hovedinnhold.
 
 Scope gjennomgått:
-- `FinalizeEnterpriseWikiIngest::assembleContentMarkdown()` — produserer en claim-dump, ikke en artikkel
-- `EnterpriseWikiPageVersion.content_markdown` — feltet finnes og er riktig sted for artikkelen
+- `FinalizeEnterpriseWikiIngest::assembleContentMarkdown()` — produserte en claim-dump, ikke en artikkel
+- `EnterpriseWikiPageVersion.content_markdown` — feltet finnes og er riktig sted for wikiinnhold
 - `WikiController::show()` — passerte `content_markdown` men det ble ikke brukt i UI
 - `resources/js/Pages/App/Wiki/Show.jsx` — ignorerte `content_markdown`, viste bare claims
 
-Funn: arkitektur og datamodell er riktig. Gap er at `assembleContentMarkdown()` lager en claim-liste, og UI viste ikke `content_markdown` som primærinnhold. Minste trygge vei: (1) fikse UI til å rendre `content_markdown` som artikkel (Fase 8D), (2) erstatte `assembleContentMarkdown()` med AI-generert artikkel (Fase 8C).
+v0.5-funn: Analysen identifiserte riktig felt (`content_markdown`), men ikke hele Karpathy-modellen. Gapet er større enn article generation: systemet mangler page types, source summary, concept/entity-sider, index, log, backlinks og compile decision.
 
-### Fase 8B — Artikkelgenerering-spesifikasjon — Fullført
+### Fase 8B — Artikkelgenerering-spesifikasjon — Fullført som article-writer-byggestein
 
 > Spesifikasjonsfase. Ingen kodeendringer i denne fasen.
 
-#### Avgrensninger
+Fase 8B definerte `WikiArticleAiClient` og bruk av `content_markdown`. Dette var nyttig for å fjerne claim-dump fra artikkelinnholdet.
 
-- Ingen ny databaseendring — `content_markdown` finnes allerede på `enterprise_wiki_page_versions`.
-- Ingen kobling til Kunnskapsbase/RAG, `KnowledgeItem`, `KnowledgeItemVersion` eller `KnowledgeItemChunk`.
-- Ingen produksjonsaktivering.
-- Claims er ikke sluttproduktet — de er verifikasjonslaget.
-- `enterprise_wiki_page_versions.content_markdown` er det autoritative feltet for wikiartikkelinnhold.
+v0.5-korrigering:
 
-#### Nåværende gap
+- `content_markdown` er fortsatt riktig felt for wikiinnhold.
+- `WikiArticleAiClient` kan beholdes som teknisk writer for `article`-sider.
+- Spesifikasjonen må ikke forstås som full Karpathy-modell.
+- Manglende ledd er compile decision: source article, source summary, concept/entity updates, index/log/backlinks.
+- Filnavn skal ikke blindt være artikkeltittel eller slug.
 
-`FinalizeEnterpriseWikiIngest::handle()` kaller `EnterpriseWikiIngestService::assembleContentMarkdown()` som produserer:
+### Fase 8C — Backend artikkelgenerering — Fullført teknisk som article-lag
 
-```
-# {pageTitle}
-<!-- wiki-ingest-run:N -->
-{claim_text}
-> *Kilde: {sourceLabel} — «{excerpt}»*
-...
-```
-
-Dette er ikke en lesbar wikiartikkel. Det er en formatert claim-liste. UI-en (Fase 8D) er klar til å rendre
-`content_markdown` som artikkel — men innholdet som genereres er ikke det rette.
-
-#### Løsning: WikiArticleAiClient i FinalizeEnterpriseWikiIngest
-
-Ny klasse `WikiArticleAiClient` (speiler `WikiSectionAiClient`). Metoden `generateArticle()` kalles av
-`FinalizeEnterpriseWikiIngest` etter at alle seksjonsjobber er fullført — i stedet for `assembleContentMarkdown()`.
-
-Claims og source references i DB røres ikke av dette steget. De forblir som verifikasjonslag.
-
-#### Plassering i pipeline
-
-```
-ProcessEnterpriseWikiIngest      (uendret)
-  → ProcessEnterpriseWikiSection (uendret — ekstraherer claims og source references per seksjon)
-  → FinalizeEnterpriseWikiIngest (ENDRES i Fase 8C: erstatter assembleContentMarkdown()
-                                   med WikiArticleAiClient::generateArticle())
-```
-
-`assembleContentMarkdown()` i `EnterpriseWikiIngestService` beholdes inntil videre for eksisterende tester, men
-kalles ikke lenger fra finalize-jobben etter Fase 8C.
-
-#### Klassestruktur etter Fase 8C
-
-```
-app/Services/Ai/Wiki/
-  WikiSectionAiClient.php          (uendret — claim extraction, gpt-4.1-mini)
-  WikiArticleAiClient.php          (ny — artikkelgenerering, gpt-5)
-  EnterpriseWikiIngestService.php  (beholder assembleContentMarkdown() men kalles ikke fra finalize)
-
-app/Jobs/Ai/Wiki/
-  FinalizeEnterpriseWikiIngest.php (endres — injiserer og bruker WikiArticleAiClient)
-```
-
-#### Input til WikiArticleAiClient::generateArticle()
-
-Alle claims for page version hentes fra DB inne i `FinalizeEnterpriseWikiIngest::handle()`:
-
-```php
-$claimsData = EnterpriseWikiClaim::query()
-    ->with('sourceReferences')
-    ->where('enterprise_wiki_page_version_id', $pageVersion->id)
-    ->orderBy('position_order')
-    ->get()
-    ->map(fn($c) => [
-        'text'       => $c->claim_text,
-        'confidence' => $c->confidence,
-        'excerpt'    => $c->sourceReferences->first()?->excerpt ?? '',
-        'source'     => $c->sourceReferences->first()?->source_label ?? '',
-    ])
-    ->all();
-
-$articleResult = $articleClient->generateArticle(
-    pageTitle: $pageTitle,
-    claims: $claimsData,
-    languageCode: $languageCode,
-);
-```
-
-`languageCode` hentes fra `$run->customer->language->code` inne i jobben (samme mønster som i AI-svarflyt).
-
-#### Modell og temperatur
-
-- **Modell:** `gpt-5` — per CLAUDE.md er dette modellen for synteseoppgaver og answer draft generation.
-- **Temperatur:** 0.3 — litt frihet for syntese; ikke 0 som for ren claim-ekstraksjon.
-- **Maks output tokens:** 4 000 — tilstrekkelig for en wiki-side med 10–20 seksjoner.
-
-#### Output-format — strict JSON schema
-
-Minimalt schema. Kun `article.markdown` er required — dette er det eneste feltet som mappes til `content_markdown`.
-
-```json
-{
-  "article": {
-    "markdown": "## Oversikt\n\nVirksomheten leverer...\n\n## HMS\n\n..."
-  }
-}
-```
-
-PHP schema for Responses API:
-
-```php
-[
-    'type' => 'object',
-    'properties' => [
-        'article' => [
-            'type' => 'object',
-            'properties' => [
-                'markdown' => ['type' => 'string'],
-            ],
-            'required' => ['markdown'],
-            'additionalProperties' => false,
-        ],
-    ],
-    'required' => ['article'],
-    'additionalProperties' => false,
-]
-```
-
-**Begrunnelse for minimalt schema:** Komplekst schema med `title`, `summary`, `sections[]` øker prompt-kompleksitet
-og risiko for schema-brudd. Tittelen er allerede på `enterprise_wiki_pages.title`. `markdown` er det eneste
-feltet som trengs.
-
-#### Prompt-design
-
-System-prompt (developer role):
-
-```
-You are a wiki article writer.
-Write a coherent, readable wiki article in {languageName} based on the provided claims and source excerpts.
-Rules:
-- Use ## headings for sections and write flowing prose paragraphs, not bullet lists.
-- Synthesise overlapping claims into coherent text — do not repeat the same fact twice.
-- Do not introduce facts not supported by the provided claims and excerpts.
-- Do not mention that the article is AI-generated within the article text itself.
-- Return only JSON matching the schema. No text before or after JSON.
-```
-
-User-prompt (en strukturert claim-liste):
-
-```
-Page title: {pageTitle}
-
-Claims and source evidence:
-
-1. {claim_text} [confidence: high]
-   Source: {source_label} — "{excerpt}"
-
-2. {claim_text} [confidence: medium]
-   Source: {source_label} — "{excerpt}"
-
-[uncertain claims inkluderes men merkes med [confidence: uncertain]]
-```
-
-Claims sorteres etter `position_order` (bevarer dokumentrekkefølge).
-
-#### Mapping til content_markdown
-
-`article.markdown` fra AI-responsen skrives direkte til `pageVersion->content_markdown`.
-
-Artikkelen begynner typisk med `## Oversikt` eller tilsvarende første seksjon — AI styrer struktur.
-Sidetittelen vises separat i UI fra `page.title`, så ingen `# {pageTitle}` prepend.
-Wiki-ingest-run-kommentar (`<!-- wiki-ingest-run:N -->`) fra `assembleContentMarkdown()` utelates.
-
-#### Håndtering av tomme/svake grunnlag
-
-| Situasjon | Håndtering |
-|---|---|
-| Ingen claims i DB | Run feiler med `No claims were stored` — eksisterende oppførsel beholdes |
-| Alle claims er `uncertain` | Artikkelen genereres; lint-sjekk `low_confidence_page` plukker opp |
-| `article.markdown` er tom streng | Run feiler med `WikiArticleAiClient: generated article was empty` |
-| AI returnerer ugyldig JSON | `RuntimeException` — run feiler (samme mønster som `WikiSectionAiClient`) |
-| Færre enn 3 claims | Artikkelen genereres — ingen minimumsgrense |
-| OpenAI-timeout | `FinalizeEnterpriseWikiIngest.$timeout = 120` er tilstrekkelig for ett API-kall |
-
-Eksisterende `if ($markdown === '')` i finalize erstattes med tilsvarende sjekk på `$articleResult['article']['markdown']`.
-
-#### Claims-laget er uendret
-
-`ProcessEnterpriseWikiSection` og `WikiSectionAiClient::fetchClaims()` endres **ikke**.
-
-Claims lagres i `enterprise_wiki_claims` som før. Source references lagres i `enterprise_wiki_source_references` som
-før. Lint-regler kjører som før. `WikiController::show()` sender claims som `claims`-prop som før.
-
-Artikkelen er et nytt synteselag skrevet av en ny AI-klient på toppen av eksisterende claims.
-
-#### Teststrategi for Fase 8C
-
-Automatiserte tester bruker mock av `WikiArticleAiClient` — ingen ekte API-kall.
-
-| Test | Hva sjekkes |
-|---|---|
-| Gyldig artikkel-respons | `generateArticle()` returnerer riktig `article.markdown` |
-| `content_markdown` lagres i page version | Finalize skriver `article.markdown` til `enterprise_wiki_page_versions` |
-| Tom `article.markdown` feiler run | Run får `status = failed`, `error_message` settes |
-| Ugyldig JSON fra OpenAI | `RuntimeException` propageres, run feiles |
-| 0 claims feiler run | Eksisterende oppførsel beholdes |
-| Claims og source references røres ikke | DB-data er uendret etter finalize |
-| `assembleContentMarkdown()` kalles ikke | Mock eller assertion verifiserer at gammel metode ikke påkalles |
-| Kunnskapsbase-tabeller røres ikke | Ingen referanse til `knowledge_items`/`knowledge_item_versions` i ny kode |
-
-Eksisterende `FinalizeEnterpriseWikiIngestTest`-tester som mocker `assembleContentMarkdown()` oppdateres i Fase 8C
-til å mocke `WikiArticleAiClient::generateArticle()` i stedet.
-
-### Fase 8C — Backend artikkelgenerering — Fullført (commits 956206d–4ea8fb6)
+**Commits:** `956206d`, `5029cb0`, `4ea8fb6`
 
 Implementert:
-- `WikiArticleAiClient::generateArticle()` (gpt-5, strict JSON schema, format-validering)
-- `FinalizeEnterpriseWikiIngest` injiserer og bruker `WikiArticleAiClient` i stedet for `assembleContentMarkdown()`
-- Guard: ingest feiler rent hvis `ENTERPRISE_WIKI_AI_ENABLED=false` etter at jobben er queued
-- `validateArticle()` avviser HTML-kommentarer, ≥2 `Kilde:`-linjer og ≥3 blockquote-linjer
-- Mock-baserte tester for alle scenarier — ingen ekte API-kall
+- `WikiArticleAiClient` for article generation
+- config-guard slik at disabled AI ikke gir uryddig runtime-brudd
+- validering mot HTML-kommentarer, `Kilde:`/`Source:`/`Ref:`-dump og excerpt-/blockquote-dump
+- tester for klient og finalize-flyt
 
-**Kjent feil verifisert under E2E-test (2026-07-08):** `gpt-5` støtter ikke `temperature`-parameteren i Responses API (HTTP 400). `WikiArticleAiClient::buildPayload()` sender `temperature: 0.3` — dette må fjernes. Én linje kodeendring, ingen migrasjon.
+v0.5-status:
+- Committene beholdes.
+- Dette er nyttig teknisk grunnlag og guardrails.
+- Dette dekker `wiki/articles`-laget delvis.
+- Dette dekker ikke `wiki/summaries`, `wiki/concepts`, `wiki/index.md`, `wiki/log.md` eller `wiki/backlinks.md`.
+- Videre arbeid skal ikke bare forbedre article-prompten, men korrigere compile-modellen.
 
-**v0.4-vurdering:** Fase 8C implementerte en gyldig byggestein (per-side artikkelgenerering fra claims). Men modellen «claims fra én kilde → én side» er for smal for Karpathy-modellen. Se §v0.4 for riktig neste retning.
+### Fase 8D — Wiki Article UI — Fullført/startet
 
-### Fase 8D — Wiki Article UI — Startet (commit 94f6541)
+**Commits:** `94f6541`, `94f5721`
 
-Mål: gjør `/app/wiki/{slug}` til en reell wikiartikkel-side.
+Implementert:
+- `content_markdown` rendres som primær wikiartikkel via `react-markdown`
+- Claims, sources og lint er sekundære i kollapsbar "Verifikasjonsgrunnlag"-seksjon
+- Godkjente sider viser ikke draft-/AI-merker i toppen
+- Helsekontroll er flyttet inn i verifikasjonslaget
 
-**Status:** Article-first UI-omstrukturering fullført i commit `94f6541`:
-- `content_markdown` rendres nå som primær wikiartikkel via `react-markdown` med `.wiki-article`-styling
-- Claims, sources og lint er sekundære — samlet i kollapsbar "Verifikasjonsgrunnlag"-seksjon (lukket som standard)
-- `react-markdown` v10 lagt til som avhengighet
-- Nye lang-nøkler: `article_heading`, `article_ai_label`, `article_empty`, `high_volume_warning`
-- Prop `content_markdown` er nå eksplisitt i controller og bekreftet med test
+v0.5-status:
+- UI-retningen er riktig for lesing av `article`-sider.
+- UI løser ikke manglende `summary`, `concept/entity`, `index`, `log` eller `backlinks`.
+- Review/approval UX skal vente til Karpathy-output er riktig.
 
-**Gjenstår:** Backend-generering av faktisk wikiartikkel (Fase 8C). Frem til Fase 8C er ferdig vil `content_markdown` fortsatt inneholde claim-dump fra `assembleContentMarkdown()` — UI er klar til å rendre riktig artikkel så snart backend leverer det.
+### Fase 8E — Karpathy-alignment: page types/schema/index/log/backlinks/compile decision — Neste steg
 
-### Fase 8E — Review og godkjennings-UX for artikkelinnhold
+Mål: etablere minste trygge grunnlag for at Enterprise Wiki fungerer som Karpathy-kompatibel wiki-compiler, ikke bare dokumentoppsummerer.
 
-Mål: reviewer godkjenner artikkelen, ikke bare en claim-liste.
+Dette er først en audit og smal implementeringsspesifikasjon. Ikke start stor refaktor.
+
+Oppgaver:
+
+1. **Audit source-as-single-page-identitet**
+   - Finn hvor source/document/filename i dag blir `EnterpriseWikiPage.title` eller `slug`.
+   - Finn hvor page/version opprettes før compile decision.
+   - Finn hvordan `enterprise_wiki_ingest_runs.enterprise_wiki_page_id` begrenser én kilde til én side.
+   - Finn om eksisterende kildelenker fra `/app/wiki` antar én generert side per kilde.
+
+2. **Definer page type-kontrakt**
+   - Minimum: `article`, `summary`, `concept`, `entity`, `index`, `backlinks`.
+   - Avklar om `page_type` må bli DB-felt nå eller kan simuleres i første steg.
+   - Avklar unikhet: slug per customer eller per customer+page_type.
+
+3. **Definer schema/instruction contract**
+   - Regler for page types, front matter/logiske metadata, navngiving, lenking, index, ingest/compile, query og lint.
+   - Filnavn er kun source metadata.
+   - Ingen hardkodede temaer.
+
+4. **Definer index contract**
+   - Hvilke felter fra eksisterende pages skal AI se før den velger concept/entity-side?
+   - Minimum: page id, page_type, title, slug, status, topics, kort summary/markdown excerpt, lint health.
+
+5. **Definer compile decision JSON**
+   - `source_article`
+   - `source_summary`
+   - `update_existing_pages[]`
+   - `create_new_pages[]`
+   - `no_action_reason`
+   - `warnings/conflicts`
+   - `source_coverage`
+
+6. **Definer log/backlinks/trace**
+   - Hvordan dokumenteres at én kilde oppdaterte flere sider?
+   - Avklar om eksisterende `enterprise_wiki_ingest_runs` holder midlertidig eller om ny relation trengs senere.
+   - Avklar første backlinks-løsning: tabell, generert markdown-side eller lint-output.
+
+7. **Minste kodeendring etter audit**
+   - Prioriter å stoppe blind filnavn→title/slug.
+   - Prioriter page type-kontrakt.
+   - Prioriter index-first lookup før nye concept/entity-sider.
+   - Ikke gjør DB-endring før audit viser konkret behov.
+
+Akseptansekriterier:
+- Planen sier tydelig at `article per source` er del av Karpathy-modellen.
+- Planen sier tydelig at `article per source` ikke er nok alene.
+- Planen peker ikke lenger på review/approval UX som neste steg.
+- Fase 8B/8C er merket som nyttig article-lag, men ikke full Karpathy compile-modell.
+- Neste kodeendring er basert på faktisk audit av eksisterende `EnterpriseWikiPage`-opprettelse og kildelenker.
+- Kunnskapsbase/RAG, billing, admin/Filament og AI workspace er urørt.
+
+### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
+
+Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
 
 Krav:
-- godkjenning knyttes til artikkelversjon
+- godkjenning knyttes til riktig sideversjon
 - verifikasjonslag støtter beslutningen
 - åpne lint `error` skal vurderes før godkjenning
+- reviewer skal kunne se hvilke kilder som endret hvilke sider
 - ikke auto-publiser
 
-### Fase 8F — Kontrollert produksjonsaktivering — Gjenstår til etter Fase 8E
+### Fase 8G — Kontrollert produksjonsaktivering — Gjenstår til etter Fase 8F
 
-> **Ikke neste steg.** Produksjonsaktivering skjer først etter at Fase 8B–8E er gjennomført og wikiartikkel-opplevelsen er verifisert.
+> **Ikke neste steg.** Produksjonsaktivering skjer først etter at Fase 8E–8F er gjennomført og wiki-maintainer-opplevelsen er verifisert.
 
 Mål: bruk eksisterende runbook fra Fase 7 kontrollert i produksjon.
 
 Krav:
-- `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres etter at artikkelgenerering fungerer
+- `ENTERPRISE_WIKI_AI_ENABLED=true` aktiveres etter at maintainer-flyten fungerer
 - første produksjonsbruk med kort dokument
 - queue restart/config clear er del av runbook (se Fase 7)
 - reversering via `ENTERPRISE_WIKI_AI_ENABLED=false`
@@ -1467,53 +1407,100 @@ Disse eksisterende modellene leses kun av `wiki:ingest`-kommandoen (Flyt A). De 
 
 ---
 
-## Appendix B — AI-promptdesign (retningslinjer)
+## Appendix B — AI-promptdesign og maintainer-kontrakter (retningslinjer)
 
-### B.1 v0.3-prinsipp
+### B.1 v0.5-prinsipp
 
-Wiki-generering skal ikke lenger stoppe ved claim extraction.
+Wiki-generering skal ikke stoppe ved claim extraction eller én article prompt.
 
-AI-output skal være strukturert og validerbar, men må inneholde et faktisk artikkellag:
+AI-output skal være strukturert og validerbar, men må styre en Karpathy-kompatibel compile-flyt:
 
-- `article` — lesbar wikiartikkel
+- `schema` — regler for page types, navngiving, lenking, ingest/compile, query og lint
+- `index_context` — eksisterende sider som kan oppdateres
+- `compile_decision` — hvilke sider skal oppdateres/opprettes, eller hvorfor ingen handling gjøres
+- `source_article` — full writeup for råkilden
+- `source_summary` — kort TL;DR for råkilden
+- `concept_entity_updates` — felles sider som oppdateres/opprettes på tvers av kilder
 - `claims` — verifikasjonsgrunnlag
-- `source_coverage` — oversikt over hvilke kilder/seksjoner som er dekket
-- `warnings` — usikkerheter eller hull modellen oppdaget
+- `source_coverage` — hvilke kilder/seksjoner som støtter endringen
+- `warnings` — usikkerheter, konflikter eller hull modellen oppdaget
 
 Claims er ikke sluttproduktet. De støtter review, kildekontroll og lint.
 
-### B.2 Strukturert output
+### B.2 Compile decision — ønsket strict JSON-format
 
-AI skal returnere strict JSON, ikke uvalidert fri tekst.
-
-Eksempel på ønsket overordnet output:
+Eksempel på ønsket overordnet output for beslutningslaget:
 
 ```json
 {
-  "article": {
-    "title": "HMS-kompetanse",
-    "summary": "Kort sammendrag av hva kildene dokumenterer om HMS-kompetanse.",
-    "markdown": "## Oversikt
-
-Sammenhengende wikiartikkel...",
-    "sections": [
+  "compile_decision": {
+    "source_article": {
+      "action": "create_or_update",
+      "title": "Menneskelig tittel avledet fra kilden, ikke filnavn",
+      "proposed_slug": "menneskelig-tittel",
+      "reason": "Hver råkilde får en full source writeup."
+    },
+    "source_summary": {
+      "action": "create_or_update",
+      "title": "Kort sammendrag: Menneskelig tittel",
+      "proposed_slug": "menneskelig-tittel-summary",
+      "max_words": 200
+    },
+    "update_existing_pages": [
       {
-        "heading": "Oversikt",
-        "markdown": "Sammenhengende avsnitt med kildegrunnede fakta."
+        "page_id": 123,
+        "page_type": "concept",
+        "reason": "Kilden inneholder ny informasjon som hører hjemme på eksisterende concept-side.",
+        "change_type": "extend"
       }
-    ]
+    ],
+    "create_new_pages": [
+      {
+        "page_type": "concept",
+        "title": "Tematisk sidetittel avledet fra innholdet",
+        "reason": "Ingen eksisterende side dekker dette temaet.",
+        "proposed_slug": "tematisk-sidetittel"
+      }
+    ],
+    "no_action_reason": null,
+    "warnings": []
+  }
+}
+```
+
+Regler:
+- `source_article` og `source_summary` er normalt forventet for en gyldig ny råkilde.
+- `title` må være innholdsavledet og menneskelig.
+- `title` må ikke være blind kopi av source filename.
+- `proposed_slug` må ikke ende på dokumentextension.
+- Én kilde kan returnere både `update_existing_pages` og `create_new_pages`.
+- Tom beslutning må ha `no_action_reason`.
+
+### B.3 Page-output per side
+
+Eksempel på ønsket output per sideversjon:
+
+```json
+{
+  "page": {
+    "page_type": "article",
+    "title": "Menneskelig sidetittel",
+    "summary": "Kort sammendrag av hva siden dekker.",
+    "markdown": "## Oversikt\n\nSammenhengende wikiartikkel...",
+    "concepts": ["hms", "referanseprosjekter"],
+    "links": ["[[hms]]", "[[referanseprosjekter]]"]
   },
   "claims": [
     {
-      "text": "Virksomheten har ISO 45001-sertifisering for HMS-styringssystem.",
+      "text": "Én konkret, verifiserbar påstand.",
       "confidence": "high",
-      "excerpt": "Selskapet ble ISO 45001-sertifisert i 2022 gjennom DNV GL.",
+      "excerpt": "Relevant tekstutdrag fra kilden.",
       "conflict_note": null
     }
   ],
   "source_coverage": [
     {
-      "source_label": "hms-policy.docx",
+      "source_label": "source.docx",
       "covered": true,
       "notes": null
     }
@@ -1522,21 +1509,34 @@ Sammenhengende wikiartikkel...",
 }
 ```
 
-### B.3 Artikkelregler
+### B.4 Page-regler
 
-Artikkelen skal:
+Alle sider skal:
 
 - skrives på kundens språk
 - være Markdown
 - ha tydelige overskrifter
-- ha sammenhengende brødtekst
+- bruke `[[wikilinks]]` bare til sider som finnes eller opprettes i samme compile-run
+- ha sammenhengende brødtekst der page type krever det
 - syntetisere overlappende kildetekst
-- unngå marketing-språk uten kilde
 - ikke inneholde fakta som ikke støttes av kildene
-- ikke nevne at den er AI-generert i selve artikkelteksten
+- ikke nevne at den er AI-generert i selve wikiinnholdet
+- ikke inneholde HTML-kommentarer
+- ikke inneholde `Kilde:`/`Source:`/`Ref:`-dump i artikkelteksten
 - kunne leses uten at brukeren åpner claim-listen
 
-### B.4 Claim-/verifikasjonsregler
+Spesifikke regler:
+
+| Page type | Regler |
+|---|---|
+| `article` | Full writeup for én råkilde. Kan lenke til concepts/entities. |
+| `summary` | Kort TL;DR for én råkilde, normalt maks 200 ord. |
+| `concept` | Deduplisert tematisk side på tvers av kilder. Skal oppdateres inkrementelt. |
+| `entity` | Navngitt kunde, leverandør, produkt, person, system eller prosjekt. |
+| `index` | Katalog over article/summary/concept/entity gruppert etter tema. |
+| `backlinks` | Systemgenerert lenkeoversikt. Ikke manuelt redigert. |
+
+### B.5 Claim-/verifikasjonsregler
 
 Claims skal:
 
@@ -1546,16 +1546,29 @@ Claims skal:
 - ha `conflict_note` ved konflikt
 - brukes til review, ikke som artikkelens primære layout
 
-### B.5 Teststrategi
+### B.6 Teststrategi
 
 Automatiserte tester skal bruke mock/fake OpenAI-klient.
 
 Tester skal dekke:
 
-- gyldig artikkel-JSON
-- `article.markdown` lagres som `content_markdown`
+- compile decision med source article
+- compile decision med source summary
+- compile decision med update existing concept/entity page
+- compile decision med create new concept/entity page
+- ingen blind filnavnbruk som wiki title/slug
+- én kilde kan påvirke flere sider
+- gyldig page-output JSON for `article`
+- gyldig page-output JSON for `summary`
+- gyldig page-output JSON for `concept`
+- `page.markdown` lagres som `content_markdown`
 - claims lagres med source references
-- manglende `article.markdown` gir feil
+- manglende `page.markdown` gir feil
 - claims uten excerpt håndteres i verifikasjonslaget
+- ugyldig output med HTML-kommentarer eller source-dump avvises
+- broken wikilinks oppdages av lint
+- orphan/stub pages rapporteres av lint
+- backlinks kan bygges/rebygges
 - ingen ekte nettverkskall i tester
 - Kunnskapsbase/RAG-tabeller røres ikke
+
