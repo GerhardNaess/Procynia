@@ -389,8 +389,17 @@ export default function WikiIndex({ pages, sources = [], sources_store_url: sour
                     </p>
                 </section>
 
-                <div>
+                <div className="flex flex-wrap items-center gap-4">
                     <LintHealthBar health={lintHealth} tw={tw} />
+                    <Link
+                        href="/app/wiki/graph"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+                    >
+                        <svg className="h-3.5 w-3.5 text-violet-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M13 4.5a2.5 2.5 0 1 1 .702 1.737L6.97 9.604a2.518 2.518 0 0 1 0 .792l6.733 3.367a2.5 2.5 0 1 1-.671 1.341l-6.733-3.367a2.5 2.5 0 1 1 0-3.474l6.733-3.367A2.5 2.5 0 0 1 13 4.5Z" />
+                        </svg>
+                        {tw.graph_view_open_graph ?? 'Grafvisning'}
+                    </Link>
                 </div>
 
                 {pages.length === 0 ? (

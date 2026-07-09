@@ -21,6 +21,7 @@ use App\Http\Controllers\App\NoticeController;
 use App\Http\Controllers\App\NoticeDocumentDownloadController;
 use App\Http\Controllers\App\SupplierController;
 use App\Http\Controllers\App\WikiController;
+use App\Http\Controllers\App\WikiGraphController;
 use App\Http\Controllers\App\WikiGraphDataController;
 use App\Http\Controllers\App\WikiSourceController;
 use App\Http\Controllers\Health\DocumentHealthController;
@@ -309,6 +310,7 @@ Route::prefix('app')
             Route::delete('/sources/{document}', [WikiSourceController::class, 'destroy'])->name('sources.destroy');
             Route::get('/sources/{document}/download', [WikiSourceController::class, 'download'])->name('sources.download');
             Route::get('/graph-data', [WikiGraphDataController::class, '__invoke'])->name('graph.data');
+            Route::get('/graph', [WikiGraphController::class, '__invoke'])->name('graph');
             Route::get('/{slug}', [WikiController::class, 'show'])->name('show');
             Route::patch('/{slug}/submit', [WikiController::class, 'submit'])->name('submit');
             Route::patch('/{slug}/approve', [WikiController::class, 'approve'])->name('approve');
