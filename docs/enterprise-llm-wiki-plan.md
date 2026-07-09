@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-17 fullført (commit cb733ac) · **Neste: Fase 8F Review og godkjennings-UX**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-18 fullført (commit 865ab24) · **Neste: Fase 8F Review og godkjennings-UX**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -1498,6 +1498,28 @@ Implementert:
 **Design: idempotens og stale resolution.**
 - Upsert-nøkkel: `{customer_id, enterprise_wiki_ingest_run_id, enterprise_wiki_page_id, enterprise_wiki_page_version_id, enterprise_wiki_claim_id, code}` — manuell query (ingen DB unique constraint, håndterer NULL-felt). Allerede åpen finding teller som skipped; resolved finding gjenåpnes og teller som created.
 - Stale resolution: etter lint-passet lukkes alle åpne findings for denne run-id som ikke ble rørt i denne kjøringen. Findings fra `wiki:lint` (run_id = NULL) røres aldri.
+
+#### Fase 8E-18 — Read-only Enterprise Wiki traversal UI — Fullført
+
+**Commit:** `865ab24`
+
+Implementert:
+- `WikiController::show()` utvidet: `EnterpriseWikiPageTraversalService` injisert i konstruktøren. Nye Inertia-props: `page_type` (i `page`-objektet), `outgoing_links`, `incoming_links`, `related_articles`, `related_concepts`, `related_entities`, `lint_summary`. Alle data er customer-scoped via traversal-servicen.
+- `WikiShow.jsx` utvidet:
+  - `page_type`-badge i sideheader (ved siden av status-badge), med fargekoding per type (violet=article, sky=summary, teal=concept, orange=entity)
+  - Ny **Navigasjon**-seksjon (alltid synlig, mellom artikkelinnhold og verifikasjon): viser klikkbare side-chips gruppert etter semantisk relasjon — sammendrag, kildeartikkel, konsepter, entiteter, relaterte artikler, baklenker. Chips har fargedot basert på page_type for visuell orientering.
+  - `lint_summary` som kompakte tellere (errors + warnings) på "Verifikasjonsgrunnlag"-knappen, med grønt OK-badge når 0 funn.
+- 17 nye i18n-nøkler i `lang/no/procynia.php` og `lang/en/procynia.php` (page types, traversal labels).
+- 12 nye tester i `WikiControllerTest.php` — dekker page_type, outgoing/incoming links, related_*, lint_summary, customer scoping, tom-side-håndtering og no-side-effects.
+
+**Traversal-navigasjon:**
+- article → sammendrag (`summaryLinks` fra outgoing_links filtrert på page_type=summary)
+- article → konsepter (`related_concepts`)
+- article → entiteter (`related_entities`)
+- summary → kildeartikkel (`articleLinks` fra outgoing_links filtrert på page_type=article)
+- summary → konsepter/entiteter (`related_concepts` / `related_entities`)
+- concept/entity → relaterte artikler (`related_articles`)
+- alle → baklenker (`incoming_links`)
 
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
