@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · **Neste: Fase 8F-3 — trygg sletting av EnterpriseWikiDocument**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0 plan fullført · Fase 8F-1 tab-struktur fullført (commit e9360fa) · Fase 8F-2 søk og filtrering fullført (commit 101885a) · Fase 8F-3 trygg sletting fullført (commit c7b3853) · **Neste: Fase 8F-4 — kjøringshistorikk**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -733,7 +733,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8C | Backend artikkelgenerering | Fullført teknisk som article-lag, men ikke full Karpathy compile-modell |
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
-| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1 og 8F-2 fullført — 8F-3 til 8F-7 gjenstår** |
+| **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0, 8F-1, 8F-2 og 8F-3 fullført — 8F-4 til 8F-7 gjenstår** |
 | Fase 8G | Kontrollert produksjonsaktivering | Gjenstår — sist |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1631,58 +1631,31 @@ Kjøringer-tab og Kvalitet-tab fikk ikke filter i 8F-2 — utsatt til eventuell 
 
 #### Fase 8F-3 — Trygg sletting av EnterpriseWikiDocument
 
-**Mål:** Slett et kildedokument med alle avledede sole-source-data, uten å ødelegge delte concept/entity-sider.
+**Implementeringscommit:** c7b3853
+**Status:** Fase 8F-3 fullført
 
-**Bakgrunn — hull i dagens `destroy()`:**
-- Sjekker `enterprise_wiki_page_id` (gammel enkelt-side-link) — ikke `enterprise_wiki_ingest_run_pages`
-- Sletter ikke `EnterpriseWikiPage`, versjoner, claims, source references eller lint findings
-- Beskytter ikke delte concept/entity-sider mot feil sletting
+**Oppsummering:**
+- `EnterpriseWikiDocument` kan nå slettes trygt fra Kildedokumenter-tabben
+- Preview-steg (`GET /sources/{doc}/delete-preview`) viser antall kjøringer, sole-source-sider og delte sider — ingen sletting skjer
+- Slettemodal krever eksplisitt bekreftelse etter preview
+- Sole-source pages og tilhørende Enterprise Wiki-data (claims, versjoner, lint findings) slettes via DB-cascade i transaksjon
+- Delte concept/entity-sider beholdes intakt
+- Source references som peker på slettet dokument fjernes fra alle sider
+- In-progress runs (`queued`/`running`/`sections_planned`) blokkerer sletting
+- `canDelete`-sjekk i frontend utvidet til `!isInProgress` (ikke lenger begrenset til dokumenter uten genererte sider)
 
-**Ny `WikiSourceDeleteService` med sole-source/delt-klassifisering:**
+**Cascade-rekkefølge i transaksjon:**
+1. Lint findings for sole-source pages
+2. Lint findings for dokumentets runs
+3. Lint findings direkte koblet til dokumentet
+4. Source references som peker på dette dokumentet (på alle siders claims)
+5. Sole-source pages slettes → DB-cascade: claims, source refs, versjoner, page links, run_pages
+6. Ingest sections og runs
+7. Fil fra Storage
+8. Dokumentet
 
-```
-1. Guard: ingen run med status queued/running/sections_planned
-2. Finn alle pages koblet via enterprise_wiki_ingest_run_pages for dette dokumentets runs
-3. Klassifiser:
-   - SOLE-SOURCE: alle run_pages-rader for siden tilhører KUN dette dokumentets runs
-   - DELT: siden har run_pages fra andre dokumenters runs i tillegg
-4. Returner preview:
-   { sole_source_pages: [...], shared_pages_affected: [...], run_count: N }
-```
-
-**To-stegs HTTP-flyt:**
-- `GET /app/wiki/sources/{doc}/delete-preview` — returnerer JSON med `{ sole_source_pages, shared_pages_affected, run_count }`. Ingen sletting.
-- `DELETE /app/wiki/sources/{doc}` med bekreftelse i modal — utfører slettingen.
-
-Modal viser preview-data og krever eksplisitt bekreftelse. Disable-knapp ved pågående sletting.
-
-**Cascade i transaksjon (korrekt rekkefølge):**
-1. Slett `enterprise_wiki_lint_findings` for sole-source pages
-2. Slett `enterprise_wiki_source_references` for claims på sole-source pages
-3. Slett `enterprise_wiki_claims` for sole-source pages
-4. Slett `enterprise_wiki_page_versions` for sole-source pages
-5. Slett `enterprise_wiki_page_links` der `from_page_id` eller `to_page_id` er sole-source
-6. Slett `enterprise_wiki_ingest_run_pages` for alle runs tilhørende dette dokumentet
-7. Slett `enterprise_wiki_ingest_sections` og `enterprise_wiki_ingest_runs`
-8. Slett sole-source pages fra `enterprise_wiki_pages`
-9. Slett source references som peker på dette dokumentet (`source_type = 'enterprise_wiki_document'`, `source_id = doc.id`) — disse kan tilhøre claims på delte sider
-10. Slett filen fra Storage
-11. Slett dokumentet
-
-**Delte concept/entity-sider:**
-- Beholdes med alt innhold og alle versjoner intakt
-- Kun `enterprise_wiki_ingest_run_pages`-rader tilhørende dette dokumentets runs fjernes
-- Source references som peker på det slettede dokumentet fjernes (jf. punkt 9)
-- Siden fremstår deretter med færre kildekoblinger — lint plukker opp stale source references
-
-Akseptansekriterier:
-- Slett dokument uten runs: OK
-- Slett dokument med sole-source pages: alle avledede data slettes; `KnowledgeItem`/`KnowledgeItemVersion`/`KnowledgeItemChunk` urørt etter kjøring
-- Slett dokument med delte pages: sole-source data slettes, delte sider beholdes, source references til slettet dokument fjernes
-- In-progress run blokkerer sletting med tydelig feilmelding
-- Filen slettes fra Storage
-- Preview-endepunkt returnerer riktig klassifisering uten å slette noe
-- ~20 tester
+**Tester:** 642 passed / 1384 assertions
+**Build:** OK
 
 #### Fase 8F-4 — Kjøringshistorikk
 
