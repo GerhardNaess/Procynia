@@ -1392,6 +1392,21 @@ Implementert:
 - Ingen ekte AI-kall i tester — `WikiPageContentAiClient` mockes i `setUp()` via Laravel service container
 - 16 tester
 
+#### Fase 8E-13 — Generate concept/entity page versions, backend-only/manual — Fullført
+
+**Commit:** `6ec73a6`
+
+Implementert:
+- Eksisterende `wiki:generate-applied-pages --run-id=ID` er utvidet til å dekke alle fire sidetyper: `article`, `summary`, `concept` og `entity`
+- `EnterpriseWikiGenerateAppliedPagesService` bruker nå to-pass-logikk: article og summary genereres i pass 1, deretter concept og entity i pass 2 — slik at article/summary-innhold er tilgjengelig som kontekst for concept/entity-generering
+- `WikiPageContentAiClient` støtter nå egne developer-prompts for `concept` og `entity`, og har fått valgfri `$additionalContext`-parameter som sendes med i user-prompt for concept/entity
+- Kontekst for concept/entity bygges av: article/summary `content_markdown` fra DB + maintainer-beslutningens `reason` for siden (matchet på tittel fra `maintainer_decision_json`)
+- CLI-output viser per-type resultat: `Article: X generated`, `Summary: Y generated`, `Concept: Z generated`, `Entity: W generated`, `Skipped: S`
+- Eksisterende versjoner skippes fortsatt trygt (idempotens via `exists()`-sjekk)
+- Ingen claims, ingen source references, ingen UI, ingen endring i `ProcessEnterpriseWikiIngest`
+- Ingen ekte AI-kall i tester — `WikiPageContentAiClient` mockes i `setUp()` via Laravel service container
+- 23 tester
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
