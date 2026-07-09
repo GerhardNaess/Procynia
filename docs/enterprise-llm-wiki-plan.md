@@ -1723,17 +1723,79 @@ Foreløpig scope (for fremtidig referanse):
 **Teststrategi for 8F:**
 Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall. `KnowledgeItem`/`KnowledgeItemVersion`/`KnowledgeItemChunk` verifiseres urørt etter sletteoperasjoner.
 
-### Fase 8G — Enterprise Wiki coverage/eval — Gjenstår
+### Fase 8G — Enterprise Wiki coverage/eval
 
-> **Ikke start uten instruksjon.** Scope avklares separat. Dette er neste planlagte aktive fase etter 8F.
+> **8G-0 (plan/kartlegging) fullført som samtale — 8G-1 ikke startet. Start ikke uten instruksjon.**
 
-Mål: automatisk måling av wiki-helse og innholdskvalitet over tid — et objektivt svar på om wikien er god nok til å stoles på.
+Mål: automatisk måling av wiki-dekning og innholdskvalitet — et objektivt svar på om wikien er god nok til å stoles på. Ingen manuell redigering, ingen handlingsknapper. System Owner ser tilstand og avvik; systemet peker på hva som mangler.
 
-Foreløpig scope (avklares separat):
-- Andel sider med godkjent innhold, komplette claims og lavt lint-score
-- Koblingsdekning og page_type-fordeling
-- Historisk trendvisning: forbedres wikien over tid?
-- Grunnlaget for å vurdere produksjonsaktivering
+#### Premiss og grenser
+
+Enterprise Wiki er ikke et manuelt CMS. Coverage/eval er et automatisk målesystem som viser tilstand, ikke en oppgaveliste. Eneste legitime UI-handlinger forblir: laste opp ny kilde, slette feil kilde, og godkjenne/avvise en side.
+
+#### Datagrunnlag (eksisterende — ingen ny modell nødvendig for 8G-1)
+
+Kilde-til-side-lineage følger denne kjeden:
+
+```
+EnterpriseWikiDocument
+  → EnterpriseWikiIngestRun   (source_id = document.id, maintainer_decision_status)
+    → enterprise_wiki_ingest_run_pages   (pivot: run_id → page_id, action)
+      → EnterpriseWikiPage   (page_type, status, last_source_hash)
+```
+
+All nødvendig dekningsmåling kan gjøres via spørringer langs denne kjeden. Det er **ikke** aktuelt å legge til en `source_document_id` direkte på `EnterpriseWikiPage` — det ville modellert én-til-én der virkeligheten er mange-til-mange (en side kan over tid ha blitt berørt av kjøringer fra flere dokumenter). Eventuell fremtidig forbedring av lineage-sporbarhet bør være en eksplisitt many-to-many page-source lineage-modell, ikke en enkelt FK.
+
+Øvrig tilgjengelig data: `EnterpriseWikiPageVersion` (is_current, content_markdown), `EnterpriseWikiClaim` (confidence, conflict_flag), `EnterpriseWikiSourceReference` (excerpt), `EnterpriseWikiLintFinding` (severity, code, status), `EnterpriseWikiPageLink` (link_type).
+
+#### Om page_type og semantisk klassifisering
+
+`page_type`-feltet (`article`, `summary`, `concept`, `entity`, `index`, `backlinks`) er **grove wiki-side-typer** som speiler Karpathy-layouten — ikke en komplett statisk kategorimodell. Verdiene dekker strukturell rolle, ikke semantisk innhold.
+
+Senere semantisk klassifisering (f.eks. «HMS», «Referanser», «Sertifisering») må være fleksibel og ikke bindes til `page_type`-enumet. Naturlig løsning er metadata/tags eller et eget `semantic_kind`-felt — avklares separat og er ikke en del av 8G.
+
+#### Hva coverage/eval måler
+
+**Lag 1 — Kildedekning:** Har en applied kjøring produsert forventet output for hvert kildedokument? Minimum forventet: én `article` og én `summary` med `status = approved`. Mangler én: gap.
+
+**Lag 2 — Side-kvalitet per side:**
+- Har siden en current version med innhold?
+- Antall claims, andel med source reference + excerpt (`claim_coverage_pct`)
+- Åpne lint-funn (error/warning/info)
+- Koblingsstatus (innkommende og utgående lenker via `EnterpriseWikiPageLink`)
+
+Score per side (forslag):
+```
+grønn  = approved + 0 errors + claim_coverage ≥ 80%
+gul    = approved + 0 errors + claim_coverage < 80%, eller draft/pending med 0 errors
+rød    = errors > 0, eller approved uten claims, eller mangler current version
+```
+
+**Lag 3 — Graf-kohesjon:** Isolerte sider, manglende symmetriske lenker, orphan concept/entity-sider. Dekkes i stor grad av eksisterende lint-koder (`orphan_concept_page`, `missing_reverse_link`, `article_without_summary_link` osv.).
+
+#### Del-faser
+
+**8G-0 — Plan/kartlegging** *(denne fasen — fullført som samtale, ikke committet som kode)*
+Teknisk kartlegging av datamodell, score-design og faseinndeling.
+
+**8G-1 — Coverage service + CLI**
+Ny `EnterpriseWikiCoverageService` og Artisan-kommando `wiki:coverage {customer}` som beregner og skriver ut coverage-rapport: kildedekning per dokument, side-kvalitetsfordeling, gjennomsnittlig claim coverage, lint-aggregat. Ingen nye tabeller, ingen UI. Formålet er å verifisere at spørringene er korrekte og ytelsesmessig akseptable mot reelle data.
+
+**8G-2 — Read-only coverage-visning i Kvalitet-tab**
+Utvider eksisterende Kvalitet-tab (`/app/wiki?tab=quality`) med en coverage-seksjon: kildedekning (N av M kilder fullstendig), side-kvalitetsfordeling (grønn/gul/rød), gjennomsnittlig claim coverage, og top-N avvik med lenker til relevante sider/kilder. Ingen nye ruter — data serveres som utvidede props på eksisterende endepunkt. Ingen handlingsknapper utover eksisterende lenker.
+
+**8G-3 — Snapshots og trendhistorikk**
+Ny tabell `enterprise_wiki_coverage_snapshots` (customer_id, snapshot_at, payload JSON). Daglig scheduled job lagrer aggregert score. Grunnlag for trendvisning ("forbedres wikien over tid?") og for 8H-triggere.
+
+**8G-4 — Eventuell lineage-forbedring**
+Vurderes basert på erfaringer fra 8G-1–8G-3. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
+
+#### Grunnlaget for 8H
+
+8H (continuous maintainer loop) trenger fra 8G:
+- Definisjon av "dekket" / "ikke dekket" (fra 8G-1)
+- Lagret historisk score per kilde (fra 8G-3) — 8H kan trigge ny kjøring når score faller under terskel
+- Evt. raskere lineage-oppslag (fra 8G-4, hvis nødvendig)
 
 ### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
 
