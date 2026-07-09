@@ -1407,6 +1407,21 @@ Implementert:
 - Ingen ekte AI-kall i tester — `WikiPageContentAiClient` mockes i `setUp()` via Laravel service container
 - 23 tester
 
+#### Fase 8E-14 — Extract claims from generated Enterprise Wiki page versions — Fullført
+
+**Commit implementering:** `ff79158` · **Commit confidence-kontrakt:** `ad5b079`
+
+Implementert:
+- Artisan-kommando `wiki:extract-page-claims --run-id=ID`
+- Ny `WikiPageClaimExtractionAiClient` (`app/Services/Ai/Wiki/WikiPageClaimExtractionAiClient.php`) — gpt-4.1-mini, temperature 0, ekstraherer claims fra `content_markdown` i genererte wiki-sider. Bruker string confidence enum (`high`/`medium`/`low`/`uncertain`) — samme som `WikiSectionAiClient` og `EnterpriseWikiClaim::CONFIDENCE_*`. 8E-14-spesifikasjonens `0.0` var illustrativ; numerisk float er bevisst utsatt (krever migrasjon).
+- Ny `EnterpriseWikiExtractPageClaimsService` — laster pivot-rader, finner current `EnterpriseWikiPageVersion` per side, ekstraherer claims via AI-klient, skriver `EnterpriseWikiClaim`-rader med `claim_text`, `confidence`, `conflict_flag`, `position_order`, `approval_status = pending`
+- Idempotent via versjonsnivå-sjekk: sider der current version allerede har claims hoppes over
+- Sider uten current version hoppes over med tydelig teller i output
+- CLI-output: `Pages processed: X`, `Claims created: Y`, `Pages skipped: Z`
+- Ingen source references, ingen lint, ingen UI, ingen endring i `ProcessEnterpriseWikiIngest`
+- `WikiPageClaimExtractionAiClient` mockes i `setUp()` — ingen ekte OpenAI-kall i tester
+- 23 tester
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
