@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-09
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-18 fullført (commit 865ab24) · **Neste: Fase 8F Review og godkjennings-UX**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-19 fullført (commit 1486007) · **Neste: Fase 8F Review og godkjennings-UX**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -1520,6 +1520,26 @@ Implementert:
 - summary → konsepter/entiteter (`related_concepts` / `related_entities`)
 - concept/entity → relaterte artikler (`related_articles`)
 - alle → baklenker (`incoming_links`)
+
+#### Fase 8E-19 — Enterprise Wiki graph data foundation — Fullført
+
+**Commit:** `1486007`
+
+Implementert:
+- `EnterpriseWikiGraphDataService` (`app/Services/EnterpriseWiki/`) — bygger stabilt grafpayload (nodes, edges, summary, scope) fra det kanoniske `EnterpriseWikiPageLink`-grafen. Tre scope-varianter:
+  - **customer-wide** — alle sider og kanter for kunden (ingen parametre)
+  - **run-scoped** — sider fra `enterprise_wiki_ingest_run_pages`-pivot for én applied run; kanter kun der begge endepunkter er i scope (`?run_id=`)
+  - **neighborhood** — valgt side + direkte naboer (inn og ut); kanter mellom alle i dette settet (`?page_id=`, vinner over `run_id` ved konflikt)
+- `WikiGraphDataController` (`app/Http/Controllers/App/`) — JSON-endepunkt, kaster `InvalidArgumentException` → 422 ved ugyldig scope
+- Rute `GET /app/wiki/graph-data` lagt inn **foran** `/{slug}` i wiki-routegruppen
+- Stabilt JSON-kontrakt:
+  - Node-ID: `"page-{id}"`, feltene: `page_id, slug, title, page_type, url, current_version_id, claim_count, source_reference_count, lint_error_count, lint_warning_count, status` (error/warning/ok)
+  - Edge-ID: `"link-{id}"`, feltene: `link_id, source, target, from_page_id, to_page_id, link_type, confidence`
+  - Summary: `node_count, edge_count, article_count, summary_count, concept_count, entity_count, lint_error_count, lint_warning_count, orphan_count`
+  - Scope: `type, run_id, page_id`
+- Alle telleoperasjoner er bulk-aggregert (ingen N+1)
+- Helt read-only — ingen skriving, ingen OpenAI
+- 39 tester i `tests/Feature/App/Wiki/WikiGraphDataControllerTest.php` — dekker: authentication, customer-wide shape, node-payload, edge-payload, summary, run-scoped (inklusive scope-validering), neighborhood (inklusive en-hopp-grense), scope-prioritet (page_id vinner), customer-scoping og no-side-effects
 
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
