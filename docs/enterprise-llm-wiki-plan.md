@@ -1379,6 +1379,19 @@ Implementert:
 - Test bekrefter at `enterprise_wiki_pages`, `enterprise_wiki_page_versions`, `enterprise_wiki_claims`, `enterprise_wiki_ingest_run_pages` og `enterprise_wiki_ingest_runs` har identisk radtall før og etter kjøring
 - 14 tester
 
+#### Fase 8E-12 — Generate article + summary page versions, backend-only/manual — Fullført
+
+**Commit:** `fb49fcd`
+
+Implementert:
+- Artisan-kommando `wiki:generate-applied-pages --run-id=ID`
+- Ny `WikiPageContentAiClient` (`app/Services/Ai/Wiki/WikiPageContentAiClient.php`) — slim gpt-5-klient som tar `pageTitle`, `pageType` (article/summary), `sourceText` og `languageCode`, og returnerer validert Markdown via strukturert JSON-output. Skiller prompt mellom article og summary. Samme forbud mot HTML-kommentarer, kildelinjer og blockquotes som `WikiArticleAiClient`.
+- Ny `EnterpriseWikiGenerateAppliedPagesService` (`app/Services/EnterpriseWiki/EnterpriseWikiGenerateAppliedPagesService.php`) — orkestrerer generering for applied run. Leser `extracted_text` fra `EnterpriseWikiDocument` (customer-scopet via `source_id`). Løser `languageCode` fra customer sin `Language`. Itererer pivot-rader, hopper over concept/entity, hopper over sider som allerede har versjon (idempotens). Skriver én `EnterpriseWikiPageVersion` per eligible side med `is_current=true`, `version_number` auto-inkrementert og `generated_by_model = 'gpt-5'`. Returnerer `{generated, skipped}`.
+- Kommandoen er en tynn wrapper: validerer `--run-id`, finner run, delegerer til service, skriver `[WIKI_GENERATE] Run [N] — Generated: X, Skipped: Y`.
+- Ingen claims, ingen source references, ingen UI, ingen endring i `ProcessEnterpriseWikiIngest`
+- Ingen ekte AI-kall i tester — `WikiPageContentAiClient` mockes i `setUp()` via Laravel service container
+- 16 tester
+
 ### Fase 8F — Review og godkjennings-UX for wiki-maintainer-output
 
 Mål: reviewer godkjenner tematisk wikiinnhold etter at riktig maintainer-flyt finnes.
