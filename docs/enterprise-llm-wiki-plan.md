@@ -1727,7 +1727,40 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 > **8G-2 fullført (commit c57ef78 + 8340324 + 0b45fe5 + a143a3e) — 8G-3 ikke startet. Start ikke uten instruksjon.**
 
-Mål: automatisk måling av wiki-dekning og innholdskvalitet — et objektivt svar på om wikien er god nok til å stoles på. Ingen manuell redigering, ingen handlingsknapper. System Owner ser tilstand og avvik; systemet peker på hva som mangler.
+Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
+
+#### Strategisk ramme: Coverage som QA-prosess
+
+Coverage er primært en kvalitetskontroll for Enterprise Wiki-genereringen, ikke en manuell arbeidsliste for kunden.
+
+**Prinsipp 1 — QA-prosess, ikke dashboard:**
+Coverage måler om genereringen har levert det den skal. En ingest anses ikke som komplett før de genererte wiki-artefaktene har bestått nødvendige QA-kontroller.
+
+**Prinsipp 2 — Forventede artefakter:**
+Coverage validerer at følgende er opprettet og brukbare per kildedokument:
+- `article`-side med gjeldende versjon og innhold
+- `summary`-side med gjeldende versjon og innhold
+- `concept`- og `entity`-sider der kildedokumentet tilsier det
+- `claims` med `source_reference` og excerpt
+- `page_links` (inn- og utgående)
+
+**Prinsipp 3 — Lint + coverage = QA-lag:**
+Lint og coverage utgjør til sammen QA-laget for Enterprise Wiki. Lint kontrollerer strukturell og semantisk korrekthet per side; coverage kontrollerer at ingest-kjøringen som helhet har levert forventet output.
+
+**Prinsipp 4 — Maintainer-loopen reparerer, kunden ser helsestatus:**
+Når QA avdekker avvik, skal Procynias maintainer-loop (8H) forsøke å:
+1. identifisere årsaken (manglende artefakt, tom versjon, brutt lenke, osv.)
+2. regenerere eller reparere innholdet automatisk
+3. kjøre QA på nytt
+4. eskalere til System Owner dersom automatisk reparasjon ikke lykkes
+
+Kunden skal primært se:
+- samlet helsestatus for wikien
+- hva Procynia har reparert automatisk
+- avvik som krever menneskelig vurdering
+
+**Prinsipp 5 — Arkitektonisk retning, ikke nåværende ingest-kobling:**
+Denne QA-modellen beskriver den arkitektoniske retningen for Enterprise Wiki. Den skal **ikke** implementeres ved å endre `ProcessEnterpriseWikiIngest` i denne fasen. Eventuell kobling mellom ingest og post-ingest QA skjer gjennom en separat orchestrator-fase etter 8G og 8H er etablert.
 
 #### Premiss og grenser
 
@@ -1824,17 +1857,34 @@ En kilde med article/summary-side som mangler versjon eller innhold vises som ga
 Commit `a143a3e` presiserte labels fra «Artikkel med innhold» til «Artikkel med gjeldende innhold».
 
 **8G-3 — Snapshots og trendhistorikk**
-Ny tabell `enterprise_wiki_coverage_snapshots` (customer_id, snapshot_at, payload JSON). Daglig scheduled job lagrer aggregert score. Grunnlag for trendvisning ("forbedres wikien over tid?") og for 8H-triggere.
+Ny tabell `enterprise_wiki_coverage_snapshots` (customer_id, snapshot_at, payload JSON). Daglig scheduled job lagrer aggregert coverage-score. Formålet er tredelt:
+- **QA-historikk:** spor om coverage forbedres etter reparasjoner
+- **Regresjonsdeteksjon:** fang fall i coverage etter nye ingest-kjøringer
+- **Evalueringsgrunnlag:** mål om automatisk reparasjon (8H) faktisk bedrer wikien over tid
+
+Snapshots er grunnlaget for at 8H kan sammenligne nåværende tilstand mot historisk terskel og beslutte om automatisk reparasjon er nødvendig.
 
 **8G-4 — Eventuell lineage-forbedring**
 Vurderes basert på erfaringer fra 8G-1–8G-3. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
 
 #### Grunnlaget for 8H
 
-8H (continuous maintainer loop) trenger fra 8G:
-- Definisjon av "dekket" / "ikke dekket" (fra 8G-1)
-- Lagret historisk score per kilde (fra 8G-3) — 8H kan trigge ny kjøring når score faller under terskel
+8H (continuous maintainer loop) er reparasjonsagenten som handler på QA-signalene fra 8G. Den trenger:
+- Definisjon av "dekket" / "ikke dekket" inkl. artefaktsjekker (fra 8G-1/8G-2)
+- Lagret historisk score per kilde (fra 8G-3) — 8H kan trigge reparasjon når score faller under terskel eller ny ingest introduserer regresjon
 - Evt. raskere lineage-oppslag (fra 8G-4, hvis nødvendig)
+
+**8H-loopen (arkitektonisk mål):**
+```
+QA-avvik oppdaget
+  → identifiser årsak (gap-type, lint-kode, manglende artefakt)
+    → forsøk automatisk reparasjon (regenerer side, fiks lenke, osv.)
+      → kjør QA på nytt
+        → ved suksess: logg reparasjon, oppdater snapshot
+        → ved feil: eskaler til System Owner med forklaring
+```
+
+Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurdering. Selve reparasjonslogikken er intern og kobles **ikke** til `ProcessEnterpriseWikiIngest` — den er en separat orchestrator-komponent.
 
 ### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
 
