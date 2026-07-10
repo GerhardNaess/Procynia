@@ -1753,7 +1753,7 @@ Post-ingest QA er **completion gate** for alle applied ingest-kjøringer. QA er 
 - Viktige krav, begreper, aktører eller avhengigheter er ikke utelatt
 - Summary er en dekkende komprimering av kildens hovedinnhold
 
-**Viktig presisering:** `qa_status = passed` i dagens implementasjon (8G-3) betyr at tekniske og strukturelle kriterier er bestått. Det betyr *ikke* at AI-generert innhold er vurdert mot kildeteksten. Semantisk QA (8G-4) vil utvide godkjenningsgaten slik at endelig `passed`-status også krever bestått semantisk vurdering.
+**Presisering (etter 8G-4):** `qa_status = passed` krever at *alle tre nivåene* er bestått — teknisk, strukturell og semantisk QA. Semantisk QA er obligatorisk når `ENTERPRISE_WIKI_AI_ENABLED=true`; uten at AI er aktivert kan `passed` ikke oppnås.
 
 **Fullstendig flyt (mål etter 8G-5):**
 
@@ -2042,7 +2042,7 @@ Filer:
 
 QA-resultater lagres i `qa_result` på `enterprise_wiki_ingest_runs` under nøkkelen `semantic_qa`.
 
-Semantisk QA kjøres kun når `ENTERPRISE_WIKI_AI_ENABLED=true` og tech/strukturell QA har passert. Dersom AI ikke er aktivert, hoppes semantisk QA over og kjøringen kan fortsatt passere basert på nivå 1/2 alene.
+Semantisk QA kjøres kun når `ENTERPRISE_WIKI_AI_ENABLED=true` og tech/strukturell QA har passert. Dersom AI ikke er aktivert når strukturell QA har bestått, settes `qa_status = failed` med en forklarende `qa_last_error`. En kjøring kan **ikke** nå `passed` uten at semantisk QA faktisk er gjennomført.
 
 Statusmapping:
 - `pass = true` → `passed`

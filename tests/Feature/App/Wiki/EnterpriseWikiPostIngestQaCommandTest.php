@@ -11,6 +11,7 @@ use App\Models\EnterpriseWikiPageVersion;
 use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -22,6 +23,28 @@ class EnterpriseWikiPostIngestQaCommandTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Semantic QA (8G-4) is required for 'passed'. Enable AI and provide a
+        // default passing result so command-level tests remain unaffected.
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn([
+                'pass'                      => true,
+                'quality_score'             => 0.9,
+                'coverage_score'            => 0.88,
+                'factual_consistency_score' => 0.95,
+                'unsupported_claims'        => [],
+                'missing_topics'            => [],
+                'missing_key_facts'         => [],
+                'critique'                  => 'Default passing result for command tests.',
+                'recommended_repair_action' => 'none',
+                'confidence'                => 0.92,
+                'model'                     => 'gpt-4.1-mini/1.0',
+                'prompt_version'            => '1.0',
+            ])
+            ->byDefault();
 
         $this->mock(WikiPageContentAiClient::class)
             ->shouldReceive('generateFromSource')

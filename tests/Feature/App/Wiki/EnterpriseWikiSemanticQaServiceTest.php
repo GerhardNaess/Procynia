@@ -326,7 +326,7 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
         $this->assertTrue($persisted['pass']);
     }
 
-    public function test_semantic_qa_skipped_when_ai_not_enabled(): void
+    public function test_ai_not_enabled_gives_failed_not_passed(): void
     {
         config(['services.enterprise_wiki.ai_enabled' => false]);
 
@@ -335,7 +335,7 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
-        // AI client should not be called at all.
+        // AI client must not be called at all.
         $this->mock(WikiSemanticQaAiClient::class)
             ->shouldReceive('review')
             ->never();
@@ -343,9 +343,33 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
         $this->orchestrator()->runForRun($run);
 
         $run->refresh();
-        // When AI is not enabled, tech/structural QA alone determines the outcome.
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        // Semantic QA is required — disabled AI must not yield 'passed'.
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        $this->assertNotEmpty($run->qa_last_error);
+        $this->assertStringContainsString('Semantic QA', $run->qa_last_error);
         $this->assertNull($run->qa_result['semantic_qa'] ?? null);
+    }
+
+    public function test_passed_requires_semantic_qa_result_in_qa_result(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('isAvailable')->andReturn(true)
+            ->getMock()
+            ->shouldReceive('review')->andReturn($this->passingAiResult());
+
+        $result = $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        // 'passed' requires a stored semantic_qa entry.
+        $this->assertNotNull($result['semantic_qa'] ?? null);
+        $this->assertNotNull($run->qa_result['semantic_qa'] ?? null);
+        $this->assertTrue($run->qa_result['semantic_qa']['pass']);
     }
 
     public function test_retry_flag_still_processes_escalated_run_with_semantic_qa_enabled(): void

@@ -189,13 +189,33 @@ class EnterpriseWikiPostIngestQaService
         $structuralFailed = $hasCriticalGap || $hasOpenLintErrors;
 
         // ── Level 3: semantic QA (8G-4) ──────────────────────────────────────
-        // Only runs when AI is enabled and tech/structural QA passed.
-        // When AI is not enabled, semantic QA is skipped and the run may still pass
-        // based on levels 1 and 2 alone.
+        // Semantic QA is required when tech/structural QA passes.
+        // A run cannot reach 'passed' without a completed semantic review.
 
         $semanticQaResult = null;
 
-        if (! $structuralFailed && WikiSemanticQaAiClient::isAvailable()) {
+        if (! $structuralFailed) {
+            if (! WikiSemanticQaAiClient::isAvailable()) {
+                $result = [
+                    'checks'           => $checks,
+                    'repair_attempted' => $repairAttempted,
+                    'repair_result'    => $repairResult,
+                    'coverage_summary' => $coverageSummary,
+                    'lint_summary'     => $lintSummary,
+                    'open_lint_errors' => $hasOpenLintErrors,
+                    'semantic_qa'      => null,
+                ];
+
+                $run->update([
+                    'qa_status'       => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                    'qa_completed_at' => now(),
+                    'qa_last_error'   => 'Semantic QA (8G-4) is required but wiki AI is not enabled. Set ENTERPRISE_WIKI_AI_ENABLED=true to run post-ingest QA.',
+                    'qa_result'       => $result,
+                ]);
+
+                return $result;
+            }
+
             $semanticQaResult = $this->semanticQaService->review($run);
         }
 
@@ -204,20 +224,20 @@ class EnterpriseWikiPostIngestQaService
         $finalStatus = $this->resolveFinalStatus($structuralFailed, $semanticQaResult);
 
         $result = [
-            'checks' => $checks,
+            'checks'           => $checks,
             'repair_attempted' => $repairAttempted,
-            'repair_result' => $repairResult,
+            'repair_result'    => $repairResult,
             'coverage_summary' => $coverageSummary,
-            'lint_summary' => $lintSummary,
+            'lint_summary'     => $lintSummary,
             'open_lint_errors' => $hasOpenLintErrors,
-            'semantic_qa' => $semanticQaResult,
+            'semantic_qa'      => $semanticQaResult,
         ];
 
         $run->update([
-            'qa_status' => $finalStatus,
+            'qa_status'       => $finalStatus,
             'qa_completed_at' => now(),
-            'qa_last_error' => null,
-            'qa_result' => $result,
+            'qa_last_error'   => null,
+            'qa_result'       => $result,
         ]);
 
         return $result;
@@ -230,8 +250,9 @@ class EnterpriseWikiPostIngestQaService
         }
 
         if ($semanticQaResult === null) {
-            // Semantic QA was skipped (AI not enabled) — pass on tech/structural alone.
-            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+            // Safety net — should not be reached when structural QA passes.
+            // The unavailable-AI case is handled in executeQa() before this method.
+            return EnterpriseWikiIngestRun::QA_STATUS_FAILED;
         }
 
         // Explicit escalation from semantic QA (e.g. source missing or unassessable).
