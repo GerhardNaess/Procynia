@@ -12,6 +12,7 @@ use App\Models\Language;
 use App\Models\Nationality;
 use App\Services\Ai\Wiki\WikiPageContentAiClient;
 use App\Services\Ai\Wiki\WikiSemanticQaAiClient;
+use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
 use App\Services\EnterpriseWiki\EnterpriseWikiSemanticQaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -215,52 +216,73 @@ class EnterpriseWikiSemanticQaServiceTest extends TestCase
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
     }
 
-    public function test_repair_action_targeted_revision_gives_repair_required(): void
+    public function test_repair_action_targeted_revision_triggers_semantic_repair_and_passes(): void
     {
+        // With 8G-5, targeted_revision triggers automatic repair — repair_required never lands in DB.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')
+            ->once()
+            ->andReturn("# Article\n\nRevised content covering all missing topics.");
+
         $this->mock(WikiSemanticQaAiClient::class)
             ->shouldReceive('isAvailable')->andReturn(true)
             ->getMock()
-            ->shouldReceive('review')->andReturn(
+            ->shouldReceive('review')
+            ->twice()
+            ->andReturn(
                 $this->failingAiResult(
                     action: 'targeted_revision',
                     missingTopics: ['Section A', 'Section B'],
                     unsupportedClaims: [],
-                )
+                ),
+                $this->passingAiResult(),
             );
 
-        $this->orchestrator()->runForRun($run);
+        $result = $this->orchestrator()->runForRun($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertTrue($result['semantic_repair_attempted']);
+        $this->assertTrue($result['semantic_repair_result']['success']);
     }
 
-    public function test_unsupported_claims_gives_repair_required(): void
+    public function test_unsupported_claims_trigger_semantic_repair_and_pass(): void
     {
+        // With 8G-5, unsupported claims with targeted_revision action trigger automatic repair.
         $customer = $this->createCustomer();
         $run = $this->createAppliedRun($customer);
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
+        $this->mock(WikiSemanticReviserAiClient::class)
+            ->shouldReceive('revise')
+            ->once()
+            ->andReturn("# Article\n\nRevised content with unsupported claims removed.");
+
         $this->mock(WikiSemanticQaAiClient::class)
             ->shouldReceive('isAvailable')->andReturn(true)
             ->getMock()
-            ->shouldReceive('review')->andReturn(
+            ->shouldReceive('review')
+            ->twice()
+            ->andReturn(
                 $this->failingAiResult(
                     action: 'targeted_revision',
                     missingTopics: [],
                     unsupportedClaims: ['The system costs €1 000 per user.'],
-                )
+                ),
+                $this->passingAiResult(),
             );
 
-        $this->orchestrator()->runForRun($run);
+        $result = $this->orchestrator()->runForRun($run);
 
         $run->refresh();
-        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED, $run->qa_status);
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertTrue($result['semantic_repair_attempted']);
     }
 
     public function test_escalate_action_gives_escalated_status(): void

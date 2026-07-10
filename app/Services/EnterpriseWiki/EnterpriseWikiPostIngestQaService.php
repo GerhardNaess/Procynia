@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\Log;
 /**
  * Post-ingest QA orchestrator for applied Enterprise Wiki runs.
  *
- * Three-tier QA gate (8G-3 + 8G-4):
+ * Three-tier QA gate (8G-3 + 8G-4 + 8G-5):
  *   Level 1 — Technical QA: artefacts exist with content (article + summary)
  *   Level 2 — Structural QA: lint findings, coverage metrics
  *   Level 3 — Semantic QA: AI review of generated content vs. extracted_text source
+ *   Level 3.5 — Targeted repair (8G-5): one automatic revision when semantic QA fails with repair_required,
+ *               followed by a full re-evaluation (levels 1–3). Result is always terminal (passed or escalated).
  *
  * QA status flow:
  *   null / pending → running
@@ -25,9 +27,12 @@ use Illuminate\Support\Facades\Log;
  *       → still failing: escalated
  *     → Level 1/2 passed → Level 3 (semantic QA, when AI enabled)
  *       → semantic pass: passed
- *       → semantic avvik (targeted_revision/full_regeneration): repair_required
+ *       → semantic avvik (targeted_revision/full_regeneration):
+ *           → targeted repair (8G-5) → re-evaluate all levels
+ *             → re-evaluation passes: passed
+ *             → re-evaluation fails or repair not possible: escalated
  *       → semantic escalation or source missing: escalated
- *     → failed (unexpected exception during QA)
+ *     → failed (unexpected exception during QA or repair)
  *
  * The status transition from null/pending to 'running' is done via an atomic DB update
  * to prevent parallel runs for the same run ID.
@@ -39,6 +44,7 @@ class EnterpriseWikiPostIngestQaService
         private readonly EnterpriseWikiAppliedRunLintService $lintService,
         private readonly EnterpriseWikiGenerateAppliedPagesService $generateService,
         private readonly EnterpriseWikiSemanticQaService $semanticQaService,
+        private readonly EnterpriseWikiSemanticRepairService $semanticRepairService,
     ) {}
 
     /**
@@ -197,13 +203,16 @@ class EnterpriseWikiPostIngestQaService
         if (! $structuralFailed) {
             if (! WikiSemanticQaAiClient::isAvailable()) {
                 $result = [
-                    'checks'           => $checks,
-                    'repair_attempted' => $repairAttempted,
-                    'repair_result'    => $repairResult,
-                    'coverage_summary' => $coverageSummary,
-                    'lint_summary'     => $lintSummary,
-                    'open_lint_errors' => $hasOpenLintErrors,
-                    'semantic_qa'      => null,
+                    'checks'                    => $checks,
+                    'repair_attempted'          => $repairAttempted,
+                    'repair_result'             => $repairResult,
+                    'coverage_summary'          => $coverageSummary,
+                    'lint_summary'              => $lintSummary,
+                    'open_lint_errors'          => $hasOpenLintErrors,
+                    'semantic_qa'               => null,
+                    'semantic_repair_attempted' => false,
+                    'semantic_repair_result'    => null,
+                    'semantic_qa_post_repair'   => null,
                 ];
 
                 $run->update([
@@ -219,18 +228,55 @@ class EnterpriseWikiPostIngestQaService
             $semanticQaResult = $this->semanticQaService->review($run);
         }
 
-        // ── Determine final status ────────────────────────────────────────────
+        // ── Level 3.5: targeted repair (8G-5) ────────────────────────────────
+        // When semantic QA recommends repair, attempt ONE targeted revision then
+        // re-run the full QA. The result after repair is always terminal (never repair_required).
 
-        $finalStatus = $this->resolveFinalStatus($structuralFailed, $semanticQaResult);
+        $semanticRepairAttempted = false;
+        $semanticRepairResult = null;
+        $semanticQaPostRepair = null;
+
+        $initialStatus = $this->resolveFinalStatus($structuralFailed, $semanticQaResult);
+
+        if ($initialStatus === EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED) {
+            $semanticRepairAttempted = true;
+            $semanticRepairResult = $this->semanticRepairService->repair($run, $semanticQaResult);
+
+            if ($semanticRepairResult['success']) {
+                // Re-run full QA (tech + structural + semantic) against the revised content.
+                $checks = $this->runChecks($run);
+                $hasCriticalGap = $this->hasCriticalGap($checks);
+                $coverageSummary = $this->computeCoverageSummary($run);
+                $lintSummary = $this->computeLintSummary($run);
+                $hasOpenLintErrors = $this->hasOpenLintErrors($run);
+                $structuralFailed = $hasCriticalGap || $hasOpenLintErrors;
+
+                if (! $structuralFailed) {
+                    $semanticQaPostRepair = $this->semanticQaService->review($run);
+                }
+
+                $finalStatus = $this->resolvePostRepairStatus($structuralFailed, $semanticQaPostRepair);
+            } else {
+                // Repair was not possible (source missing, version missing, etc.) — escalate.
+                $finalStatus = EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+            }
+        } else {
+            $finalStatus = $initialStatus;
+        }
+
+        // ── Build result ──────────────────────────────────────────────────────
 
         $result = [
-            'checks'           => $checks,
-            'repair_attempted' => $repairAttempted,
-            'repair_result'    => $repairResult,
-            'coverage_summary' => $coverageSummary,
-            'lint_summary'     => $lintSummary,
-            'open_lint_errors' => $hasOpenLintErrors,
-            'semantic_qa'      => $semanticQaResult,
+            'checks'                    => $checks,
+            'repair_attempted'          => $repairAttempted,
+            'repair_result'             => $repairResult,
+            'coverage_summary'          => $coverageSummary,
+            'lint_summary'              => $lintSummary,
+            'open_lint_errors'          => $hasOpenLintErrors,
+            'semantic_qa'               => $semanticQaResult,
+            'semantic_repair_attempted' => $semanticRepairAttempted,
+            'semantic_repair_result'    => $semanticRepairResult,
+            'semantic_qa_post_repair'   => $semanticQaPostRepair,
         ];
 
         $run->update([
@@ -274,6 +320,38 @@ class EnterpriseWikiPostIngestQaService
             'targeted_revision', 'full_regeneration' => EnterpriseWikiIngestRun::QA_STATUS_REPAIR_REQUIRED,
             default => EnterpriseWikiIngestRun::QA_STATUS_ESCALATED,
         };
+    }
+
+    /**
+     * Determine the terminal status after a targeted repair attempt (8G-5).
+     *
+     * Never returns repair_required — after one automatic repair, the result is
+     * always passed or escalated. No further automatic repair is attempted.
+     */
+    private function resolvePostRepairStatus(bool $structuralFailed, ?array $semanticQaResult): string
+    {
+        if ($structuralFailed) {
+            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        }
+
+        if ($semanticQaResult === null) {
+            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        }
+
+        if (! empty($semanticQaResult['escalated'])) {
+            return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
+        }
+
+        if (! empty($semanticQaResult['skipped'])) {
+            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+        }
+
+        if ($semanticQaResult['pass']) {
+            return EnterpriseWikiIngestRun::QA_STATUS_PASSED;
+        }
+
+        // Still failing after one targeted repair — escalate (no further automatic attempts).
+        return EnterpriseWikiIngestRun::QA_STATUS_ESCALATED;
     }
 
     // =========================================================================
