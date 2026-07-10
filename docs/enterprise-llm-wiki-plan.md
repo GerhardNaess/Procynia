@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1/8G-2 fullført · **Retning: post-ingest QA-orchestrator (8G-3) er neste fase**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-3 fullført (commit 1c5f3a6) · **Retning: daglige snapshots (8G-4) er neste fase**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -734,8 +734,8 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-2 fullført · **8G-3 (post-ingest QA-orchestrator) er neste fase** · 8G-4 snapshots og 8G-5 lineage gjenstår |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — avhenger av 8G-3 og 8G-4 |
+| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-3 fullført · **8G-4 snapshots er neste fase** · 8G-5 lineage gjenstår |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3 · 8H-utvidelse avhenger av 8G-4 |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1725,9 +1725,25 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-2 fullført (commit c57ef78 + 8340324 + 0b45fe5 + a143a3e) — 8G-3 (post-ingest QA-orchestrator) er neste fase — start ikke uten instruksjon. Daglige snapshots utsatt til 8G-4.**
+> **8G-1–8G-3 fullført — 8G-4 (daglige snapshots) er neste fase — start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
+
+#### QA som arkitektonisk senter
+
+Post-ingest QA (8G-3) er **completion gate** for alle applied ingest-kjøringer.
+
+En applied run regnes ikke som ferdig før `qa_status = passed`. Coverage (8G-1/8G-2), daglige snapshots (8G-4) og maintainer-loop (8H) bygger rundt denne gaten — de er ikke parallelle alternativer til QA, men støttelag over den.
+
+```
+EnterpriseWikiIngestRun (maintainer_decision_status = applied)
+  → post-ingest QA (8G-3) → qa_status = passed | escalated | failed
+      ↑ per-run data lagres i qa_status, qa_result, qa_timestamps
+  → daglig snapshot (8G-4) → kundenivå-aggregater over tid
+  → maintainer loop (8H) → kontinuerlig kildemonitoring og dypere reparasjon
+```
+
+Alle sider som er merket `applied` skal til slutt ha `qa_status = passed`. Runs som er `escalated` eller `failed` krever eksplisitt operator-handling (`--retry`) eller 8H-basert intelligens.
 
 #### Strategisk ramme: Coverage som QA-prosess
 
@@ -1856,128 +1872,172 @@ En kilde med article/summary-side som mangler versjon eller innhold vises som ga
 
 Commit `a143a3e` presiserte labels fra «Artikkel med innhold» til «Artikkel med gjeldende innhold».
 
-**8G-3 — Post-ingest QA-orchestrator**
+**8G-3 — Post-ingest QA-orchestrator** ✅ *fullført — commit 1c5f3a6 — 724 tester / 1587 assertions — build OK*
 
-> **Neste fase. Ikke start uten instruksjon.**
+**Implementert:**
 
-En ingest-kjøring er ikke fullført før forventede wiki-artefakter er validert av en separat QA-orchestrator. Orchestratoren er et eget lag rundt eksisterende Enterprise Wiki-generering — `ProcessEnterpriseWikiIngest` røres ikke.
+Migrasjon: `2026_07_10_000001_add_qa_fields_to_enterprise_wiki_ingest_runs_table.php` — legger til `qa_status`, `qa_started_at`, `qa_completed_at`, `qa_attempt_count`, `qa_last_error`, `qa_result` på `enterprise_wiki_ingest_runs`.
 
-**QA-flyt:**
+Filer:
+- `app/Services/EnterpriseWiki/EnterpriseWikiPostIngestQaService.php` — QA-orchestrator
+- `app/Jobs/EnterpriseWiki/RunPostIngestQa.php` — tynn queue-wrapper
+- `app/Console/Commands/EnterpriseWikiRunPostIngestQa.php` — Artisan-kommando
+- `routes/console.php` — scheduled command lagt til
+
+**QA-flyt (faktisk implementert):**
 ```
-raw source
-→ ingest/generering (ProcessEnterpriseWikiIngest — uendret)
-→ post-ingest QA-orchestrator (nytt lag)
-  → coverage (EnterpriseWikiCoverageService)
-  → lint (EnterpriseWikiAppliedRunLintService)
-  → vurder resultat
-    → ved avvik: forsøk automatisk reparasjon
-      → re-kjør QA
-        → ved suksess: qa_status = passed
-        → ved feil: qa_status = failed / escalated
+applied run
+→ atomic DB-claim → qa_status = running
+  → sjekk article + summary eksisterer med current version og innhold
+    → ved innholdsgap: qa_status = repair_required, kjør generate()
+      → re-sjekk article + summary
+  → kjør EnterpriseWikiAppliedRunLintService (skriv findings til DB)
+  → kjør EnterpriseWikiCoverageService (customer-wide metrics)
+  → sjekk åpne lint-feil med severity=error
+    → ved innholdsgap ELLER åpne lint-feil → qa_status = escalated
+    → ellers → qa_status = passed
+  → lagre qa_result JSON med checks, repair, coverage, lint, open_lint_errors
 ```
 
-**QA-status på `enterprise_wiki_ingest_runs`** (nytt felt — krever migrasjon):
+**QA-status på `enterprise_wiki_ingest_runs`:**
 
 | Verdi | Betydning |
 |---|---|
-| `pending` | QA ikke kjørt ennå |
-| `running` | QA kjøres nå |
-| `passed` | Alle sjekker bestått |
-| `repair_required` | Avvik funnet — automatisk reparasjon forsøkes |
-| `failed` | Reparasjon feilet etter forsøk |
-| `escalated` | Krever menneskelig vurdering |
+| `null` | QA ikke kjørt ennå |
+| `pending` | Eksplisitt markert for QA — behandles av scheduled polling |
+| `running` | QA kjøres nå — atomic guard hindrer parallell kjøring |
+| `passed` | Alle sjekker bestått, ingen åpne lint-feil med severity=error |
+| `repair_required` | Transient tilstand — settes rett før generate()-kall, løses i samme run |
+| `escalated` | Innholdsgap som ikke lot seg reparere, eller åpne lint-feil — krever menneskelig vurdering |
+| `failed` | Uventet unntak under QA — krever eksplisitt retry |
 
-**Sjekker i første versjon (alle deterministiske — ingen AI-kall):**
+**Triggermekanisme — scheduled polling (ingen observer):**
 
-1. Applied run finnes for kildedokumentet
-2. Article-side finnes via lineage (Document → IngestRun → run_pages → Page)
-3. Summary-side finnes via lineage
-4. Article-siden har `is_current`-versjon med ikke-tomt `content_markdown`
-5. Summary-siden har `is_current`-versjon med ikke-tomt `content_markdown`
-6. Coverage er beregnet (`EnterpriseWikiCoverageService::computeForCustomer`)
-7. Lint er kjørt for run (`EnterpriseWikiAppliedRunLintService`)
+`ProcessEnterpriseWikiIngest` er urørt. QA er et separat lag som kjøres uavhengig:
 
-**Avvik som kan forsøkes reparert automatisk i første versjon:**
+```bash
+# Scheduled: kjøres automatisk hvert 15. minutt via routes/console.php
+wiki:run-post-ingest-qa --all-pending
 
-| Avvik | Reparasjonsaksjon |
-|---|---|
-| Manglende article-side | `EnterpriseWikiGenerateAppliedPagesService` — regenerer article |
-| Manglende summary-side | `EnterpriseWikiGenerateAppliedPagesService` — regenerer summary |
-| Article mangler `is_current`-versjon | Regenerer innhold, skriv ny `EnterpriseWikiPageVersion` |
-| Summary mangler `is_current`-versjon | Regenerer innhold, skriv ny `EnterpriseWikiPageVersion` |
-| Article har tomt `content_markdown` | Regenerer innhold |
-| Summary har tomt `content_markdown` | Regenerer innhold |
+# Enkelt run — manuell kjøring eller test
+wiki:run-post-ingest-qa --run-id=<id>
 
-**Avvik som ikke repareres automatisk i første versjon:**
-Claims, source references, page links (concept/entity-koblinger) og semantiske feil i innholdet kan inngå i senere utvidelser dersom tjenestene støtter trygg automatisk reparasjon. Kunden eskaleres kun når automatisk reparasjon ikke lykkes eller menneskelig vurdering er nødvendig.
+# Eksplisitt retry av failed eller escalated
+wiki:run-post-ingest-qa --run-id=<id> --retry
+wiki:run-post-ingest-qa --all-pending --retry
+```
 
-**Triggermekanisme (uten å endre `ProcessEnterpriseWikiIngest`):**
+**Scope for automatisk pickup (`--all-pending` uten `--retry`):**
+- `qa_status IS NULL` — aldri kjørt
+- `qa_status = pending` — venter
+- `qa_status = repair_required` — stuck transient (prosess krasjet)
 
-Observer på `EnterpriseWikiIngestRun` som reagerer på overgang til `maintainer_decision_status = 'applied'` og dispatcher `RunPostIngestQa`-job. Alternativt: scheduled Artisan-kommando `wiki:run-post-ingest-qa [--run-id=] [--all-pending]` som behandler applied runs med `qa_status = null` eller `qa_status = pending`.
+`failed` og `escalated` plukkes **ikke** opp automatisk — krever eksplisitt `--retry`.
+
+**Lint-feil som gate:**
+
+`passed` krever at det ikke finnes åpne `EnterpriseWikiLintFinding`-rader med `severity = error` for run etter at lint er kjørt. Lint-warnings lagres i `qa_result` men blokkerer ikke `passed`.
+
+**Repair — én runde per QA-kjøring:**
+
+`EnterpriseWikiGenerateAppliedPagesService::generate()` kalles én gang ved innholdsgap. QA sjekkes på nytt etter repair. Det er ingen sløyfe — mislykket repair gir direkte `escalated`.
+
+**Kjent begrensning:**
+`generate()` hopper over sider som allerede har en versjon, selv om `content_markdown` er tomt. En side med en eksisterende tom versjon kan ikke repareres automatisk av denne tjenesten og resulterer i `escalated`. Dette er en bevisst begrensning i første versjon — dypere repair av eksisterende versjoner er et 8H-ansvar.
+
+**Avvik som ikke repareres i 8G-3:**
+Claims, source references, page links, concept/entity-koblinger og semantiske feil i innholdet repareres ikke her. Se 8H for dypere reparasjon.
 
 **Placement:**
-- Job: `app/Jobs/EnterpriseWiki/RunPostIngestQa.php`
 - Service: `app/Services/EnterpriseWiki/EnterpriseWikiPostIngestQaService.php`
+- Job: `app/Jobs/EnterpriseWiki/RunPostIngestQa.php`
+- Kommando: `app/Console/Commands/EnterpriseWikiRunPostIngestQa.php`
 - Queue: `enterprise-wiki` (eksisterende)
+- Scheduled: `routes/console.php` → `everyFifteenMinutes()->withoutOverlapping()`
 
-**Gjenbruk av eksisterende tjenester:**
-- `EnterpriseWikiCoverageService` — dekningsberegning
-- `EnterpriseWikiAppliedRunLintService` — lint-sjekker
-- `EnterpriseWikiGenerateAppliedPagesService` — regenerering ved manglende/tom side
-- `wiki:lint-applied-run` — kan kalles fra orchestrator
-- `wiki:generate-applied-pages` — brukes til reparasjon
-
-**Viktigste tester:**
-1. QA passerer (`qa_status = passed`) når article + summary med `is_current`-versjon og innhold finnes
-2. `qa_status = repair_required` settes ved manglende article-side
-3. `qa_status = repair_required` settes ved tomt `content_markdown` på article
-4. `qa_status = repair_required` settes ved manglende summary-side
-5. Reparasjon kalles med riktig run-id og page-type
-6. Etter vellykket reparasjon kjøres QA på nytt → `passed`
-7. `qa_status = failed` etter mislykket reparasjon
-8. `qa_status = escalated` ved gjentatte feil
-9. Customer-scope beholdes — annen kundes runs påvirkes ikke
-10. `ProcessEnterpriseWikiIngest` berøres ikke av noen test i denne fasen
+**Gjenbruk:**
+- `EnterpriseWikiCoverageService` — dekningsberegning (customer-wide, lagres i qa_result)
+- `EnterpriseWikiAppliedRunLintService` — lint-sjekker (skriver findings til DB)
+- `EnterpriseWikiGenerateAppliedPagesService` — reparasjon av manglende/versjonløse sider
 
 **8G-4 — Snapshots og trendhistorikk**
 
-> **Utsatt til etter 8G-3.** Snapshots er støttelaget for QA-historikk og regresjonsdeteksjon. De forutsetter at post-ingest QA (8G-3) er etablert og produserer `qa_status`-data å bygge historikk på.
+> **Neste fase. Ikke start uten instruksjon.**
 
-Snapshots er ikke selve QA-mekanismen — de er historiske snapshots av tilstanden etter at QA er kjørt. 8H sammenligner nåværende tilstand mot historisk terskel for å beslutte om ny reparasjon er nødvendig.
+**Presisering — per-run vs. aggregat:**
+
+8G-3 lagrer allerede per-kjøring QA-data direkte på `enterprise_wiki_ingest_runs`:
+- `qa_status` — om kjøringen passerte, ble eskalert eller feilet
+- `qa_result` JSON — coverage-summary (customer-wide på QA-tidspunktet), lint-summary, sjekker, repair-resultat, `open_lint_errors`
+- `qa_started_at`, `qa_completed_at`, `qa_attempt_count` — timing og retry-historikk
+
+Dette er per-run data og ikke trendhistorikk. 8G-4 er et *annet lag*: det lagrer **kundenivå-aggregater over tid**, ikke per-kjøring QA-utfall.
+
+Snapshots er ikke selve QA-mekanismen — de er daglige aggregerte helsemålinger som gjør det mulig å sammenligne wikiens tilstand over dager og uker. 8H-utvidelsen sammenligner nåværende tilstand mot historisk terskel for å beslutte om ny reparasjon er nødvendig.
 
 Ny tabell `enterprise_wiki_coverage_snapshots` med eksplisitte aggregatkolonner (`gap_count`, `claim_coverage_pct`, `open_error_count` m.fl.) og én `payload JSON`-kolonne for full service-output. Unik constraint `(customer_id, snapshot_date)` med upsert-semantikk. Daglig scheduled job via `wiki:snapshot-coverage --all`. Formålet er tredelt:
-- **QA-historikk:** spor om coverage forbedres etter reparasjoner
+- **Trendhistorikk:** spor om wikiens samlede helsetilstand forbedres over tid
 - **Regresjonsdeteksjon:** fang fall i coverage etter nye ingest-kjøringer
-- **Evalueringsgrunnlag:** mål om automatisk reparasjon (8H) faktisk bedrer wikien over tid
+- **Evalueringsgrunnlag:** mål om automatisk reparasjon (8H) faktisk bedrer wikien på kundenivå
 
 **8G-5 — Eventuell lineage-forbedring**
 Vurderes basert på erfaringer fra 8G-1–8G-4. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
 
-#### Grunnlaget for 8H
+#### Grunnlaget for 8H — og grensen mot 8G-3
 
-8H (continuous maintainer loop) er reparasjonsagenten som handler på QA-signalene fra 8G. Den trenger:
-- Definisjon av "dekket" / "ikke dekket" inkl. artefaktsjekker (fra 8G-1/8G-2)
-- Post-ingest QA-orchestrator med `qa_status`-felt (fra 8G-3) — 8H bygger videre på og utvider orchestratoren til å dekke kontinuerlig overvåkning og dypere reparasjon
-- Lagret historisk score per kilde (fra 8G-4) — 8H kan trigge reparasjon når score faller under terskel eller ny ingest introduserer regresjon
-- Evt. raskere lineage-oppslag (fra 8G-5, hvis nødvendig)
+**Hva 8G-3 allerede gjør (ikke gjenta i 8H):**
+- QA-statusmaskin (`qa_status`) med atomic claim-guard
+- Innholdssjekker: article + summary eksisterer med current version og innhold
+- Coverage-beregning (customer-wide) og lint (per-run) lagret i `qa_result`
+- Enkel reparasjon: én runde med `generate()` ved manglende/versjonløs side
+- Re-sjekk etter repair, deretter eskalering hvis gap gjenstår
+- Lint-feil (severity=error) som gate — blokkerer `passed`
+- Eksplisitt retry-mekanisme: `--retry` for `failed`/`escalated`
+- Scheduled polling hvert 15. minutt for `null`/`pending`/`repair_required`
+
+**Hva 8H skal legge til (ikke dekket av 8G-3):**
+- Kontinuerlig kildemonitoring: detektere at et kildedokument er endret (`file_hash_sha256` vs `last_source_hash`) og trigge ny ingest
+- Intelligent beslutning om når og om det er verdt å retry `escalated`-kjøringer (når kilden er endret, ikke bare hvert 15. minutt)
+- Dypere reparasjon: claims, source references, page links, concept/entity-koblinger — typer 8G-3 bevisst ikke reparerer
+- Terskel- og trendbaserte beslutninger basert på historiske snapshots (avhenger av 8G-4)
+
+**Avhengigheter:**
+- 8H-kjerne (kildemonitoring, endringsdeteksjon, triggert ingest/QA): avhenger av 8G-3 — kan i prinsippet starte uten 8G-4
+- 8H-utvidelse (terskelbasert repair, regresjonsdeteksjon): avhenger av 8G-4
 
 **8H-loopen (arkitektonisk mål):**
 ```
-QA-avvik oppdaget (qa_status = repair_required / failed)
-  → identifiser årsak (gap-type, lint-kode, manglende artefakt)
-    → forsøk automatisk reparasjon (regenerer side, fiks lenke, osv.)
-      → kjør QA på nytt
-        → ved suksess: logg reparasjon, oppdater snapshot, qa_status = passed
-        → ved feil: qa_status = escalated, eskaler til System Owner med forklaring
+ny eller endret kildedokument oppdaget
+  → trigger ny ingest → ProcessEnterpriseWikiIngest (uendret)
+    → post-ingest QA (8G-3) → qa_status
+      → passed: logg, oppdater snapshot
+      → escalated/failed: 8H vurderer dypere reparasjon
+          → reparasjon av claims/links/source references
+            → re-kjør QA
+              → passed: logg reparasjon, oppdater snapshot
+              → fortsatt feil: eskaler til System Owner med forklaring
 ```
 
-Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurdering. Selve reparasjonslogikken er intern og kobles **ikke** til `ProcessEnterpriseWikiIngest` — den er en separat orchestrator-komponent, bygget videre på grunnlaget fra 8G-3.
+Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurdering. Selve reparasjonslogikken er intern og kobles **ikke** til `ProcessEnterpriseWikiIngest`.
 
 ### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
 
-> **Ikke start uten instruksjon.** Avhenger av at 8G er på plass.
+> **Ikke start uten instruksjon.** 8H-kjerne avhenger av 8G-3. 8H-utvidelse avhenger av 8G-4.
 
 Mål: automatisk pipeline-kjøring ved nye eller endrede kildedokumenter, med ferdig beslutningsforslag klart for System Owner-godkjenning — fra manuell pilot til operasjonelt system.
+
+**8H-kjerne** *(avhenger av 8G-3):*
+- Kildemonitoring: detektere endringer i `EnterpriseWikiDocument` via `file_hash_sha256` vs `EnterpriseWikiPage.last_source_hash`
+- Endringsdeteksjon uten snapshot-historikk — nok til å trigge ny ingest og QA
+- Intelligent retry-beslutning for `escalated` kjøringer: retry når kilden faktisk har endret seg, ikke automatisk hvert 15. minutt
+- Dypere reparasjon av claims, source references og page links — typer som 8G-3 bevisst ikke reparerer
+
+**8H-utvidelse** *(avhenger av 8G-4):*
+- Terskelbasert repair-beslutning: trigger reparasjon når coverage-score faller under historisk terskel
+- Regresjonsdeteksjon: fang fall i aggregert wikihelse etter nye ingest-kjøringer
+- Historikkbasert eskalering: eskaler til System Owner med trendkontekst, ikke bare øyeblikksbilde
+
+Roadmap-rekkefølge beholdes: 8G-3 → 8G-4 → 8G-5 → 8H. 8H-kjernen kan teknisk sett utvikles uten 8G-4, men implementeres ikke uten eksplisitt instruksjon.
 
 ### Produksjonsaktivering — Etter 8G og 8H
 
