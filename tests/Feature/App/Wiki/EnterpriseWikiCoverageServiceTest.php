@@ -59,19 +59,58 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
         $customer = $this->createCustomer();
         $doc = $this->createDocument($customer);
         $run = $this->createAppliedRun($customer, $doc);
-        $page = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-        $this->attachPageToRun($run, $page);
+        // Create article WITH version+content so it passes content checks
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createPageVersion($article, '# Artikkel');
+        $this->attachPageToRun($run, $article);
 
         $result = $this->service()->computeForCustomer($customer->id);
 
         $sc = $result['source_coverage'];
         $this->assertSame(1, $sc['documents_with_applied_run']);
         $this->assertSame(1, $sc['documents_with_article']);
+        $this->assertSame(1, $sc['documents_with_article_content']);
         $this->assertSame(0, $sc['documents_with_summary']);
-        // No article gap, but summary missing
+        $this->assertSame(0, $sc['documents_with_summary_content']);
+        // Article OK, only summary missing
         $this->assertCount(1, $sc['gaps']);
-        $this->assertContains('summary', $sc['gaps'][0]['missing']);
-        $this->assertNotContains('article', $sc['gaps'][0]['missing']);
+        $this->assertContains('summary_missing', $sc['gaps'][0]['missing']);
+        $this->assertNotContains('article_missing', $sc['gaps'][0]['missing']);
+        $this->assertNotContains('article_missing_current_version', $sc['gaps'][0]['missing']);
+        $this->assertNotContains('article_missing_content', $sc['gaps'][0]['missing']);
+    }
+
+    public function test_article_page_without_current_version_creates_version_gap(): void
+    {
+        $customer = $this->createCustomer();
+        $doc = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $doc);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        // No version created
+        $this->attachPageToRun($run, $article);
+
+        $sc = $this->service()->computeForCustomer($customer->id)['source_coverage'];
+
+        $this->assertSame(1, $sc['documents_with_article']);
+        $this->assertSame(0, $sc['documents_with_article_content']);
+        $this->assertCount(1, $sc['gaps']);
+        $this->assertContains('article_missing_current_version', $sc['gaps'][0]['missing']);
+    }
+
+    public function test_article_page_with_empty_content_creates_content_gap(): void
+    {
+        $customer = $this->createCustomer();
+        $doc = $this->createDocument($customer);
+        $run = $this->createAppliedRun($customer, $doc);
+        $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $this->createPageVersion($article, ''); // empty content
+        $this->attachPageToRun($run, $article);
+
+        $sc = $this->service()->computeForCustomer($customer->id)['source_coverage'];
+
+        $this->assertSame(1, $sc['documents_with_article']);
+        $this->assertSame(0, $sc['documents_with_article_content']);
+        $this->assertContains('article_missing_content', $sc['gaps'][0]['missing']);
     }
 
     public function test_document_with_both_article_and_summary_pages_has_no_gap(): void
@@ -81,6 +120,9 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
         $run = $this->createAppliedRun($customer, $doc);
         $article = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        // Both pages need current versions with content to pass all checks
+        $this->createPageVersion($article, '# Artikkel');
+        $this->createPageVersion($summary, '# Sammendrag');
         $this->attachPageToRun($run, $article);
         $this->attachPageToRun($run, $summary);
 
@@ -89,6 +131,8 @@ class EnterpriseWikiCoverageServiceTest extends TestCase
         $sc = $result['source_coverage'];
         $this->assertSame(1, $sc['documents_with_article']);
         $this->assertSame(1, $sc['documents_with_summary']);
+        $this->assertSame(1, $sc['documents_with_article_content']);
+        $this->assertSame(1, $sc['documents_with_summary_content']);
         $this->assertSame([], $sc['gaps']);
     }
 

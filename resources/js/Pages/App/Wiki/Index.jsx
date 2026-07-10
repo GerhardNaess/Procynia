@@ -316,9 +316,13 @@ function CoveragePanel({ coverage, tw }) {
     const gaps = sc.gaps ?? [];
 
     const gapLabelMap = {
-        applied_run: tw.coverage_docs_with_run ?? 'applied kjøring',
-        article: tw.coverage_docs_with_article ?? 'artikkel-side',
-        summary: tw.coverage_docs_with_summary ?? 'sammendrag-side',
+        applied_run:                      tw.coverage_docs_with_run             ?? 'applied kjøring',
+        article_missing:                  tw.coverage_gap_article_missing        ?? 'Artikkel-side mangler',
+        article_missing_current_version:  tw.coverage_gap_article_no_version    ?? 'Artikkel: mangler gjeldende versjon',
+        article_missing_content:          tw.coverage_gap_article_no_content    ?? 'Artikkel: mangler innhold',
+        summary_missing:                  tw.coverage_gap_summary_missing        ?? 'Sammendrag-side mangler',
+        summary_missing_current_version:  tw.coverage_gap_summary_no_version    ?? 'Sammendrag: mangler gjeldende versjon',
+        summary_missing_content:          tw.coverage_gap_summary_no_content    ?? 'Sammendrag: mangler innhold',
     };
 
     return (
@@ -335,8 +339,10 @@ function CoveragePanel({ coverage, tw }) {
                     <CoverageSection title={tw.coverage_section_sources ?? 'Kildedekning'}>
                         <CoverageStat label={tw.coverage_extracted_docs ?? 'Extracted dokumenter'} value={sc.extracted_documents ?? 0} />
                         <CoverageStat label={tw.coverage_docs_with_run ?? 'Med applied kjøring'} value={sc.documents_with_applied_run ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_with_article ?? 'Med artikkel-side'} value={sc.documents_with_article ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_with_summary ?? 'Med sammendrag-side'} value={sc.documents_with_summary ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_with_article ?? 'Artikkel-side opprettet'} value={sc.documents_with_article ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_with_summary ?? 'Sammendrag-side opprettet'} value={sc.documents_with_summary ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_article_content ?? 'Artikkel med innhold'} value={sc.documents_with_article_content ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_summary_content ?? 'Sammendrag med innhold'} value={sc.documents_with_summary_content ?? 0} />
                     </CoverageSection>
                 </div>
 

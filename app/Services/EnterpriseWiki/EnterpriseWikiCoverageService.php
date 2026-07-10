@@ -37,11 +37,13 @@ class EnterpriseWikiCoverageService
 
         if ($docs->isEmpty()) {
             return [
-                'extracted_documents'       => 0,
-                'documents_with_applied_run' => 0,
-                'documents_with_article'    => 0,
-                'documents_with_summary'    => 0,
-                'gaps'                      => [],
+                'extracted_documents'            => 0,
+                'documents_with_applied_run'     => 0,
+                'documents_with_article'         => 0,
+                'documents_with_summary'         => 0,
+                'documents_with_article_content' => 0,
+                'documents_with_summary_content' => 0,
+                'gaps'                           => [],
             ];
         }
 
@@ -75,10 +77,22 @@ class EnterpriseWikiCoverageService
                 ->pluck('page_type', 'id')
             : collect();
 
-        $docsWithAppliedRun = 0;
-        $docsWithArticle    = 0;
-        $docsWithSummary    = 0;
-        $gaps               = [];
+        // Batch-fetch current versions for all linked pages
+        $pageVersionInfo = $allPageIds->isNotEmpty()
+            ? DB::table('enterprise_wiki_page_versions')
+                ->whereIn('enterprise_wiki_page_id', $allPageIds)
+                ->where('is_current', true)
+                ->select('enterprise_wiki_page_id', 'content_markdown')
+                ->get()
+                ->keyBy('enterprise_wiki_page_id')
+            : collect();
+
+        $docsWithAppliedRun         = 0;
+        $docsWithArticle            = 0;
+        $docsWithSummary            = 0;
+        $docsWithArticleContent     = 0;
+        $docsWithSummaryContent     = 0;
+        $gaps                       = [];
 
         foreach ($docs as $doc) {
             $docRuns = $appliedRuns->get($doc->id, collect());
@@ -94,20 +108,47 @@ class EnterpriseWikiCoverageService
 
             $docsWithAppliedRun++;
 
-            // Collect page_types from all applied runs for this document
-            $pageTypes = collect();
+            // Collect page IDs by type across all applied runs for this document
+            $articlePageIds = [];
+            $summaryPageIds = [];
             foreach ($docRuns as $run) {
-                $links = $runPageLinks->get($run->id, collect());
-                foreach ($links as $link) {
+                foreach ($runPageLinks->get($run->id, collect()) as $link) {
                     $type = $pageTypeById->get($link->enterprise_wiki_page_id);
-                    if ($type !== null) {
-                        $pageTypes->push($type);
+                    if ($type === EnterpriseWikiPage::PAGE_TYPE_ARTICLE) {
+                        $articlePageIds[] = $link->enterprise_wiki_page_id;
+                    } elseif ($type === EnterpriseWikiPage::PAGE_TYPE_SUMMARY) {
+                        $summaryPageIds[] = $link->enterprise_wiki_page_id;
                     }
                 }
             }
 
-            $hasArticle = $pageTypes->contains(EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-            $hasSummary = $pageTypes->contains(EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+            $hasArticle = ! empty($articlePageIds);
+            $hasSummary = ! empty($summaryPageIds);
+
+            // Content depth: any page of the type with a current version + content suffices
+            $articleHasVersion = false;
+            $articleHasContent = false;
+            foreach ($articlePageIds as $pageId) {
+                $v = $pageVersionInfo->get($pageId);
+                if ($v !== null) {
+                    $articleHasVersion = true;
+                    if (! empty($v->content_markdown)) {
+                        $articleHasContent = true;
+                    }
+                }
+            }
+
+            $summaryHasVersion = false;
+            $summaryHasContent = false;
+            foreach ($summaryPageIds as $pageId) {
+                $v = $pageVersionInfo->get($pageId);
+                if ($v !== null) {
+                    $summaryHasVersion = true;
+                    if (! empty($v->content_markdown)) {
+                        $summaryHasContent = true;
+                    }
+                }
+            }
 
             if ($hasArticle) {
                 $docsWithArticle++;
@@ -115,14 +156,31 @@ class EnterpriseWikiCoverageService
             if ($hasSummary) {
                 $docsWithSummary++;
             }
+            if ($articleHasContent) {
+                $docsWithArticleContent++;
+            }
+            if ($summaryHasContent) {
+                $docsWithSummaryContent++;
+            }
 
+            // Gap: structural first, then version, then content
             $missing = [];
             if (! $hasArticle) {
-                $missing[] = 'article';
+                $missing[] = 'article_missing';
+            } elseif (! $articleHasVersion) {
+                $missing[] = 'article_missing_current_version';
+            } elseif (! $articleHasContent) {
+                $missing[] = 'article_missing_content';
             }
+
             if (! $hasSummary) {
-                $missing[] = 'summary';
+                $missing[] = 'summary_missing';
+            } elseif (! $summaryHasVersion) {
+                $missing[] = 'summary_missing_current_version';
+            } elseif (! $summaryHasContent) {
+                $missing[] = 'summary_missing_content';
             }
+
             if (! empty($missing)) {
                 $gaps[] = [
                     'document_id' => $doc->id,
@@ -133,11 +191,13 @@ class EnterpriseWikiCoverageService
         }
 
         return [
-            'extracted_documents'        => $docs->count(),
-            'documents_with_applied_run' => $docsWithAppliedRun,
-            'documents_with_article'     => $docsWithArticle,
-            'documents_with_summary'     => $docsWithSummary,
-            'gaps'                       => $gaps,
+            'extracted_documents'            => $docs->count(),
+            'documents_with_applied_run'     => $docsWithAppliedRun,
+            'documents_with_article'         => $docsWithArticle,
+            'documents_with_summary'         => $docsWithSummary,
+            'documents_with_article_content' => $docsWithArticleContent,
+            'documents_with_summary_content' => $docsWithSummaryContent,
+            'gaps'                           => $gaps,
         ];
     }
 

@@ -51,8 +51,10 @@ class EnterpriseWikiCoverage extends Command
         $this->components->twoColumnDetail('<fg=cyan;options=bold>Kildedekning</>');
         $this->components->twoColumnDetail('Extracted dokumenter', (string) $sc['extracted_documents']);
         $this->components->twoColumnDetail('Med applied run', (string) $sc['documents_with_applied_run']);
-        $this->components->twoColumnDetail('Med article-side', (string) $sc['documents_with_article']);
-        $this->components->twoColumnDetail('Med summary-side', (string) $sc['documents_with_summary']);
+        $this->components->twoColumnDetail('Artikkel-side opprettet', (string) $sc['documents_with_article']);
+        $this->components->twoColumnDetail('Sammendrag-side opprettet', (string) $sc['documents_with_summary']);
+        $this->components->twoColumnDetail('Artikkel med innhold', (string) $sc['documents_with_article_content']);
+        $this->components->twoColumnDetail('Sammendrag med innhold', (string) $sc['documents_with_summary_content']);
 
         if (! empty($sc['gaps'])) {
             $this->newLine();
