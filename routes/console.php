@@ -42,3 +42,8 @@ Schedule::command('exchange-rates:sync')
 Schedule::command('wiki:lint')
     ->dailyAt('02:30')
     ->withoutOverlapping();
+
+// Enterprise Wiki post-ingest QA: process applied runs with pending or failed QA status.
+Schedule::command('wiki:run-post-ingest-qa --all-pending')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping();

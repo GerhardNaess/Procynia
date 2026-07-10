@@ -34,6 +34,22 @@ class EnterpriseWikiIngestRun extends Model
     public const MAINTAINER_DECISION_STATUS_PENDING  = 'pending';
     public const MAINTAINER_DECISION_STATUS_APPLIED  = 'applied';
 
+    public const QA_STATUS_PENDING         = 'pending';
+    public const QA_STATUS_RUNNING         = 'running';
+    public const QA_STATUS_PASSED          = 'passed';
+    public const QA_STATUS_REPAIR_REQUIRED = 'repair_required';
+    public const QA_STATUS_FAILED          = 'failed';
+    public const QA_STATUS_ESCALATED       = 'escalated';
+
+    public const QA_STATUSES = [
+        self::QA_STATUS_PENDING,
+        self::QA_STATUS_RUNNING,
+        self::QA_STATUS_PASSED,
+        self::QA_STATUS_REPAIR_REQUIRED,
+        self::QA_STATUS_FAILED,
+        self::QA_STATUS_ESCALATED,
+    ];
+
     public const TRIGGER_TYPE_MANUAL = 'manual';
 
     public const TRIGGER_TYPE_SCHEDULE = 'schedule';
@@ -74,6 +90,12 @@ class EnterpriseWikiIngestRun extends Model
         'maintainer_decision_json',
         'maintainer_decision_status',
         'maintainer_decision_generated_at',
+        'qa_status',
+        'qa_started_at',
+        'qa_completed_at',
+        'qa_attempt_count',
+        'qa_last_error',
+        'qa_result',
     ];
 
     protected function casts(): array
@@ -87,6 +109,10 @@ class EnterpriseWikiIngestRun extends Model
             'finished_at' => 'datetime',
             'maintainer_decision_json' => 'array',
             'maintainer_decision_generated_at' => 'datetime',
+            'qa_started_at'   => 'datetime',
+            'qa_completed_at' => 'datetime',
+            'qa_attempt_count' => 'integer',
+            'qa_result'       => 'array',
         ];
     }
 
