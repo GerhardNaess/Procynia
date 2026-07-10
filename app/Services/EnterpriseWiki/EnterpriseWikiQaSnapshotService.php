@@ -150,6 +150,13 @@ class EnterpriseWikiQaSnapshotService
             'semantic_post_repair_quality_score'   => $postRepair['quality_score'] ?? null,
             'semantic_post_repair_coverage_score'  => $postRepair['coverage_score'] ?? null,
             'semantic_post_repair_factual_score'   => $postRepair['factual_consistency_score'] ?? null,
+
+            // Deep repair context (8H-kjerne delfase 2)
+            'deep_repair_attempted'             => $run->deep_repair_attempted_at !== null,
+            'deep_repair_source_hash'           => $run->deep_repair_source_hash,
+            'deep_repair_components_repaired'   => $run->deep_repair_attempted_at !== null
+                ? ($run->deep_repair_result['components_repaired'] ?? [])
+                : null,
         ];
     }
 }

@@ -288,10 +288,14 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         $this->assertTrue($result['attempted']);
         $this->assertSame('component_repair_failed', $result['reason']);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $result['qa_status']);
+        $this->assertSame(self::HASH_A, $result['source_hash']);
+        $this->assertIsArray($result['diagnosis']);
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
         $this->assertStringContainsString('[DEEP_REPAIR]', $run->qa_last_error);
+        $this->assertSame(self::HASH_A, $run->deep_repair_result['source_hash']);
+        $this->assertIsArray($run->deep_repair_result['diagnosis']);
     }
 
     // =========================================================================
@@ -353,10 +357,16 @@ class EnterpriseWikiDeepRepairServiceTest extends TestCase
         $run->refresh();
         $this->assertNotNull($run->deep_repair_result);
         $this->assertTrue($run->deep_repair_result['attempted']);
+        $this->assertSame(self::HASH_A, $run->deep_repair_result['source_hash']);
+        $this->assertIsArray($run->deep_repair_result['diagnosis']);
+        $this->assertIsArray($run->deep_repair_result['components_repaired']);
+        $this->assertNotNull($run->deep_repair_result['qa_status']);
 
-        // QA re-evaluation creates a snapshot (via EnterpriseWikiQaSnapshotService)
+        // QA re-evaluation creates a snapshot with deep repair context
         $this->assertDatabaseHas('enterprise_wiki_qa_snapshots', [
             'enterprise_wiki_ingest_run_id' => $run->id,
+            'deep_repair_attempted'         => true,
+            'deep_repair_source_hash'       => self::HASH_A,
         ]);
     }
 

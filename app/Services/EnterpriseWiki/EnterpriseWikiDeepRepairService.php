@@ -43,6 +43,8 @@ class EnterpriseWikiDeepRepairService
      * Returns a result array with keys:
      * - attempted (bool)
      * - reason (string|null)          — why not attempted, or null on success
+     * - source_hash (string|null)     — the document hash this repair was for
+     * - diagnosis (array|null)        — which components were found missing
      * - components_repaired (string[]) — ['claims', 'source_references', 'page_links']
      * - qa_status (string|null)       — final QA status after re-evaluation
      *
@@ -71,7 +73,12 @@ class EnterpriseWikiDeepRepairService
                 'run_id' => $run->id,
             ]);
 
-            return $this->result(attempted: false, reason: 'no_repairables');
+            return $this->result(
+                attempted: false,
+                reason: 'no_repairables',
+                sourceHash: $currentHash,
+                diagnosis: $diagnosis,
+            );
         }
 
         // Stamp before repairs so idempotence holds even if repairs fail.
@@ -109,24 +116,35 @@ class EnterpriseWikiDeepRepairService
                 'error'  => $e->getMessage(),
             ]);
 
-            $run->update([
-                'qa_status'          => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                'qa_last_error'      => '[DEEP_REPAIR] ' . $e->getMessage(),
-                'deep_repair_result' => $this->result(
-                    attempted: true,
-                    reason: 'component_repair_failed',
-                    componentsRepaired: $componentsRepaired,
-                    qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED,
-                ),
-            ]);
-
-            return $this->result(
+            $errorResult = $this->result(
                 attempted: true,
                 reason: 'component_repair_failed',
+                sourceHash: $currentHash,
+                diagnosis: $diagnosis,
                 componentsRepaired: $componentsRepaired,
                 qaStatus: EnterpriseWikiIngestRun::QA_STATUS_FAILED,
             );
+
+            $run->update([
+                'qa_status'          => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                'qa_last_error'      => '[DEEP_REPAIR] ' . $e->getMessage(),
+                'deep_repair_result' => $errorResult,
+            ]);
+
+            return $errorResult;
         }
+
+        // Store partial result before QA so the snapshot created inside runForRun
+        // captures repair context (source_hash, diagnosis, components_repaired).
+        $run->update([
+            'deep_repair_result' => $this->result(
+                attempted: true,
+                sourceHash: $currentHash,
+                diagnosis: $diagnosis,
+                componentsRepaired: $componentsRepaired,
+                qaStatus: null,
+            ),
+        ]);
 
         // ── QA re-evaluation ─────────────────────────────────────────────────
         try {
@@ -142,6 +160,8 @@ class EnterpriseWikiDeepRepairService
             $repairResult = $this->result(
                 attempted: true,
                 reason: 'qa_re_evaluation_failed',
+                sourceHash: $currentHash,
+                diagnosis: $diagnosis,
                 componentsRepaired: $componentsRepaired,
                 qaStatus: $run->qa_status,
             );
@@ -155,6 +175,8 @@ class EnterpriseWikiDeepRepairService
 
         $repairResult = $this->result(
             attempted: true,
+            sourceHash: $currentHash,
+            diagnosis: $diagnosis,
             componentsRepaired: $componentsRepaired,
             qaStatus: $finalStatus,
         );
@@ -162,9 +184,9 @@ class EnterpriseWikiDeepRepairService
         $run->update(['deep_repair_result' => $repairResult]);
 
         Log::info('[WIKI_DEEP_REPAIR] Deep repair complete', [
-            'run_id'             => $run->id,
+            'run_id'              => $run->id,
             'components_repaired' => $componentsRepaired,
-            'qa_status'          => $finalStatus,
+            'qa_status'           => $finalStatus,
         ]);
 
         return $repairResult;
@@ -246,10 +268,14 @@ class EnterpriseWikiDeepRepairService
         ?string $reason = null,
         array $componentsRepaired = [],
         ?string $qaStatus = null,
+        ?string $sourceHash = null,
+        ?array $diagnosis = null,
     ): array {
         return [
             'attempted'           => $attempted,
             'reason'              => $reason,
+            'source_hash'         => $sourceHash,
+            'diagnosis'           => $diagnosis,
             'components_repaired' => $componentsRepaired,
             'qa_status'           => $qaStatus,
         ];

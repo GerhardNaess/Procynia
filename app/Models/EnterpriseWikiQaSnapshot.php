@@ -40,6 +40,9 @@ class EnterpriseWikiQaSnapshot extends Model
         'semantic_post_repair_quality_score',
         'semantic_post_repair_coverage_score',
         'semantic_post_repair_factual_score',
+        'deep_repair_attempted',
+        'deep_repair_source_hash',
+        'deep_repair_components_repaired',
     ];
 
     protected $casts = [
@@ -67,6 +70,8 @@ class EnterpriseWikiQaSnapshot extends Model
         'semantic_post_repair_quality_score'  => 'float',
         'semantic_post_repair_coverage_score' => 'float',
         'semantic_post_repair_factual_score'  => 'float',
+        'deep_repair_attempted'               => 'boolean',
+        'deep_repair_components_repaired'     => 'array',
     ];
 
     public function ingestRun(): BelongsTo
