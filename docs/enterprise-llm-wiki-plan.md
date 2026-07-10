@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-1 fullført (commit 6708a60) — 8G-2 ikke startet. Start ikke uten instruksjon.**
+> **8G-2 fullført (commit c57ef78 + fargefix 8340324) — 8G-3 ikke startet. Start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet — et objektivt svar på om wikien er god nok til å stoles på. Ingen manuell redigering, ingen handlingsknapper. System Owner ser tilstand og avvik; systemet peker på hva som mangler.
 
@@ -1788,8 +1788,15 @@ Teknisk kartlegging av datamodell, score-design og faseinndeling.
 
 Ingen nye tabeller, migrasjoner, UI eller AI-kall. Lineage via Document→IngestRun→run_pages→Page.
 
-**8G-2 — Read-only coverage-visning i Kvalitet-tab**
-Utvider eksisterende Kvalitet-tab (`/app/wiki?tab=quality`) med en coverage-seksjon: kildedekning (N av M kilder fullstendig), side-kvalitetsfordeling (grønn/gul/rød), gjennomsnittlig claim coverage, og top-N avvik med lenker til relevante sider/kilder. Ingen nye ruter — data serveres som utvidede props på eksisterende endepunkt. Ingen handlingsknapper utover eksisterende lenker.
+**8G-2 — Read-only coverage-visning i Kvalitet-tab** ✅ *fullført — commit c57ef78 + fargefix 8340324 — 685 tester / 1487 assertions — build OK*
+
+Kvalitet-tabben viser nå read-only coverage/eval basert på `EnterpriseWikiCoverageService`. `CoveragePanel` rendres øverst i Kvalitet-tab med fire seksjoner:
+- **Kildedekning:** extracted docs, med applied run, med artikkel-side, med sammendrag-side
+- **Sidekvalitet:** totalt, uten gjeldende versjon, uten innhold, uten claims
+- **Claim-dekning:** dekningsgrad (terskelbasert farging: ≥ 80 % emerald, ≥ 50 % amber, < 50 % rose), med/uten kildereferanse
+- **Graf og struktur:** åpne feil (rose), åpne advarsler (amber), foreldreløse sider (amber)
+
+Gap-liste per dokument vises under statistikken. Positive helsetall vises nøytralt, faktiske avvik markeres med warning/error. Ingen nye ruter, ingen skrivehandlinger — kun utvidede props på eksisterende endepunkt.
 
 **8G-3 — Snapshots og trendhistorikk**
 Ny tabell `enterprise_wiki_coverage_snapshots` (customer_id, snapshot_at, payload JSON). Daglig scheduled job lagrer aggregert score. Grunnlag for trendvisning ("forbedres wikien over tid?") og for 8H-triggere.
