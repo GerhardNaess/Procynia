@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-3 fullført (commit 1c5f3a6) · **Retning: daglige snapshots (8G-4) er neste fase**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-3 fullført (commit 1c5f3a6) · **Retning: semantisk AI-QA (8G-4) er neste fase**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -734,8 +734,8 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-3 fullført · **8G-4 snapshots er neste fase** · 8G-5 lineage gjenstår |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3 · 8H-utvidelse avhenger av 8G-4 |
+| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-3 fullført · **8G-4 (semantisk AI-QA) er neste fase** · 8G-5 critique/revise, 8G-6 snapshots, 8G-7 lineage gjenstår |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 · 8H-utvidelse avhenger av 8G-6 |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1725,25 +1725,53 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-1–8G-3 fullført — 8G-4 (daglige snapshots) er neste fase — start ikke uten instruksjon.**
+> **8G-1–8G-3 fullført — 8G-4 (semantisk AI-QA mot originalkilden) er neste fase — start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
 
 #### QA som arkitektonisk senter
 
-Post-ingest QA (8G-3) er **completion gate** for alle applied ingest-kjøringer.
+Post-ingest QA er **completion gate** for alle applied ingest-kjøringer. QA er delt i tre nivåer med ulike ansvarsområder.
 
-En applied run regnes ikke som ferdig før `qa_status = passed`. Coverage (8G-1/8G-2), daglige snapshots (8G-4) og maintainer-loop (8H) bygger rundt denne gaten — de er ikke parallelle alternativer til QA, men støttelag over den.
+**Nivå 1 — Teknisk QA** *(8G-3, fullført)*
+- Applied run finnes og er korrekt applied
+- Article og summary finnes via lineage
+- Current version finnes for forventede sidetyper
+- `content_markdown` er ikke tomt
+- Nødvendige tjenester (coverage, lint) kan kjøres uten unntak
+
+**Nivå 2 — Strukturell QA** *(del av 8G-3, fullført)*
+- Claims, source references og page links er konsistente
+- Lineage er sporbar gjennom Document → IngestRun → run_pages → Page
+- Lint-funn med `severity = error` blokkerer godkjenning
+- Coverage-summary lagres i `qa_result`
+
+**Nivå 3 — Semantisk QA** *(8G-4/8G-5, kommende)*
+- Article og summary vurderes mot `EnterpriseWikiDocument.extracted_text`
+- Sentrale temaer og fakta fra originalkilden er dekket
+- Generert innhold inneholder ikke påstander uten støtte i kilden
+- Viktige krav, begreper, aktører eller avhengigheter er ikke utelatt
+- Summary er en dekkende komprimering av kildens hovedinnhold
+
+**Viktig presisering:** `qa_status = passed` i dagens implementasjon (8G-3) betyr at tekniske og strukturelle kriterier er bestått. Det betyr *ikke* at AI-generert innhold er vurdert mot kildeteksten. Semantisk QA (8G-4) vil utvide godkjenningsgaten slik at endelig `passed`-status også krever bestått semantisk vurdering.
+
+**Fullstendig flyt (mål etter 8G-5):**
 
 ```
-EnterpriseWikiIngestRun (maintainer_decision_status = applied)
-  → post-ingest QA (8G-3) → qa_status = passed | escalated | failed
-      ↑ per-run data lagres i qa_status, qa_result, qa_timestamps
-  → daglig snapshot (8G-4) → kundenivå-aggregater over tid
-  → maintainer loop (8H) → kontinuerlig kildemonitoring og dypere reparasjon
+raw source (EnterpriseWikiDocument.extracted_text)
+→ generer article + summary + concept/entity-sider
+→ teknisk og strukturell QA (8G-3)
+→ semantisk AI-QA mot originalkilden (8G-4)
+  → diagnose: quality_score, coverage_score, unsupported_claims, missing_topics
+    → ved avvik: målrettet revisjon med QA-diagnose som tilleggsinstruks (8G-5)
+      → re-kjør semantisk QA
+        → passed: qa_status = semantisk godkjent
+        → fortsatt feil: eskalert til System Owner
+→ daglige snapshots og trendhistorikk (8G-6)
+→ maintainer loop (8H) → kontinuerlig kildemonitoring
 ```
 
-Alle sider som er merket `applied` skal til slutt ha `qa_status = passed`. Runs som er `escalated` eller `failed` krever eksplisitt operator-handling (`--retry`) eller 8H-basert intelligens.
+En applied run regnes ikke som ferdig før all QA er bestått. Runs som er `escalated` eller `failed` krever eksplisitt operator-handling (`--retry`) eller 8H-basert intelligens.
 
 #### Strategisk ramme: Coverage som QA-prosess
 
@@ -1946,7 +1974,7 @@ wiki:run-post-ingest-qa --all-pending --retry
 `generate()` hopper over sider som allerede har en versjon, selv om `content_markdown` er tomt. En side med en eksisterende tom versjon kan ikke repareres automatisk av denne tjenesten og resulterer i `escalated`. Dette er en bevisst begrensning i første versjon — dypere repair av eksisterende versjoner er et 8H-ansvar.
 
 **Avvik som ikke repareres i 8G-3:**
-Claims, source references, page links, concept/entity-koblinger og semantiske feil i innholdet repareres ikke her. Se 8H for dypere reparasjon.
+Claims, source references, page links og concept/entity-koblinger repareres ikke her. Semantiske feil i innholdet håndteres av semantisk QA og repair (8G-4/8G-5). Dypere strukturell reparasjon er et 8H-ansvar.
 
 **Placement:**
 - Service: `app/Services/EnterpriseWiki/EnterpriseWikiPostIngestQaService.php`
@@ -1960,18 +1988,121 @@ Claims, source references, page links, concept/entity-koblinger og semantiske fe
 - `EnterpriseWikiAppliedRunLintService` — lint-sjekker (skriver findings til DB)
 - `EnterpriseWikiGenerateAppliedPagesService` — reparasjon av manglende/versjonløse sider
 
-**8G-4 — Snapshots og trendhistorikk**
+**8G-4 — Semantisk AI-QA mot originalkilden**
 
 > **Neste fase. Ikke start uten instruksjon.**
 
+Semantisk QA er en AI-drevet gjennomgang av generert wikiinnhold mot `EnterpriseWikiDocument.extracted_text`. Målet er ikke å sjekke om article og summary er like — begge er genererte artefakter. Målet er å vurdere begge mot den autoritative originalkilden.
+
+**`EnterpriseWikiDocument.extracted_text` som referanseramme:**
+
+`extracted_text` er den primære referansen for semantisk QA. Article og summary er genererte artefakter som skal vurderes mot kilden, ikke mot hverandre. QA-reviewer bruker kilden, ikke de genererte sidene, som fasit.
+
+**Reviewer-rollen:**
+
+QA-reviewer-agenten:
+- Mottar `extracted_text` fra `EnterpriseWikiDocument` og `content_markdown` fra gjeldende `EnterpriseWikiPageVersion`
+- Vurderer innholdet kritisk mot originalkilden
+- Returnerer en strukturert diagnose — skriver ikke direkte til gjeldende sideversjon
+- Er en separat komponent fra generator og repair/reviser
+
+**Strukturert semantisk QA-resultat:**
+
+| Felt | Type | Innhold |
+|---|---|---|
+| `pass` | bool | Om innholdet består semantisk QA |
+| `quality_score` | float 0–1 | Samlet kvalitetsvurdering |
+| `coverage_score` | float 0–1 | Andel av kildens hovedinnhold som er dekket |
+| `factual_consistency_score` | float 0–1 | Andel av påstander med støtte i kilden |
+| `unsupported_claims` | array | Konkrete påstander uten kildedekning |
+| `missing_topics` | array | Viktige temaer fra kilden som mangler |
+| `missing_key_facts` | array | Konkrete fakta, krav, aktører eller avhengigheter som er utelatt |
+| `critique` | string | Fritekst QA-kommentar til generatoren |
+| `recommended_repair_action` | enum | `none`, `targeted_revision`, `full_regeneration`, `escalate` |
+| `confidence` | float 0–1 | Reviewerens sikkerhet på vurderingen |
+| `model` | string | Modell og prompt-versjon brukt i vurderingen |
+| `source_hash` | string | `file_hash_sha256` fra kilden på vurderingstidspunktet |
+| `page_version_id` | bigint | `EnterpriseWikiPageVersion.id` som ble vurdert |
+
+Databaseskjema er ikke låst i denne planoppdateringen. Sporbarhetsdata (`model`, `source_hash`, `page_version_id`) er påkrevd fra dag én.
+
+**Triggere for videre reparasjon (til 8G-5):**
+
+Semantisk repair trigges ved ett eller flere av følgende:
+- Sentrale temaer fra kilden mangler i generert innhold
+- Viktige fakta, krav, aktører eller avhengigheter er utelatt
+- Generert innhold inneholder påstander uten støtte i kilden
+- Summary dekker ikke kildens hovedinnhold tilstrekkelig
+- `quality_score` eller `coverage_score` er under konfigurert terskel
+
+**Placement:**
+- Service: `app/Services/EnterpriseWiki/EnterpriseWikiSemanticQaService.php` (ny)
+- QA-resultater lagres i `qa_result` på `enterprise_wiki_ingest_runs` under nøkkelen `semantic_qa`
+- Semantisk QA er et eget lag atskilt fra teknisk/strukturell QA (8G-3) og repair (8G-5)
+
+**8G-5 — Målrettet critique/revise-reparasjon og re-evaluering**
+
+> **Gjenstår — avhenger av 8G-4.**
+
+**Repair/reviser-rollen:**
+
+Repair/reviser-agenten:
+- Mottar originalkilden (`extracted_text`), eksisterende `content_markdown` og QA-diagnosen fra 8G-4
+- Lager en forbedret versjon av innholdet, målrettet mot de konkrete manglene i diagnosen
+- Kjøres med QA-diagnosen som tilleggsinstruks — ikke med identisk prompt som første generering
+- Skriver ny `EnterpriseWikiPageVersion` (ikke overskriving av eksisterende)
+
+**Critique/revise-loop:**
+
+```
+Semantisk QA (8G-4) → diagnose
+  → avvik identifisert (quality_score / coverage_score under terskel, eller konkrete mangler)
+    → targeted revision med QA-diagnose som tilleggsinstruks
+      → ny EnterpriseWikiPageVersion
+        → re-kjør semantisk QA
+          → passed → qa_status oppdateres (semantisk godkjent)
+          → fortsatt feil → eskalering til System Owner
+```
+
+**Begrensning av automatisk loop:**
+
+Maksimalt **én** målrettet revisjon per semantisk QA-syklus. Dersom innholdet fortsatt ikke passerer etter én revisjon, eskaleres kjøringen. Åpne AI-looper uten eksplisitt øvre grense er ikke tillatt.
+
+**Eskalering:**
+
+Kunden involveres kun når:
+- Automatisk revisjon ikke løser avviket
+- Kilden er uklar, ufullstendig eller motstridende
+- En forretningsmessig vurdering kreves som AI ikke kan ta
+
+**Rolleoversikt (alle fire roller):**
+
+| Rolle | Ansvar |
+|---|---|
+| Generator | Lager første versjon av article/summary |
+| QA/reviewer | Vurderer innholdet kritisk mot originalkilden, returnerer strukturert diagnose |
+| Repair/reviser | Mottar diagnose + kilden + eksisterende innhold, produserer forbedret versjon |
+| Orchestrator | Styrer rekkefølge, begrenser forsøk, kjører QA på nytt, eskalerer |
+
+**Placement:**
+- Service: `app/Services/EnterpriseWiki/EnterpriseWikiSemanticRepairService.php` (ny)
+- Orchestrator: `app/Services/EnterpriseWiki/EnterpriseWikiSemanticQaOrchestrator.php` (ny)
+- Semantisk QA og repair er separate Enterprise Wiki-services — ikke koblet til `ProcessEnterpriseWikiIngest`
+
+**8G-6 — Snapshots og trendhistorikk**
+
+> **Gjenstår — avhenger av 8G-5.**
+
 **Presisering — per-run vs. aggregat:**
 
-8G-3 lagrer allerede per-kjøring QA-data direkte på `enterprise_wiki_ingest_runs`:
+8G-3 lagrer allerede per-kjøring teknisk/strukturell QA-data direkte på `enterprise_wiki_ingest_runs`:
 - `qa_status` — om kjøringen passerte, ble eskalert eller feilet
 - `qa_result` JSON — coverage-summary (customer-wide på QA-tidspunktet), lint-summary, sjekker, repair-resultat, `open_lint_errors`
 - `qa_started_at`, `qa_completed_at`, `qa_attempt_count` — timing og retry-historikk
 
-Dette er per-run data og ikke trendhistorikk. 8G-4 er et *annet lag*: det lagrer **kundenivå-aggregater over tid**, ikke per-kjøring QA-utfall.
+8G-4/8G-5 lagrer semantisk QA-data under nøkkelen `semantic_qa` i `qa_result`: quality_score, coverage_score, unsupported_claims, revisjonsstatus og model/source_hash-sporbarhet.
+
+Dette er per-run data og ikke trendhistorikk. 8G-6 er et *annet lag*: det lagrer **kundenivå-aggregater over tid**, ikke per-kjøring QA-utfall.
 
 Snapshots er ikke selve QA-mekanismen — de er daglige aggregerte helsemålinger som gjør det mulig å sammenligne wikiens tilstand over dager og uker. 8H-utvidelsen sammenligner nåværende tilstand mot historisk terskel for å beslutte om ny reparasjon er nødvendig.
 
@@ -1980,10 +2111,10 @@ Ny tabell `enterprise_wiki_coverage_snapshots` med eksplisitte aggregatkolonner 
 - **Regresjonsdeteksjon:** fang fall i coverage etter nye ingest-kjøringer
 - **Evalueringsgrunnlag:** mål om automatisk reparasjon (8H) faktisk bedrer wikien på kundenivå
 
-**8G-5 — Eventuell lineage-forbedring**
-Vurderes basert på erfaringer fra 8G-1–8G-4. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
+**8G-7 — Eventuell lineage-forbedring**
+Vurderes basert på erfaringer fra 8G-1–8G-6. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
 
-#### Grunnlaget for 8H — og grensen mot 8G-3
+#### Grunnlaget for 8H — og grensen mot 8G-3/8G-4/8G-5
 
 **Hva 8G-3 allerede gjør (ikke gjenta i 8H):**
 - QA-statusmaskin (`qa_status`) med atomic claim-guard
@@ -1991,53 +2122,64 @@ Vurderes basert på erfaringer fra 8G-1–8G-4. Hvis join-kjeden via run_pages v
 - Coverage-beregning (customer-wide) og lint (per-run) lagret i `qa_result`
 - Enkel reparasjon: én runde med `generate()` ved manglende/versjonløs side
 - Re-sjekk etter repair, deretter eskalering hvis gap gjenstår
-- Lint-feil (severity=error) som gate — blokkerer `passed`
+- Lint-feil (`severity = error`) som gate — blokkerer `passed`
 - Eksplisitt retry-mekanisme: `--retry` for `failed`/`escalated`
 - Scheduled polling hvert 15. minutt for `null`/`pending`/`repair_required`
 
-**Hva 8H skal legge til (ikke dekket av 8G-3):**
+**Hva 8G-4 og 8G-5 skal legge til (ikke dekket av 8G-3):**
+- Semantisk vurdering av generert innhold mot `extracted_text` (8G-4): quality_score, coverage_score, unsupported_claims, missing_topics
+- Diagnosebasert repair med QA-critiquen som tilleggsinstruks (8G-5): ikke blind re-generering
+- Ny `EnterpriseWikiPageVersion` ved revisjon — ikke overskriving av eksisterende versjon
+- Begrensning til én automatisk revisjon; eskalering ved vedvarende avvik
+
+**Hva 8H skal legge til (ikke dekket av 8G-3 gjennom 8G-5):**
 - Kontinuerlig kildemonitoring: detektere at et kildedokument er endret (`file_hash_sha256` vs `last_source_hash`) og trigge ny ingest
-- Intelligent beslutning om når og om det er verdt å retry `escalated`-kjøringer (når kilden er endret, ikke bare hvert 15. minutt)
-- Dypere reparasjon: claims, source references, page links, concept/entity-koblinger — typer 8G-3 bevisst ikke reparerer
-- Terskel- og trendbaserte beslutninger basert på historiske snapshots (avhenger av 8G-4)
+- Intelligent beslutning om når og om det er verdt å retry `escalated`-kjøringer (når kilden er endret, ikke automatisk)
+- Dypere reparasjon av claims, source references, page links og concept/entity-koblinger
+- Terskel- og trendbaserte beslutninger basert på historiske snapshots (avhenger av 8G-6)
 
 **Avhengigheter:**
-- 8H-kjerne (kildemonitoring, endringsdeteksjon, triggert ingest/QA): avhenger av 8G-3 — kan i prinsippet starte uten 8G-4
-- 8H-utvidelse (terskelbasert repair, regresjonsdeteksjon): avhenger av 8G-4
 
-**8H-loopen (arkitektonisk mål):**
+| Lag | Avhenger av |
+|---|---|
+| 8H-kjerne (kildemonitoring, endringsdeteksjon, triggert ingest/QA) | 8G-3 og 8G-5 — teknisk/strukturell + semantisk QA er grunnlag for meningsfull 8H-reparasjon |
+| 8H-utvidelse (terskelbasert repair, regresjonsdeteksjon) | 8G-6 — snapshot-historikk nødvendig for trendbaserte beslutninger |
+
+**8H-loopen (arkitektonisk mål etter 8G-5):**
 ```
 ny eller endret kildedokument oppdaget
   → trigger ny ingest → ProcessEnterpriseWikiIngest (uendret)
-    → post-ingest QA (8G-3) → qa_status
-      → passed: logg, oppdater snapshot
-      → escalated/failed: 8H vurderer dypere reparasjon
-          → reparasjon av claims/links/source references
-            → re-kjør QA
-              → passed: logg reparasjon, oppdater snapshot
-              → fortsatt feil: eskaler til System Owner med forklaring
+    → teknisk og strukturell QA (8G-3) → qa_status
+    → semantisk AI-QA mot originalkilden (8G-4) → diagnose
+      → ved avvik: targeted revision (8G-5) → re-QA
+        → passed: logg, oppdater snapshot (8G-6)
+        → escalated: 8H vurderer dypere reparasjon
+            → reparasjon av claims/links/source references
+              → re-kjør QA
+                → passed: logg reparasjon, oppdater snapshot
+                → fortsatt feil: eskaler til System Owner med forklaring
 ```
 
 Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurdering. Selve reparasjonslogikken er intern og kobles **ikke** til `ProcessEnterpriseWikiIngest`.
 
 ### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
 
-> **Ikke start uten instruksjon.** 8H-kjerne avhenger av 8G-3. 8H-utvidelse avhenger av 8G-4.
+> **Ikke start uten instruksjon.** 8H-kjerne avhenger av 8G-3/8G-5. 8H-utvidelse avhenger av 8G-6.
 
 Mål: automatisk pipeline-kjøring ved nye eller endrede kildedokumenter, med ferdig beslutningsforslag klart for System Owner-godkjenning — fra manuell pilot til operasjonelt system.
 
-**8H-kjerne** *(avhenger av 8G-3):*
+**8H-kjerne** *(avhenger av 8G-3/8G-5):*
 - Kildemonitoring: detektere endringer i `EnterpriseWikiDocument` via `file_hash_sha256` vs `EnterpriseWikiPage.last_source_hash`
 - Endringsdeteksjon uten snapshot-historikk — nok til å trigge ny ingest og QA
 - Intelligent retry-beslutning for `escalated` kjøringer: retry når kilden faktisk har endret seg, ikke automatisk hvert 15. minutt
-- Dypere reparasjon av claims, source references og page links — typer som 8G-3 bevisst ikke reparerer
+- Dypere reparasjon av claims, source references og page links — typer som 8G-3/8G-5 bevisst ikke reparerer
 
-**8H-utvidelse** *(avhenger av 8G-4):*
+**8H-utvidelse** *(avhenger av 8G-6):*
 - Terskelbasert repair-beslutning: trigger reparasjon når coverage-score faller under historisk terskel
 - Regresjonsdeteksjon: fang fall i aggregert wikihelse etter nye ingest-kjøringer
 - Historikkbasert eskalering: eskaler til System Owner med trendkontekst, ikke bare øyeblikksbilde
 
-Roadmap-rekkefølge beholdes: 8G-3 → 8G-4 → 8G-5 → 8H. 8H-kjernen kan teknisk sett utvikles uten 8G-4, men implementeres ikke uten eksplisitt instruksjon.
+Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H. 8H-kjernen kan teknisk sett utvikles uten 8G-6, men implementeres ikke uten eksplisitt instruksjon.
 
 ### Produksjonsaktivering — Etter 8G og 8H
 
