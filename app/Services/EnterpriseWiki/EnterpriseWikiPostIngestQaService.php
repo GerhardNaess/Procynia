@@ -305,7 +305,11 @@ class EnterpriseWikiPostIngestQaService
     }
 
     /**
-     * Create a QA snapshot (8G-6). Errors are logged but must not affect the QA result.
+     * Create a QA snapshot (8G-6).
+     *
+     * On failure the run is downgraded to 'failed' and qa_last_error is set
+     * so that the run never appears as completed without a recorded snapshot.
+     * qa_result is preserved (already saved before this is called).
      */
     private function captureSnapshot(EnterpriseWikiIngestRun $run, array $result): void
     {
@@ -315,6 +319,11 @@ class EnterpriseWikiPostIngestQaService
             Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot', [
                 'run_id' => $run->id,
                 'error'  => $e->getMessage(),
+            ]);
+
+            $run->update([
+                'qa_status'     => EnterpriseWikiIngestRun::QA_STATUS_FAILED,
+                'qa_last_error' => '[SNAPSHOT] Snapshot creation failed: ' . $e->getMessage(),
             ]);
         }
     }

@@ -433,6 +433,135 @@ class EnterpriseWikiQaSnapshotServiceTest extends TestCase
     }
 
     // =========================================================================
+    // Snapshot failure handling (8G-6 rettelse)
+    // =========================================================================
+
+    public function test_snapshot_failure_on_passing_qa_gives_failed_not_passed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn($this->passingAiResult());
+
+        $this->mock(EnterpriseWikiQaSnapshotService::class)
+            ->shouldReceive('capture')
+            ->andThrow(new \RuntimeException('DB connection lost during snapshot insert'));
+
+        $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        $this->assertSame(0, EnterpriseWikiQaSnapshot::query()->count());
+    }
+
+    public function test_snapshot_failure_sets_qa_last_error_describing_snapshot_failure(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn($this->passingAiResult());
+
+        $this->mock(EnterpriseWikiQaSnapshotService::class)
+            ->shouldReceive('capture')
+            ->andThrow(new \RuntimeException('Unique constraint violation'));
+
+        $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertNotNull($run->qa_last_error);
+        $this->assertStringContainsString('[SNAPSHOT]', $run->qa_last_error);
+        $this->assertStringContainsString('Unique constraint violation', $run->qa_last_error);
+    }
+
+    public function test_snapshot_failure_preserves_qa_result(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn($this->passingAiResult());
+
+        $this->mock(EnterpriseWikiQaSnapshotService::class)
+            ->shouldReceive('capture')
+            ->andThrow(new \RuntimeException('Disk full'));
+
+        $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertNotNull($run->qa_result);
+        $this->assertArrayHasKey('checks', $run->qa_result);
+        $this->assertArrayHasKey('semantic_qa', $run->qa_result);
+        $this->assertNotNull($run->qa_result['semantic_qa']);
+        $this->assertTrue($run->qa_result['semantic_qa']['pass']);
+    }
+
+    public function test_snapshot_success_preserves_normal_terminal_status(): void
+    {
+        // Regression: when snapshot succeeds, the run must keep its QA-determined status.
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn($this->passingAiResult());
+
+        $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertNull($run->qa_last_error);
+        $this->assertSame(1, EnterpriseWikiQaSnapshot::query()->count());
+    }
+
+    public function test_retry_after_snapshot_failure_can_reach_passed(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createAppliedRun($customer);
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $this->createVersionedPage($customer, $run, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        $this->mock(WikiSemanticQaAiClient::class)
+            ->shouldReceive('review')
+            ->andReturn($this->passingAiResult());
+
+        // First attempt: snapshot fails → run ends as failed
+        $snapshotMock = $this->mock(EnterpriseWikiQaSnapshotService::class);
+        $snapshotMock->shouldReceive('capture')
+            ->once()
+            ->andThrow(new \RuntimeException('Transient DB error'));
+
+        $this->orchestrator()->runForRun($run);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_FAILED, $run->qa_status);
+        $this->assertSame(0, EnterpriseWikiQaSnapshot::query()->count());
+
+        // Second attempt (retry): snapshot succeeds → run reaches passed
+        $snapshotMock->shouldReceive('capture')
+            ->once()
+            ->andReturn(null);
+
+        $this->orchestrator()->runForRun($run, retry: true);
+
+        $run->refresh();
+        $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
+        $this->assertNull($run->qa_last_error);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
