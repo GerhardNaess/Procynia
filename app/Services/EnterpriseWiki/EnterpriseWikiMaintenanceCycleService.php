@@ -16,12 +16,16 @@ use Illuminate\Support\Facades\Log;
  * Delfase 2: if the run is still escalated after intelligent retry, attempts one targeted
  * deep repair of claims, source references, and page links via EnterpriseWikiDeepRepairService.
  * Idempotence for deep repair is guaranteed by `deep_repair_source_hash`.
+ *
+ * 8H-utvidelse: analyses immutable QA snapshots for threshold-based regressions and routes
+ * repairable cases through the existing repair flow.
  */
 class EnterpriseWikiMaintenanceCycleService
 {
     public function __construct(
         private readonly EnterpriseWikiPostIngestQaService $qaService,
         private readonly EnterpriseWikiDeepRepairService $deepRepairService,
+        private readonly EnterpriseWikiQaRegressionService $regressionService,
     ) {}
 
     /**
@@ -50,10 +54,13 @@ class EnterpriseWikiMaintenanceCycleService
             };
         }
 
+        $regressionSummary = $this->regressionService->processPendingSnapshots();
+
         Log::info('[WIKI_MAINTENANCE] Maintenance cycle complete', [
             'retried' => $retried,
             'skipped' => $skipped,
             'failed'  => $failed,
+            'regressions' => $regressionSummary,
         ]);
 
         return compact('retried', 'skipped', 'failed');

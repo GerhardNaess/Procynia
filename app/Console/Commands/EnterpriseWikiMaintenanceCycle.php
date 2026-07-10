@@ -10,7 +10,7 @@ class EnterpriseWikiMaintenanceCycle extends Command
 {
     protected $signature = 'wiki:maintenance-cycle';
 
-    protected $description = 'Detect source changes and retry QA for escalated Enterprise Wiki ingest runs.';
+    protected $description = 'Detect source changes, regression snapshots, and retry QA for escalated Enterprise Wiki ingest runs.';
 
     public function handle(EnterpriseWikiMaintenanceCycleService $service): int
     {

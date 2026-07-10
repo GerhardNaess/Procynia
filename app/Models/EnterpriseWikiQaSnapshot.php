@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class EnterpriseWikiQaSnapshot extends Model
 {
@@ -77,5 +78,10 @@ class EnterpriseWikiQaSnapshot extends Model
     public function ingestRun(): BelongsTo
     {
         return $this->belongsTo(EnterpriseWikiIngestRun::class, 'enterprise_wiki_ingest_run_id');
+    }
+
+    public function regression(): HasOne
+    {
+        return $this->hasOne(EnterpriseWikiQaRegression::class, 'enterprise_wiki_qa_snapshot_id');
     }
 }

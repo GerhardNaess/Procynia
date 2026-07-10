@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) — 8H-utvidelse gjenstår**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon)**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -735,7 +735,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
 | Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-7 fullført |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 + 2 fullført** (kildemonitoring, intelligent retry, dyp reparasjon av claims/refs/lenker) · 8H-utvidelse gjenstår |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 + 2 fullført** (kildemonitoring, intelligent retry, dyp reparasjon av claims/refs/lenker) · **8H-utvidelse fullført** (snapshot-basert terskelreparasjon og regresjonsdeteksjon) |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -2234,7 +2234,7 @@ Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurd
 
 ### Fase 8H — Continuous Enterprise Wiki Maintainer Loop
 
-> **8H-kjerne delfase 1 fullført.** 8H-kjerne delfase 2 (dypere reparasjon) og 8H-utvidelse gjenstår — start ikke uten instruksjon.
+> **8H-kjerne delfase 1 + delfase 2 fullført.** 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon).
 
 Mål: automatisk pipeline-kjøring ved nye eller endrede kildedokumenter, med ferdig beslutningsforslag klart for System Owner-godkjenning — fra manuell pilot til operasjonelt system.
 
@@ -2298,12 +2298,32 @@ Alle tre tjenester er idempotente — de fyller kun inn det som mangler.
 - `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php` — kaller `deepRepairService->attempt()` hvis run fortsatt er `escalated` etter intelligent retry
 - `app/Models/EnterpriseWikiIngestRun.php` — tre nye felt i `$fillable` og `$casts`
 
-#### 8H-utvidelse *(avhenger av 8G-6):*
-- Terskelbasert repair-beslutning: trigger reparasjon når coverage-score faller under historisk terskel
-- Regresjonsdeteksjon: fang fall i aggregert wikihelse etter nye ingest-kjøringer
-- Historikkbasert eskalering: eskaler til System Owner med trendkontekst, ikke bare øyeblikksbilde
+#### 8H-utvidelse *(avhenger av 8G-6) — fullført:*
 
-Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H-kjerne delfase 1 (fullført) → 8H-kjerne delfase 2 → 8H-utvidelse.
+Implementert snapshot-basert threshold maintenance for QA-regresjoner:
+
+- Terskelbasert repair-beslutning: quality, coverage og factual drop på 0.10, samt økning i unsupported claims, missing topics, missing key facts og lint errors på 1
+- Regresjonsdeteksjon: immutabel QA-snapshot-historikk sammenlignes innenfor samme kunde, kilde og page-type-signatur
+- Historikkbasert eskalering: samme signal og source hash eskaleres uten ny reparasjonsrunde
+- Audit trail: regnegrunnlag, terskler, signaler, metric deltas og final status lagres i `enterprise_wiki_qa_regressions`
+- Maintenance loop: `wiki:maintenance-cycle` skanner terminale QA-snapshots etter source-change retry og fører regression summary i loggen
+
+Nye filer:
+
+- `app/Models/EnterpriseWikiQaRegression.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiQaRegressionPolicy.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiQaRegressionService.php`
+- `database/migrations/2026_07_10_000007_create_enterprise_wiki_qa_regressions_table.php`
+- `tests/Unit/Services/EnterpriseWiki/EnterpriseWikiQaRegressionPolicyTest.php`
+- `tests/Feature/App/Wiki/EnterpriseWikiQaRegressionServiceTest.php`
+
+Oppdaterte filer:
+
+- `app/Models/EnterpriseWikiQaSnapshot.php` — regression-relasjon for immutable snapshots
+- `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php` — kaller snapshot-regresjonsskann etter source-change retry
+- `app/Console/Commands/EnterpriseWikiMaintenanceCycle.php` — beskriver snapshot-regresjoner i command help
+
+Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H-kjerne delfase 1 (fullført) → 8H-kjerne delfase 2 (fullført) → 8H-utvidelse (fullført).
 
 ### Produksjonsaktivering — Etter 8G og 8H
 
@@ -2517,4 +2537,3 @@ Tester skal dekke:
 - backlinks kan bygges/rebygges
 - ingen ekte nettverkskall i tester
 - Kunnskapsbase/RAG-tabeller røres ikke
-
