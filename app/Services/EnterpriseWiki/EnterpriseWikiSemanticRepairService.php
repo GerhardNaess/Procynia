@@ -5,8 +5,6 @@ namespace App\Services\EnterpriseWiki;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
-use App\Models\EnterpriseWikiIngestRunPage;
-use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageVersion;
 use App\Services\Ai\Wiki\WikiSemanticReviserAiClient;
 use Illuminate\Support\Facades\DB;
@@ -73,10 +71,21 @@ class EnterpriseWikiSemanticRepairService
             return $this->skippedResult('source_text_empty');
         }
 
-        $articleVersion = $this->currentArticleVersion($run);
+        $diagnosedVersionId = $semanticQaDiagnosis['page_version_id'] ?? null;
+
+        if (! $diagnosedVersionId) {
+            return $this->skippedResult('diagnosed_version_id_missing');
+        }
+
+        $articleVersion = DB::table('enterprise_wiki_page_versions')
+            ->where('id', $diagnosedVersionId)
+            ->whereNotNull('content_markdown')
+            ->where('content_markdown', '!=', '')
+            ->select(['id', 'enterprise_wiki_page_id', 'version_number', 'content_markdown'])
+            ->first();
 
         if (! $articleVersion) {
-            return $this->skippedResult('article_version_not_found');
+            return $this->skippedResult('diagnosed_version_not_found');
         }
 
         $existingContent = trim((string) $articleVersion->content_markdown);
@@ -140,34 +149,6 @@ class EnterpriseWikiSemanticRepairService
                 'generated_by_model'      => WikiSemanticReviserAiClient::MODEL . '/semantic-repair',
             ]);
         });
-    }
-
-    private function currentArticleVersion(EnterpriseWikiIngestRun $run): ?object
-    {
-        $pivotPageIds = EnterpriseWikiIngestRunPage::query()
-            ->where('enterprise_wiki_ingest_run_id', $run->id)
-            ->pluck('enterprise_wiki_page_id');
-
-        if ($pivotPageIds->isEmpty()) {
-            return null;
-        }
-
-        $articlePageIds = EnterpriseWikiPage::query()
-            ->whereIn('id', $pivotPageIds)
-            ->where('page_type', EnterpriseWikiPage::PAGE_TYPE_ARTICLE)
-            ->pluck('id');
-
-        if ($articlePageIds->isEmpty()) {
-            return null;
-        }
-
-        return DB::table('enterprise_wiki_page_versions')
-            ->whereIn('enterprise_wiki_page_id', $articlePageIds)
-            ->where('is_current', true)
-            ->whereNotNull('content_markdown')
-            ->where('content_markdown', '!=', '')
-            ->select(['id', 'enterprise_wiki_page_id', 'version_number', 'content_markdown'])
-            ->first();
     }
 
     private function resolveLanguageCode(int $customerId): string

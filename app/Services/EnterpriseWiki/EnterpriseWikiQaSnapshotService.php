@@ -145,10 +145,11 @@ class EnterpriseWikiQaSnapshotService
             'semantic_repair_model'             => $repairResult['model'] ?? null,
 
             // Post-repair QA
-            'semantic_post_repair_pass'         => $postRepair !== null ? (bool) ($postRepair['pass'] ?? false) : null,
-            'semantic_post_repair_quality_score'  => $postRepair['quality_score'] ?? null,
-            'semantic_post_repair_coverage_score' => $postRepair['coverage_score'] ?? null,
-            'semantic_post_repair_factual_score'  => $postRepair['factual_consistency_score'] ?? null,
+            'semantic_post_repair_page_version_id' => $postRepair['page_version_id'] ?? null,
+            'semantic_post_repair_pass'            => $postRepair !== null ? (bool) ($postRepair['pass'] ?? false) : null,
+            'semantic_post_repair_quality_score'   => $postRepair['quality_score'] ?? null,
+            'semantic_post_repair_coverage_score'  => $postRepair['coverage_score'] ?? null,
+            'semantic_post_repair_factual_score'   => $postRepair['factual_consistency_score'] ?? null,
         ];
     }
 }

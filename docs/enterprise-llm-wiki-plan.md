@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-6 fullført · **Retning: 8G-7 lineage-forbedring eller 8H continuous maintainer-loop — start ikke uten instruksjon**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **Retning: 8H continuous maintainer-loop — start ikke uten instruksjon**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -734,7 +734,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-6 fullført · 8G-7 lineage gjenstår (ikke planlagt) |
+| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-7 fullført |
 | Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 (fullført) · 8H-utvidelse avhenger av 8G-6 (fullført) |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-1–8G-6 fullført — 8G-7 (lineage-forbedring) og 8H (continuous maintainer-loop) gjenstår — start ikke uten instruksjon.**
+> **8G-1–8G-7 fullført — 8H (continuous maintainer-loop) gjenstår — start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
 
@@ -2151,8 +2151,38 @@ Alle graceful failures → `qa_status = escalated`. AI-exceptions propagerer til
 
 **Tester:** `tests/Feature/App/Wiki/EnterpriseWikiQaSnapshotServiceTest.php` — 14 tester, 76 assertions.
 
-**8G-7 — Eventuell lineage-forbedring**
-Vurderes basert på erfaringer fra 8G-1–8G-6. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.
+**8G-7 — Lineage-forbedring**
+
+> **Fullført.**
+
+**Lukket gap 1 — 8G-5 brukte `is_current`-oppslag i stedet for diagnostisert versjon:**
+
+`EnterpriseWikiSemanticRepairService::repair()` brukte tidligere et nytt `is_current = true`-oppslag for å finne article-versjonen som skulle revideres. Dette betyr at repair-tjenesten potensielt bearbeidet en annen versjon enn den 8G-4 faktisk vurderte. Fikset ved å bruke `$semanticQaDiagnosis['page_version_id']` som autoritativ referanse. Dersom IDen mangler eller versjonen ikke finnes, returneres et graceful failure-resultat (`diagnosed_version_id_missing` / `diagnosed_version_not_found`).
+
+**Lukket gap 2 — Post-repair-versjonen ikke registrert i QA-snapshot:**
+
+`EnterpriseWikiQaSnapshot` manglet feltet `semantic_post_repair_page_version_id` — versjons-IDen som re-evalueringen (8G-4 kjøring 2) faktisk vurderte. Lagt til via migrasjon, oppdatert modell, og `buildAttributes()` i `EnterpriseWikiQaSnapshotService`.
+
+**Eksisterende lineage (allerede på plass — ikke endret):**
+
+Kjeden `originalkilde → ingest-run → side → sideversjon → semantisk QA → revisjon → ny sideversjon → re-evaluering → QA-snapshot` var allerede sporbar via:
+- `EnterpriseWikiIngestRun.source_id` + `source_type` → `EnterpriseWikiDocument`
+- `EnterpriseWikiIngestRunPage`-pivot → `EnterpriseWikiPage`
+- `qa_result['semantic_qa']['page_version_id']` — diagnostisert versjon
+- `qa_result['semantic_qa']['source_hash']` — kildedokumentets hash
+- `qa_result['semantic_repair_result']['previous_version_id']` — versjon sendt til revisjon
+- `qa_result['semantic_repair_result']['page_version_id']` — ny versjon etter revisjon
+- `qa_result['semantic_qa_post_repair']['page_version_id']` — re-evaluert versjon
+- `EnterpriseWikiQaSnapshot.semantic_page_version_id` — diagnostisert versjon i snapshot
+- `EnterpriseWikiQaSnapshot.semantic_repair_previous_version_id` + `semantic_repair_new_version_id`
+- `EnterpriseWikiQaSnapshot.semantic_post_repair_page_version_id` ← **ny (8G-7)**
+
+**Filer:**
+- `database/migrations/2026_07_10_000003_add_post_repair_version_to_qa_snapshots.php`
+- `app/Models/EnterpriseWikiQaSnapshot.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiQaSnapshotService.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiSemanticRepairService.php`
+- `tests/Feature/App/Wiki/EnterpriseWikiLineageTest.php` — 13 tester, 66 assertions
 
 #### Grunnlaget for 8H — og grensen mot 8G-3/8G-4/8G-5
 
