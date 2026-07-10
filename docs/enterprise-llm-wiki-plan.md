@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-3 fullført (commit 1c5f3a6) · **Retning: semantisk AI-QA (8G-4) er neste fase**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-4 fullført · **Retning: critique/revise (8G-5) er neste fase**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -734,7 +734,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-3 fullført · **8G-4 (semantisk AI-QA) er neste fase** · 8G-5 critique/revise, 8G-6 snapshots, 8G-7 lineage gjenstår |
+| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-4 fullført · **8G-5 (critique/revise) er neste fase** · 8G-6 snapshots, 8G-7 lineage gjenstår |
 | Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 · 8H-utvidelse avhenger av 8G-6 |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-1–8G-3 fullført — 8G-4 (semantisk AI-QA mot originalkilden) er neste fase — start ikke uten instruksjon.**
+> **8G-1–8G-4 fullført — 8G-5 (critique/revise-reparasjon) er neste fase — start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
 
@@ -1988,9 +1988,7 @@ Claims, source references, page links og concept/entity-koblinger repareres ikke
 - `EnterpriseWikiAppliedRunLintService` — lint-sjekker (skriver findings til DB)
 - `EnterpriseWikiGenerateAppliedPagesService` — reparasjon av manglende/versjonløse sider
 
-**8G-4 — Semantisk AI-QA mot originalkilden**
-
-> **Neste fase. Ikke start uten instruksjon.**
+**8G-4 — Semantisk AI-QA mot originalkilden** ✅ *fullført — se commit nedenfor*
 
 Semantisk QA er en AI-drevet gjennomgang av generert wikiinnhold mot `EnterpriseWikiDocument.extracted_text`. Målet er ikke å sjekke om article og summary er like — begge er genererte artefakter. Målet er å vurdere begge mot den autoritative originalkilden.
 
@@ -2035,10 +2033,23 @@ Semantisk repair trigges ved ett eller flere av følgende:
 - Summary dekker ikke kildens hovedinnhold tilstrekkelig
 - `quality_score` eller `coverage_score` er under konfigurert terskel
 
-**Placement:**
-- Service: `app/Services/EnterpriseWiki/EnterpriseWikiSemanticQaService.php` (ny)
-- QA-resultater lagres i `qa_result` på `enterprise_wiki_ingest_runs` under nøkkelen `semantic_qa`
-- Semantisk QA er et eget lag atskilt fra teknisk/strukturell QA (8G-3) og repair (8G-5)
+**Implementert:**
+
+Filer:
+- `app/Services/Ai/Wiki/WikiSemanticQaAiClient.php` — AI-reviewer (modell: `gpt-4.1-mini`, JSON schema output, temperature 0)
+- `app/Services/EnterpriseWiki/EnterpriseWikiSemanticQaService.php` — orkestrerer kildehenting og AI-kall
+- `app/Services/EnterpriseWiki/EnterpriseWikiPostIngestQaService.php` — utvidet med semantisk QA-lag
+
+QA-resultater lagres i `qa_result` på `enterprise_wiki_ingest_runs` under nøkkelen `semantic_qa`.
+
+Semantisk QA kjøres kun når `ENTERPRISE_WIKI_AI_ENABLED=true` og tech/strukturell QA har passert. Dersom AI ikke er aktivert, hoppes semantisk QA over og kjøringen kan fortsatt passere basert på nivå 1/2 alene.
+
+Statusmapping:
+- `pass = true` → `passed`
+- `pass = false`, action `targeted_revision`/`full_regeneration` → `repair_required`
+- `pass = false`, action `escalate` eller kilde mangler/er tom → `escalated`
+
+Tester: `tests/Feature/App/Wiki/EnterpriseWikiSemanticQaServiceTest.php` — 16 tester, 51 assertions.
 
 **8G-5 — Målrettet critique/revise-reparasjon og re-evaluering**
 
