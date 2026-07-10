@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-5 fullført · **Retning: 8G-6 snapshots og trendhistorikk er neste fase**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-6 fullført · **Retning: 8G-7 lineage-forbedring eller 8H continuous maintainer-loop — start ikke uten instruksjon**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -734,8 +734,8 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8D | Wiki Article UI | Fullført/startet article-first; må utvides til page types senere |
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
-| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-5 fullført · **8G-6 snapshots er neste fase** · 8G-7 lineage gjenstår |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 (begge fullført) · 8H-utvidelse avhenger av 8G-6 |
+| Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-6 fullført · 8G-7 lineage gjenstår (ikke planlagt) |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 (fullført) · 8H-utvidelse avhenger av 8G-6 (fullført) |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-1–8G-5 fullført — 8G-6 (snapshots og trendhistorikk) er neste fase — start ikke uten instruksjon.**
+> **8G-1–8G-6 fullført — 8G-7 (lineage-forbedring) og 8H (continuous maintainer-loop) gjenstår — start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet som et **QA-signal til maintaineren** — ikke et brukerrettet dashboard. Coverage validerer at forventede wiki-artefakter er opprettet og brukbare etter en ingest. Systemet identifiserer avvik; maintainer-loopen (8H) håndterer reparasjon.
 
@@ -2120,25 +2120,36 @@ Alle graceful failures → `qa_status = escalated`. AI-exceptions propagerer til
 
 **8G-6 — Snapshots og trendhistorikk**
 
-> **Gjenstår — avhenger av 8G-5 (fullført). Start ikke uten instruksjon.**
+> **Fullført (commit se nedenfor). Per-run QA-snapshots implementert.**
 
-**Presisering — per-run vs. aggregat:**
+**Implementert design — per-run snapshots (ikke daglige aggregater):**
 
-8G-3 lagrer allerede per-kjøring teknisk/strukturell QA-data direkte på `enterprise_wiki_ingest_runs`:
-- `qa_status` — om kjøringen passerte, ble eskalert eller feilet
-- `qa_result` JSON — coverage-summary (customer-wide på QA-tidspunktet), lint-summary, sjekker, repair-resultat, `open_lint_errors`
-- `qa_started_at`, `qa_completed_at`, `qa_attempt_count` — timing og retry-historikk
+8G-6 lagrer ett uforanderlig snapshot per avsluttet QA-forsøk (terminal status: `passed`, `failed`, `escalated`). Snapshots opprettes av `EnterpriseWikiQaSnapshotService` og kalles fra `EnterpriseWikiPostIngestQaService` etter at `qa_status` er satt. Feil i snapshot-oppretting er isolert med try/catch og logger, og skjuler aldri QA-resultatet.
 
-8G-4/8G-5 lagrer semantisk QA-data under nøkkelen `semantic_qa` i `qa_result`: quality_score, coverage_score, unsupported_claims, revisjonsstatus og model/source_hash-sporbarhet.
+**Filer:**
+- `database/migrations/2026_07_10_000002_create_enterprise_wiki_qa_snapshots_table.php`
+- `app/Models/EnterpriseWikiQaSnapshot.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiQaSnapshotService.php`
+- `app/Services/EnterpriseWiki/EnterpriseWikiPostIngestQaService.php` (utvidet med `snapshotService`)
 
-Dette er per-run data og ikke trendhistorikk. 8G-6 er et *annet lag*: det lagrer **kundenivå-aggregater over tid**, ikke per-kjøring QA-utfall.
+**Tabell: `enterprise_wiki_qa_snapshots`**
+- Unik constraint: `(enterprise_wiki_ingest_run_id, qa_attempt_count)` — idempotens per forsøk
+- Indekser: `(customer_id, snapshotted_at)`, `(customer_id, qa_status)` — trendspørringer
+- Teknisk/strukturell: `technical_qa_passed`, `structural_qa_passed`, `open_lint_errors`, `lint_error_count`, `lint_warning_count`
+- Semantisk QA (8G-4): `semantic_qa_ran`, `semantic_pass`, `semantic_quality_score`, `semantic_coverage_score`, `semantic_factual_score`, `semantic_missing_topics_count`, `semantic_missing_key_facts_count`, `semantic_unsupported_claims_count`, `semantic_source_hash`, `semantic_page_version_id`, `semantic_model`, `semantic_prompt_version`
+- Repair (8G-5): `semantic_repair_attempted`, `semantic_repair_success`, `semantic_repair_previous_version_id`, `semantic_repair_new_version_id`, `semantic_repair_model`
+- Post-repair re-evaluering: `semantic_post_repair_pass`, `semantic_post_repair_quality_score`, `semantic_post_repair_coverage_score`, `semantic_post_repair_factual_score`
 
-Snapshots er ikke selve QA-mekanismen — de er daglige aggregerte helsemålinger som gjør det mulig å sammenligne wikiens tilstand over dager og uker. 8H-utvidelsen sammenligner nåværende tilstand mot historisk terskel for å beslutte om ny reparasjon er nødvendig.
+**Når opprettes snapshot:**
+- Etter AI-deaktivert early-return (`failed`)
+- Etter normal QA-fullføring (`passed`, `escalated`, `failed`)
+- Ved uventet exception i `runForRun()` catch-blokk (`failed`)
+- `repair_required` er en mellomtilstand — oppretter ikke eget snapshot
 
-Ny tabell `enterprise_wiki_coverage_snapshots` med eksplisitte aggregatkolonner (`gap_count`, `claim_coverage_pct`, `open_error_count` m.fl.) og én `payload JSON`-kolonne for full service-output. Unik constraint `(customer_id, snapshot_date)` med upsert-semantikk. Daglig scheduled job via `wiki:snapshot-coverage --all`. Formålet er tredelt:
-- **Trendhistorikk:** spor om wikiens samlede helsetilstand forbedres over tid
-- **Regresjonsdeteksjon:** fang fall i coverage etter nye ingest-kjøringer
-- **Evalueringsgrunnlag:** mål om automatisk reparasjon (8H) faktisk bedrer wikien på kundenivå
+**Idempotens:**
+`firstOrCreate`-mønster via eksplisitt `first()` + `create()`. Nytt QA-forsøk (retry) inkrementerer `qa_attempt_count` og oppretter nytt snapshot med ny `qa_attempt_count`.
+
+**Tester:** `tests/Feature/App/Wiki/EnterpriseWikiQaSnapshotServiceTest.php` — 14 tester, 76 assertions.
 
 **8G-7 — Eventuell lineage-forbedring**
 Vurderes basert på erfaringer fra 8G-1–8G-6. Hvis join-kjeden via run_pages viser seg ytelsesmessig uholdbar eller logisk uklar, spesifiseres en eksplisitt many-to-many page-source lineage-modell. Ikke planlagt nå.

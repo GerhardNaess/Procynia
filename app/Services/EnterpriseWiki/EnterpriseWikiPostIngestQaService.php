@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Post-ingest QA orchestrator for applied Enterprise Wiki runs.
  *
- * Three-tier QA gate (8G-3 + 8G-4 + 8G-5):
+ * Three-tier QA gate (8G-3 + 8G-4 + 8G-5 + 8G-6):
  *   Level 1 — Technical QA: artefacts exist with content (article + summary)
  *   Level 2 — Structural QA: lint findings, coverage metrics
  *   Level 3 — Semantic QA: AI review of generated content vs. extracted_text source
@@ -45,6 +45,7 @@ class EnterpriseWikiPostIngestQaService
         private readonly EnterpriseWikiGenerateAppliedPagesService $generateService,
         private readonly EnterpriseWikiSemanticQaService $semanticQaService,
         private readonly EnterpriseWikiSemanticRepairService $semanticRepairService,
+        private readonly EnterpriseWikiQaSnapshotService $snapshotService,
     ) {}
 
     /**
@@ -112,6 +113,16 @@ class EnterpriseWikiPostIngestQaService
                 'run_id' => $run->id,
                 'error' => $e->getMessage(),
             ]);
+
+            // Snapshot the failed attempt. Errors here must not suppress the original exception.
+            try {
+                $this->snapshotService->capture($fresh, []);
+            } catch (\Throwable $snapshotException) {
+                Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot for failed run', [
+                    'run_id' => $run->id,
+                    'error'  => $snapshotException->getMessage(),
+                ]);
+            }
 
             throw $e;
         }
@@ -222,6 +233,8 @@ class EnterpriseWikiPostIngestQaService
                     'qa_result'       => $result,
                 ]);
 
+                $this->captureSnapshot($run, $result);
+
                 return $result;
             }
 
@@ -286,7 +299,24 @@ class EnterpriseWikiPostIngestQaService
             'qa_result'       => $result,
         ]);
 
+        $this->captureSnapshot($run, $result);
+
         return $result;
+    }
+
+    /**
+     * Create a QA snapshot (8G-6). Errors are logged but must not affect the QA result.
+     */
+    private function captureSnapshot(EnterpriseWikiIngestRun $run, array $result): void
+    {
+        try {
+            $this->snapshotService->capture($run, $result);
+        } catch (\Throwable $e) {
+            Log::error('[WIKI_QA_SNAPSHOT] Failed to create snapshot', [
+                'run_id' => $run->id,
+                'error'  => $e->getMessage(),
+            ]);
+        }
     }
 
     private function resolveFinalStatus(bool $structuralFailed, ?array $semanticQaResult): string
