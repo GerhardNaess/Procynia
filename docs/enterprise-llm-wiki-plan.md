@@ -1725,7 +1725,7 @@ Alle backend-tester er feature-tester. Ingen Cypress/E2E. Ingen ekte OpenAI-kall
 
 ### Fase 8G — Enterprise Wiki coverage/eval
 
-> **8G-2 fullført (commit c57ef78 + fargefix 8340324) — 8G-3 ikke startet. Start ikke uten instruksjon.**
+> **8G-2 fullført (commit c57ef78 + 8340324 + 0b45fe5 + a143a3e) — 8G-3 ikke startet. Start ikke uten instruksjon.**
 
 Mål: automatisk måling av wiki-dekning og innholdskvalitet — et objektivt svar på om wikien er god nok til å stoles på. Ingen manuell redigering, ingen handlingsknapper. System Owner ser tilstand og avvik; systemet peker på hva som mangler.
 
@@ -1788,15 +1788,40 @@ Teknisk kartlegging av datamodell, score-design og faseinndeling.
 
 Ingen nye tabeller, migrasjoner, UI eller AI-kall. Lineage via Document→IngestRun→run_pages→Page.
 
-**8G-2 — Read-only coverage-visning i Kvalitet-tab** ✅ *fullført — commit c57ef78 + fargefix 8340324 — 685 tester / 1487 assertions — build OK*
+**8G-2 — Read-only coverage-visning i Kvalitet-tab** ✅ *fullført — commits c57ef78 / 8340324 / 0b45fe5 / a143a3e — 687 tester / 1500 assertions — build OK*
 
 Kvalitet-tabben viser nå read-only coverage/eval basert på `EnterpriseWikiCoverageService`. `CoveragePanel` rendres øverst i Kvalitet-tab med fire seksjoner:
-- **Kildedekning:** extracted docs, med applied run, med artikkel-side, med sammendrag-side
+- **Kildedekning:** extracted docs, med applied run, artikkel/sammendrag-side opprettet, artikkel/sammendrag med gjeldende innhold
 - **Sidekvalitet:** totalt, uten gjeldende versjon, uten innhold, uten claims
 - **Claim-dekning:** dekningsgrad (terskelbasert farging: ≥ 80 % emerald, ≥ 50 % amber, < 50 % rose), med/uten kildereferanse
 - **Graf og struktur:** åpne feil (rose), åpne advarsler (amber), foreldreløse sider (amber)
 
 Gap-liste per dokument vises under statistikken. Positive helsetall vises nøytralt, faktiske avvik markeres med warning/error. Ingen nye ruter, ingen skrivehandlinger — kun utvidede props på eksisterende endepunkt.
+
+#### Kildedekning — to lag (implementert i 0b45fe5)
+
+Kildedekning skiller mellom strukturell dekning og innholdsdekning:
+
+| Lag | Hva som sjekkes | Felter |
+|---|---|---|
+| Strukturell | article/summary-side finnes via lineage (Document → IngestRun → run_pages → Page) | `documents_with_article`, `documents_with_summary` |
+| Innhold | siden har `is_current = true`-versjon med ikke-tomt `content_markdown` | `documents_with_article_content`, `documents_with_summary_content` |
+
+En kilde med article/summary-side som mangler versjon eller innhold vises som gap — ikke som ok.
+
+**Coverage-gap-typer (source_coverage.gaps[].missing):**
+
+| Kode | Betyr |
+|---|---|
+| `applied_run` | Ingen applied kjøring for dokumentet |
+| `article_missing` | Ingen article-side funnet via lineage |
+| `article_missing_current_version` | Article-side finnes, men mangler `is_current`-versjon |
+| `article_missing_content` | Article-side har versjon, men `content_markdown` er tomt |
+| `summary_missing` | Ingen summary-side funnet via lineage |
+| `summary_missing_current_version` | Summary-side finnes, men mangler `is_current`-versjon |
+| `summary_missing_content` | Summary-side har versjon, men `content_markdown` er tomt |
+
+Commit `a143a3e` presiserte labels fra «Artikkel med innhold» til «Artikkel med gjeldende innhold».
 
 **8G-3 — Snapshots og trendhistorikk**
 Ny tabell `enterprise_wiki_coverage_snapshots` (customer_id, snapshot_at, payload JSON). Daglig scheduled job lagrer aggregert score. Grunnlag for trendvisning ("forbedres wikien over tid?") og for 8H-triggere.
