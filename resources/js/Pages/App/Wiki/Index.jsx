@@ -283,10 +283,12 @@ function DecisionModal({ run, tw, onClose }) {
 
 // ─── Coverage panel ──────────────────────────────────────────────────────────
 
-function CoverageStat({ label, value, warn = false }) {
-    const numCls = warn && value > 0
-        ? 'text-amber-600'
-        : 'text-slate-900';
+function CoverageStat({ label, value, warn = false, error = false, numCls: numClsOverride }) {
+    const numCls = numClsOverride ?? (
+        (error && value > 0) ? 'text-rose-600' :
+        (warn && value > 0) ? 'text-amber-600' :
+        'text-slate-900'
+    );
     return (
         <div className="flex flex-col gap-0.5">
             <span className={`text-xl font-semibold tabular-nums ${numCls}`}>{value ?? '—'}</span>
@@ -355,6 +357,12 @@ function CoveragePanel({ coverage, tw }) {
                             <CoverageStat
                                 label={tw.coverage_claim_pct ?? 'Dekningsgrad'}
                                 value={cc.claim_coverage_pct != null ? `${cc.claim_coverage_pct}%` : '—'}
+                                numCls={
+                                    cc.claim_coverage_pct == null ? 'text-slate-900' :
+                                    cc.claim_coverage_pct >= 80 ? 'text-emerald-600' :
+                                    cc.claim_coverage_pct >= 50 ? 'text-amber-600' :
+                                    'text-rose-600'
+                                }
                             />
                             <CoverageStat label="Med kildereferanse" value={cc.claims_with_source_reference ?? 0} />
                             <CoverageStat label="Uten kildereferanse" value={cc.claims_without_source_reference ?? 0} warn />
@@ -362,6 +370,8 @@ function CoveragePanel({ coverage, tw }) {
                     </div>
                     <div className="px-5 py-4">
                         <CoverageSection title={tw.coverage_section_graph ?? 'Graf og struktur'}>
+                            <CoverageStat label={tw.lint_severity_error ?? 'Feil'} value={lint.open_errors ?? 0} error />
+                            <CoverageStat label={tw.lint_severity_warning ?? 'Advarsler'} value={lint.open_warnings ?? 0} warn />
                             <CoverageStat label={tw.coverage_orphan_pages ?? 'Foreldreløse sider'} value={lint.orphan_pages ?? 0} warn />
                         </CoverageSection>
                     </div>
