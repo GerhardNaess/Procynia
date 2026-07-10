@@ -96,6 +96,8 @@ class EnterpriseWikiIngestRun extends Model
         'qa_attempt_count',
         'qa_last_error',
         'qa_result',
+        'maintenance_triggered_at',
+        'maintenance_source_hash',
     ];
 
     protected function casts(): array
@@ -113,6 +115,7 @@ class EnterpriseWikiIngestRun extends Model
             'qa_completed_at' => 'datetime',
             'qa_attempt_count' => 'integer',
             'qa_result'       => 'array',
+            'maintenance_triggered_at' => 'datetime',
         ];
     }
 

@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **Retning: 8H continuous maintainer-loop — start ikke uten instruksjon**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 fullført (kildemonitoring + intelligent retry) — 8H-utvidelse gjenstår**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -735,7 +735,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
 | Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-7 fullført |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | Gjenstår — 8H-kjerne avhenger av 8G-3/8G-5 (fullført) · 8H-utvidelse avhenger av 8G-6 (fullført) |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 fullført** (kildemonitoring + intelligent retry av escalated kjøringer) · 8H-kjerne delfase 2 (dypere reparasjon) og 8H-utvidelse gjenstår |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -2232,24 +2232,49 @@ ny eller endret kildedokument oppdaget
 
 Kunden ser kun sluttresultatet: hva ble reparert, og hva krever menneskelig vurdering. Selve reparasjonslogikken er intern og kobles **ikke** til `ProcessEnterpriseWikiIngest`.
 
-### Fase 8H — Continuous Enterprise Wiki Maintainer Loop — Gjenstår
+### Fase 8H — Continuous Enterprise Wiki Maintainer Loop
 
-> **Ikke start uten instruksjon.** 8H-kjerne avhenger av 8G-3/8G-5. 8H-utvidelse avhenger av 8G-6.
+> **8H-kjerne delfase 1 fullført.** 8H-kjerne delfase 2 (dypere reparasjon) og 8H-utvidelse gjenstår — start ikke uten instruksjon.
 
 Mål: automatisk pipeline-kjøring ved nye eller endrede kildedokumenter, med ferdig beslutningsforslag klart for System Owner-godkjenning — fra manuell pilot til operasjonelt system.
 
-**8H-kjerne** *(avhenger av 8G-3/8G-5):*
-- Kildemonitoring: detektere endringer i `EnterpriseWikiDocument` via `file_hash_sha256` vs `EnterpriseWikiPage.last_source_hash`
-- Endringsdeteksjon uten snapshot-historikk — nok til å trigge ny ingest og QA
-- Intelligent retry-beslutning for `escalated` kjøringer: retry når kilden faktisk har endret seg, ikke automatisk hvert 15. minutt
+#### 8H-kjerne delfase 1 — Kildemonitoring + intelligent retry (fullført)
+
+Implementert: kildemonitoring og intelligent retry-beslutning for `escalated` kjøringer.
+
+**Deteksjonssignal:** `EnterpriseWikiDocument.file_hash_sha256` ≠ `EnterpriseWikiIngestRun.maintenance_source_hash`
+
+**Idempotens:** `maintenance_source_hash` settes på kjøringen *før* retry-kallet. Samme kildehash trigges ikke mer enn én gang — neste forsøk skjer kun når dokumentet endrer seg igjen.
+
+**Nye felt på `enterprise_wiki_ingest_runs`:**
+- `maintenance_triggered_at` — tidsstempel for siste maintenanceforsøk
+- `maintenance_source_hash` — kildehash benyttet ved siste maintenanceforsøk (idempotensgaranti)
+
+**Nye filer:**
+- `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php`
+- `app/Console/Commands/EnterpriseWikiMaintenanceCycle.php` (`wiki:maintenance-cycle`)
+- `database/migrations/2026_07_10_000004_add_maintenance_fields_to_enterprise_wiki_ingest_runs.php`
+- `tests/Feature/App/Wiki/EnterpriseWikiMaintenanceCycleTest.php` (9 tester, 28 assertions)
+
+**Scheduler:** `wiki:maintenance-cycle` kjøres hvert 30. minutt med `withoutOverlapping()`.
+
+**Kjørelogikk:**
+1. Finn alle applied kjøringer med `qa_status = escalated` og `source_type = enterprise_wiki_document`
+2. For hver: hent `file_hash_sha256` fra kilddokumentet
+3. Hopp over hvis hash er null eller uendret siden siste maintenance
+4. Sett `maintenance_source_hash` og `maintenance_triggered_at`, kall `runForRun($run->fresh(), retry: true)`
+5. Feil ved QA-retry: logg og teller som `failed` — masker ikke feilen, og lar neste syklus forsøke igjen
+
+#### 8H-kjerne delfase 2 — Dypere reparasjon (gjenstår)
+
 - Dypere reparasjon av claims, source references og page links — typer som 8G-3/8G-5 bevisst ikke reparerer
 
-**8H-utvidelse** *(avhenger av 8G-6):*
+#### 8H-utvidelse *(avhenger av 8G-6):*
 - Terskelbasert repair-beslutning: trigger reparasjon når coverage-score faller under historisk terskel
 - Regresjonsdeteksjon: fang fall i aggregert wikihelse etter nye ingest-kjøringer
 - Historikkbasert eskalering: eskaler til System Owner med trendkontekst, ikke bare øyeblikksbilde
 
-Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H. 8H-kjernen kan teknisk sett utvikles uten 8G-6, men implementeres ikke uten eksplisitt instruksjon.
+Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (critique/revise) → 8G-6 (snapshots) → 8G-7 (lineage) → 8H-kjerne delfase 1 (fullført) → 8H-kjerne delfase 2 → 8H-utvidelse.
 
 ### Produksjonsaktivering — Etter 8G og 8H
 

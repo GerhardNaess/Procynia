@@ -47,3 +47,8 @@ Schedule::command('wiki:lint')
 Schedule::command('wiki:run-post-ingest-qa --all-pending')
     ->everyFifteenMinutes()
     ->withoutOverlapping();
+
+// Enterprise Wiki maintenance cycle: retry escalated runs when source document has changed.
+Schedule::command('wiki:maintenance-cycle')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping();
