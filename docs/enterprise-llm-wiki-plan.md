@@ -2,7 +2,7 @@
 
 Versjon: 0.5
 Dato: 2026-07-10
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 fullført (kildemonitoring + intelligent retry) — 8H-utvidelse gjenstår**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 fullført (commit dd071f6) · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · **8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) — 8H-utvidelse gjenstår**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -735,7 +735,7 @@ Disse spørsmålene må avklares før videre kode utover audit/plankorrigering:
 | Fase 8E | Karpathy-alignment: page types/schema/index/log/backlinks/compile decision | Fullført (8E-10–8E-20) |
 | **Fase 8F** | **Enterprise Wiki forvaltning av kilder, kjøringer og generert innhold** | **8F-0–8F-5 fullført (forvaltningsflate komplett) · 8F-6 og 8F-7 parkert som unntaksfunksjoner** |
 | Fase 8G | Enterprise Wiki coverage/eval og post-ingest QA | 8G-1–8G-7 fullført |
-| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 fullført** (kildemonitoring + intelligent retry av escalated kjøringer) · 8H-kjerne delfase 2 (dypere reparasjon) og 8H-utvidelse gjenstår |
+| Fase 8H | Continuous Enterprise Wiki Maintainer Loop | **8H-kjerne delfase 1 + 2 fullført** (kildemonitoring, intelligent retry, dyp reparasjon av claims/refs/lenker) · 8H-utvidelse gjenstår |
 | Produksjonsaktivering | Kontrollert aktivering — etter 8G og 8H | Sist — ikke aktiv fase |
 | Fase 9 | Sammenligning mot RAG | Fremtidig |
 | Fase 10 | Wiki som svargrunnlag | Fremtidig |
@@ -2265,9 +2265,38 @@ Implementert: kildemonitoring og intelligent retry-beslutning for `escalated` kj
 4. Sett `maintenance_source_hash` og `maintenance_triggered_at`, kall `runForRun($run->fresh(), retry: true)`
 5. Feil ved QA-retry: logg og teller som `failed` — masker ikke feilen, og lar neste syklus forsøke igjen
 
-#### 8H-kjerne delfase 2 — Dypere reparasjon (gjenstår)
+#### 8H-kjerne delfase 2 — Dyp reparasjon av claims, source references og page links (fullført)
 
-- Dypere reparasjon av claims, source references og page links — typer som 8G-3/8G-5 bevisst ikke reparerer
+Implementert: diagnose og målrettet reparasjon av strukturelle wiki-komponenter etter at intelligent retry fortsatt gir `escalated`.
+
+**Deteksjon:** diagnosen sjekker per run:
+- Claims: sider med current version men ingen claims → kaller `EnterpriseWikiExtractPageClaimsService::extract()`
+- Source references: claims uten kildereferanse → kaller `EnterpriseWikiVerifyPageClaimsService::verify()`
+- Page links: sider uten outbound-lenker → kaller `EnterpriseWikiBuildPageLinksService::build()`
+
+Alle tre tjenester er idempotente — de fyller kun inn det som mangler.
+
+**Idempotens:** `deep_repair_source_hash` settes på kjøringen *før* reparasjon. Samme kildehash gir maksimalt ett forsøk — neste forsøk er mulig kun etter at kilden endres igjen.
+
+**QA etter reparasjon:** full post-ingest QA kjøres på nytt via `runForRun(retry: true)`, inkludert teknisk QA, lint, semantisk AI-QA og snapshot.
+
+**Resultat:** `passed`, `escalated` (fortsatt avvik) eller `failed` (teknisk feil).
+
+**Sporbarhet:** `deep_repair_result` (JSON) lagres på kjøringen med `attempted`, `components_repaired`, `qa_status`. QA-snapshot opprettes av re-evalueringsrunden.
+
+**Nye felt på `enterprise_wiki_ingest_runs`:**
+- `deep_repair_attempted_at` — tidsstempel for dyp reparasjonsforsøk
+- `deep_repair_source_hash` — kildehash benyttet (idempotensgaranti)
+- `deep_repair_result` — JSON med diagnose og resultat
+
+**Nye filer:**
+- `app/Services/EnterpriseWiki/EnterpriseWikiDeepRepairService.php`
+- `database/migrations/2026_07_10_000005_add_deep_repair_fields_to_enterprise_wiki_ingest_runs.php`
+- `tests/Feature/App/Wiki/EnterpriseWikiDeepRepairServiceTest.php` (15 tester, 47 assertions)
+
+**Oppdaterte filer:**
+- `app/Services/EnterpriseWiki/EnterpriseWikiMaintenanceCycleService.php` — kaller `deepRepairService->attempt()` hvis run fortsatt er `escalated` etter intelligent retry
+- `app/Models/EnterpriseWikiIngestRun.php` — tre nye felt i `$fillable` og `$casts`
 
 #### 8H-utvidelse *(avhenger av 8G-6):*
 - Terskelbasert repair-beslutning: trigger reparasjon når coverage-score faller under historisk terskel

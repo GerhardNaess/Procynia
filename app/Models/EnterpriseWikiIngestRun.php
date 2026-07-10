@@ -98,6 +98,9 @@ class EnterpriseWikiIngestRun extends Model
         'qa_result',
         'maintenance_triggered_at',
         'maintenance_source_hash',
+        'deep_repair_attempted_at',
+        'deep_repair_source_hash',
+        'deep_repair_result',
     ];
 
     protected function casts(): array
@@ -116,6 +119,8 @@ class EnterpriseWikiIngestRun extends Model
             'qa_attempt_count' => 'integer',
             'qa_result'       => 'array',
             'maintenance_triggered_at' => 'datetime',
+            'deep_repair_attempted_at' => 'datetime',
+            'deep_repair_result'       => 'array',
         ];
     }
 

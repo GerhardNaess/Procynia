@@ -8,17 +8,20 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Source change detection and intelligent retry for escalated Enterprise Wiki ingest runs (8H-kjerne).
+ * Source change detection, intelligent retry, and deep repair for escalated Enterprise Wiki ingest runs (8H-kjerne).
  *
- * Finds applied runs in `escalated` QA status whose source document has changed since
- * the last maintenance attempt and re-triggers QA. Idempotence is guaranteed by
- * `maintenance_source_hash`: a run is only retried when the current document hash
- * differs from the stored hash, preventing repeated retries on the same source version.
+ * Delfase 1: finds applied runs in `escalated` QA status whose source document has changed,
+ * and re-triggers QA (intelligent retry). Idempotence is guaranteed by `maintenance_source_hash`.
+ *
+ * Delfase 2: if the run is still escalated after intelligent retry, attempts one targeted
+ * deep repair of claims, source references, and page links via EnterpriseWikiDeepRepairService.
+ * Idempotence for deep repair is guaranteed by `deep_repair_source_hash`.
  */
 class EnterpriseWikiMaintenanceCycleService
 {
     public function __construct(
         private readonly EnterpriseWikiPostIngestQaService $qaService,
+        private readonly EnterpriseWikiDeepRepairService $deepRepairService,
     ) {}
 
     /**
@@ -103,8 +106,6 @@ class EnterpriseWikiMaintenanceCycleService
 
         try {
             $this->qaService->runForRun($run->fresh(), retry: true);
-
-            return 'retried';
         } catch (\Throwable $e) {
             Log::error('[WIKI_MAINTENANCE] QA retry failed for run', [
                 'run_id' => $run->id,
@@ -113,5 +114,14 @@ class EnterpriseWikiMaintenanceCycleService
 
             return 'failed';
         }
+
+        // If still escalated after intelligent retry, attempt targeted deep repair (delfase 2).
+        $fresh = $run->fresh();
+
+        if ($fresh->qa_status === EnterpriseWikiIngestRun::QA_STATUS_ESCALATED) {
+            $this->deepRepairService->attempt($fresh, $currentHash);
+        }
+
+        return 'retried';
     }
 }
