@@ -341,8 +341,8 @@ function CoveragePanel({ coverage, tw }) {
                         <CoverageStat label={tw.coverage_docs_with_run ?? 'Med applied kjøring'} value={sc.documents_with_applied_run ?? 0} />
                         <CoverageStat label={tw.coverage_docs_with_article ?? 'Artikkel-side opprettet'} value={sc.documents_with_article ?? 0} />
                         <CoverageStat label={tw.coverage_docs_with_summary ?? 'Sammendrag-side opprettet'} value={sc.documents_with_summary ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_article_content ?? 'Artikkel med innhold'} value={sc.documents_with_article_content ?? 0} />
-                        <CoverageStat label={tw.coverage_docs_summary_content ?? 'Sammendrag med innhold'} value={sc.documents_with_summary_content ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_article_content ?? 'Artikkel med gjeldende innhold'} value={sc.documents_with_article_content ?? 0} />
+                        <CoverageStat label={tw.coverage_docs_summary_content ?? 'Sammendrag med gjeldende innhold'} value={sc.documents_with_summary_content ?? 0} />
                     </CoverageSection>
                 </div>
 
