@@ -39,6 +39,7 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiExtractPageClaimsService $extractPageClaimsService,
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
+        private readonly EnterpriseWikiIncrementalRelinkService $incrementalRelinkService,
         private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
         private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
     ) {}
@@ -155,6 +156,7 @@ class EnterpriseWikiDocumentFlowService
 
         try {
             $this->performMaterializeWikilinks($run);
+            $this->performIncrementalRelinking($run);
             $this->performExtractPageClaims($run);
             $this->performVerifyPageClaims($run);
             $this->performAppliedRunLint($run);
@@ -300,6 +302,26 @@ class EnterpriseWikiDocumentFlowService
             'created' => $result['created'] ?? null,
             'updated' => $result['updated'] ?? null,
             'stale_links_removed' => $result['stale_links_removed'] ?? null,
+        ]);
+    }
+
+    /**
+     * When this run created or updated a concept/entity page, relink any existing customer
+     * pages (outside this run) that plausibly already discuss it. Runs after this run's own
+     * wikilinks are materialized so backlinks/traversal/graph immediately reflect any new
+     * cross-page link, and before claims/lint/QA so those stages see the final link graph.
+     */
+    private function performIncrementalRelinking(EnterpriseWikiIngestRun $run): void
+    {
+        $result = $this->incrementalRelinkService->relinkForRun($run->fresh() ?? $run);
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Incremental relinking completed.', [
+            'run_id' => $run->id,
+            'triggers_processed' => $result['triggers_processed'] ?? null,
+            'candidates_considered' => $result['candidates_considered'] ?? null,
+            'applied' => $result['applied'] ?? null,
+            'skipped' => $result['skipped'] ?? null,
+            'failed' => $result['failed'] ?? null,
         ]);
     }
 
