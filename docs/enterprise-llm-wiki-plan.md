@@ -1,8 +1,8 @@
 # Enterprise LLM Wiki — Arkitektur- og implementeringsplan
 
-Versjon: 0.7
+Versjon: 0.8
 Dato: 2026-07-11
-Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — inline wikilinks er nå klikkbare i UI og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · 8I-5 (full incremental relinking av eldre sider) og 8I-6 (lint/semantisk repair av lenker) gjenstår som neste blocker**
+Status: Infrastruktur fullført (Fase 0–4B) · AI-integrasjon fullført (Fase 5) · Lokal E2E verifisert (Fase 6) · Produksjonsrunbook fullført (Fase 7, aktivering utsatt) · Article-first UI/fullført start (Fase 8D, commits 94f6541 og 94f5721) · Backend artikkelgenerering teknisk implementert (Fase 8C, commits 956206d, 5029cb0 og 4ea8fb6) · Fase 8E-10–8E-20 teknisk implementert, men **8E-16/8E-19/8E-20 sin lenke-/grafmodell er korrigert i v0.6 — se Fase 8I** · Fase 8F-0–8F-5 fullført (forvaltnings- og kontrollflate) · 8G-1–8G-7 fullført · 8H-kjerne delfase 1 + delfase 2 fullført (kildemonitoring, intelligent retry, dyp reparasjon) · 8H-utvidelse fullført (snapshot-basert terskelreparasjon og regresjonsdeteksjon) · Runtimeflyten (staged page-generation queues, commit `b6ccd87`) teknisk verifisert · **Fase 8I-1/8I-2 (canonical wikilink-syntax, parser, materialisering) fullført, commit `d0a608d` · Fase 8I-3/8I-4 (rendering, backlinks, canonical traversal, Wiki-aware generation) fullført, commit `ab35d52` — inline wikilinks er nå klikkbare i UI og LLM-generert innhold skriver og valideres mot en tillatt sidekatalog før persistens · Fase 8I-5 (incremental relinking av eksisterende sider) fullført, commit `716477e` · 8I-6 (lint/semantisk repair av lenker) gjenstår som neste blocker**
 
 > **Arkitekturkorrigering (v0.2):** Enterprise Wiki skal være et fullstendig parallelt system uten avhengighet av Kunnskapsbase eller RAG-pipeline. Dagens `KnowledgeItemVersion`-baserte ingest er midlertidig bootstrap/import og regnes **ikke** som permanent primærflyt. Se §3, §7 og Fase 4A for korrekt langsiktig arkitektur.
 >
@@ -2456,7 +2456,7 @@ Roadmap-rekkefølge: 8G-3 (fullført) → 8G-4 (semantisk AI-QA) → 8G-5 (criti
 
 ### Fase 8I — Karpathy Wiki linking and incremental maintenance
 
-> **Status (2026-07-11): 8I-1, 8I-2, 8I-3 og 8I-4 fullført.** 8I-5 (full incremental relinking av eldre sider) og 8I-6 (lint/semantisk repair av lenker) gjenstår og er neste blocker foran videre graph-visualisering, generell resume-arkitektur eller andre utvidelser.
+> **Status (2026-07-11): 8I-1, 8I-2, 8I-3, 8I-4 og 8I-5 fullført.** 8I-6 (lint/semantisk repair av lenker) gjenstår og er neste blocker foran videre graph-visualisering, generell resume-arkitektur eller andre utvidelser.
 >
 > - **8I-1 (canonical wikilink-syntax, parser, validering)** og **8I-2 (deterministisk materialisering til `EnterpriseWikiPageLink`)** — fullført, commit `d0a608d`.
 > - **8I-3 (rendering av inline wikilinks, backlinks, canonical traversal)** og **8I-4 (Wiki-aware LLM-generering av inline wikilinks)** — fullført, commit `ab35d52`.
@@ -2501,9 +2501,14 @@ Claims og source references forblir verifikasjonslaget — de er ikke hovedinnho
 **Canonical traversal — fullført (8I-3, ikke i opprinnelig A-I-liste, men del av leveransen)**
 - `EnterpriseWikiPageTraversalService` (`outgoing`, `incoming`, `relatedArticles`, `relatedConcepts`, `relatedEntities`) filtrerer nå alle spørringer til `link_type = wikilink`. Historiske kombinatoriske rader slettes ikke, men ignoreres av all canonical Wiki-navigasjon.
 
-**G. Incremental relinking — gjenstår (8I-5)**
-- Når en ny concept/entity-side opprettes: finn relevante eksisterende pages som omtaler begrepet, la maintainer/compiler vurdere revidering, opprett nye page versions kun ved faktisk endring, parse/bygg relasjoner på nytt for berørte sider.
-- Katalog- og valideringsmodellen fra 8I-4 (`EnterpriseWikiLinkCatalogService`, `EnterpriseWikiLinkResolver`) er bevisst gjenbrukbar for dette — 8I-5 er ikke startet, men grunnmuren finnes.
+**G. Incremental relinking — fullført (8I-5, commit `716477e`)**
+- Ny `EnterpriseWikiIncrementalRelinkService`, kjørt fra `EnterpriseWikiDocumentFlowService::continueAfterPagesGenerated()` rett etter `performMaterializeWikilinks()`: når en run oppretter/oppdaterer en concept- eller entity-side (pivot `action` created/updated), søkes det etter eksisterende customer-sider (utenfor runen) hvis current `content_markdown` nevner triggersidens tittel — deterministisk tekstsøk, ikke RAG/embeddings.
+- Kandidater er cappet på `EnterpriseWikiIncrementalRelinkService::MAX_CANDIDATES_PER_TRIGGER = 10` per trigger-side, ordnet etter sist oppdatert.
+- Ny `WikiLinkRevisionAiClient` (delt med 8I-6) får bare étt tillatt mål (triggersiden) og avgjør selv (`changed: bool`) om en naturlig lenke er berettiget — ingen mekanisk lenking av alle forekomster, ingen full mesh.
+- Deterministisk validering før persistens gjenbruker `EnterpriseWikiLinkParser`/`EnterpriseWikiLinkResolver` nøyaktig som i 8I-4: avviser ukjent slug, self-link, cross-customer og malformed forsøk, og avviser i tillegg enhver revisjon som dropper en tidligere gyldig wikilink. Ingen reparasjon — en ugyldig revisjon forkastes, siden endres ikke.
+- Ny idempotens-/proveniens-tabell `enterprise_wiki_page_relink_attempts` (unik på run+trigger+kandidat) gjør et gjentatt/dobbelt kall til `relinkForRun()` et rent no-op — ingen ny AI-kall, ingen ny page version.
+- Ved faktisk endring: ny immutable `EnterpriseWikiPageVersion` (gammel versjon bevares, `is_current=false`), etterfulgt av `EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage()` — samme canonical materialisering som all annen wikilink-skriving, ingen separat relasjonssannhet.
+- 14 nye tester i `EnterpriseWikiIncrementalRelinkServiceTest` (kandidatvalg, dedupe/allerede-lenket, cap, cross-customer, ugyldig revisjon, ingen-endring, ny version + bevart gammel version, materialisering, backlinks/traversal/graph reflekterer ny lenke, dobbel dispatch, `ProcessEnterpriseWikiIngest` urørt). Full suite: 1009 passed, 2733 assertions.
 
 **H. Lint — gjenstår (8I-6)**
 - Broken wikilinks, self-links, cross-customer links, orphan concept/entity, article med concepts/entities uten relevante inline links, page-relasjon som ikke samsvarer med current markdown, graph node uten relasjoner der relasjoner burde finnes.
