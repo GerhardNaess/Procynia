@@ -35,8 +35,8 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $summary  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
         $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
 
-        $this->createLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
-        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT);
+        $this->createLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->outgoing($article);
 
@@ -52,14 +52,56 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
         $entity   = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entity');
 
-        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
-        $this->createLink($customer, $entity, $article, EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE);
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $this->createLink($customer, $entity, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->incoming($article);
 
         $this->assertCount(2, $result);
         $resultIds = $result->pluck('id')->sort()->values()->all();
         $this->assertSame(collect([$concept->id, $entity->id])->sort()->values()->all(), $resultIds);
+    }
+
+    // =========================================================================
+    // Canonical wikilink filter (8I-3/8I-4)
+    // =========================================================================
+
+    public function test_outgoing_ignores_combinatoric_link_types(): void
+    {
+        $customer = $this->createCustomer();
+        $article  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $summary  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
+
+        // A structural relation built by the legacy combinatoric EnterpriseWikiBuildPageLinksService::build() —
+        // not derived from an actual inline wikilink, so it must never appear here.
+        EnterpriseWikiPageLink::query()->create([
+            'customer_id' => $customer->id,
+            'from_page_id' => $article->id,
+            'to_page_id' => $summary->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+        ]);
+
+        $this->assertCount(0, $this->service->outgoing($article));
+    }
+
+    public function test_incoming_ignores_a_historical_link_with_a_different_link_type(): void
+    {
+        $customer = $this->createCustomer();
+        $article  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
+        $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
+
+        EnterpriseWikiPageLink::query()->create([
+            'customer_id' => $customer->id,
+            'from_page_id' => $concept->id,
+            'to_page_id' => $article->id,
+            'link_type' => EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE,
+            'source' => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+            'confidence' => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+        ]);
+
+        $this->assertCount(0, $this->service->incoming($article));
     }
 
     // =========================================================================
@@ -73,7 +115,7 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
 
         $article1 = $this->createPage($customer1, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article C1');
         $summary1 = $this->createPage($customer1, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary C1');
-        $this->createLink($customer1, $article1, $summary1, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $this->createLink($customer1, $article1, $summary1, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         // Customer 2 has a page with the same type but different customer
         $article2 = $this->createPage($customer2, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article C2');
@@ -90,7 +132,7 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
 
         $article1 = $this->createPage($customer1, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article C1');
         $concept1 = $this->createPage($customer1, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept C1');
-        $this->createLink($customer1, $concept1, $article1, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
+        $this->createLink($customer1, $concept1, $article1, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $article2 = $this->createPage($customer2, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article C2');
 
@@ -110,9 +152,9 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $article  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
         $summary  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Summary');
 
-        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
+        $this->createLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
         // Add a non-article link to verify filtering
-        $this->createLink($customer, $concept, $summary, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_SUMMARY);
+        $this->createLink($customer, $concept, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->relatedArticles($concept);
 
@@ -126,7 +168,7 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $entity   = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entity');
         $article  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ARTICLE, 'Article');
 
-        $this->createLink($customer, $entity, $article, EnterpriseWikiPageLink::LINK_TYPE_ENTITY_TO_ARTICLE);
+        $this->createLink($customer, $entity, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->relatedArticles($entity);
 
@@ -141,9 +183,9 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
         $entity   = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entity');
 
-        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT);
+        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
         // Add an entity link to verify filtering
-        $this->createLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY);
+        $this->createLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->relatedConcepts($article);
 
@@ -158,9 +200,9 @@ class EnterpriseWikiPageTraversalServiceTest extends TestCase
         $entity   = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_ENTITY, 'Entity');
         $concept  = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_CONCEPT, 'Concept');
 
-        $this->createLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY);
+        $this->createLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
         // Add a concept link to verify filtering
-        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT);
+        $this->createLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $result = $this->service->relatedEntities($article);
 

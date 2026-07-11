@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Exceptions\EnterpriseWikiInvalidWikilinksException;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -35,6 +36,9 @@ class EnterpriseWikiGenerateAppliedPagesService
 
     public function __construct(
         private readonly WikiPageContentAiClient $aiClient,
+        private readonly EnterpriseWikiLinkCatalogService $linkCatalogService,
+        private readonly EnterpriseWikiLinkParser $linkParser,
+        private readonly EnterpriseWikiLinkResolver $linkResolver,
     ) {}
 
     /**
@@ -219,13 +223,18 @@ class EnterpriseWikiGenerateAppliedPagesService
             ? $this->buildConceptEntityContextForRun($run, $page)
             : '';
 
+        $catalogResult = $this->linkCatalogService->buildForPage($run, $page);
+
         $markdown = $this->aiClient->generateFromSource(
             pageTitle:         $page->title,
             pageType:          $page->page_type,
             sourceText:        $sourceText,
             languageCode:      $languageCode,
             additionalContext: $additionalContext,
+            linkCatalog:       $catalogResult['catalog'],
         );
+
+        $this->validateWikilinks($run, $page, $markdown, $catalogResult['run_page_count']);
 
         DB::transaction(function () use ($run, $page, $markdown): void {
             $pivot = EnterpriseWikiIngestRunPage::query()
@@ -248,6 +257,72 @@ class EnterpriseWikiGenerateAppliedPagesService
                 'generation_error' => null,
             ]);
         });
+    }
+
+    /**
+     * Deterministically validate a generated page's inline wikilinks against the exact
+     * allowed catalog before the page version is written (8I-4). Rejects unknown/broken
+     * slugs, self-links (cross-customer targets are indistinguishable from unknown slugs,
+     * since resolving is customer-scoped), and malformed-but-attempted wikilink syntax.
+     * Never repairs anything — an invalid generation is rejected outright and surfaces as
+     * a generation failure for this page (see GenerateEnterpriseWikiAppliedPage).
+     *
+     * Minimum-links domain rule: if this run has other applied pages available to link to
+     * (run_page_count > 0), the generated page must contain at least one valid inline
+     * wikilink — a run must not complete with a page left completely isolated from
+     * everything else the maintainer decision created. A page whose run has no other pages
+     * (run_page_count === 0) is never required to contain a link.
+     *
+     * @throws EnterpriseWikiInvalidWikilinksException
+     */
+    private function validateWikilinks(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page, string $markdown, int $runPageCount): void
+    {
+        $parsed = $this->linkParser->parse($markdown);
+        $rawOccurrences = $this->linkParser->countRawOccurrences($markdown);
+
+        if ($rawOccurrences > count($parsed)) {
+            throw new EnterpriseWikiInvalidWikilinksException(sprintf(
+                'Run [%d] page [%d] (%s): generated content contains %d malformed wikilink attempt(s).',
+                $run->id,
+                $page->id,
+                $page->page_type,
+                $rawOccurrences - count($parsed),
+            ));
+        }
+
+        $occurrences = $this->linkResolver->resolveOccurrences($run->customer_id, $page, $parsed);
+
+        $invalidSlugs = [];
+        $validCount = 0;
+
+        foreach ($occurrences as $occurrence) {
+            if ($occurrence['status'] === EnterpriseWikiLinkResolver::STATUS_VALID) {
+                $validCount++;
+            } else {
+                $invalidSlugs[] = $occurrence['link']['target_slug'];
+            }
+        }
+
+        if ($invalidSlugs !== []) {
+            throw new EnterpriseWikiInvalidWikilinksException(sprintf(
+                'Run [%d] page [%d] (%s): %d invalid wikilink slug(s): %s.',
+                $run->id,
+                $page->id,
+                $page->page_type,
+                count($invalidSlugs),
+                implode(', ', array_values(array_unique($invalidSlugs))),
+            ));
+        }
+
+        if ($validCount === 0 && $runPageCount > 0) {
+            throw new EnterpriseWikiInvalidWikilinksException(sprintf(
+                'Run [%d] page [%d] (%s): generated content contains no valid inline wikilinks, but %d other applied page(s) exist in this run.',
+                $run->id,
+                $page->id,
+                $page->page_type,
+                $runPageCount,
+            ));
+        }
     }
 
     private function buildConceptEntityContextForRun(EnterpriseWikiIngestRun $run, EnterpriseWikiPage $page): string

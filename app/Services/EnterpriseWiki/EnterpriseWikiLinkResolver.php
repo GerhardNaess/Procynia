@@ -19,6 +19,12 @@ use App\Models\EnterpriseWikiPage;
  */
 class EnterpriseWikiLinkResolver
 {
+    public const STATUS_VALID = 'valid';
+
+    public const STATUS_BROKEN = 'broken';
+
+    public const STATUS_SELF_LINK = 'self_link';
+
     /**
      * @param  list<array{target_slug: string, anchor_text: string, original_markup: string, occurrence_order: int}>  $parsedLinks
      * @return array{
@@ -30,50 +36,24 @@ class EnterpriseWikiLinkResolver
      */
     public function resolve(int $customerId, EnterpriseWikiPage $sourcePage, array $parsedLinks): array
     {
-        if (empty($parsedLinks)) {
-            return [
-                'resolved' => [],
-                'broken_slugs' => [],
-                'self_link_slugs' => [],
-                'occurrences_found' => 0,
-            ];
-        }
-
-        $uniqueSlugs = array_values(array_unique(array_column($parsedLinks, 'target_slug')));
-
-        $pagesBySlug = EnterpriseWikiPage::query()
-            ->where('customer_id', $customerId)
-            ->whereIn('slug', $uniqueSlugs)
-            ->get()
-            ->keyBy('slug');
+        $occurrences = $this->resolveOccurrences($customerId, $sourcePage, $parsedLinks);
 
         $resolvedByTargetPageId = [];
         $brokenSlugs = [];
         $selfLinkSlugs = [];
 
-        foreach ($parsedLinks as $link) {
-            $targetSlug = $link['target_slug'];
+        foreach ($occurrences as $occurrence) {
+            $targetSlug = $occurrence['link']['target_slug'];
 
-            /** @var EnterpriseWikiPage|null $targetPage */
-            $targetPage = $pagesBySlug->get($targetSlug);
-
-            if ($targetPage === null) {
-                $brokenSlugs[] = $targetSlug;
-
-                continue;
-            }
-
-            if ($targetPage->id === $sourcePage->id) {
-                $selfLinkSlugs[] = $targetSlug;
-
-                continue;
-            }
-
-            // First occurrence of a given target wins the anchor text used for materialization.
-            $resolvedByTargetPageId[$targetPage->id] ??= [
-                'to_page' => $targetPage,
-                'anchor_text' => $link['anchor_text'],
-            ];
+            match ($occurrence['status']) {
+                self::STATUS_BROKEN => $brokenSlugs[] = $targetSlug,
+                self::STATUS_SELF_LINK => $selfLinkSlugs[] = $targetSlug,
+                // First occurrence of a given target wins the anchor text used for materialization.
+                self::STATUS_VALID => $resolvedByTargetPageId[$occurrence['target_page']->id] ??= [
+                    'to_page' => $occurrence['target_page'],
+                    'anchor_text' => $occurrence['link']['anchor_text'],
+                ],
+            };
         }
 
         return [
@@ -82,5 +62,49 @@ class EnterpriseWikiLinkResolver
             'self_link_slugs' => $selfLinkSlugs,
             'occurrences_found' => count($parsedLinks),
         ];
+    }
+
+    /**
+     * Classify every parsed occurrence individually, preserving order and duplicates —
+     * unlike resolve(), nothing is deduplicated here. Used by callers that need to act on
+     * each literal occurrence in the text (e.g. render-only link transformation), rather
+     * than the one-row-per-target logical relation resolve() produces for materialization.
+     *
+     * @param  list<array{target_slug: string, anchor_text: string, original_markup: string, occurrence_order: int}>  $parsedLinks
+     * @return list<array{link: array, status: string, target_page: ?EnterpriseWikiPage}>
+     */
+    public function resolveOccurrences(int $customerId, EnterpriseWikiPage $sourcePage, array $parsedLinks): array
+    {
+        if (empty($parsedLinks)) {
+            return [];
+        }
+
+        $pagesBySlug = $this->fetchPagesBySlug($customerId, array_column($parsedLinks, 'target_slug'));
+
+        return array_map(function (array $link) use ($sourcePage, $pagesBySlug): array {
+            /** @var EnterpriseWikiPage|null $targetPage */
+            $targetPage = $pagesBySlug->get($link['target_slug']);
+
+            if ($targetPage === null) {
+                return ['link' => $link, 'status' => self::STATUS_BROKEN, 'target_page' => null];
+            }
+
+            if ($targetPage->id === $sourcePage->id) {
+                return ['link' => $link, 'status' => self::STATUS_SELF_LINK, 'target_page' => null];
+            }
+
+            return ['link' => $link, 'status' => self::STATUS_VALID, 'target_page' => $targetPage];
+        }, $parsedLinks);
+    }
+
+    private function fetchPagesBySlug(int $customerId, array $slugs): \Illuminate\Support\Collection
+    {
+        $uniqueSlugs = array_values(array_unique($slugs));
+
+        return EnterpriseWikiPage::query()
+            ->where('customer_id', $customerId)
+            ->whereIn('slug', $uniqueSlugs)
+            ->get()
+            ->keyBy('slug');
     }
 }

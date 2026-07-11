@@ -156,10 +156,10 @@ export default function WikiShow({
     lint_findings: lintFindings = [],
     lint_summary: lintSummary = null,
     outgoing_links: outgoingLinks = [],
-    incoming_links: incomingLinks = [],
     related_articles: relatedArticles = [],
     related_concepts: relatedConcepts = [],
     related_entities: relatedEntities = [],
+    backlinks = [],
 }) {
     const { translations = {}, auth = {} } = usePage().props;
     const tw = translations?.wiki ?? {};
@@ -210,7 +210,9 @@ export default function WikiShow({
     const isPendingReview = page.status === 'pending_review';
     const isApproved = page.status === 'approved';
 
-    const articleContent = current_version?.content_markdown ?? null;
+    // rendered_markdown has [[wikilinks]] pre-transformed into clickable internal links;
+    // fall back to raw content_markdown for older payloads/tests that don't send it.
+    const articleContent = current_version?.rendered_markdown ?? current_version?.content_markdown ?? null;
     const hasArticle = Boolean(articleContent?.trim());
 
     // Derive semantic traversal groups from outgoing links
@@ -222,8 +224,7 @@ export default function WikiShow({
         articleLinks.length > 0 ||
         relatedConcepts.length > 0 ||
         relatedEntities.length > 0 ||
-        relatedArticles.length > 0 ||
-        incomingLinks.length > 0;
+        relatedArticles.length > 0;
 
     return (
         <CustomerAppLayout title={page.title} showPageTitle={false}>
@@ -369,6 +370,23 @@ export default function WikiShow({
                     )}
                 </section>
 
+                {/* Backlinks — pages that link to this one via a canonical inline wikilink */}
+                <section className="space-y-3">
+                    <h2 className="text-base font-semibold text-slate-700">
+                        {tw.backlinks_heading ?? 'Lenket fra'}
+                    </h2>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
+                        {backlinks.length > 0 ? (
+                            <LinkedPageList pages={backlinks} label={tw.backlinks_label ?? 'Sider'} />
+                        ) : (
+                            <p className="text-sm text-slate-400">
+                                {tw.backlinks_empty ?? 'Ingen andre sider lenker hit ennå.'}
+                            </p>
+                        )}
+                    </div>
+                </section>
+
                 {/* Traversal / navigation */}
                 <section className="space-y-3">
                     <h2 className="text-base font-semibold text-slate-700">
@@ -397,10 +415,6 @@ export default function WikiShow({
                                 <LinkedPageList
                                     pages={relatedArticles}
                                     label={tw.traversal_related_articles ?? 'Relaterte artikler'}
-                                />
-                                <LinkedPageList
-                                    pages={incomingLinks}
-                                    label={tw.traversal_incoming_links ?? 'Baklenker'}
                                 />
                             </div>
                         ) : (

@@ -151,12 +151,15 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
     {
         Queue::fake();
 
+        $customer = $this->createCustomer();
+        [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
+
+        // $this->mock() rebinds the container on every call, so this must run AFTER
+        // createAppliedRunWithTwoPages() (which sets its own default success mock) to
+        // actually take effect — see the note in that helper.
         $this->mock(WikiPageContentAiClient::class)
             ->shouldReceive('generateFromSource')
             ->andThrow(new RuntimeException('AI unavailable'));
-
-        $customer = $this->createCustomer();
-        [$run, $article] = $this->createAppliedRunWithTwoPages($customer);
 
         try {
             (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle(
@@ -216,10 +219,13 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
                 string $sourceText,
                 string $languageCode,
                 string $additionalContext = '',
-            ) use (&$capturedContext): string {
+                array $linkCatalog = [],
+            ) use (&$capturedContext, $article): string {
                 $capturedContext = $additionalContext;
 
-                return self::FAKE_MARKDOWN;
+                // The run has other applied pages (article, summary), so 8I-4's
+                // minimum-wikilink domain rule requires at least one valid link.
+                return self::FAKE_MARKDOWN." See [[{$article->slug}]] for details.";
             });
 
         Queue::fake();
@@ -292,6 +298,15 @@ class GenerateEnterpriseWikiAppliedPageJobTest extends TestCase
         $summary = $this->createPage($customer, EnterpriseWikiPage::PAGE_TYPE_SUMMARY, 'Sammendrag: Test Artikkel');
 
         $run = $this->createAppliedRun($customer, $document, [$article, $summary]);
+
+        // The run has another applied page (summary), so 8I-4's minimum-wikilink domain
+        // rule requires the generated article to contain at least one valid inline
+        // wikilink. Point the mocked AI response at the summary's real slug so these
+        // orchestration-focused tests satisfy that rule without asserting on it directly.
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generateFromSource')
+            ->andReturn(self::FAKE_MARKDOWN." See [[{$summary->slug}]] for details.")
+            ->byDefault();
 
         return [$run, $article, $summary];
     }

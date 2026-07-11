@@ -61,6 +61,57 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertSame(300, $capturedTimeout);
     }
 
+    // =========================================================================
+    // Wiki-link catalog (8I-4)
+    // =========================================================================
+
+    public function test_link_catalog_is_included_in_the_user_prompt(): void
+    {
+        $catalog = [
+            ['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept'],
+            ['slug' => 'prosjekteier', 'title' => 'Prosjekteier', 'page_type' => 'entity'],
+        ];
+
+        $payload = $this->capturePayload(linkCatalog: $catalog);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('ALLOWED WIKILINK TARGETS (2 pages):', $userPrompt);
+        $this->assertStringContainsString('business-case', $userPrompt);
+        $this->assertStringContainsString('prosjekteier', $userPrompt);
+    }
+
+    public function test_empty_link_catalog_is_documented_as_no_pages_available(): void
+    {
+        $payload = $this->capturePayload(linkCatalog: []);
+        $userPrompt = $this->userPromptTextFromPayload($payload);
+
+        $this->assertStringContainsString('ALLOWED WIKILINK TARGETS (0 pages):', $userPrompt);
+        $this->assertStringContainsString('No other pages available to link to.', $userPrompt);
+    }
+
+    public function test_adding_a_link_catalog_does_not_change_the_model_token_reasoning_or_store_contract(): void
+    {
+        $catalog = [['slug' => 'business-case', 'title' => 'Business Case', 'page_type' => 'concept']];
+
+        $payload = $this->capturePayload(linkCatalog: $catalog);
+
+        $this->assertSame('gpt-5', $payload['model']);
+        $this->assertSame(6000, $payload['max_output_tokens']);
+        $this->assertSame('low', data_get($payload, 'reasoning.effort'));
+        $this->assertFalse($payload['store']);
+    }
+
+    public function test_developer_prompt_documents_slug_and_slug_anchor_syntax(): void
+    {
+        foreach (['article', 'summary', 'concept', 'entity'] as $pageType) {
+            $payload = $this->capturePayload(pageType: $pageType);
+            $developerPrompt = $this->developerPromptTextFromPayload($payload);
+
+            $this->assertStringContainsString('[[target-slug|natural visible text]]', $developerPrompt, "page type: {$pageType}");
+            $this->assertStringContainsString('[[target-slug]]', $developerPrompt, "page type: {$pageType}");
+        }
+    }
+
     public function test_schema_requires_page_markdown(): void
     {
         $payload = $this->capturePayload();
@@ -307,6 +358,7 @@ class WikiPageContentAiClientTest extends TestCase
         string $sourceText = 'Noe kildetekst.',
         string $languageCode = 'no',
         string $additionalContext = '',
+        array $linkCatalog = [],
     ): array {
         $capturedPayload = null;
 
@@ -333,9 +385,20 @@ class WikiPageContentAiClientTest extends TestCase
             $sourceText,
             $languageCode,
             $additionalContext,
+            $linkCatalog,
         );
 
         return (array) $capturedPayload;
+    }
+
+    private function userPromptTextFromPayload(array $payload): string
+    {
+        return (string) data_get($payload, 'input.1.content.0.text', '');
+    }
+
+    private function developerPromptTextFromPayload(array $payload): string
+    {
+        return (string) data_get($payload, 'input.0.content.0.text', '');
     }
 
     private function clientReturning(array $body): WikiPageContentAiClient

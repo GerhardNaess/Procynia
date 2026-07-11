@@ -1211,7 +1211,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
-        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
 
@@ -1232,7 +1232,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
-        $this->createPageLink($customer, $summary, $article, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE);
+        $this->createPageLink($customer, $summary, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
 
@@ -1249,7 +1249,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $concept = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
-        $this->createPageLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_CONCEPT);
+        $this->createPageLink($customer, $article, $concept, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
 
@@ -1266,7 +1266,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_CONTRIBUTOR);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $entity = $this->createPage($customer, EnterpriseWikiPage::STATUS_APPROVED, 'Entitet', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
-        $this->createPageLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_ENTITY);
+        $this->createPageLink($customer, $article, $entity, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$article->slug);
 
@@ -1283,7 +1283,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $concept = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
-        $this->createPageLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_CONCEPT_TO_ARTICLE);
+        $this->createPageLink($customer, $concept, $article, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$concept->slug);
 
@@ -1344,7 +1344,7 @@ class WikiControllerTest extends TestCase
         $page2 = $this->createPage($customer2, EnterpriseWikiPage::STATUS_APPROVED, 'Fremmed side', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
 
         // Create a link that belongs to customer2 — must not appear in customer1's page props
-        $this->createPageLink($customer2, $page2, $page1, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE);
+        $this->createPageLink($customer2, $page2, $page1, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->get('/app/wiki/'.$page1->slug);
 
@@ -1379,7 +1379,7 @@ class WikiControllerTest extends TestCase
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
         $article = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Kildeartikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
         $summary = $this->createPage($customer, EnterpriseWikiPage::STATUS_DRAFT, 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
-        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $this->createPageLink($customer, $article, $summary, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $linksBefore    = EnterpriseWikiPageLink::query()->count();
         $claimsBefore   = EnterpriseWikiClaim::query()->count();

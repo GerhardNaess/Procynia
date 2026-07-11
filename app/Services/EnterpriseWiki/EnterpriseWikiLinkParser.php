@@ -82,4 +82,17 @@ class EnterpriseWikiLinkParser
 
         return $results;
     }
+
+    /**
+     * Counts every bracket-matched `[[...]]` span in the markdown, including ones parse()
+     * drops for having an empty slug or empty anchor. The gap between this count and
+     * count(parse($markdown)) is exactly the number of malformed-but-clearly-attempted
+     * wikilinks — useful for callers (e.g. AI-output validation) that need to reject
+     * near-miss syntax rather than silently ignore it, without the parser itself
+     * attempting to repair anything.
+     */
+    public function countRawOccurrences(string $markdown): int
+    {
+        return (int) preg_match_all(self::PATTERN, $markdown);
+    }
 }

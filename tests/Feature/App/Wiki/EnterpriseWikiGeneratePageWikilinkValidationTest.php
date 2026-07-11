@@ -1,0 +1,300 @@
+<?php
+
+namespace Tests\Feature\App\Wiki;
+
+use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
+use App\Models\Customer;
+use App\Models\EnterpriseWikiDocument;
+use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageVersion;
+use App\Models\Language;
+use App\Models\Nationality;
+use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
+use RuntimeException;
+use Tests\TestCase;
+
+/**
+ * Phase 8I-4: deterministic validation of generated inline wikilinks before a page
+ * version is persisted.
+ */
+class EnterpriseWikiGeneratePageWikilinkValidationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    // =========================================================================
+    // Valid wikilinks are accepted, for every page type
+    // =========================================================================
+
+    public function test_article_output_with_a_valid_wikilink_is_accepted(): void
+    {
+        $this->assertGenerationAccepted(EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+    }
+
+    public function test_summary_output_with_a_valid_wikilink_is_accepted(): void
+    {
+        $this->assertGenerationAccepted(EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+    }
+
+    public function test_concept_output_with_a_valid_wikilink_is_accepted(): void
+    {
+        $this->assertGenerationAccepted(EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+    }
+
+    public function test_entity_output_with_a_valid_wikilink_is_accepted(): void
+    {
+        $this->assertGenerationAccepted(EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+    }
+
+    private function assertGenerationAccepted(string $pageType): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'target-page', 'Target Page', $pageType);
+        $other = $this->createPage($customer, 'other-page', 'Other Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $other]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nSee [[other-page]] for details.");
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $generated->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_COMPLETED, $pivot->generation_status);
+    }
+
+    // =========================================================================
+    // Invalid wikilinks are rejected before persistence
+    // =========================================================================
+
+    public function test_unknown_slug_is_rejected_before_persistence(): void
+    {
+        $this->assertGenerationRejected(
+            fn (EnterpriseWikiPage $generated, EnterpriseWikiPage $other) => "# {$generated->title}\n\nSee [[does-not-exist]].",
+        );
+    }
+
+    public function test_self_link_is_rejected_before_persistence(): void
+    {
+        $this->assertGenerationRejected(
+            fn (EnterpriseWikiPage $generated, EnterpriseWikiPage $other) => "# {$generated->title}\n\nSee [[{$generated->slug}]].",
+        );
+    }
+
+    public function test_cross_customer_target_is_rejected_before_persistence(): void
+    {
+        $customer = $this->createCustomer();
+        $otherCustomer = $this->createCustomer('Other Customer');
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'target-page', 'Target Page');
+        $otherCustomerPage = $this->createPage($otherCustomer, 'foreign-page', 'Foreign Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated]);
+
+        $this->mockAiResponse("# {$generated->title}\n\nSee [[{$otherCustomerPage->slug}]].");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+    }
+
+    private function assertGenerationRejected(\Closure $markdownFor): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $generated = $this->createPage($customer, 'target-page', 'Target Page');
+        $other = $this->createPage($customer, 'other-page', 'Other Page');
+        $run = $this->createAppliedRun($customer, $document, [$generated, $other]);
+
+        $this->mockAiResponse($markdownFor($generated, $other));
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $generated->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected — the job's catch block turns this into a failed pivot.
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $generated->id)->exists());
+
+        $pivot = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->where('enterprise_wiki_page_id', $generated->id)
+            ->first();
+        $this->assertSame(EnterpriseWikiIngestRunPage::GENERATION_STATUS_FAILED, $pivot->generation_status);
+        $this->assertNull($pivot->generated_page_version_id);
+    }
+
+    // =========================================================================
+    // Minimum-wikilinks domain rule
+    // =========================================================================
+
+    public function test_zero_link_article_is_rejected_when_the_run_has_relevant_targets(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel', EnterpriseWikiPage::PAGE_TYPE_ARTICLE);
+        $concept = $this->createPage($customer, 'konsept', 'Konsept', EnterpriseWikiPage::PAGE_TYPE_CONCEPT);
+        $run = $this->createAppliedRun($customer, $document, [$article, $concept]);
+
+        $this->mockAiResponse("# {$article->title}\n\nNo links in this content at all.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+    }
+
+    public function test_zero_link_summary_is_rejected_when_the_run_has_relevant_targets(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $summary = $this->createPage($customer, 'sammendrag', 'Sammendrag', EnterpriseWikiPage::PAGE_TYPE_SUMMARY);
+        $entity = $this->createPage($customer, 'entitet', 'Entitet', EnterpriseWikiPage::PAGE_TYPE_ENTITY);
+        $run = $this->createAppliedRun($customer, $document, [$summary, $entity]);
+
+        $this->mockAiResponse("# {$summary->title}\n\nNo links in this content at all.");
+
+        Queue::fake();
+
+        try {
+            (new GenerateEnterpriseWikiAppliedPage($run->id, $summary->id))->handle($this->service());
+            $this->fail('Expected generation to be rejected.');
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertFalse(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $summary->id)->exists());
+    }
+
+    public function test_page_with_empty_catalog_can_be_generated_without_a_wikilink(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $article = $this->createPage($customer, 'artikkel', 'Artikkel');
+        $run = $this->createAppliedRun($customer, $document, [$article]);
+
+        $this->mockAiResponse("# {$article->title}\n\nNo links needed — this page stands alone.");
+
+        Queue::fake();
+        (new GenerateEnterpriseWikiAppliedPage($run->id, $article->id))->handle($this->service());
+
+        $this->assertTrue(EnterpriseWikiPageVersion::query()->where('enterprise_wiki_page_id', $article->id)->exists());
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private function service(): EnterpriseWikiGenerateAppliedPagesService
+    {
+        return app(EnterpriseWikiGenerateAppliedPagesService::class);
+    }
+
+    private function mockAiResponse(string $markdown): void
+    {
+        $this->mock(WikiPageContentAiClient::class)
+            ->shouldReceive('generateFromSource')
+            ->once()
+            ->andReturn($markdown);
+    }
+
+    private function createCustomer(string $name = 'Test AS'): Customer
+    {
+        $language = Language::query()->firstOrCreate(
+            ['code' => 'no'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk'],
+        );
+
+        $nationality = Nationality::query()->firstOrCreate(
+            ['code' => 'NO'],
+            ['name_en' => 'Norwegian', 'name_no' => 'Norsk', 'flag_emoji' => 'NO'],
+        );
+
+        return Customer::query()->create([
+            'name' => $name,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(6)),
+            'language_id' => $language->id,
+            'nationality_id' => $nationality->id,
+            'billing_interval' => Customer::BILLING_MONTHLY,
+            'is_active' => true,
+        ]);
+    }
+
+    private function createDocument(Customer $customer): EnterpriseWikiDocument
+    {
+        return EnterpriseWikiDocument::query()->create([
+            'customer_id' => $customer->id,
+            'original_filename' => 'source.pdf',
+            'file_path' => 'customers/'.$customer->id.'/wiki/'.Str::random(8).'.pdf',
+            'file_hash_sha256' => hash('sha256', Str::random(32)),
+            'extracted_text' => 'This is the extracted text from the source document.',
+            'document_status' => EnterpriseWikiDocument::DOCUMENT_STATUS_EXTRACTED,
+        ]);
+    }
+
+    private function createPage(
+        Customer $customer,
+        string $slug,
+        string $title,
+        string $pageType = EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+    ): EnterpriseWikiPage {
+        return EnterpriseWikiPage::query()->create([
+            'customer_id' => $customer->id,
+            'slug' => $slug,
+            'title' => $title,
+            'page_type' => $pageType,
+            'status' => EnterpriseWikiPage::STATUS_DRAFT,
+            'generated_by' => EnterpriseWikiPage::GENERATED_BY_AI_JOB,
+            'last_source_hash' => str_pad('hash', 64, '0'),
+        ]);
+    }
+
+    private function createAppliedRun(Customer $customer, EnterpriseWikiDocument $document, array $pages): EnterpriseWikiIngestRun
+    {
+        $run = EnterpriseWikiIngestRun::query()->create([
+            'uuid' => Str::uuid()->toString(),
+            'customer_id' => $customer->id,
+            'trigger_type' => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
+            'source_type' => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+            'source_id' => $document->id,
+            'status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES,
+            'maintainer_decision_status' => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            'maintainer_decision_generated_at' => now(),
+        ]);
+
+        foreach ($pages as $page) {
+            EnterpriseWikiIngestRunPage::query()->create([
+                'enterprise_wiki_ingest_run_id' => $run->id,
+                'enterprise_wiki_page_id' => $page->id,
+                'action' => EnterpriseWikiIngestRunPage::ACTION_CREATED,
+            ]);
+        }
+
+        return $run;
+    }
+}

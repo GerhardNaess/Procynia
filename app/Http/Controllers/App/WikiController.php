@@ -8,11 +8,13 @@ use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
+use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
+use App\Services\EnterpriseWiki\EnterpriseWikiWikilinkRenderer;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,6 +28,7 @@ class WikiController extends Controller
         private readonly CustomerContext $customerContext,
         private readonly EnterpriseWikiPageTraversalService $traversal,
         private readonly EnterpriseWikiCoverageService $coverageService,
+        private readonly EnterpriseWikiWikilinkRenderer $wikilinkRenderer,
     ) {}
 
     public function index(Request $request): Response
@@ -505,6 +508,27 @@ class WikiController extends Controller
             'status'    => $p->status,
         ];
 
+        $renderedMarkdown = $currentVersion !== null && $currentVersion->content_markdown !== null
+            ? $this->wikilinkRenderer->render($currentVersion->content_markdown, $customerId, $page)
+            : null;
+
+        // Canonical backlinks: pages whose current content_markdown contains an inline
+        // [[wikilink]] to this page. Deliberately a direct, dedicated query rather than
+        // EnterpriseWikiPageTraversalService::incoming() so this stays literally scoped to
+        // link_type=wikilink regardless of how the traversal service's contract evolves.
+        $backlinks = EnterpriseWikiPageLink::query()
+            ->where('customer_id', $customerId)
+            ->where('to_page_id', $page->id)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+            ->with('fromPage')
+            ->get()
+            ->map(fn(EnterpriseWikiPageLink $link) => $link->fromPage)
+            ->filter()
+            ->unique('id')
+            ->map($mapPage)
+            ->values()
+            ->all();
+
         return Inertia::render('App/Wiki/Show', [
             'page' => [
                 'id'           => $page->id,
@@ -517,9 +541,10 @@ class WikiController extends Controller
                 'updated_at'   => $page->updated_at,
             ],
             'current_version' => $currentVersion !== null ? [
-                'id'               => $currentVersion->id,
-                'version_number'   => $currentVersion->version_number,
-                'content_markdown' => $currentVersion->content_markdown,
+                'id'                => $currentVersion->id,
+                'version_number'    => $currentVersion->version_number,
+                'content_markdown'  => $currentVersion->content_markdown,
+                'rendered_markdown' => $renderedMarkdown,
             ] : null,
             'claims'          => $claims,
             'claim_summary'   => $claimSummary,
@@ -530,6 +555,7 @@ class WikiController extends Controller
             'related_articles' => $this->traversal->relatedArticles($page)->map($mapPage)->values()->all(),
             'related_concepts' => $this->traversal->relatedConcepts($page)->map($mapPage)->values()->all(),
             'related_entities' => $this->traversal->relatedEntities($page)->map($mapPage)->values()->all(),
+            'backlinks'       => $backlinks,
         ]);
     }
 
