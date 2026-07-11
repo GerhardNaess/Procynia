@@ -53,3 +53,27 @@ Bruk heller formuleringer som:
 - AI-støtte med struktur, kilder og menneskelig kontroll
 
 Alle nye sider, tekster og funksjoner skal vurderes mot denne posisjoneringen før implementering.
+
+# Autonomous programming workflow
+
+For programming tasks in this repository:
+
+- Do not ask for approval for routine implementation decisions.
+- Do not present technical options and wait for the user to choose when one reasonable solution can be selected.
+- Inspect the codebase, make reasonable engineering decisions, implement the requested change, run the relevant tests, and commit the completed work.
+- Do not stop before commit unless the user explicitly says not to commit.
+- Report decisions, assumptions, changed files, tests, and commit hash after completion.
+- Prefer the smallest coherent solution that satisfies the requested behavior.
+- Preserve unrelated local changes.
+- Do not perform unrelated refactors.
+
+Only stop and ask the user when the task would require:
+
+- destructive or irreversible operations
+- modifying or deleting production data
+- deploying to production
+- exposing, rotating, or changing secrets or credentials
+- incurring material external cost
+- resolving a genuine product ambiguity that materially changes intended behavior
+
+Routine code structure, naming, tests, migrations, queue configuration, and implementation details are engineering decisions the agent should make autonomously.
