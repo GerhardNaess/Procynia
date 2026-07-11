@@ -39,6 +39,28 @@ class WikiPageContentAiClientTest extends TestCase
         $this->assertArrayNotHasKey('temperature', $payload);
     }
 
+    public function test_generate_from_source_uses_a_300_second_http_timeout(): void
+    {
+        $capturedTimeout = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload, int $timeoutSeconds = 120) use (&$capturedTimeout): array {
+                $capturedTimeout = $timeoutSeconds;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode(['page' => ['markdown' => '# Test Page']]),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        $this->assertSame(300, $capturedTimeout);
+    }
+
     public function test_schema_requires_page_markdown(): void
     {
         $payload = $this->capturePayload();

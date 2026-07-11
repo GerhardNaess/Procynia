@@ -16,11 +16,39 @@ class EnterpriseWikiIngestRunPage extends Model
         self::ACTION_UPDATED,
     ];
 
+    public const GENERATION_STATUS_PENDING = 'pending';
+
+    public const GENERATION_STATUS_RUNNING = 'running';
+
+    public const GENERATION_STATUS_COMPLETED = 'completed';
+
+    public const GENERATION_STATUS_FAILED = 'failed';
+
+    public const GENERATION_STATUSES = [
+        self::GENERATION_STATUS_PENDING,
+        self::GENERATION_STATUS_RUNNING,
+        self::GENERATION_STATUS_COMPLETED,
+        self::GENERATION_STATUS_FAILED,
+    ];
+
     protected $fillable = [
         'enterprise_wiki_ingest_run_id',
         'enterprise_wiki_page_id',
         'action',
+        'generated_page_version_id',
+        'generation_status',
+        'generation_started_at',
+        'generation_completed_at',
+        'generation_error',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'generation_started_at' => 'datetime',
+            'generation_completed_at' => 'datetime',
+        ];
+    }
 
     public function run(): BelongsTo
     {
@@ -30,5 +58,18 @@ class EnterpriseWikiIngestRunPage extends Model
     public function page(): BelongsTo
     {
         return $this->belongsTo(EnterpriseWikiPage::class, 'enterprise_wiki_page_id');
+    }
+
+    public function generatedPageVersion(): BelongsTo
+    {
+        return $this->belongsTo(EnterpriseWikiPageVersion::class, 'generated_page_version_id');
+    }
+
+    public function isGenerationTerminal(): bool
+    {
+        return in_array($this->generation_status, [
+            self::GENERATION_STATUS_COMPLETED,
+            self::GENERATION_STATUS_FAILED,
+        ], true);
     }
 }

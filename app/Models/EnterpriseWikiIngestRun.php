@@ -21,6 +21,11 @@ class EnterpriseWikiIngestRun extends Model
 
     public const STATUS_GENERATING_PAGES = 'generating_pages';
 
+    // Phase 2 of applied page generation: article/summary pages have all finished
+    // successfully and concept/entity page jobs (which read their finished content as
+    // context) have been dispatched.
+    public const STATUS_GENERATING_CONCEPT_ENTITY_PAGES = 'generating_concept_entity_pages';
+
     public const STATUS_VERIFICATION_LINKING = 'verification_linking';
 
     public const STATUS_QA = 'qa';
@@ -41,6 +46,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_MAINTAINER_DECISION,
         self::STATUS_APPLYING,
         self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
         self::STATUS_QA,
         self::STATUS_COMPLETED,
@@ -102,6 +108,7 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_MAINTAINER_DECISION,
         self::STATUS_APPLYING,
         self::STATUS_GENERATING_PAGES,
+        self::STATUS_GENERATING_CONCEPT_ENTITY_PAGES,
         self::STATUS_VERIFICATION_LINKING,
         self::STATUS_QA,
         self::STATUS_DECISION_ONLY,

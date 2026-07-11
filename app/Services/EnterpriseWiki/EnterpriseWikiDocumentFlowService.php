@@ -2,9 +2,13 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Jobs\EnterpriseWiki\FinalizeEnterpriseWikiPageGeneration;
+use App\Jobs\EnterpriseWiki\GenerateEnterpriseWikiAppliedPage;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
+use App\Models\EnterpriseWikiIngestRunPage;
+use App\Models\EnterpriseWikiPage;
 use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -19,6 +23,12 @@ use Throwable;
  * - it runs the existing Enterprise Wiki services in the new order
  * - it owns status transitions for the new flow
  * - it marks failures terminally so the run never gets stuck mid-stage
+ *
+ * Applied page generation (article/summary/concept/entity) is NOT performed synchronously here.
+ * run() dispatches one GenerateEnterpriseWikiAppliedPage job per page and returns; the flow
+ * resumes via continueAfterPagesGenerated() once FinalizeEnterpriseWikiPageGeneration confirms
+ * every page job for the run has finished. This keeps a single slow OpenAI call for one page
+ * from blocking the maintainer-decision/apply stages or any other page.
  */
 class EnterpriseWikiDocumentFlowService
 {
@@ -26,7 +36,6 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiIngestService $ingestService,
         private readonly EnterpriseWikiMaintainerDecisionService $maintainerDecisionService,
         private readonly EnterpriseWikiMaintainerDecisionApplyService $maintainerDecisionApplyService,
-        private readonly EnterpriseWikiGenerateAppliedPagesService $generateAppliedPagesService,
         private readonly EnterpriseWikiExtractPageClaimsService $extractPageClaimsService,
         private readonly EnterpriseWikiVerifyPageClaimsService $verifyPageClaimsService,
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
@@ -93,9 +102,11 @@ class EnterpriseWikiDocumentFlowService
     }
 
     /**
-     * Run the document flow for a queued ingest run.
+     * Run the document flow for a queued ingest run up to and including dispatching applied
+     * page generation. Duplicate dispatches are ignored by the atomic claim step at the top.
      *
-     * Duplicate dispatches are ignored by the atomic claim step at the top.
+     * The rest of the flow (claim extraction onward) resumes in continueAfterPagesGenerated()
+     * once every dispatched page job has finished — see FinalizeEnterpriseWikiPageGeneration.
      */
     public function run(int $runId): void
     {
@@ -105,18 +116,44 @@ class EnterpriseWikiDocumentFlowService
             return;
         }
 
-        $currentStage = EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION;
-
         try {
             $this->performMaintainerDecision($run);
-
-            $currentStage = EnterpriseWikiIngestRun::STATUS_APPLYING;
             $this->performApplyMaintainerDecision($run);
+            $this->beginGeneratingPages($run);
+        } catch (Throwable $e) {
+            $this->markRunFailed($run->fresh() ?? $run, $e, false);
 
-            $currentStage = EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES;
-            $this->performGenerateAppliedPages($run);
+            throw $e;
+        }
+    }
 
-            $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
+    /**
+     * Resume the flow after every applied page for the run has been generated: claim
+     * extraction, verification, linking, lint, and QA.
+     *
+     * No separate atomic claim is needed here: FinalizeEnterpriseWikiPageGeneration already
+     * transitions the run out of generating_pages under its own row lock before dispatching
+     * this continuation exactly once, so by the time this runs the run is already claimed.
+     */
+    public function continueAfterPagesGenerated(int $runId): void
+    {
+        $run = EnterpriseWikiIngestRun::query()->find($runId);
+
+        if (! $run instanceof EnterpriseWikiIngestRun) {
+            Log::warning('[WIKI_DOCUMENT_FLOW] Run not found for page-generation continuation.', [
+                'run_id' => $runId,
+            ]);
+
+            return;
+        }
+
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
+
+        try {
             $this->performExtractPageClaims($run);
             $this->performVerifyPageClaims($run);
             $this->performBuildPageLinks($run);
@@ -207,20 +244,38 @@ class EnterpriseWikiDocumentFlowService
         ]);
     }
 
-    private function performGenerateAppliedPages(EnterpriseWikiIngestRun $run): void
+    /**
+     * Dispatch phase 1 of applied page generation: article and summary pages only.
+     * Concept and entity pages are deliberately NOT dispatched here — they read the
+     * finished article/summary content as context, so FinalizeEnterpriseWikiPageGeneration
+     * dispatches them only once every article/summary job has completed successfully.
+     */
+    private function beginGeneratingPages(EnterpriseWikiIngestRun $run): void
     {
         $run->update(['status' => EnterpriseWikiIngestRun::STATUS_GENERATING_PAGES]);
 
-        $result = $this->generateAppliedPagesService->generate($run->fresh() ?? $run);
+        $pageIds = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->whereNull('generated_page_version_id')
+            ->whereHas('page', fn ($query) => $query->whereIn('page_type', [
+                EnterpriseWikiPage::PAGE_TYPE_ARTICLE,
+                EnterpriseWikiPage::PAGE_TYPE_SUMMARY,
+            ]))
+            ->pluck('enterprise_wiki_page_id');
 
-        Log::info('[WIKI_DOCUMENT_FLOW] Applied pages generated.', [
+        foreach ($pageIds as $pageId) {
+            GenerateEnterpriseWikiAppliedPage::dispatch($run->id, $pageId);
+        }
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Article/summary page generation jobs dispatched.', [
             'run_id' => $run->id,
-            'article' => $result['article'] ?? null,
-            'summary' => $result['summary'] ?? null,
-            'concept' => $result['concept'] ?? null,
-            'entity' => $result['entity'] ?? null,
-            'skipped' => $result['skipped'] ?? null,
+            'pages_dispatched' => $pageIds->count(),
         ]);
+
+        // Safety net for the case where every article/summary page already has a version
+        // (e.g. a resumed run): no page job will fire to trigger the phase check, so trigger
+        // it once here. This is a cheap no-op if pages are still pending.
+        FinalizeEnterpriseWikiPageGeneration::dispatch($run->id);
     }
 
     private function performExtractPageClaims(EnterpriseWikiIngestRun $run): void

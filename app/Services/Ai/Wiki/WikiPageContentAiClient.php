@@ -45,7 +45,7 @@ class WikiPageContentAiClient
         }
 
         $payload = $this->buildPayload($pageTitle, $pageType, $sourceText, $additionalContext, $this->languageName($languageCode));
-        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
+        $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 300);
         $decoded = $this->responsesDecoder->decode($response, 'WikiPageContentAiClient');
 
         $markdown = data_get($decoded, 'page.markdown', '');
