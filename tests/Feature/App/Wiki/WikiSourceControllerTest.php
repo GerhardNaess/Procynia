@@ -3,6 +3,7 @@
 namespace Tests\Feature\App\Wiki;
 
 use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\Customer;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -347,6 +348,7 @@ class WikiSourceControllerTest extends TestCase
     public function test_ingest_is_blocked_when_wiki_generation_not_available(): void
     {
         Queue::fake();
+        config(['services.enterprise_wiki.ai_enabled' => false]);
 
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
@@ -373,7 +375,29 @@ class WikiSourceControllerTest extends TestCase
         // Passes availability check — redirects after successful run creation, not with 'error'.
         $response->assertRedirect();
         $response->assertSessionMissing('error');
-        Queue::assertPushed(\App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest::class);
+        Queue::assertPushedOn('enterprise-wiki', RunEnterpriseWikiDocumentFlow::class);
+        Queue::assertNotPushed(ProcessEnterpriseWikiIngest::class);
+    }
+
+    public function test_ingest_reuses_existing_active_run_without_duplicate_dispatch(): void
+    {
+        Queue::fake();
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+
+        $customer = $this->createCustomer();
+        $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
+        $document = $this->createExtractedDocument($customer);
+
+        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest")
+            ->assertRedirect(route('app.wiki.index'));
+
+        $this->actingAs($user)->post("/app/wiki/sources/{$document->id}/ingest")
+            ->assertRedirect(route('app.wiki.index'));
+
+        $this->assertSame(1, EnterpriseWikiIngestRun::query()->count());
+        Queue::assertPushedOn('enterprise-wiki', RunEnterpriseWikiDocumentFlow::class);
+        Queue::assertPushed(RunEnterpriseWikiDocumentFlow::class, 1);
+        Queue::assertNotPushed(ProcessEnterpriseWikiIngest::class);
     }
 
     public function test_ingest_rejects_other_customer_document(): void

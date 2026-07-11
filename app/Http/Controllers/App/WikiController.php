@@ -10,8 +10,8 @@ use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
 use App\Models\User;
-use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiCoverageService;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Support\CustomerContext;
 use Illuminate\Http\RedirectResponse;
@@ -55,7 +55,7 @@ class WikiController extends Controller
         $props = [
             'active_tab' => $tab,
             'lint_health' => $lintHealth,
-            'wiki_generation_available' => WikiSectionAiClient::isAvailable(),
+            'wiki_generation_available' => EnterpriseWikiMaintainerDecisionAiClient::isAvailable(),
             'sources_store_url' => route('app.wiki.sources.store'),
         ];
 
@@ -224,6 +224,8 @@ class WikiController extends Controller
             'latest_ingest_run' => $latestRuns->has($doc->id) ? [
                 'status' => $latestRuns[$doc->id]->status,
                 'error_message' => $latestRuns[$doc->id]->error_message,
+                'qa_status' => $latestRuns[$doc->id]->qa_status,
+                'qa_last_error' => $latestRuns[$doc->id]->qa_last_error,
                 'created_at' => $latestRuns[$doc->id]->created_at,
                 'started_at' => $latestRuns[$doc->id]->started_at,
                 'finished_at' => $latestRuns[$doc->id]->finished_at,
@@ -311,6 +313,8 @@ class WikiController extends Controller
                 'source_document_filename' => $docFilenames->get($run->source_id),
                 'source_id' => $run->source_id,
                 'error_message' => $run->error_message,
+                'qa_status' => $run->qa_status,
+                'qa_last_error' => $run->qa_last_error,
                 'model_used' => $run->model_used,
                 'input_tokens' => $run->input_tokens,
                 'output_tokens' => $run->output_tokens,

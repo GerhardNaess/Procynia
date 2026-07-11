@@ -26,9 +26,15 @@ class EnterpriseWikiMaintainerDecisionApplyService
      */
     public function apply(EnterpriseWikiIngestRun $run): array
     {
-        if ($run->status !== EnterpriseWikiIngestRun::STATUS_DECISION_ONLY) {
+        $allowedStatuses = [
+            EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            EnterpriseWikiIngestRun::STATUS_MAINTAINER_DECISION,
+            EnterpriseWikiIngestRun::STATUS_APPLYING,
+        ];
+
+        if (! in_array($run->status, $allowedStatuses, true)) {
             throw new \InvalidArgumentException(
-                "Run [{$run->id}] has status [{$run->status}], expected [decision_only]."
+                "Run [{$run->id}] has status [{$run->status}], expected [decision_only, maintainer_decision, applying]."
             );
         }
 

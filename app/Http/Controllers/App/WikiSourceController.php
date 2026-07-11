@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\App;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\Ai\Wiki\ProcessEnterpriseWikiIngest;
+use App\Jobs\EnterpriseWiki\RunEnterpriseWikiDocumentFlow;
 use App\Models\EnterpriseWikiClaim;
 use App\Models\EnterpriseWikiDocument;
 use App\Models\EnterpriseWikiIngestRun;
@@ -11,9 +11,9 @@ use App\Models\EnterpriseWikiIngestSection;
 use App\Models\EnterpriseWikiLintFinding;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiSourceReference;
-use App\Services\Ai\Wiki\EnterpriseWikiIngestService;
-use App\Services\Ai\Wiki\WikiSectionAiClient;
 use App\Services\DocumentTextExtractor;
+use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
+use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Support\CustomerContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -33,7 +33,7 @@ class WikiSourceController extends Controller
     public function __construct(
         private readonly CustomerContext $customerContext,
         private readonly DocumentTextExtractor $documentTextExtractor,
-        private readonly EnterpriseWikiIngestService $ingestService,
+        private readonly EnterpriseWikiDocumentFlowService $documentFlowService,
     ) {}
 
     public function store(Request $request): RedirectResponse
@@ -140,19 +140,13 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        $inProgressStatuses = [
-            EnterpriseWikiIngestRun::STATUS_QUEUED,
-            EnterpriseWikiIngestRun::STATUS_RUNNING,
-            EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
-        ];
-
         $runs = EnterpriseWikiIngestRun::query()
             ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
             ->where('source_id', $document->id)
             ->where('customer_id', $customerId)
             ->get(['id', 'status']);
 
-        if ($runs->whereIn('status', $inProgressStatuses)->isNotEmpty()) {
+        if ($runs->contains(fn (EnterpriseWikiIngestRun $run) => ! $run->isTerminal())) {
             return response()->json([
                 'blocked' => true,
                 'reason' => 'in_progress_run',
@@ -178,19 +172,13 @@ class WikiSourceController extends Controller
             abort(404);
         }
 
-        $inProgressStatuses = [
-            EnterpriseWikiIngestRun::STATUS_QUEUED,
-            EnterpriseWikiIngestRun::STATUS_RUNNING,
-            EnterpriseWikiIngestRun::STATUS_SECTIONS_PLANNED,
-        ];
-
         $runs = EnterpriseWikiIngestRun::query()
             ->where('source_type', EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT)
             ->where('source_id', $document->id)
             ->where('customer_id', $customerId)
             ->get(['id', 'status']);
 
-        if ($runs->whereIn('status', $inProgressStatuses)->isNotEmpty()) {
+        if ($runs->contains(fn (EnterpriseWikiIngestRun $run) => ! $run->isTerminal())) {
             return redirect()->route('app.wiki.index')
                 ->with('error', 'Kan ikke slette dokumentet mens ingest-jobben kjører.');
         }
@@ -266,7 +254,7 @@ class WikiSourceController extends Controller
             abort(403);
         }
 
-        if (! WikiSectionAiClient::isAvailable()) {
+        if (! EnterpriseWikiMaintainerDecisionAiClient::isAvailable()) {
             return redirect()->route('app.wiki.index')
                 ->with('error', 'Wiki-generering er ikke aktivert ennå.');
         }
@@ -277,7 +265,7 @@ class WikiSourceController extends Controller
         }
 
         try {
-            $validated = $this->ingestService->resolveDocumentForIngest($customerId, $document->id);
+            $prepared = $this->documentFlowService->prepareRunForDocument($customerId, $document->id);
         } catch (InvalidArgumentException $e) {
             Log::warning('[PROCYNIA][WIKI_SOURCE_INGEST] '.$e->getMessage(), ['document_id' => $document->id]);
 
@@ -285,18 +273,26 @@ class WikiSourceController extends Controller
                 ->with('error', 'Kunne ikke starte ingest. Prøv igjen.');
         }
 
-        $run = $this->ingestService->createQueuedRunForDocument($customerId, $validated);
+        $run = $prepared['run'];
 
-        ProcessEnterpriseWikiIngest::dispatch($run->id);
+        if ($prepared['created']) {
+            RunEnterpriseWikiDocumentFlow::dispatch($run->id);
+        }
 
         Log::info('[PROCYNIA][WIKI_SOURCE_INGEST] Queued ingest run.', [
             'run_id' => $run->id,
             'customer_id' => $customerId,
             'document_id' => $document->id,
+            'created' => $prepared['created'],
         ]);
 
         return redirect()->route('app.wiki.index')
-            ->with('success', 'Wiki-utkast er satt i kø. Det vil snart være klart til gjennomgang.');
+            ->with(
+                'success',
+                $prepared['created']
+                    ? 'Wiki-utkast er satt i kø. Det vil snart være klart til gjennomgang.'
+                    : 'Wiki-utkast er allerede i kø eller under behandling.',
+            );
     }
 
     /**

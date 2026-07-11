@@ -15,9 +15,21 @@ class EnterpriseWikiIngestRun extends Model
 
     public const STATUS_SECTIONS_PLANNED = 'sections_planned';
 
+    public const STATUS_MAINTAINER_DECISION = 'maintainer_decision';
+
+    public const STATUS_APPLYING = 'applying';
+
+    public const STATUS_GENERATING_PAGES = 'generating_pages';
+
+    public const STATUS_VERIFICATION_LINKING = 'verification_linking';
+
+    public const STATUS_QA = 'qa';
+
     public const STATUS_COMPLETED = 'completed';
 
     public const STATUS_FAILED = 'failed';
+
+    public const STATUS_ESCALATED = 'escalated';
 
     // Used when the run stores only a maintainer decision — no pages are created.
     public const STATUS_DECISION_ONLY = 'decision_only';
@@ -26,8 +38,14 @@ class EnterpriseWikiIngestRun extends Model
         self::STATUS_QUEUED,
         self::STATUS_RUNNING,
         self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
         self::STATUS_COMPLETED,
         self::STATUS_FAILED,
+        self::STATUS_ESCALATED,
         self::STATUS_DECISION_ONLY,
     ];
 
@@ -69,6 +87,24 @@ class EnterpriseWikiIngestRun extends Model
     public const SOURCE_TYPES = [
         self::SOURCE_TYPE_KNOWLEDGE_ITEM_VERSION,
         self::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
+    ];
+
+    public const TERMINAL_STATUSES = [
+        self::STATUS_COMPLETED,
+        self::STATUS_FAILED,
+        self::STATUS_ESCALATED,
+    ];
+
+    public const NON_TERMINAL_STATUSES = [
+        self::STATUS_QUEUED,
+        self::STATUS_RUNNING,
+        self::STATUS_SECTIONS_PLANNED,
+        self::STATUS_MAINTAINER_DECISION,
+        self::STATUS_APPLYING,
+        self::STATUS_GENERATING_PAGES,
+        self::STATUS_VERIFICATION_LINKING,
+        self::STATUS_QA,
+        self::STATUS_DECISION_ONLY,
     ];
 
     protected $fillable = [
@@ -151,7 +187,7 @@ class EnterpriseWikiIngestRun extends Model
 
     public function isTerminal(): bool
     {
-        return in_array($this->status, [self::STATUS_COMPLETED, self::STATUS_FAILED], true);
+        return in_array($this->status, self::TERMINAL_STATUSES, true);
     }
 
     public function isQueued(): bool

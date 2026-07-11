@@ -323,9 +323,24 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         ]);
 
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches('/expected \[decision_only\]/');
+        $this->expectExceptionMessageMatches('/expected \[decision_only, maintainer_decision, applying\]/');
 
         $this->service->apply($run);
+    }
+
+    public function test_apply_accepts_run_in_applying_status(): void
+    {
+        $customer = $this->createCustomer();
+        $run = $this->createDecisionOnlyRun($customer, $this->baseDecision(), EnterpriseWikiIngestRun::STATUS_APPLYING);
+
+        $result = $this->service->apply($run);
+
+        $this->assertSame(2, $result['created']);
+        $this->assertSame(0, $result['updated']);
+        $this->assertSame(
+            EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_APPLIED,
+            $run->fresh()->maintainer_decision_status
+        );
     }
 
     public function test_apply_throws_when_no_maintainer_decision_json(): void
@@ -427,7 +442,11 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
         ]);
     }
 
-    private function createDecisionOnlyRun(Customer $customer, array $decision): EnterpriseWikiIngestRun
+    private function createDecisionOnlyRun(
+        Customer $customer,
+        array $decision,
+        string $status = EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+    ): EnterpriseWikiIngestRun
     {
         $document = $this->createDocument($customer);
 
@@ -437,7 +456,7 @@ class EnterpriseWikiMaintainerDecisionApplyServiceTest extends TestCase
             'trigger_type'                     => EnterpriseWikiIngestRun::TRIGGER_TYPE_MANUAL,
             'source_type'                      => EnterpriseWikiIngestRun::SOURCE_TYPE_ENTERPRISE_WIKI_DOCUMENT,
             'source_id'                        => $document->id,
-            'status'                           => EnterpriseWikiIngestRun::STATUS_DECISION_ONLY,
+            'status'                           => $status,
             'maintainer_decision_json'         => $decision,
             'maintainer_decision_status'       => EnterpriseWikiIngestRun::MAINTAINER_DECISION_STATUS_PENDING,
             'maintainer_decision_generated_at' => now(),

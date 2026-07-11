@@ -59,8 +59,14 @@ const INGEST_STATUS_STYLES = {
     queued: 'bg-amber-100 text-amber-700',
     running: 'bg-blue-100 text-blue-700',
     sections_planned: 'bg-blue-100 text-blue-700',
+    maintainer_decision: 'bg-violet-100 text-violet-700',
+    applying: 'bg-indigo-100 text-indigo-700',
+    generating_pages: 'bg-sky-100 text-sky-700',
+    verification_linking: 'bg-cyan-100 text-cyan-700',
+    qa: 'bg-fuchsia-100 text-fuchsia-700',
     completed: 'bg-emerald-100 text-emerald-700',
     failed: 'bg-rose-100 text-rose-700',
+    escalated: 'bg-amber-100 text-amber-700',
     decision_only: 'bg-violet-100 text-violet-700',
 };
 
@@ -70,7 +76,48 @@ const SEVERITY_STYLES = {
     info: 'bg-slate-100 text-slate-600',
 };
 
-const IN_PROGRESS_STATUSES = ['queued', 'running', 'sections_planned'];
+const INGEST_STATUS_LABELS = {
+    queued: 'I kø',
+    running: 'Kjører',
+    sections_planned: 'Seksjoner planlagt',
+    maintainer_decision: 'Vedlikeholdersbeslutning',
+    applying: 'Anvender beslutning',
+    generating_pages: 'Genererer sider',
+    verification_linking: 'Verifisering og lenking',
+    qa: 'QA',
+    completed: 'Fullført',
+    failed: 'Feilet',
+    escalated: 'Eskalert',
+    decision_only: 'Beslutning lagret',
+};
+
+const IN_PROGRESS_STATUSES = [
+    'queued',
+    'running',
+    'sections_planned',
+    'maintainer_decision',
+    'applying',
+    'generating_pages',
+    'verification_linking',
+    'qa',
+    'decision_only',
+];
+
+function ingestStatusLabel(status, qaStatus = null) {
+    if (status === 'completed' && qaStatus === 'passed') {
+        return 'Fullført / bestått';
+    }
+
+    if (status === 'escalated' || qaStatus === 'escalated') {
+        return 'Eskalert';
+    }
+
+    if (status === 'failed' && qaStatus === 'failed') {
+        return 'Feilet';
+    }
+
+    return INGEST_STATUS_LABELS[status] ?? status;
+}
 
 function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, onViewDecision }) {
     if (!run) {
@@ -105,7 +152,8 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
     const cls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
     const isInProgress = IN_PROGRESS_STATUSES.includes(run.status);
     const queuedSince = run.status === 'queued' ? formatTime(run.created_at, locale) : null;
-    const startedAt = (run.status === 'running' || run.status === 'sections_planned') ? formatTime(run.started_at, locale) : null;
+    const startedAt = run.started_at ? formatTime(run.started_at, locale) : null;
+    const errorMessage = run.qa_last_error ?? run.error_message;
     return (
         <div className="space-y-1.5">
             <div className="flex items-center gap-2">
@@ -126,15 +174,15 @@ function IngestStatusBadge({ run, label, notStartedLabel, locale, onReload, tw, 
                     <span className="font-mono">enterprise-wiki</span> worker kjører.
                 </p>
             )}
-            {startedAt && (
-                <p className="text-[11px] text-slate-400">Startet {startedAt}</p>
-            )}
-            {run.status === 'failed' && run.error_message && (
+                {startedAt && (
+                    <p className="text-[11px] text-slate-400">Startet {startedAt}</p>
+                )}
+            {run.status === 'failed' && errorMessage && (
                 <p
                     className="line-clamp-2 wrap-break-word text-[11px] leading-4 text-rose-500"
-                    title={run.error_message}
+                    title={errorMessage}
                 >
-                    {run.error_message}
+                    {errorMessage}
                 </p>
             )}
         </div>
@@ -815,15 +863,6 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
         failed: tw.source_status_failed ?? 'Feilet',
     }[status] ?? status);
 
-    const ingestStatusLabel = (status) => ({
-        queued: tw.ingest_status_queued ?? 'I kø',
-        running: tw.ingest_status_running ?? 'Kjører',
-        sections_planned: tw.ingest_status_running ?? 'Kjører',
-        completed: tw.ingest_status_completed ?? 'Fullført',
-        failed: tw.ingest_status_failed ?? 'Feilet',
-        decision_only: tw.ingest_status_decision_only ?? 'Beslutning lagret',
-    }[status] ?? status);
-
     const notStartedLabel = tw.ingest_status_not_started ?? 'Ikke startet';
 
     return (
@@ -932,7 +971,7 @@ function SourcesTab({ sources, sourcesFilters, sourcesStoreUrl, wikiGenerationAv
                                             <td className="px-4 py-3 align-top">
                                                 <IngestStatusBadge
                                                     run={source.latest_ingest_run}
-                                                    label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status) : null}
+                                                    label={source.latest_ingest_run ? ingestStatusLabel(source.latest_ingest_run.status, source.latest_ingest_run.qa_status) : null}
                                                     notStartedLabel={notStartedLabel}
                                                     locale={locale}
                                                     onReload={handleSourceReload}
@@ -1167,15 +1206,6 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
 
     const hasActiveFilter = !!(filters.status || filters.decision || filters.src_id);
 
-    const ingestStatusLabel = (status) => ({
-        queued: tw.ingest_status_queued ?? 'I kø',
-        running: tw.ingest_status_running ?? 'Kjører',
-        sections_planned: tw.ingest_status_running ?? 'Kjører',
-        completed: tw.ingest_status_completed ?? 'Fullført',
-        failed: tw.ingest_status_failed ?? 'Feilet',
-        decision_only: tw.ingest_status_decision_only ?? 'Beslutning lagret',
-    }[status] ?? status);
-
     return (
         <div className="space-y-4">
             {/* Filter bar */}
@@ -1186,7 +1216,20 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                     className={SELECT_CLS}
                 >
                     <option value="">{tw.runs_filter_status_all ?? 'Alle statuser'}</option>
-                    {['queued', 'running', 'sections_planned', 'completed', 'failed', 'decision_only'].map((s) => (
+                    {[
+                        'queued',
+                        'maintainer_decision',
+                        'applying',
+                        'generating_pages',
+                        'verification_linking',
+                        'qa',
+                        'completed',
+                        'escalated',
+                        'failed',
+                        'running',
+                        'sections_planned',
+                        'decision_only',
+                    ].map((s) => (
                         <option key={s} value={s}>{ingestStatusLabel(s)}</option>
                     ))}
                 </select>
@@ -1257,6 +1300,7 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                             <tbody className="divide-y divide-slate-100">
                                 {runs.map((run) => {
                                     const statusCls = INGEST_STATUS_STYLES[run.status] ?? 'bg-slate-100 text-slate-600';
+                                    const runError = run.qa_last_error ?? run.error_message;
                                     return (
                                         <tr key={run.id} className="text-sm text-slate-700">
                                             <td className="px-4 py-3 text-right font-mono text-xs text-slate-400 tabular-nums">
@@ -1274,15 +1318,15 @@ function RunsTab({ runs, runsFilters, tw, locale }) {
                                                 ) : (
                                                     <span className="text-slate-400">—</span>
                                                 )}
-                                                {run.status === 'failed' && run.error_message && (
-                                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-rose-500" title={run.error_message}>
-                                                        {run.error_message}
+                                                {run.status === 'failed' && runError && (
+                                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-rose-500" title={runError}>
+                                                        {runError}
                                                     </p>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`${BADGE} ${statusCls}`}>
-                                                    {ingestStatusLabel(run.status)}
+                                                    {ingestStatusLabel(run.status, run.qa_status)}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">
