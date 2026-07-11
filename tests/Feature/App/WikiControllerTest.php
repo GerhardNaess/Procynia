@@ -872,6 +872,8 @@ class WikiControllerTest extends TestCase
 
     public function test_index_sends_wiki_generation_available_as_false(): void
     {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+
         $customer = $this->createCustomer();
         $user = $this->createUser($customer, User::BID_ROLE_SYSTEM_OWNER);
 

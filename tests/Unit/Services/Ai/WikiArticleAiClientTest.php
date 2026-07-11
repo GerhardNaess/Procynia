@@ -44,7 +44,7 @@ class WikiArticleAiClientTest extends TestCase
         $client = $this->clientWithRawResponse(['output_text' => '', 'output' => []]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/empty text response/');
+        $this->expectExceptionMessageMatches('/no output text/');
 
         $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
     }
@@ -135,7 +135,7 @@ class WikiArticleAiClientTest extends TestCase
         $client->generateArticle('Test Page', [['text' => 'Krav.', 'confidence' => 'high', 'excerpt' => '', 'source' => '']], 'no');
     }
 
-    public function test_build_payload_does_not_include_temperature(): void
+    public function test_payload_contract(): void
     {
         $capturedPayload = null;
 
@@ -146,7 +146,7 @@ class WikiArticleAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['output_text' => json_encode(['article' => ['markdown' => '## Test']])];
+                return ['status' => 'completed', 'output' => [], 'output_text' => json_encode(['article' => ['markdown' => '## Test']])];
             });
 
         $client = app(WikiArticleAiClient::class);
@@ -154,6 +154,12 @@ class WikiArticleAiClientTest extends TestCase
 
         $this->assertIsArray($capturedPayload);
         $this->assertArrayNotHasKey('temperature', $capturedPayload);
+        $this->assertSame('gpt-5', $capturedPayload['model']);
+        $this->assertSame(4000, $capturedPayload['max_output_tokens']);
+        $this->assertSame('low', data_get($capturedPayload, 'reasoning.effort'));
+        $this->assertFalse($capturedPayload['store']);
+        $this->assertSame('json_schema', data_get($capturedPayload, 'text.format.type'));
+        $this->assertTrue(data_get($capturedPayload, 'text.format.strict'));
     }
 
     public function test_is_available_returns_false_by_default(): void
@@ -189,7 +195,10 @@ class WikiArticleAiClientTest extends TestCase
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn($responseBody);
+        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace([
+            'status' => 'completed',
+            'output' => [],
+        ], $responseBody));
 
         return app(WikiArticleAiClient::class);
     }

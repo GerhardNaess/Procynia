@@ -2,6 +2,7 @@
 
 namespace App\Services\EnterpriseWiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -18,7 +19,9 @@ class EnterpriseWikiMaintainerDecisionAiClient
 {
     private const MODEL = 'gpt-5';
 
-    private const MAX_OUTPUT_TOKENS = 2000;
+    private const MAX_OUTPUT_TOKENS = 3000;
+
+    private const REASONING_EFFORT = 'low';
 
     // Keeps the source text well within token limits while leaving room for
     // the system prompt, index context, and the schema output.
@@ -26,6 +29,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     public static function isAvailable(): bool
@@ -36,11 +40,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
     /**
      * Ask the AI maintainer to decide what wiki pages to create or update.
      *
-     * @param  array{title: string, filename: string}       $sourceMeta   Cleaned title + original filename.
-     * @param  string                                        $sourceText   Extracted text from the document.
-     * @param  array<int, array<string, mixed>>              $indexContext From EnterpriseWikiIndexContextService::buildForCustomer().
-     * @param  string                                        $languageCode 'no' | 'en'
-     * @return array<string, mixed>  Validated maintainer decision.
+     * @param  array{title: string, filename: string}  $sourceMeta  Cleaned title + original filename.
+     * @param  string  $sourceText  Extracted text from the document.
+     * @param  array<int, array<string, mixed>>  $indexContext  From EnterpriseWikiIndexContextService::buildForCustomer().
+     * @param  string  $languageCode  'no' | 'en'
+     * @return array<string, mixed> Validated maintainer decision.
      *
      * @throws RuntimeException when AI is disabled, the API fails, the response is empty or invalid.
      */
@@ -58,27 +62,13 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
         $payload = $this->buildPayload($sourceMeta, $sourceText, $indexContext, $this->languageName($languageCode));
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 60);
-        $rawText = $this->extractOutputText($response);
-
-        if ($rawText === '') {
-            throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: OpenAI returned an empty response.'
-            );
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: response was not valid JSON.'
-            );
-        }
+        $decoded = $this->responsesDecoder->decode($response, 'EnterpriseWikiMaintainerDecisionAiClient');
 
         try {
             return EnterpriseWikiMaintainerDecisionPrompt::parse($decoded);
         } catch (\InvalidArgumentException $e) {
             throw new RuntimeException(
-                'EnterpriseWikiMaintainerDecisionAiClient: decision failed schema validation: ' . $e->getMessage(),
+                'EnterpriseWikiMaintainerDecisionAiClient: decision failed schema validation: '.$e->getMessage(),
                 0,
                 $e,
             );
@@ -97,7 +87,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'model' => self::MODEL,
             'input' => [
                 [
-                    'role'    => 'developer',
+                    'role' => 'developer',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -106,7 +96,7 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     ],
                 ],
                 [
-                    'role'    => 'user',
+                    'role' => 'user',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -121,6 +111,11 @@ class EnterpriseWikiMaintainerDecisionAiClient
                     $schemaBlock['json_schema'],
                 ),
             ],
+            // Low effort is enough for a bounded planning decision and reduces token pressure.
+            'reasoning' => [
+                'effort' => self::REASONING_EFFORT,
+            ],
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -161,12 +156,12 @@ class EnterpriseWikiMaintainerDecisionAiClient
 
     private function userPrompt(array $sourceMeta, string $sourceText, array $indexContext): string
     {
-        $title    = (string) ($sourceMeta['title'] ?? '');
+        $title = (string) ($sourceMeta['title'] ?? '');
         $filename = (string) ($sourceMeta['filename'] ?? '');
-        $text     = trim($sourceText);
+        $text = trim($sourceText);
 
         if (mb_strlen($text) > self::MAX_SOURCE_TEXT_CHARS) {
-            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS) . "\n[... text truncated ...]";
+            $text = mb_substr($text, 0, self::MAX_SOURCE_TEXT_CHARS)."\n[... text truncated ...]";
         }
 
         $indexJson = $indexContext !== []
@@ -181,55 +176,15 @@ class EnterpriseWikiMaintainerDecisionAiClient
             'SOURCE TEXT:',
             $text !== '' ? $text : '(empty)',
             '',
-            'EXISTING WIKI INDEX (' . count($indexContext) . ' pages):',
+            'EXISTING WIKI INDEX ('.count($indexContext).' pages):',
             $indexJson,
         ]);
-    }
-
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
     }
 
     private function languageName(string $code): string
     {
         return match ($code) {
-            'en'    => 'English',
+            'en' => 'English',
             default => 'Norwegian',
         };
     }

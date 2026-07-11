@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -24,6 +25,8 @@ class WikiSemanticReviserAiClient
 
     private const MAX_OUTPUT_TOKENS = 4000;
 
+    private const REASONING_EFFORT = 'low';
+
     private const MAX_SOURCE_CHARS = 15000;
 
     private const MAX_CONTENT_CHARS = 10000;
@@ -32,6 +35,7 @@ class WikiSemanticReviserAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     public static function isAvailable(): bool
@@ -75,17 +79,7 @@ class WikiSemanticReviserAiClient
         );
 
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
-        $rawText = $this->extractOutputText($response);
-
-        if ($rawText === '') {
-            throw new RuntimeException('WikiSemanticReviserAiClient: OpenAI returned an empty response.');
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('WikiSemanticReviserAiClient: OpenAI response was not valid JSON.');
-        }
+        $decoded = $this->responsesDecoder->decode($response, 'WikiSemanticReviserAiClient');
 
         $markdown = data_get($decoded, 'page.markdown', '');
 
@@ -124,7 +118,7 @@ class WikiSemanticReviserAiClient
             'model' => self::MODEL,
             'input' => [
                 [
-                    'role'    => 'developer',
+                    'role' => 'developer',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -133,7 +127,7 @@ class WikiSemanticReviserAiClient
                     ],
                 ],
                 [
-                    'role'    => 'user',
+                    'role' => 'user',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -144,12 +138,14 @@ class WikiSemanticReviserAiClient
             ],
             'text' => [
                 'format' => [
-                    'type'   => 'json_schema',
-                    'name'   => self::PROMPT_NAME,
+                    'type' => 'json_schema',
+                    'name' => self::PROMPT_NAME,
                     'strict' => true,
                     'schema' => self::schema(),
                 ],
             ],
+            'reasoning' => ['effort' => self::REASONING_EFFORT],
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -242,61 +238,21 @@ class WikiSemanticReviserAiClient
         ]);
     }
 
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
-    }
-
     private static function schema(): array
     {
         return [
-            'type'       => 'object',
+            'type' => 'object',
             'properties' => [
                 'page' => [
-                    'type'       => 'object',
+                    'type' => 'object',
                     'properties' => [
                         'markdown' => ['type' => 'string'],
                     ],
-                    'required'             => ['markdown'],
+                    'required' => ['markdown'],
                     'additionalProperties' => false,
                 ],
             ],
-            'required'             => ['page'],
+            'required' => ['page'],
             'additionalProperties' => false,
         ];
     }
@@ -304,7 +260,7 @@ class WikiSemanticReviserAiClient
     private function languageName(string $code): string
     {
         return match ($code) {
-            'en'    => 'English',
+            'en' => 'English',
             default => 'Norwegian',
         };
     }

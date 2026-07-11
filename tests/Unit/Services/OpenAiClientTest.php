@@ -43,6 +43,7 @@ class OpenAiClientTest extends TestCase
         ]);
 
         $this->assertSame('resp_123', $response['id']);
+        $this->assertSame(200, $response['_meta']['http_status']);
 
         Http::assertSentCount(1);
         Http::assertSent(function (Request $request): bool {
@@ -68,7 +69,7 @@ class OpenAiClientTest extends TestCase
         ]);
     }
 
-    public function test_it_logs_the_full_raw_error_body_for_non_success_responses(): void
+    public function test_it_logs_only_safe_error_metadata_for_non_success_responses(): void
     {
         config([
             'services.openai.api_key' => 'test-openai-key',
@@ -119,7 +120,9 @@ class OpenAiClientTest extends TestCase
                 && ($context['error_type'] ?? null) === data_get($errorBody, 'error.type')
                 && ($context['error_code'] ?? null) === data_get($errorBody, 'error.code')
                 && ($context['error_param'] ?? null) === data_get($errorBody, 'error.param')
-                && ($context['raw_body'] ?? null) === json_encode($errorBody, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                && ($context['raw_body_length'] ?? null) > 0
+                && ! array_key_exists('raw_body', $context)
+                && ! array_key_exists('body_excerpt', $context);
         });
     }
 

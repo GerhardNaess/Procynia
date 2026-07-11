@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -32,6 +33,7 @@ class WikiSemanticQaAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     public static function isAvailable(): bool
@@ -73,17 +75,7 @@ class WikiSemanticQaAiClient
 
         $payload = $this->buildPayload($truncatedSource, $truncatedContent, $this->languageName($languageCode));
         $response = $this->openAiClient->createResponse($payload, timeoutSeconds: 120);
-        $rawText = $this->extractOutputText($response);
-
-        if ($rawText === '') {
-            throw new RuntimeException('WikiSemanticQaAiClient: OpenAI returned an empty response.');
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('WikiSemanticQaAiClient: OpenAI response was not valid JSON.');
-        }
+        $decoded = $this->responsesDecoder->decode($response, 'WikiSemanticQaAiClient');
 
         $this->validateResult($decoded);
 
@@ -117,6 +109,29 @@ class WikiSemanticQaAiClient
                     "WikiSemanticQaAiClient: response is missing required field [{$field}]."
                 );
             }
+        }
+
+        if (! is_bool($decoded['pass'])) {
+            throw new RuntimeException('WikiSemanticQaAiClient: response field [pass] must be boolean.');
+        }
+
+        foreach (['quality_score', 'coverage_score', 'factual_consistency_score', 'confidence'] as $field) {
+            if ((! is_int($decoded[$field]) && ! is_float($decoded[$field]))
+                || (float) $decoded[$field] < 0.0
+                || (float) $decoded[$field] > 1.0) {
+                throw new RuntimeException("WikiSemanticQaAiClient: response field [{$field}] must be numeric and between 0 and 1.");
+            }
+        }
+
+        foreach (['unsupported_claims', 'missing_topics', 'missing_key_facts'] as $field) {
+            if (! is_array($decoded[$field])
+                || array_filter($decoded[$field], static fn (mixed $value): bool => ! is_string($value)) !== []) {
+                throw new RuntimeException("WikiSemanticQaAiClient: response field [{$field}] must be an array of strings.");
+            }
+        }
+
+        if (! is_string($decoded['critique']) || ! is_string($decoded['recommended_repair_action'])) {
+            throw new RuntimeException('WikiSemanticQaAiClient: critique and recommended_repair_action must be strings.');
         }
 
         $validActions = ['none', 'targeted_revision', 'full_regeneration', 'escalate'];
@@ -161,6 +176,7 @@ class WikiSemanticQaAiClient
                 ],
             ],
             'temperature' => self::TEMPERATURE,
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -213,46 +229,6 @@ class WikiSemanticQaAiClient
             '',
             $generatedContent,
         ]);
-    }
-
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
     }
 
     private static function schema(): array

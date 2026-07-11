@@ -1,0 +1,351 @@
+<?php
+
+namespace Tests\Unit\Services\Ai;
+
+use App\Services\Ai\Wiki\WikiPageContentAiClient;
+use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Support\Facades\Log;
+use Mockery\MockInterface;
+use RuntimeException;
+use Tests\TestCase;
+
+class WikiPageContentAiClientTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['services.enterprise_wiki.ai_enabled' => true]);
+    }
+
+    // =========================================================================
+    // Payload structure
+    // =========================================================================
+
+    public function test_payload_includes_strict_json_schema_and_low_reasoning(): void
+    {
+        $payload = $this->capturePayload();
+
+        $format = $payload['text']['format'];
+
+        $this->assertSame('gpt-5', $payload['model']);
+        $this->assertSame('json_schema', $format['type']);
+        $this->assertSame('wiki_page_content_generation', $format['name']);
+        $this->assertTrue($format['strict']);
+        $this->assertIsArray($format['schema']);
+        $this->assertSame(6000, $payload['max_output_tokens']);
+        $this->assertSame('low', data_get($payload, 'reasoning.effort'));
+        $this->assertFalse($payload['store']);
+        $this->assertArrayNotHasKey('temperature', $payload);
+    }
+
+    public function test_schema_requires_page_markdown(): void
+    {
+        $payload = $this->capturePayload();
+
+        $schema = $payload['text']['format']['schema'];
+
+        $this->assertSame(['page'], $schema['required']);
+        $this->assertSame(['markdown'], $schema['properties']['page']['required']);
+        $this->assertFalse($schema['properties']['page']['additionalProperties']);
+        $this->assertFalse($schema['additionalProperties']);
+    }
+
+    // =========================================================================
+    // Happy path
+    // =========================================================================
+
+    public function test_generate_from_source_returns_markdown_on_top_level_output_text(): void
+    {
+        $expectedMarkdown = "# Test Page\n\nDette er generert innhold.";
+        $client = $this->clientReturning([
+            'page' => [
+                'markdown' => $expectedMarkdown,
+            ],
+        ]);
+
+        $result = $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        $this->assertSame($expectedMarkdown, $result);
+    }
+
+    public function test_generate_from_source_returns_markdown_from_nested_output_text(): void
+    {
+        $expectedMarkdown = "# Test Page\n\nDette er generert innhold.";
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_nested_text',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        [
+                            'type' => 'output_text',
+                            'text' => json_encode([
+                                'page' => [
+                                    'markdown' => $expectedMarkdown,
+                                ],
+                            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $result = $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        $this->assertSame($expectedMarkdown, $result);
+    }
+
+    // =========================================================================
+    // Error handling
+    // =========================================================================
+
+    public function test_generate_from_source_throws_when_ai_is_disabled(): void
+    {
+        config(['services.enterprise_wiki.ai_enabled' => false]);
+        $client = app(WikiPageContentAiClient::class);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not enabled/');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+    }
+
+    public function test_generate_from_source_throws_on_empty_response_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_empty',
+            'output_text' => '',
+            'output' => [],
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/no output text/');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_empty'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) === 0
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false
+                && ($context['token_usage']['input_tokens'] ?? null) === 100
+                && ($context['token_usage']['output_tokens'] ?? null) === 20
+                && ($context['token_usage']['total_tokens'] ?? null) === 120
+                && ! array_key_exists('sourceText', $context)
+                && ! array_key_exists('additionalContext', $context)
+                && ! array_key_exists('pageTitle', $context)
+                && ! array_key_exists('input', $context)
+                && ! array_key_exists('output', $context)
+                && ! array_key_exists('prompt', $context);
+        });
+    }
+
+    public function test_generate_from_source_throws_on_incomplete_response_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_incomplete',
+            'status' => 'incomplete',
+            'incomplete_details' => [
+                'reason' => 'max_output_tokens',
+            ],
+            'output_text' => '{"page":{"markdown":"# Test Page',
+            'output' => [],
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*max_output_tokens/s');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_incomplete'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'incomplete'
+                && ($context['incomplete_details']['reason'] ?? null) === 'max_output_tokens'
+                && ($context['output_text_length'] ?? null) > 0
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false;
+        });
+    }
+
+    public function test_generate_from_source_throws_on_refusal_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_refusal',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        [
+                            'type' => 'refusal',
+                            'refusal' => 'safety',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/refusal/');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_refusal'
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) === 0
+                && ($context['output_item_types'] ?? null) === ['message']
+                && ($context['content_item_types'] ?? null) === ['refusal']
+                && ($context['has_refusal'] ?? null) === true;
+        });
+    }
+
+    public function test_generate_from_source_throws_on_invalid_json_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_invalid_json',
+            'output_text' => 'dette er ikke json',
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/not valid JSON/');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_invalid_json'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) === mb_strlen('dette er ikke json', 'UTF-8')
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false
+                && ($context['token_usage']['input_tokens'] ?? null) === 100
+                && ($context['token_usage']['output_tokens'] ?? null) === 20
+                && ($context['token_usage']['total_tokens'] ?? null) === 120;
+        });
+    }
+
+    public function test_generate_from_source_throws_on_missing_markdown_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_missing_markdown',
+            'output_text' => json_encode(['page' => []]),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/generated page content was empty/');
+
+        $client->generateFromSource('Test Page', 'article', 'Noe kildetekst.', 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_PAGE_CONTENT] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_missing_markdown'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) > 0
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false;
+        });
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private function capturePayload(
+        string $pageTitle = 'Test Page',
+        string $pageType = 'article',
+        string $sourceText = 'Noe kildetekst.',
+        string $languageCode = 'no',
+        string $additionalContext = '',
+    ): array {
+        $capturedPayload = null;
+
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')
+            ->once()
+            ->andReturnUsing(function (array $payload) use (&$capturedPayload, $pageTitle): array {
+                $capturedPayload = $payload;
+
+                return [
+                    'status' => 'completed',
+                    'output_text' => json_encode([
+                        'page' => [
+                            'markdown' => "# {$pageTitle}\n\nGenerert innhold.",
+                        ],
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ];
+            });
+
+        app(WikiPageContentAiClient::class)->generateFromSource(
+            $pageTitle,
+            $pageType,
+            $sourceText,
+            $languageCode,
+            $additionalContext,
+        );
+
+        return (array) $capturedPayload;
+    }
+
+    private function clientReturning(array $body): WikiPageContentAiClient
+    {
+        return $this->clientWithRawResponse([
+            'output_text' => json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+    }
+
+    private function clientWithRawResponse(array $responseBody): WikiPageContentAiClient
+    {
+        /** @var OpenAiClient&MockInterface $mock */
+        $mock = $this->mock(OpenAiClient::class);
+        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+            'id' => 'resp_test',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [],
+            'usage' => [
+                'input_tokens' => 100,
+                'output_tokens' => 20,
+                'total_tokens' => 120,
+            ],
+            '_meta' => [
+                'request_id' => 'req_test',
+                'http_status' => 200,
+                'provider' => 'openai',
+                'deployment_name' => null,
+                'provider_region' => null,
+            ],
+        ], $responseBody));
+
+        return app(WikiPageContentAiClient::class);
+    }
+}

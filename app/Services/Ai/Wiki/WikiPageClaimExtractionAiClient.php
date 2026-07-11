@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -33,6 +34,7 @@ class WikiPageClaimExtractionAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     public static function isAvailable(): bool
@@ -46,6 +48,7 @@ class WikiPageClaimExtractionAiClient
      * Returns at most MAX_CLAIMS claims. Input is trimmed to MAX_INPUT_CHARS.
      *
      * @return array{claims: list<array{text: string, confidence: string, excerpt: string, conflict_note: string|null}>}
+     *
      * @throws RuntimeException on API error, empty response, invalid JSON, or missing claims key
      */
     public function extractClaims(
@@ -58,30 +61,29 @@ class WikiPageClaimExtractionAiClient
             throw new RuntimeException('WikiPageClaimExtractionAiClient: wiki AI generation is not enabled.');
         }
 
-        $trimmed  = mb_substr(trim($contentMarkdown), 0, self::MAX_INPUT_CHARS);
-        $payload  = $this->buildPayload($pageTitle, $pageType, $trimmed, $this->languageName($languageCode));
+        $trimmed = mb_substr(trim($contentMarkdown), 0, self::MAX_INPUT_CHARS);
+        $payload = $this->buildPayload($pageTitle, $pageType, $trimmed, $this->languageName($languageCode));
         $response = $this->openAiClient->createResponse($payload);
-        $rawText  = $this->extractOutputText($response);
-
-        if ($rawText === '') {
-            throw new RuntimeException('WikiPageClaimExtractionAiClient: OpenAI returned an empty text response.');
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('WikiPageClaimExtractionAiClient: OpenAI response was not valid JSON.');
-        }
+        $decoded = $this->responsesDecoder->decode($response, 'WikiPageClaimExtractionAiClient');
 
         if (! array_key_exists('claims', $decoded) || ! is_array($decoded['claims'])) {
             throw new RuntimeException('WikiPageClaimExtractionAiClient: response did not include a claims array.');
         }
 
-        $claims     = array_slice($decoded['claims'], 0, self::MAX_CLAIMS);
+        $claims = array_slice($decoded['claims'], 0, self::MAX_CLAIMS);
         $normalized = [];
 
         foreach ($claims as $claim) {
             if (! is_array($claim)) {
+                continue;
+            }
+
+            if (! is_string($claim['text'] ?? null)
+                || trim($claim['text']) === ''
+                || ! is_string($claim['confidence'] ?? null)
+                || ! in_array($claim['confidence'], ['high', 'medium', 'low', 'uncertain'], true)
+                || ! is_string($claim['excerpt'] ?? null)
+                || ! (is_string($claim['conflict_note'] ?? null) || ($claim['conflict_note'] ?? null) === null)) {
                 continue;
             }
 
@@ -97,7 +99,7 @@ class WikiPageClaimExtractionAiClient
             'model' => self::MODEL,
             'input' => [
                 [
-                    'role'    => 'developer',
+                    'role' => 'developer',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -106,7 +108,7 @@ class WikiPageClaimExtractionAiClient
                     ],
                 ],
                 [
-                    'role'    => 'user',
+                    'role' => 'user',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -117,13 +119,14 @@ class WikiPageClaimExtractionAiClient
             ],
             'text' => [
                 'format' => [
-                    'type'   => 'json_schema',
-                    'name'   => self::PROMPT_NAME,
+                    'type' => 'json_schema',
+                    'name' => self::PROMPT_NAME,
                     'strict' => true,
                     'schema' => self::schema(),
                 ],
             ],
-            'temperature'       => self::TEMPERATURE,
+            'temperature' => self::TEMPERATURE,
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -144,62 +147,22 @@ class WikiPageClaimExtractionAiClient
         ]);
     }
 
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts       = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
-    }
-
     private static function schema(): array
     {
         return [
-            'type'       => 'object',
+            'type' => 'object',
             'properties' => [
                 'claims' => [
-                    'type'  => 'array',
+                    'type' => 'array',
                     'items' => [
-                        'type'       => 'object',
+                        'type' => 'object',
                         'properties' => [
-                            'text'       => ['type' => 'string'],
+                            'text' => ['type' => 'string'],
                             'confidence' => [
                                 'type' => 'string',
                                 'enum' => ['high', 'medium', 'low', 'uncertain'],
                             ],
-                            'excerpt'       => ['type' => 'string'],
+                            'excerpt' => ['type' => 'string'],
                             'conflict_note' => [
                                 'anyOf' => [
                                     ['type' => 'string'],
@@ -207,12 +170,12 @@ class WikiPageClaimExtractionAiClient
                                 ],
                             ],
                         ],
-                        'required'             => ['text', 'confidence', 'excerpt', 'conflict_note'],
+                        'required' => ['text', 'confidence', 'excerpt', 'conflict_note'],
                         'additionalProperties' => false,
                     ],
                 ],
             ],
-            'required'             => ['claims'],
+            'required' => ['claims'],
             'additionalProperties' => false,
         ];
     }
@@ -220,7 +183,7 @@ class WikiPageClaimExtractionAiClient
     private function languageName(string $code): string
     {
         return match ($code) {
-            'en'    => 'English',
+            'en' => 'English',
             default => 'Norwegian',
         };
     }

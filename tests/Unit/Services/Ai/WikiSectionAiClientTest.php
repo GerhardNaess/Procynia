@@ -77,6 +77,12 @@ class WikiSectionAiClientTest extends TestCase
 
         $userText = data_get($capturedPayload, 'input.1.content.0.text', '');
         $this->assertLessThanOrEqual(3000, mb_strlen($userText));
+        $this->assertSame('gpt-4.1-mini', $capturedPayload['model']);
+        $this->assertSame(2000, $capturedPayload['max_output_tokens']);
+        $this->assertFalse($capturedPayload['store']);
+        $this->assertArrayNotHasKey('reasoning', $capturedPayload);
+        $this->assertSame('json_schema', data_get($capturedPayload, 'text.format.type'));
+        $this->assertTrue(data_get($capturedPayload, 'text.format.strict'));
     }
 
     // ─── Claim count cap ─────────────────────────────────────────────────────
@@ -186,7 +192,7 @@ class WikiSectionAiClientTest extends TestCase
         $mock = $this->mock(OpenAiClient::class);
         $mock->shouldReceive('createResponse')
             ->once()
-            ->andReturn(['output_text' => $rawText, '_meta' => []]);
+            ->andReturn(['status' => 'completed', 'output_text' => $rawText, 'output' => [], '_meta' => []]);
 
         return app(WikiSectionAiClient::class);
     }
@@ -195,6 +201,7 @@ class WikiSectionAiClientTest extends TestCase
     {
         return [
             'id' => 'resp_test123',
+            'status' => 'completed',
             'output_text' => json_encode($body),
             '_meta' => [
                 'request_id' => null,

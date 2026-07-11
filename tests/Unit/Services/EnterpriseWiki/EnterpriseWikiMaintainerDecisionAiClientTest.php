@@ -4,6 +4,7 @@ namespace Tests\Unit\Services\EnterpriseWiki;
 
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionAiClient;
 use App\Services\OpenAi\OpenAiClient;
+use Illuminate\Support\Facades\Log;
 use Mockery\MockInterface;
 use RuntimeException;
 use Tests\TestCase;
@@ -43,6 +44,21 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->assertSame('gpt-5', $payload['model']);
     }
 
+    public function test_payload_uses_updated_max_output_tokens(): void
+    {
+        $payload = $this->capturePayload();
+
+        $this->assertSame(3000, $payload['max_output_tokens']);
+    }
+
+    public function test_payload_uses_low_reasoning_effort(): void
+    {
+        $payload = $this->capturePayload();
+
+        $this->assertSame('low', data_get($payload, 'reasoning.effort'));
+        $this->assertFalse($payload['store']);
+    }
+
     public function test_payload_includes_source_title_in_user_message(): void
     {
         $payload = $this->capturePayload(
@@ -77,14 +93,14 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         $indexContext = [
             [
-                'id'             => 7,
-                'title'          => 'Eksisterende Konseptside',
-                'slug'           => 'eksisterende-konseptside',
-                'page_type'      => 'concept',
-                'status'         => 'approved',
-                'excerpt'        => null,
+                'id' => 7,
+                'title' => 'Eksisterende Konseptside',
+                'slug' => 'eksisterende-konseptside',
+                'page_type' => 'concept',
+                'status' => 'approved',
+                'excerpt' => null,
                 'open_lint_count' => 0,
-                'updated_at'     => '2026-07-01T12:00:00+00:00',
+                'updated_at' => '2026-07-01T12:00:00+00:00',
             ],
         ];
 
@@ -154,12 +170,33 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
 
     public function test_decide_throws_on_empty_response(): void
     {
-        $client = $this->clientWithRawResponse(['output_text' => '', 'output' => []]);
+        Log::spy();
+
+        $client = $this->clientWithRawResponse(['id' => 'resp_empty', 'output_text' => '', 'output' => []]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/empty response/');
+        $this->expectExceptionMessageMatches('/no output text/');
 
         $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_empty'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) === 0
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false
+                && ($context['token_usage']['input_tokens'] ?? null) === 100
+                && ($context['token_usage']['output_tokens'] ?? null) === 20
+                && ($context['token_usage']['total_tokens'] ?? null) === 120
+                && ! array_key_exists('title', $context)
+                && ! array_key_exists('filename', $context)
+                && ! array_key_exists('sourceText', $context)
+                && ! array_key_exists('input', $context)
+                && ! array_key_exists('output', $context);
+        });
     }
 
     public function test_decide_throws_on_non_json_response(): void
@@ -170,6 +207,102 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
         $this->expectExceptionMessageMatches('/not valid JSON/');
 
         $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+    }
+
+    public function test_decide_returns_valid_decision_array_from_nested_output_text(): void
+    {
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_nested_text',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        [
+                            'type' => 'output_text',
+                            'text' => json_encode($this->validDecision()),
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $result = $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        $this->assertSame('create', $result['source_article']['action']);
+        $this->assertSame('Test Artikkel', $result['source_article']['title']);
+    }
+
+    public function test_decide_throws_when_response_is_incomplete_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_incomplete',
+            'status' => 'incomplete',
+            'incomplete_details' => [
+                'reason' => 'max_output_tokens',
+            ],
+            'output_text' => '',
+            'output' => [],
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/OpenAI response was incomplete\..*max_output_tokens/s');
+
+        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_incomplete'
+                && ($context['http_status'] ?? null) === 200
+                && ($context['response_status'] ?? null) === 'incomplete'
+                && ($context['incomplete_details']['reason'] ?? null) === 'max_output_tokens'
+                && ($context['output_text_length'] ?? null) === 0
+                && ($context['output_item_types'] ?? null) === []
+                && ($context['content_item_types'] ?? null) === []
+                && ($context['has_refusal'] ?? null) === false;
+        });
+    }
+
+    public function test_decide_throws_when_response_contains_refusal_and_logs_safe_diagnostics(): void
+    {
+        Log::spy();
+
+        $client = $this->clientWithRawResponse([
+            'id' => 'resp_refusal',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [
+                [
+                    'type' => 'message',
+                    'role' => 'assistant',
+                    'content' => [
+                        [
+                            'type' => 'refusal',
+                            'refusal' => 'safety',
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/refusal/');
+
+        $client->decide(['title' => 'T', 'filename' => 'T.docx'], 'text', [], 'no');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === '[PROCYNIA][WIKI_MAINTAINER_DECISION] OpenAI response diagnostics.'
+                && ($context['response_id'] ?? null) === 'resp_refusal'
+                && ($context['response_status'] ?? null) === 'completed'
+                && ($context['output_text_length'] ?? null) === 0
+                && ($context['output_item_types'] ?? null) === ['message']
+                && ($context['content_item_types'] ?? null) === ['refusal']
+                && ($context['has_refusal'] ?? null) === true;
+        });
     }
 
     public function test_decide_throws_on_schema_violation(): void
@@ -257,21 +390,21 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
     {
         return [
             'source_article' => [
-                'action'        => 'create',
-                'title'         => 'Test Artikkel',
+                'action' => 'create',
+                'title' => 'Test Artikkel',
                 'proposed_slug' => 'test-artikkel-ab1c2d',
-                'reason'        => 'New article for this source.',
+                'reason' => 'New article for this source.',
             ],
             'source_summary' => [
-                'action'        => 'create',
-                'title'         => 'Sammendrag: Test Artikkel',
+                'action' => 'create',
+                'title' => 'Sammendrag: Test Artikkel',
                 'proposed_slug' => 'sammendrag-test-artikkel-ab1c2d',
-                'reason'        => 'Companion summary page.',
+                'reason' => 'Companion summary page.',
             ],
-            'concept_pages'    => [],
-            'entity_pages'     => [],
+            'concept_pages' => [],
+            'entity_pages' => [],
             'no_action_reason' => null,
-            'warnings'         => [],
+            'warnings' => [],
         ];
     }
 
@@ -290,7 +423,7 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
             ->andReturnUsing(function (array $payload) use (&$capturedPayload): array {
                 $capturedPayload = $payload;
 
-                return ['output_text' => json_encode($this->validDecision())];
+                return ['status' => 'completed', 'output_text' => json_encode($this->validDecision())];
             });
 
         app(EnterpriseWikiMaintainerDecisionAiClient::class)->decide(
@@ -302,14 +435,31 @@ class EnterpriseWikiMaintainerDecisionAiClientTest extends TestCase
 
     private function clientReturning(array $decision): EnterpriseWikiMaintainerDecisionAiClient
     {
-        return $this->clientWithRawResponse(['output_text' => json_encode($decision)]);
+        return $this->clientWithRawResponse(['status' => 'completed', 'output_text' => json_encode($decision)]);
     }
 
     private function clientWithRawResponse(array $responseBody): EnterpriseWikiMaintainerDecisionAiClient
     {
         /** @var OpenAiClient&MockInterface $mock */
         $mock = $this->mock(OpenAiClient::class);
-        $mock->shouldReceive('createResponse')->once()->andReturn($responseBody);
+        $mock->shouldReceive('createResponse')->once()->andReturn(array_replace_recursive([
+            'id' => 'resp_test',
+            'status' => 'completed',
+            'output_text' => '',
+            'output' => [],
+            'usage' => [
+                'input_tokens' => 100,
+                'output_tokens' => 20,
+                'total_tokens' => 120,
+            ],
+            '_meta' => [
+                'request_id' => 'req_test',
+                'http_status' => 200,
+                'provider' => 'openai',
+                'deployment_name' => null,
+                'provider_region' => null,
+            ],
+        ], $responseBody));
 
         return app(EnterpriseWikiMaintainerDecisionAiClient::class);
     }

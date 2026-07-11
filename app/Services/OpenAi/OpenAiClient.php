@@ -6,7 +6,6 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use RuntimeException;
 
 class OpenAiClient
@@ -73,8 +72,9 @@ class OpenAiClient
         }
 
         $decoded['_meta'] = [
-            'request_id'      => $requestId,
-            'provider'        => $this->providerKey(),
+            'request_id' => $requestId,
+            'http_status' => $response->status(),
+            'provider' => $this->providerKey(),
             'deployment_name' => $this->deploymentName(),
             'provider_region' => $this->providerRegion(),
         ];
@@ -205,8 +205,6 @@ class OpenAiClient
             'error_code' => $error['code'],
             'error_param' => $error['param'],
             'raw_body_length' => mb_strlen($body, 'UTF-8'),
-            'raw_body' => $body,
-            'body_excerpt' => Str::limit($body, 1000),
         ]);
     }
 

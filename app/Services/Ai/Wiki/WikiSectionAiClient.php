@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -21,6 +22,7 @@ class WikiSectionAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     /**
@@ -48,18 +50,7 @@ class WikiSectionAiClient
         $payload = $this->buildPayload($trimmedText, $heading, $this->languageName($languageCode));
 
         $response = $this->openAiClient->createResponse($payload);
-
-        $rawText = $this->extractOutputText($response);
-
-        if ($rawText === '') {
-            throw new RuntimeException('WikiSectionAiClient: OpenAI returned an empty text response.');
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('WikiSectionAiClient: OpenAI response was not valid JSON.');
-        }
+        $decoded = $this->responsesDecoder->decode($response, 'WikiSectionAiClient');
 
         if (! array_key_exists('claims', $decoded) || ! is_array($decoded['claims'])) {
             throw new RuntimeException('WikiSectionAiClient: OpenAI response did not include a claims array.');
@@ -118,6 +109,7 @@ class WikiSectionAiClient
                 ],
             ],
             'temperature' => self::TEMPERATURE,
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -135,46 +127,6 @@ class WikiSectionAiClient
             '- If the section provides insufficient basis for any claim, return an empty claims array.',
             '- Return only JSON matching the schema. No text before or after JSON.',
         ]);
-    }
-
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
     }
 
     private static function schema(): array

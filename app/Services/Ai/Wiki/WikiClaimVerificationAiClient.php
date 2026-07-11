@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Wiki;
 
+use App\Services\Ai\Wiki\Responses\EnterpriseWikiResponsesDecoder;
 use App\Services\OpenAi\OpenAiClient;
 use RuntimeException;
 
@@ -30,6 +31,7 @@ class WikiClaimVerificationAiClient
 
     public function __construct(
         private readonly OpenAiClient $openAiClient,
+        private readonly EnterpriseWikiResponsesDecoder $responsesDecoder,
     ) {}
 
     public static function isAvailable(): bool
@@ -41,6 +43,7 @@ class WikiClaimVerificationAiClient
      * Verify that $claimText is supported by $sourceText.
      *
      * @return array{supported: bool, excerpt: string}
+     *
      * @throws RuntimeException on API error, empty or invalid response
      */
     public function verifyClaim(
@@ -53,27 +56,19 @@ class WikiClaimVerificationAiClient
         }
 
         $trimmedSource = mb_substr(trim($sourceText), 0, self::MAX_SOURCE_CHARS);
-        $payload       = $this->buildPayload($claimText, $trimmedSource, $this->languageName($languageCode));
-        $response      = $this->openAiClient->createResponse($payload);
-        $rawText       = $this->extractOutputText($response);
+        $payload = $this->buildPayload($claimText, $trimmedSource, $this->languageName($languageCode));
+        $response = $this->openAiClient->createResponse($payload);
+        $decoded = $this->responsesDecoder->decode($response, 'WikiClaimVerificationAiClient');
 
-        if ($rawText === '') {
-            throw new RuntimeException('WikiClaimVerificationAiClient: OpenAI returned an empty text response.');
-        }
-
-        $decoded = json_decode($rawText, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('WikiClaimVerificationAiClient: OpenAI response was not valid JSON.');
-        }
-
-        if (! array_key_exists('supported', $decoded) || ! array_key_exists('excerpt', $decoded)) {
+        if (! is_bool($decoded['supported'] ?? null)
+            || ! array_key_exists('excerpt', $decoded)
+            || ! (is_string($decoded['excerpt']) || $decoded['excerpt'] === null)) {
             throw new RuntimeException('WikiClaimVerificationAiClient: response is missing required fields.');
         }
 
         return [
             'supported' => (bool) $decoded['supported'],
-            'excerpt'   => (string) ($decoded['excerpt'] ?? ''),
+            'excerpt' => $decoded['excerpt'] ?? '',
         ];
     }
 
@@ -83,7 +78,7 @@ class WikiClaimVerificationAiClient
             'model' => self::MODEL,
             'input' => [
                 [
-                    'role'    => 'developer',
+                    'role' => 'developer',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -92,7 +87,7 @@ class WikiClaimVerificationAiClient
                     ],
                 ],
                 [
-                    'role'    => 'user',
+                    'role' => 'user',
                     'content' => [
                         [
                             'type' => 'input_text',
@@ -103,13 +98,14 @@ class WikiClaimVerificationAiClient
             ],
             'text' => [
                 'format' => [
-                    'type'   => 'json_schema',
-                    'name'   => self::PROMPT_NAME,
+                    'type' => 'json_schema',
+                    'name' => self::PROMPT_NAME,
                     'strict' => true,
                     'schema' => self::schema(),
                 ],
             ],
-            'temperature'       => self::TEMPERATURE,
+            'temperature' => self::TEMPERATURE,
+            'store' => false,
             'max_output_tokens' => self::MAX_OUTPUT_TOKENS,
         ];
     }
@@ -143,55 +139,15 @@ class WikiClaimVerificationAiClient
         ]);
     }
 
-    private function extractOutputText(array $response): string
-    {
-        $topLevel = trim((string) data_get($response, 'output_text', ''));
-
-        if ($topLevel !== '') {
-            return $topLevel;
-        }
-
-        $parts       = [];
-        $outputItems = data_get($response, 'output', []);
-
-        if (! is_array($outputItems)) {
-            return '';
-        }
-
-        foreach ($outputItems as $item) {
-            if (data_get($item, 'type') !== 'message' || data_get($item, 'role') !== 'assistant') {
-                continue;
-            }
-
-            $contentItems = data_get($item, 'content', []);
-
-            if (! is_array($contentItems)) {
-                continue;
-            }
-
-            foreach ($contentItems as $contentItem) {
-                if (in_array(data_get($contentItem, 'type'), ['output_text', 'text'], true)) {
-                    $text = trim((string) data_get($contentItem, 'text', ''));
-
-                    if ($text !== '') {
-                        $parts[] = $text;
-                    }
-                }
-            }
-        }
-
-        return trim(implode('', $parts));
-    }
-
     private static function schema(): array
     {
         return [
-            'type'       => 'object',
+            'type' => 'object',
             'properties' => [
                 'supported' => ['type' => 'boolean'],
-                'excerpt'   => ['type' => 'string'],
+                'excerpt' => ['type' => 'string'],
             ],
-            'required'             => ['supported', 'excerpt'],
+            'required' => ['supported', 'excerpt'],
             'additionalProperties' => false,
         ];
     }
@@ -199,7 +155,7 @@ class WikiClaimVerificationAiClient
     private function languageName(string $code): string
     {
         return match ($code) {
-            'en'    => 'English',
+            'en' => 'English',
             default => 'Norwegian',
         };
     }

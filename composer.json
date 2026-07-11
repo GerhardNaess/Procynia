@@ -52,6 +52,7 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
+        "test:enterprise-wiki": "docker compose exec -T app php artisan test tests/Feature/App/Wiki/*.php tests/Feature/App/WikiControllerTest.php tests/Feature/Console/EnterpriseWikiLintCommandTest.php tests/Feature/Console/IngestEnterpriseWikiVersionCommandTest.php tests/Feature/Console/WikiCoverageCommandTest.php tests/Unit/Services/Ai/EnterpriseWiki*Test.php tests/Unit/Services/Ai/Wiki*Test.php tests/Unit/Services/EnterpriseWiki/*Test.php tests/Unit/Services/OpenAiClientTest.php",
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi",
