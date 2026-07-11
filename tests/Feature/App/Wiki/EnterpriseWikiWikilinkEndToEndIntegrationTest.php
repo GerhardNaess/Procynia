@@ -19,6 +19,7 @@ use App\Services\EnterpriseWiki\EnterpriseWikiAppliedRunLintService;
 use App\Services\EnterpriseWiki\EnterpriseWikiDocumentFlowService;
 use App\Services\EnterpriseWiki\EnterpriseWikiExtractPageClaimsService;
 use App\Services\EnterpriseWiki\EnterpriseWikiGenerateAppliedPagesService;
+use App\Services\EnterpriseWiki\EnterpriseWikiLinkSemanticRepairService;
 use App\Services\EnterpriseWiki\EnterpriseWikiMaintainerDecisionService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPageTraversalService;
 use App\Services\EnterpriseWiki\EnterpriseWikiPostIngestQaService;
@@ -83,6 +84,7 @@ class EnterpriseWikiWikilinkEndToEndIntegrationTest extends TestCase
         $this->mock(EnterpriseWikiExtractPageClaimsService::class)->shouldReceive('extract')->once()->andReturn(['pages' => 4, 'claims' => 0, 'skipped' => 0]);
         $this->mock(EnterpriseWikiVerifyPageClaimsService::class)->shouldReceive('verify')->once()->andReturn(['pages' => 4, 'claims' => 0, 'references' => 0, 'skipped' => 0, 'no_support' => 0]);
         $this->mock(EnterpriseWikiAppliedRunLintService::class)->shouldReceive('lint')->once()->andReturn(['pages_checked' => 4, 'claims_checked' => 0, 'source_refs_checked' => 0, 'links_checked' => 0, 'findings_created' => 0, 'findings_skipped' => 0, 'findings_resolved' => 0, 'errors' => 0, 'warnings' => 0, 'info' => 0]);
+        $this->mock(EnterpriseWikiLinkSemanticRepairService::class)->shouldReceive('repairForRun')->once()->andReturn(['pages_reviewed' => 4, 'applied' => 0, 'skipped' => 4, 'failed' => 0]);
         $this->mock(EnterpriseWikiPostIngestQaService::class)
             ->shouldReceive('runForRun')
             ->once()

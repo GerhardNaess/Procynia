@@ -41,6 +41,7 @@ class EnterpriseWikiDocumentFlowService
         private readonly EnterpriseWikiBuildPageLinksService $buildPageLinksService,
         private readonly EnterpriseWikiIncrementalRelinkService $incrementalRelinkService,
         private readonly EnterpriseWikiAppliedRunLintService $appliedRunLintService,
+        private readonly EnterpriseWikiLinkSemanticRepairService $linkSemanticRepairService,
         private readonly EnterpriseWikiPostIngestQaService $postIngestQaService,
     ) {}
 
@@ -160,6 +161,7 @@ class EnterpriseWikiDocumentFlowService
             $this->performExtractPageClaims($run);
             $this->performVerifyPageClaims($run);
             $this->performAppliedRunLint($run);
+            $this->performLinkSemanticRepair($run);
 
             $currentStage = EnterpriseWikiIngestRun::STATUS_QA;
             $this->performPostIngestQa($run);
@@ -363,6 +365,26 @@ class EnterpriseWikiDocumentFlowService
             'warnings' => $result['warnings'] ?? null,
             'info' => $result['info'] ?? null,
             'findings_created' => $result['findings_created'] ?? null,
+        ]);
+    }
+
+    /**
+     * Semantic QA and repair of this run's pages' inline wikilinks (8I-6): catches what
+     * deterministic lint cannot — a central concept mentioned but never linked, a misleading
+     * anchor, or a wrongly-targeted link. Runs after the deterministic lint pass so any repair
+     * this makes is immediately reflected by the re-lint it triggers internally, and before
+     * post-ingest QA so the final content is what gets QA-reviewed.
+     */
+    private function performLinkSemanticRepair(EnterpriseWikiIngestRun $run): void
+    {
+        $result = $this->linkSemanticRepairService->repairForRun($run->fresh() ?? $run);
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Link semantic QA/repair completed.', [
+            'run_id' => $run->id,
+            'pages_reviewed' => $result['pages_reviewed'] ?? null,
+            'applied' => $result['applied'] ?? null,
+            'skipped' => $result['skipped'] ?? null,
+            'failed' => $result['failed'] ?? null,
         ]);
     }
 

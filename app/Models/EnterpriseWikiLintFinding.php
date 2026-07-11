@@ -52,6 +52,27 @@ class EnterpriseWikiLintFinding extends Model
 
     public const CODE_APPLIED_RUN_WITHOUT_SUMMARY = 'applied_run_without_summary';
 
+    // --- 8I-6: canonical wikilink integrity (wiki:lint-applied-run) ---
+    public const CODE_BROKEN_WIKILINK = 'broken_wikilink';
+
+    public const CODE_MALFORMED_WIKILINK = 'malformed_wikilink';
+
+    public const CODE_SELF_WIKILINK = 'self_wikilink';
+
+    public const CODE_CROSS_CUSTOMER_WIKILINK = 'cross_customer_wikilink';
+
+    public const CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK = 'concept_without_incoming_wikilink';
+
+    public const CODE_ENTITY_WITHOUT_INCOMING_WIKILINK = 'entity_without_incoming_wikilink';
+
+    public const CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED = 'run_targets_available_but_not_linked';
+
+    public const CODE_MISSING_WIKILINK_MATERIALIZATION = 'missing_wikilink_materialization';
+
+    public const CODE_WIKILINK_PROJECTION_MISMATCH = 'wikilink_projection_mismatch';
+
+    public const CODE_STALE_WIKILINK_GRAPH_EDGE = 'stale_wikilink_graph_edge';
+
     public const CODES = [
         self::CODE_CLAIM_MISSING_SOURCE,
         self::CODE_SOURCE_REFERENCE_MISSING_EXCERPT,
@@ -72,6 +93,16 @@ class EnterpriseWikiLintFinding extends Model
         self::CODE_APPLIED_RUN_WITHOUT_PAGES,
         self::CODE_APPLIED_RUN_WITHOUT_ARTICLE,
         self::CODE_APPLIED_RUN_WITHOUT_SUMMARY,
+        self::CODE_BROKEN_WIKILINK,
+        self::CODE_MALFORMED_WIKILINK,
+        self::CODE_SELF_WIKILINK,
+        self::CODE_CROSS_CUSTOMER_WIKILINK,
+        self::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK,
+        self::CODE_ENTITY_WITHOUT_INCOMING_WIKILINK,
+        self::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED,
+        self::CODE_MISSING_WIKILINK_MATERIALIZATION,
+        self::CODE_WIKILINK_PROJECTION_MISMATCH,
+        self::CODE_STALE_WIKILINK_GRAPH_EDGE,
     ];
 
     public const SEVERITY_INFO = 'info';

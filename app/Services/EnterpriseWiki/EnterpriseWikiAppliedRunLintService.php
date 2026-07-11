@@ -31,6 +31,11 @@ use App\Models\EnterpriseWikiSourceReference;
  */
 class EnterpriseWikiAppliedRunLintService
 {
+    public function __construct(
+        private readonly EnterpriseWikiLinkParser $linkParser,
+        private readonly EnterpriseWikiLinkResolver $linkResolver,
+    ) {}
+
     /** Expected reverse link type for each forward link type. */
     private const REVERSE_LINK_TYPES = [
         EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY  => EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE,
@@ -115,6 +120,8 @@ class EnterpriseWikiAppliedRunLintService
         // ----------------------------------------------------------------
         // Per-page checks
         // ----------------------------------------------------------------
+        $runPageIds = array_map(fn (array $entry) => $entry['page']->id, $allPages);
+
         foreach ($allPages as $entry) {
             $counts['pages_checked']++;
             $page    = $entry['page'];
@@ -125,6 +132,7 @@ class EnterpriseWikiAppliedRunLintService
             if ($version !== null && trim((string) ($version->content_markdown ?? '')) !== '') {
                 $this->checkPageClaims($run, $page, $version, $touchedIds, $counts);
                 $this->checkPageLinks($run, $page, $touchedIds, $counts);
+                $this->checkWikilinkIntegrity($run, $page, $version, $runPageIds, $touchedIds, $counts);
             }
         }
 
@@ -368,6 +376,172 @@ class EnterpriseWikiAppliedRunLintService
                 $touchedIds,
                 $counts,
             );
+        }
+    }
+
+    /**
+     * Canonical wikilink integrity (8I-6): every check here is derived deterministically from
+     * content_markdown → parser → resolver → EnterpriseWikiPageLink, never from the graph or
+     * maintainer decision as a separate source of truth.
+     */
+    private function checkWikilinkIntegrity(
+        EnterpriseWikiIngestRun $run,
+        EnterpriseWikiPage $page,
+        EnterpriseWikiPageVersion $version,
+        array $runPageIds,
+        array &$touchedIds,
+        array &$counts,
+    ): void {
+        $markdown = (string) $version->content_markdown;
+        $parsed = $this->linkParser->parse($markdown);
+        $rawOccurrences = $this->linkParser->countRawOccurrences($markdown);
+
+        if ($rawOccurrences > count($parsed)) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_MALFORMED_WIKILINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                sprintf('Content contains %d malformed wikilink attempt(s).', $rawOccurrences - count($parsed)),
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        $occurrences = $this->linkResolver->resolveOccurrences($run->customer_id, $page, $parsed);
+        $brokenSlugs = [];
+        $selfSlugs = [];
+
+        foreach ($occurrences as $occurrence) {
+            match ($occurrence['status']) {
+                EnterpriseWikiLinkResolver::STATUS_BROKEN => $brokenSlugs[] = $occurrence['link']['target_slug'],
+                EnterpriseWikiLinkResolver::STATUS_SELF_LINK => $selfSlugs[] = $occurrence['link']['target_slug'],
+                default => null,
+            };
+        }
+
+        if ($brokenSlugs !== []) {
+            $brokenSlugs = array_values(array_unique($brokenSlugs));
+
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_BROKEN_WIKILINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Content contains broken wikilink(s): '.implode(', ', $brokenSlugs).'.',
+                $touchedIds,
+                $counts,
+            );
+
+            $crossCustomerSlugs = EnterpriseWikiPage::query()
+                ->whereIn('slug', $brokenSlugs)
+                ->where('customer_id', '!=', $run->customer_id)
+                ->pluck('slug')
+                ->all();
+
+            if ($crossCustomerSlugs !== []) {
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_CROSS_CUSTOMER_WIKILINK),
+                    EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                    'Content links to (an)other customer\'s page(s): '.implode(', ', $crossCustomerSlugs).'.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
+        }
+
+        if ($selfSlugs !== []) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_SELF_WIKILINK),
+                EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                'Content contains (a) self-referencing wikilink(s).',
+                $touchedIds,
+                $counts,
+            );
+        }
+
+        $resolution = $this->linkResolver->resolve($run->customer_id, $page, $parsed);
+        $parsedValidTargetIds = array_map(fn (array $t) => $t['to_page']->id, $resolution['resolved']);
+
+        $materializedTargetIds = EnterpriseWikiPageLink::query()
+            ->where('customer_id', $run->customer_id)
+            ->where('from_page_id', $page->id)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+            ->pluck('to_page_id')
+            ->all();
+
+        if ($parsedValidTargetIds !== [] && $materializedTargetIds === []) {
+            $this->upsertFinding(
+                $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_MISSING_WIKILINK_MATERIALIZATION),
+                EnterpriseWikiLintFinding::SEVERITY_ERROR,
+                'Current version contains valid wikilinks but no canonical EnterpriseWikiPageLink rows exist for this page.',
+                $touchedIds,
+                $counts,
+            );
+        } else {
+            $underMaterialized = array_diff($parsedValidTargetIds, $materializedTargetIds);
+
+            if ($underMaterialized !== []) {
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_WIKILINK_PROJECTION_MISMATCH),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    'Current version contains a valid wikilink not reflected in the materialized page-link projection.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
+
+            $overMaterialized = array_diff($materializedTargetIds, $parsedValidTargetIds);
+
+            if ($overMaterialized !== []) {
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_STALE_WIKILINK_GRAPH_EDGE),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    'A materialized wikilink graph edge no longer has a matching link in the current version.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
+        }
+
+        // Orphan concept/entity pages: no incoming canonical wikilink at all.
+        if (in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_CONCEPT, EnterpriseWikiPage::PAGE_TYPE_ENTITY], true)) {
+            $hasIncomingWikilink = EnterpriseWikiPageLink::query()
+                ->where('customer_id', $run->customer_id)
+                ->where('to_page_id', $page->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+                ->exists();
+
+            if (! $hasIncomingWikilink) {
+                $code = $page->page_type === EnterpriseWikiPage::PAGE_TYPE_CONCEPT
+                    ? EnterpriseWikiLintFinding::CODE_CONCEPT_WITHOUT_INCOMING_WIKILINK
+                    : EnterpriseWikiLintFinding::CODE_ENTITY_WITHOUT_INCOMING_WIKILINK;
+
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, $code),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    ucfirst($page->page_type).' page has no incoming canonical wikilink from any page.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
+        }
+
+        // Article/summary pages with other run pages available but zero outgoing wikilinks.
+        if (in_array($page->page_type, [EnterpriseWikiPage::PAGE_TYPE_ARTICLE, EnterpriseWikiPage::PAGE_TYPE_SUMMARY], true)
+            && count($runPageIds) > 1
+        ) {
+            $hasOutgoingWikilink = EnterpriseWikiPageLink::query()
+                ->where('customer_id', $run->customer_id)
+                ->where('from_page_id', $page->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
+                ->exists();
+
+            if (! $hasOutgoingWikilink) {
+                $this->upsertFinding(
+                    $this->pageKey($run, $page, $version, EnterpriseWikiLintFinding::CODE_RUN_TARGETS_AVAILABLE_BUT_NOT_LINKED),
+                    EnterpriseWikiLintFinding::SEVERITY_WARNING,
+                    'Other pages exist in this run but the page has no outgoing canonical wikilink.',
+                    $touchedIds,
+                    $counts,
+                );
+            }
         }
     }
 
