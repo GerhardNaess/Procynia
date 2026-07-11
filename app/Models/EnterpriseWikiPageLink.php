@@ -33,6 +33,17 @@ class EnterpriseWikiPageLink extends Model
 
     public const LINK_TYPE_ENTITY_TO_SUMMARY = 'entity_to_summary';
 
+    /**
+     * Canonical link type for relations derived from an actual inline [[wikilink]] found
+     * in a page's current content_markdown (see EnterpriseWikiLinkParser/Resolver, v0.6/8I-1).
+     * Unlike the structural page-type pairs above, this type is directional and NOT built
+     * from co-membership or page-type combinatorics — a row only exists because the source
+     * page's text literally contains a link to the target page. Never reuse the structural
+     * types above for this purpose: doing so would make the origin of a row ambiguous
+     * (mechanical page-type pairing vs. an actual authored link).
+     */
+    public const LINK_TYPE_WIKILINK = 'wikilink';
+
     public const LINK_TYPES = [
         self::LINK_TYPE_ARTICLE_TO_SUMMARY,
         self::LINK_TYPE_SUMMARY_TO_ARTICLE,
@@ -44,13 +55,20 @@ class EnterpriseWikiPageLink extends Model
         self::LINK_TYPE_CONCEPT_TO_SUMMARY,
         self::LINK_TYPE_SUMMARY_TO_ENTITY,
         self::LINK_TYPE_ENTITY_TO_SUMMARY,
+        self::LINK_TYPE_WIKILINK,
     ];
 
     // -------------------------------------------------------------------------
     // Source constants — how the link was established.
     // -------------------------------------------------------------------------
 
-    /** Built algorithmically from co-membership in a maintainer decision run. */
+    /**
+     * Built algorithmically without AI: either from co-membership in a maintainer decision
+     * run (structural page-type pairs), or from deterministically parsing and resolving
+     * inline [[wikilinks]] in content_markdown (link_type = wikilink). Both are "no AI
+     * involved, computed the same way every time" — the link_type column, not this column,
+     * is what distinguishes a structural pairing from an authored content link.
+     */
     public const SOURCE_DETERMINISTIC = 'deterministic';
 
     /** Explicitly recorded in maintainer decision JSON. */

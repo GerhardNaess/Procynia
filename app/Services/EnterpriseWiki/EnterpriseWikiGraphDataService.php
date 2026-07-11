@@ -16,6 +16,15 @@ use Illuminate\Support\Collection;
  * Builds a stable graph payload (nodes + edges + summary) from the canonical
  * customer-scoped EnterpriseWikiPageLink graph.
  *
+ * Edges — and neighborhood adjacency — are restricted to link_type = wikilink: the
+ * only relations derived from actual inline [[wikilinks]] in a page's current
+ * content_markdown (see EnterpriseWikiLinkParser/Resolver and
+ * EnterpriseWikiBuildPageLinksService::materializeWikilinksForPage()). Historical
+ * combinatoric rows (article_to_summary, article_to_concept, etc. — see
+ * EnterpriseWikiBuildPageLinksService::build()) still exist in the table but are
+ * never surfaced here: they are not derived from page content and would make the
+ * graph mix real authored relations with mechanical page-type pairings.
+ *
  * Three scopes:
  *   - customer-wide  → no filters
  *   - run-scoped     → pages from an applied maintainer decision run
@@ -55,6 +64,7 @@ class EnterpriseWikiGraphDataService
 
         $links = EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->get();
 
         return $this->assemble($pages, $links, $customerId, 'customer', null, null);
@@ -92,6 +102,7 @@ class EnterpriseWikiGraphDataService
         // Only edges whose both endpoints are within the run's page set
         $links = empty($actualPageIds) ? collect() : EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->whereIn('from_page_id', $actualPageIds)
             ->whereIn('to_page_id', $actualPageIds)
             ->get();
@@ -112,11 +123,13 @@ class EnterpriseWikiGraphDataService
 
         $outgoing = EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->where('from_page_id', $pageId)
             ->pluck('to_page_id');
 
         $incoming = EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->where('to_page_id', $pageId)
             ->pluck('from_page_id');
 
@@ -130,6 +143,7 @@ class EnterpriseWikiGraphDataService
         // All edges between any two pages in the neighborhood
         $links = EnterpriseWikiPageLink::query()
             ->where('customer_id', $customerId)
+            ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK)
             ->whereIn('from_page_id', $pageIdSet)
             ->whereIn('to_page_id', $pageIdSet)
             ->get();

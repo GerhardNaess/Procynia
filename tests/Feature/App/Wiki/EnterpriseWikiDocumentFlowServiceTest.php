@@ -203,7 +203,12 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     }
 
     // =========================================================================
-    // continueAfterPagesGenerated(): extract -> verify -> build -> lint -> qa
+    // continueAfterPagesGenerated(): materialize -> extract -> verify -> lint -> qa
+    //
+    // The old combinatorial EnterpriseWikiBuildPageLinksService::build() step is
+    // deliberately gone from this flow — canonical relations now come exclusively
+    // from performMaterializeWikilinks(). See configureStage2Mocks(), which asserts
+    // build() is never called regardless of which step fails.
     // =========================================================================
 
     public function test_continue_after_pages_generated_executes_steps_in_order_and_completes(): void
@@ -217,13 +222,29 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
 
         $this->flowService()->continueAfterPagesGenerated($run->id);
 
-        $this->assertSame(['extract', 'verify', 'build', 'lint', 'qa'], $callOrder);
+        $this->assertSame(['materialize', 'extract', 'verify', 'lint', 'qa'], $callOrder);
 
         $run->refresh();
         $this->assertSame(EnterpriseWikiIngestRun::STATUS_COMPLETED, $run->status);
         $this->assertSame(EnterpriseWikiIngestRun::QA_STATUS_PASSED, $run->qa_status);
         $this->assertNotNull($run->finished_at);
         $this->assertNull($run->error_message);
+    }
+
+    public function test_continue_after_pages_generated_never_calls_combinatorial_build(): void
+    {
+        $customer = $this->createCustomer();
+        $document = $this->createDocument($customer);
+        $run = $this->createRunAwaitingContinuation($customer, $document);
+
+        $callOrder = [];
+        // configureStage2Mocks() always asserts shouldNotReceive('build') on the
+        // EnterpriseWikiBuildPageLinksService mock — a passing run here proves it.
+        $this->configureStage2Mocks($callOrder);
+
+        $this->flowService()->continueAfterPagesGenerated($run->id);
+
+        $this->assertNotContains('build', $callOrder);
     }
 
     #[DataProvider('stage2FailingStepProvider')]
@@ -262,11 +283,11 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
     public static function stage2FailingStepProvider(): array
     {
         return [
-            'extract claims' => ['extract', ['extract'], false],
-            'verify claims' => ['verify', ['extract', 'verify'], false],
-            'build links' => ['build', ['extract', 'verify', 'build'], false],
-            'lint' => ['lint', ['extract', 'verify', 'build', 'lint'], false],
-            'qa' => ['qa', ['extract', 'verify', 'build', 'lint', 'qa'], true],
+            'materialize wikilinks' => ['materialize', ['materialize'], false],
+            'extract claims' => ['extract', ['materialize', 'extract'], false],
+            'verify claims' => ['verify', ['materialize', 'extract', 'verify'], false],
+            'lint' => ['lint', ['materialize', 'extract', 'verify', 'lint'], false],
+            'qa' => ['qa', ['materialize', 'extract', 'verify', 'lint', 'qa'], true],
         ];
     }
 
@@ -425,7 +446,7 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
 
     private function configureStage2Mocks(array &$callOrder, ?string $failingStep = null): void
     {
-        $stages = ['extract', 'verify', 'build', 'lint', 'qa'];
+        $stages = ['materialize', 'extract', 'verify', 'lint', 'qa'];
         $failingStageIndex = $failingStep !== null ? array_search($failingStep, $stages, true) : false;
         $shouldExpect = function (string $stage) use ($failingStageIndex, $stages): bool {
             if ($failingStageIndex === false) {
@@ -435,6 +456,35 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
             return array_search($stage, $stages, true) <= $failingStageIndex;
         };
         $shouldFail = fn (string $stage): bool => $failingStep === $stage;
+
+        $buildPageLinksMock = $this->mock(EnterpriseWikiBuildPageLinksService::class);
+        // The old combinatorial build() step is gone from this flow entirely — assert
+        // it regardless of which stage fails (see the correction note in the class
+        // header). materializeWikilinksForRun() is the only method this flow calls.
+        $buildPageLinksMock->shouldNotReceive('build');
+
+        if ($shouldExpect('materialize')) {
+            $buildPageLinksMock
+                ->shouldReceive('materializeWikilinksForRun')
+                ->once()
+                ->ordered('enterprise-wiki-continue-flow')
+                ->andReturnUsing(function (EnterpriseWikiIngestRun $run) use (&$callOrder, $shouldFail) {
+                    $callOrder[] = 'materialize';
+                    $this->assertSame(EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING, $run->status);
+
+                    if ($shouldFail('materialize')) {
+                        throw new RuntimeException('materialize failed');
+                    }
+
+                    return [
+                        'pages_processed' => 4, 'occurrences_found' => 2, 'valid_links' => 2,
+                        'broken_slugs' => 0, 'self_links' => 0, 'created' => 2, 'updated' => 0,
+                        'stale_links_removed' => 0,
+                    ];
+                });
+        } else {
+            $buildPageLinksMock->shouldNotReceive('materializeWikilinksForRun');
+        }
 
         if ($shouldExpect('extract')) {
             $this->mock(EnterpriseWikiExtractPageClaimsService::class)
@@ -471,24 +521,6 @@ class EnterpriseWikiDocumentFlowServiceTest extends TestCase
                 });
         } else {
             $this->mock(EnterpriseWikiVerifyPageClaimsService::class)->shouldNotReceive('verify');
-        }
-
-        if ($shouldExpect('build')) {
-            $this->mock(EnterpriseWikiBuildPageLinksService::class)
-                ->shouldReceive('build')
-                ->once()
-                ->ordered('enterprise-wiki-continue-flow')
-                ->andReturnUsing(function (EnterpriseWikiIngestRun $run) use (&$callOrder, $shouldFail) {
-                    $callOrder[] = 'build';
-
-                    if ($shouldFail('build')) {
-                        throw new RuntimeException('build failed');
-                    }
-
-                    return ['pages_checked' => 4, 'links_created' => 4, 'links_skipped' => 0, 'missing_versions' => 0, 'failed' => 0];
-                });
-        } else {
-            $this->mock(EnterpriseWikiBuildPageLinksService::class)->shouldNotReceive('build');
         }
 
         if ($shouldExpect('lint')) {

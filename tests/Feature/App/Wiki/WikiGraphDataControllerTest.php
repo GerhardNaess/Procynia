@@ -93,7 +93,7 @@ class WikiGraphDataControllerTest extends TestCase
         $user = $this->createUser($customer);
         $a = $this->createPage($customer, 'article', 'Artikkel');
         $b = $this->createPage($customer, 'summary', 'Sammendrag');
-        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
 
@@ -260,7 +260,7 @@ class WikiGraphDataControllerTest extends TestCase
         $user = $this->createUser($customer);
         $a = $this->createPage($customer, 'article', 'A');
         $b = $this->createPage($customer, 'summary', 'B');
-        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
 
@@ -272,7 +272,7 @@ class WikiGraphDataControllerTest extends TestCase
         $this->assertSame("page-{$b->id}", $edge['target']);
         $this->assertSame($a->id, $edge['from_page_id']);
         $this->assertSame($b->id, $edge['to_page_id']);
-        $this->assertSame(EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY, $edge['link_type']);
+        $this->assertSame(EnterpriseWikiPageLink::LINK_TYPE_WIKILINK, $edge['link_type']);
         $this->assertArrayHasKey('confidence', $edge);
     }
 
@@ -326,7 +326,7 @@ class WikiGraphDataControllerTest extends TestCase
         $a = $this->createPage($customer, 'article', 'Tilkoblet');
         $b = $this->createPage($customer, 'summary', 'Sammendrag');
         $orphan = $this->createPage($customer, 'concept', 'Isolert konsept');
-        $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
 
@@ -377,7 +377,7 @@ class WikiGraphDataControllerTest extends TestCase
         $outside = $this->createPage($customer, 'summary', 'Utenfor kjøring');
         $run = $this->createAppliedRun($customer, $inRun);
         // Edge goes from inRun to outside — outside is not in run, so edge must be excluded
-        $link = $this->createPageLink($customer, $inRun, $outside, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $link = $this->createPageLink($customer, $inRun, $outside, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?run_id='.$run->id);
 
@@ -393,7 +393,7 @@ class WikiGraphDataControllerTest extends TestCase
         $a = $this->createPage($customer, 'article', 'A');
         $b = $this->createPage($customer, 'summary', 'B');
         $run = $this->createAppliedRun($customer, $a, $b);
-        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $link = $this->createPageLink($customer, $a, $b, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?run_id='.$run->id);
 
@@ -471,7 +471,7 @@ class WikiGraphDataControllerTest extends TestCase
         $user = $this->createUser($customer);
         $center = $this->createPage($customer, 'article', 'Sentrum');
         $neighbor = $this->createPage($customer, 'summary', 'Nabo');
-        $this->createPageLink($customer, $center, $neighbor, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $this->createPageLink($customer, $center, $neighbor, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?page_id='.$center->id);
 
@@ -486,7 +486,7 @@ class WikiGraphDataControllerTest extends TestCase
         $user = $this->createUser($customer);
         $center = $this->createPage($customer, 'article', 'Sentrum');
         $incoming = $this->createPage($customer, 'summary', 'Innkommende');
-        $this->createPageLink($customer, $incoming, $center, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_ARTICLE);
+        $this->createPageLink($customer, $incoming, $center, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?page_id='.$center->id);
 
@@ -502,8 +502,8 @@ class WikiGraphDataControllerTest extends TestCase
         $center = $this->createPage($customer, 'article', 'Sentrum');
         $neighbor = $this->createPage($customer, 'summary', 'Nabo');
         $distant = $this->createPage($customer, 'concept', 'Fjern side');
-        $this->createPageLink($customer, $center, $neighbor, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
-        $this->createPageLink($customer, $neighbor, $distant, EnterpriseWikiPageLink::LINK_TYPE_SUMMARY_TO_CONCEPT);
+        $this->createPageLink($customer, $center, $neighbor, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $this->createPageLink($customer, $neighbor, $distant, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data?page_id='.$center->id);
 
@@ -601,8 +601,8 @@ class WikiGraphDataControllerTest extends TestCase
         $ownB = $this->createPage($customer, 'summary', 'Eigen B');
         $foreignA = $this->createPage($other, 'article', 'Fremmed A');
         $foreignB = $this->createPage($other, 'summary', 'Fremmed B');
-        $ownLink = $this->createPageLink($customer, $ownA, $ownB, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
-        $foreignLink = $this->createPageLink($other, $foreignA, $foreignB, EnterpriseWikiPageLink::LINK_TYPE_ARTICLE_TO_SUMMARY);
+        $ownLink = $this->createPageLink($customer, $ownA, $ownB, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+        $foreignLink = $this->createPageLink($other, $foreignA, $foreignB, EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
 
         $response = $this->actingAs($user)->getJson('/app/wiki/graph-data');
 

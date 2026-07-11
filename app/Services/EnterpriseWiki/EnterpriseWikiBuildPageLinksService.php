@@ -7,22 +7,37 @@ use App\Models\EnterpriseWikiIngestRunPage;
 use App\Models\EnterpriseWikiPage;
 use App\Models\EnterpriseWikiPageLink;
 use App\Models\EnterpriseWikiPageVersion;
+use Illuminate\Support\Facades\DB;
 
 /**
- * Builds a deterministic link graph between EnterpriseWikiPage nodes that belong
- * to the same applied maintainer decision run.
+ * Builds the EnterpriseWikiPageLink graph for Enterprise Wiki pages.
  *
- * Both directions are written as explicit rows so traversal queries are simple
- * forward lookups on from_page_id, never requiring reverse-index joins.
+ * Two distinct, independently-idempotent responsibilities live here:
  *
- * Idempotent: the unique index on (customer_id, from_page_id, to_page_id, link_type)
- * prevents duplicate rows. Reruns accumulate "skipped" rather than duplicating.
+ * 1. build() — the original structural link builder. It links pages by page-type
+ *    co-membership within an applied maintainer decision run (article<->summary,
+ *    article<->concept, etc). It never reads content_markdown and never deletes a
+ *    row once created. This is NOT a canonical wikilink graph — see the class docs
+ *    on EnterpriseWikiPageLink::LINK_TYPE_WIKILINK.
+ *
+ * 2. materializeWikilinksForPage()/materializeWikilinksForRun() — the canonical
+ *    projection (8I-1/8I-2): parses a page's CURRENT content_markdown for inline
+ *    [[wikilinks]], resolves them against the customer's page catalog, and makes
+ *    the link_type=wikilink rows for that source page match the text exactly —
+ *    creating, updating, and deleting rows as needed. Unlike build(), this is not
+ *    "create once and never touch again": every call is authoritative for that
+ *    source page's wikilink-type outgoing edges.
  *
  * Does not call OpenAI. Does not touch claims, source references, lint, or
  * ProcessEnterpriseWikiIngest.
  */
 class EnterpriseWikiBuildPageLinksService
 {
+    public function __construct(
+        private readonly EnterpriseWikiLinkParser $linkParser,
+        private readonly EnterpriseWikiLinkResolver $linkResolver,
+    ) {}
+
     /**
      * @return array{pages_checked: int, links_created: int, links_skipped: int, missing_versions: int, failed: int}
      * @throws \InvalidArgumentException if the run is not applied
@@ -126,6 +141,159 @@ class EnterpriseWikiBuildPageLinksService
             'missing_versions' => $missingVersions,
             'failed'           => 0,
         ];
+    }
+
+    // =========================================================================
+    // Canonical wikilink materialization (8I-1/8I-2)
+    // =========================================================================
+
+    /**
+     * Materialize every page linked to a run's applied pages: parse each page's
+     * current content_markdown for inline [[wikilinks]] and make its
+     * link_type=wikilink outgoing rows match the text exactly.
+     *
+     * @return array{
+     *     pages_processed: int,
+     *     occurrences_found: int,
+     *     valid_links: int,
+     *     broken_slugs: int,
+     *     self_links: int,
+     *     created: int,
+     *     updated: int,
+     *     stale_links_removed: int,
+     * }
+     */
+    public function materializeWikilinksForRun(EnterpriseWikiIngestRun $run): array
+    {
+        $pages = EnterpriseWikiIngestRunPage::query()
+            ->where('enterprise_wiki_ingest_run_id', $run->id)
+            ->with('page')
+            ->get()
+            ->pluck('page')
+            ->filter();
+
+        $aggregate = [
+            'pages_processed' => 0,
+            'occurrences_found' => 0,
+            'valid_links' => 0,
+            'broken_slugs' => 0,
+            'self_links' => 0,
+            'created' => 0,
+            'updated' => 0,
+            'stale_links_removed' => 0,
+        ];
+
+        foreach ($pages as $page) {
+            $result = $this->materializeWikilinksForPage($page, $run->id);
+
+            $aggregate['pages_processed']++;
+            $aggregate['occurrences_found'] += $result['occurrences_found'];
+            $aggregate['valid_links'] += $result['valid_links'];
+            $aggregate['broken_slugs'] += count($result['broken_slugs']);
+            $aggregate['self_links'] += count($result['self_link_slugs']);
+            $aggregate['created'] += $result['created'];
+            $aggregate['updated'] += $result['updated'];
+            $aggregate['stale_links_removed'] += $result['stale_links_removed'];
+        }
+
+        return $aggregate;
+    }
+
+    /**
+     * Materialize link_type=wikilink rows for a single source page from its current
+     * content_markdown. Safe to call repeatedly for the same page (idempotent) and
+     * independently of any run — the $ingestRunId is stored only as provenance.
+     *
+     * current content_markdown = complete truth for this page's wikilink relations:
+     * links no longer present in the text are removed; links newly present are
+     * created; links whose target's current version changed are updated in place.
+     * Rows with any other link_type are never touched.
+     *
+     * @return array{
+     *     page_id: int,
+     *     occurrences_found: int,
+     *     valid_links: int,
+     *     broken_slugs: list<string>,
+     *     self_link_slugs: list<string>,
+     *     created: int,
+     *     updated: int,
+     *     stale_links_removed: int,
+     * }
+     */
+    public function materializeWikilinksForPage(EnterpriseWikiPage $page, ?int $ingestRunId = null): array
+    {
+        $currentVersion = EnterpriseWikiPageVersion::query()
+            ->where('enterprise_wiki_page_id', $page->id)
+            ->where('is_current', true)
+            ->first();
+
+        $markdown = (string) ($currentVersion?->content_markdown ?? '');
+
+        $parsed = $this->linkParser->parse($markdown);
+        $resolution = $this->linkResolver->resolve($page->customer_id, $page, $parsed);
+
+        return DB::transaction(function () use ($page, $currentVersion, $ingestRunId, $resolution) {
+            $targetPageIds = array_map(
+                fn (array $target) => $target['to_page']->id,
+                $resolution['resolved'],
+            );
+
+            $targetCurrentVersionsByPageId = empty($targetPageIds)
+                ? collect()
+                : EnterpriseWikiPageVersion::query()
+                    ->where('is_current', true)
+                    ->whereIn('enterprise_wiki_page_id', $targetPageIds)
+                    ->get()
+                    ->keyBy('enterprise_wiki_page_id');
+
+            $created = 0;
+            $updated = 0;
+
+            foreach ($resolution['resolved'] as $target) {
+                $toPage = $target['to_page'];
+
+                $link = EnterpriseWikiPageLink::query()->updateOrCreate(
+                    [
+                        'customer_id'  => $page->customer_id,
+                        'from_page_id' => $page->id,
+                        'to_page_id'   => $toPage->id,
+                        'link_type'    => EnterpriseWikiPageLink::LINK_TYPE_WIKILINK,
+                    ],
+                    [
+                        'enterprise_wiki_ingest_run_id' => $ingestRunId,
+                        'from_page_version_id' => $currentVersion?->id,
+                        'to_page_version_id'   => $targetCurrentVersionsByPageId->get($toPage->id)?->id,
+                        'source'               => EnterpriseWikiPageLink::SOURCE_DETERMINISTIC,
+                        'confidence'           => EnterpriseWikiPageLink::CONFIDENCE_CERTAIN,
+                        'metadata'             => ['anchor_text' => $target['anchor_text']],
+                    ],
+                );
+
+                $link->wasRecentlyCreated ? $created++ : $updated++;
+            }
+
+            $staleQuery = EnterpriseWikiPageLink::query()
+                ->where('customer_id', $page->customer_id)
+                ->where('from_page_id', $page->id)
+                ->where('link_type', EnterpriseWikiPageLink::LINK_TYPE_WIKILINK);
+
+            if (! empty($targetPageIds)) {
+                $staleQuery->whereNotIn('to_page_id', $targetPageIds);
+            }
+
+            $staleRemoved = $staleQuery->delete();
+
+            return [
+                'page_id' => $page->id,
+                'occurrences_found' => $resolution['occurrences_found'],
+                'valid_links' => count($resolution['resolved']),
+                'broken_slugs' => $resolution['broken_slugs'],
+                'self_link_slugs' => $resolution['self_link_slugs'],
+                'created' => $created,
+                'updated' => $updated,
+                'stale_links_removed' => $staleRemoved,
+            ];
+        });
     }
 
     /**

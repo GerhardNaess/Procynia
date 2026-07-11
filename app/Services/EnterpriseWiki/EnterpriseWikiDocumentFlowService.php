@@ -154,9 +154,9 @@ class EnterpriseWikiDocumentFlowService
         $currentStage = EnterpriseWikiIngestRun::STATUS_VERIFICATION_LINKING;
 
         try {
+            $this->performMaterializeWikilinks($run);
             $this->performExtractPageClaims($run);
             $this->performVerifyPageClaims($run);
-            $this->performBuildPageLinks($run);
             $this->performAppliedRunLint($run);
 
             $currentStage = EnterpriseWikiIngestRun::STATUS_QA;
@@ -278,6 +278,31 @@ class EnterpriseWikiDocumentFlowService
         FinalizeEnterpriseWikiPageGeneration::dispatch($run->id);
     }
 
+    /**
+     * Parse every applied page's current content_markdown for inline [[wikilinks]] and
+     * materialize the canonical link_type=wikilink EnterpriseWikiPageLink rows. Runs
+     * before claims/verification/lint so those stages, and later backlinks/graph reads,
+     * see relations derived from the actual final page content of this run.
+     */
+    private function performMaterializeWikilinks(EnterpriseWikiIngestRun $run): void
+    {
+        $this->markVerificationStage($run);
+
+        $result = $this->buildPageLinksService->materializeWikilinksForRun($run->fresh() ?? $run);
+
+        Log::info('[WIKI_DOCUMENT_FLOW] Wikilinks materialized.', [
+            'run_id' => $run->id,
+            'pages_processed' => $result['pages_processed'] ?? null,
+            'occurrences_found' => $result['occurrences_found'] ?? null,
+            'valid_links' => $result['valid_links'] ?? null,
+            'broken_slugs' => $result['broken_slugs'] ?? null,
+            'self_links' => $result['self_links'] ?? null,
+            'created' => $result['created'] ?? null,
+            'updated' => $result['updated'] ?? null,
+            'stale_links_removed' => $result['stale_links_removed'] ?? null,
+        ]);
+    }
+
     private function performExtractPageClaims(EnterpriseWikiIngestRun $run): void
     {
         $this->markVerificationStage($run);
@@ -303,19 +328,6 @@ class EnterpriseWikiDocumentFlowService
             'references' => $result['references'] ?? null,
             'skipped' => $result['skipped'] ?? null,
             'no_support' => $result['no_support'] ?? null,
-        ]);
-    }
-
-    private function performBuildPageLinks(EnterpriseWikiIngestRun $run): void
-    {
-        $result = $this->buildPageLinksService->build($run->fresh() ?? $run);
-
-        Log::info('[WIKI_DOCUMENT_FLOW] Page links built.', [
-            'run_id' => $run->id,
-            'pages_checked' => $result['pages_checked'] ?? null,
-            'links_created' => $result['links_created'] ?? null,
-            'links_skipped' => $result['links_skipped'] ?? null,
-            'missing_versions' => $result['missing_versions'] ?? null,
         ]);
     }
 
